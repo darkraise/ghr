@@ -99,6 +99,7 @@ func TestClassify(t *testing.T) {
 		{"403 no rate headers", 403, map[string]string{"X-RateLimit-Remaining": "4000"}, ErrAuth, time.Time{}},
 		{"403 primary limit", 403, map[string]string{"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": fmt.Sprint(reset.Unix())}, ErrRateLimit, reset},
 		{"429 retry-after", 429, map[string]string{"Retry-After": "30"}, ErrRateLimit, time.Date(2026, 10, 3, 12, 0, 30, 0, time.UTC)},
+		{"429 bad retry-after", 429, map[string]string{"Retry-After": "soon"}, ErrRateLimit, time.Date(2026, 10, 3, 12, 1, 0, 0, time.UTC)},
 		{"404", 404, nil, ErrNotFound, time.Time{}},
 		{"422", 422, nil, ErrUnprocessable, time.Time{}},
 		{"502", 502, nil, ErrServer, time.Time{}},
@@ -250,6 +251,25 @@ func TestRateLimitSuspendsEveryRequest(t *testing.T) {
 	}
 	if len(f.requests) != 2 {
 		t.Fatalf("requests = %v", f.requests)
+	}
+}
+
+func TestSuspendedMutationFailsWithoutWaiting(t *testing.T) {
+	now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	c, f := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(429)
+	})
+	var slept []time.Duration
+	c.Now = func() time.Time { return now }
+	c.Sleep = func(d time.Duration) { slept = append(slept, d); now = now.Add(d) }
+	for i := 0; i < 4; i++ {
+		if err := c.DeleteRunner(context.Background(), "r", 1); !IsKind(err, ErrRateLimit) {
+			t.Fatalf("call %d: %v", i, err)
+		}
+	}
+	if len(slept) != 0 || len(f.requests) != 1 {
+		t.Fatalf("slept %v, requests %v", slept, f.requests)
 	}
 }
 

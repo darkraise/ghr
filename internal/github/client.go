@@ -242,7 +242,10 @@ func (c *Client) classify(resp *http.Response, data []byte) *APIError {
 			}
 		} else if ra := resp.Header.Get("Retry-After"); ra != "" {
 			e.Kind = ErrRateLimit
-			secs, _ := strconv.Atoi(ra)
+			secs, err := strconv.Atoi(ra)
+			if err != nil || secs < 0 {
+				secs = 60
+			}
 			e.RetryAt = c.Now().Add(time.Duration(secs) * time.Second)
 		} else if resp.StatusCode == 429 {
 			e.Kind = ErrRateLimit
@@ -264,6 +267,9 @@ func (c *Client) classify(resp *http.Response, data []byte) *APIError {
 func (c *Client) mutate(ctx context.Context, method, u string, body any) ([]byte, error) {
 	c.mutMu.Lock()
 	defer c.mutMu.Unlock()
+	if until := c.SuspendedUntil(); !until.IsZero() {
+		return nil, &APIError{Status: http.StatusTooManyRequests, Kind: ErrRateLimit, Message: "rate limited until " + until.Format(time.RFC3339), RetryAt: until}
+	}
 	if wait := c.lastMutate.Add(time.Second).Sub(c.Now()); wait > 0 {
 		c.Sleep(wait)
 	}
