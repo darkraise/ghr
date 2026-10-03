@@ -58,9 +58,13 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 			return c.Pause(ctx, args[1])
 		}
 		return c.Resume(ctx, args[1])
-	case "drain":
-		return c.PauseAll(ctx)
-	case "resume-all":
+	case "drain", "resume-all":
+		if err := need(args, 1, args[0]); err != nil {
+			return err
+		}
+		if args[0] == "drain" {
+			return c.PauseAll(ctx)
+		}
 		return c.ResumeAll(ctx)
 	case "set":
 		return set(ctx, c, args[1:])
@@ -183,7 +187,9 @@ func logs(ctx context.Context, c *api.Client, args []string, out io.Writer) erro
 			}
 			return err
 		}
-		io.WriteString(out, chunk.Data)
+		if _, err := io.WriteString(out, chunk.Data); err != nil {
+			return err
+		}
 		cursor = chunk.Next
 		if !follow {
 			return nil

@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -164,6 +166,18 @@ func TestTokenSetReadsStdin(t *testing.T) {
 	}
 }
 
+func TestDrainAndResumeAllTakeNoArguments(t *testing.T) {
+	reqs := fakeDaemon(t)
+	for _, args := range [][]string{{"drain", "darkcloud"}, {"resume-all", "darkcloud"}} {
+		if code, _, _ := runCLI(t, "", args...); code != 2 {
+			t.Errorf("%v: exit %d, want 2", args, code)
+		}
+	}
+	if len(*reqs) != 0 {
+		t.Fatalf("rejected commands reached the daemon: %v", *reqs)
+	}
+}
+
 func TestErrorsAndUsage(t *testing.T) {
 	fakeDaemon(t)
 	code, _, errOut := runCLI(t, "", "repo", "add", "public")
@@ -189,5 +203,16 @@ func TestLogsAndHistory(t *testing.T) {
 	code, out, _ := runCLI(t, "", "history", "--repo", "darkmem")
 	if code != 0 || !strings.Contains(out, "#88") || !strings.Contains(out, "failure") || !strings.Contains(out, "1m0s") {
 		t.Fatalf("history %d:\n%s", code, out)
+	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("closed") }
+
+func TestLogsReportsWriteError(t *testing.T) {
+	fakeDaemon(t)
+	if err := logs(context.Background(), newClient(), []string{"a3f9c1", "-f"}, failWriter{}); err == nil {
+		t.Fatal("a failed write must be an error")
 	}
 }
