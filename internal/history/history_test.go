@@ -1,6 +1,7 @@
 package history
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -77,5 +78,20 @@ func TestAppendSkipsDuplicateInstanceRun(t *testing.T) {
 	got, _ := s.Query("", "", 0)
 	if len(got) != 2 {
 		t.Fatalf("want 2 entries (duplicate skipped), got %+v", got)
+	}
+}
+
+func TestAppendAfterTornTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.jsonl")
+	if err := os.WriteFile(path, []byte(`{"id":"torn","repo":"a","run_id":1,"fin`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{Path: path}
+	if err := s.Append(model.HistoryEntry{ID: "x", Repo: "a", RunID: 2, FinishedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Query("", "", 0)
+	if err != nil || len(got) != 1 || got[0].ID != "x" {
+		t.Fatalf("record after torn tail: %+v %v", got, err)
 	}
 }

@@ -32,17 +32,34 @@ func (s *Store) Append(e model.HistoryEntry) error {
 			return nil
 		}
 	}
-	f, err := os.OpenFile(s.Path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
 	line, err := json.Marshal(e)
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(append(line, '\n'))
-	return err
+	f, err := os.OpenFile(s.Path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	// A crash mid-write can leave a fragment with no trailing newline; start a
+	// new line so this record is not merged into the fragment and lost.
+	st, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if st.Size() > 0 {
+		last := make([]byte, 1)
+		if _, err := f.ReadAt(last, st.Size()-1); err != nil {
+			return err
+		}
+		if last[0] != '\n' {
+			line = append([]byte{'\n'}, line...)
+		}
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 func (s *Store) readAll() ([]model.HistoryEntry, error) {
