@@ -65,14 +65,18 @@ func jsonBody(v any) io.Reader {
 	return bytes.NewReader(b)
 }
 
+// The getters below call before returning: Go leaves the order of
+// `return v, f(&v)` unspecified, so v could be read before f fills it.
 func (c *Client) Status(ctx context.Context) (model.Status, error) {
 	var s model.Status
-	return s, c.call(ctx, http.MethodGet, "/status", nil, &s)
+	err := c.call(ctx, http.MethodGet, "/status", nil, &s)
+	return s, err
 }
 
 func (c *Client) Events(ctx context.Context, after int64) ([]model.Event, error) {
 	var e []model.Event
-	return e, c.call(ctx, http.MethodGet, fmt.Sprintf("/events?after=%d", after), nil, &e)
+	err := c.call(ctx, http.MethodGet, fmt.Sprintf("/events?after=%d", after), nil, &e)
+	return e, err
 }
 
 func (c *Client) History(ctx context.Context, repo, conclusion string, limit int) ([]model.HistoryEntry, error) {
@@ -81,24 +85,28 @@ func (c *Client) History(ctx context.Context, repo, conclusion string, limit int
 	q.Set("conclusion", conclusion)
 	q.Set("limit", fmt.Sprint(limit))
 	var h []model.HistoryEntry
-	return h, c.call(ctx, http.MethodGet, "/history?"+q.Encode(), nil, &h)
+	err := c.call(ctx, http.MethodGet, "/history?"+q.Encode(), nil, &h)
+	return h, err
 }
 
 // Log returns the runner's log after cursor ("" = from the start); pass the
 // returned chunk's Next to continue.
 func (c *Client) Log(ctx context.Context, id, cursor string) (model.LogChunk, error) {
 	var l model.LogChunk
-	return l, c.call(ctx, http.MethodGet, "/runners/"+url.PathEscape(id)+"/log?cursor="+url.QueryEscape(cursor), nil, &l)
+	err := c.call(ctx, http.MethodGet, "/runners/"+url.PathEscape(id)+"/log?cursor="+url.QueryEscape(cursor), nil, &l)
+	return l, err
 }
 
 func (c *Client) Containers(ctx context.Context, id string) ([]model.Container, error) {
 	var cs []model.Container
-	return cs, c.call(ctx, http.MethodGet, "/runners/"+url.PathEscape(id)+"/containers", nil, &cs)
+	err := c.call(ctx, http.MethodGet, "/runners/"+url.PathEscape(id)+"/containers", nil, &cs)
+	return cs, err
 }
 
 func (c *Client) Steps(ctx context.Context, id string) ([]model.Step, error) {
 	var s []model.Step
-	return s, c.call(ctx, http.MethodGet, "/runners/"+url.PathEscape(id)+"/steps", nil, &s)
+	err := c.call(ctx, http.MethodGet, "/runners/"+url.PathEscape(id)+"/steps", nil, &s)
+	return s, err
 }
 
 // Config decodes the daemon's current config into out (normally *config.Config).
