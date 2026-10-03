@@ -4,6 +4,7 @@ package system
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -27,6 +28,9 @@ func Exec(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	// Killing the command does not close pipes a child process inherited (a
+	// docker CLI plugin, say); without WaitDelay, Output would wait on them forever.
+	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.Output()
 	if err != nil {
 		first := ""
@@ -91,10 +95,14 @@ func (s Systemd) Active(ctx context.Context, unit string) (bool, error) {
 		return false, ctx.Err()
 	}
 	state := strings.TrimSpace(string(out))
+	// systemctl exits non-zero for inactive units; only a normal exit confirms
+	// one, so a killed or failed query is never read as an exited runner.
+	var exitErr *exec.ExitError
+	confirmed := err == nil || (errors.As(err, &exitErr) && exitErr.Exited())
 	switch {
 	case activeStates[state]:
 		return true, nil
-	case inactiveStates[state]:
+	case inactiveStates[state] && confirmed:
 		return false, nil
 	case err != nil:
 		return false, err

@@ -159,6 +159,24 @@ func TestSystemdActiveErrorsAreNotInactive(t *testing.T) {
 	}
 }
 
+func TestSystemdActiveNeedsANormalExitToConfirmInactive(t *testing.T) {
+	killed := Systemd{Run: func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("inactive\n"), errors.New("signal: killed")
+	}}
+	if _, err := killed.Active(context.Background(), "ghr-runner-kill00"); err == nil {
+		t.Fatal("printed inactive with a failed query must be an error")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not on PATH")
+	}
+	exited := Systemd{Run: func(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+		return Exec(ctx, "sh", "-c", "echo inactive; exit 3")
+	}}
+	if ok, err := exited.Active(context.Background(), "ghr-runner-gone00"); ok || err != nil {
+		t.Fatalf("inactive with exit 3: %v %v", ok, err)
+	}
+}
+
 func TestProjectContainers(t *testing.T) {
 	run, calls := fake(map[string]string{"docker ps": "c1\tghr-abc123-db-1\tpostgres:17\trunning\nbad line\n"})
 	got, err := Docker{Run: run}.ProjectContainers(context.Background(), "ghr-abc123")
@@ -183,5 +201,21 @@ func TestExecTimesOut(t *testing.T) {
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Fatalf("Exec ignored CommandTimeout: %v", time.Since(start))
+	}
+}
+
+func TestExecTimesOutWhenAChildHoldsOutput(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not on PATH")
+	}
+	old := CommandTimeout
+	CommandTimeout = 100 * time.Millisecond
+	defer func() { CommandTimeout = old }()
+	start := time.Now()
+	if _, err := Exec(context.Background(), "sh", "-c", "sleep 30 & sleep 30"); err == nil {
+		t.Fatal("expected a timeout error")
+	}
+	if time.Since(start) > 15*time.Second {
+		t.Fatalf("Exec waited on an inherited pipe: %v", time.Since(start))
 	}
 }
