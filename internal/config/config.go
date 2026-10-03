@@ -2,8 +2,11 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -60,10 +63,13 @@ type Duration time.Duration
 
 func (d Duration) D() time.Duration { return time.Duration(d) }
 
+// maxDays is the largest day count whose nanoseconds fit in an int64.
+const maxDays = int64(math.MaxInt64 / int64(24*time.Hour))
+
 func ParseDuration(s string) (Duration, error) {
 	if strings.HasSuffix(s, "d") {
-		n, err := strconv.Atoi(strings.TrimSuffix(s, "d"))
-		if err != nil {
+		n, err := strconv.ParseInt(strings.TrimSuffix(s, "d"), 10, 64)
+		if err != nil || n > maxDays || n < -maxDays {
 			return 0, fmt.Errorf("invalid duration %q", s)
 		}
 		return Duration(time.Duration(n) * 24 * time.Hour), nil
@@ -129,10 +135,19 @@ func defaults() *Config {
 	}
 }
 
-// Parse decodes YAML over the defaults and validates the result.
+// Parse decodes YAML over the defaults and validates the result. Unknown keys
+// and extra documents are errors: Save would otherwise drop them silently.
 func Parse(data []byte) (*Config, []string, error) {
 	c := defaults()
-	if err := yaml.Unmarshal(data, c); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(c); err != nil {
+		return nil, nil, fmt.Errorf("parse config: %w", err)
+	}
+	var extra yaml.Node
+	if err := dec.Decode(&extra); err == nil {
+		return nil, nil, errors.New("parse config: expected exactly one YAML document")
+	} else if !errors.Is(err, io.EOF) {
 		return nil, nil, fmt.Errorf("parse config: %w", err)
 	}
 	warnings, err := c.Validate()

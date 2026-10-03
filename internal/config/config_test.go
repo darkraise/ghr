@@ -231,6 +231,18 @@ func TestSaveRejectsInvalid(t *testing.T) {
 	}
 }
 
+func TestParseRejectsUnknownKeysAndExtraDocuments(t *testing.T) {
+	for name, y := range map[string]string{
+		"unknown repo key": sample + "    maax: 1\n",
+		"unknown top key":  "poll_intervall: 5s\n" + sample,
+		"second document":  sample + "---\nowner: other\n",
+	} {
+		if _, _, err := Parse([]byte(y)); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}
+
 func TestCloneIsDeep(t *testing.T) {
 	c, _, _ := Parse([]byte(sample))
 	d := c.Clone()
@@ -238,5 +250,16 @@ func TestCloneIsDeep(t *testing.T) {
 	d.Labels[0] = "x"
 	if *c.Repos[0].Max != 1 || c.Labels[0] != "homelab" {
 		t.Fatal("clone shares memory")
+	}
+}
+
+func TestParseDurationDayBounds(t *testing.T) {
+	if d, err := ParseDuration("106751d"); err != nil || d.D() != 106751*24*time.Hour {
+		t.Fatalf("106751d = %v, %v", d, err)
+	}
+	for _, s := range []string{"106752d", "213504d", "-106752d", "xd"} {
+		if _, err := ParseDuration(s); err == nil {
+			t.Errorf("%s accepted", s)
+		}
 	}
 }
