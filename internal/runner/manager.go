@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -168,10 +169,12 @@ func (m *Manager) Init() error {
 	return nil
 }
 
-// recordLastJob keeps the newest finished job per repo; m.mu must be held or unshared.
+// recordLastJob keeps the newest finished job per repo, keyed by the lower-cased
+// name because repo names are case-insensitive; m.mu must be held or unshared.
 func (m *Manager) recordLastJob(e model.HistoryEntry) {
-	if cur, ok := m.lastJob[e.Repo]; !ok || e.FinishedAt.After(cur.FinishedAt) {
-		m.lastJob[e.Repo] = e
+	key := strings.ToLower(e.Repo)
+	if cur, ok := m.lastJob[key]; !ok || e.FinishedAt.After(cur.FinishedAt) {
+		m.lastJob[key] = e
 	}
 }
 
@@ -263,11 +266,11 @@ func (m *Manager) Status() model.Status {
 		rs := model.RepoStatus{Name: r.Name, Paused: r.Paused, Removing: r.Removing, Max: cfg.EffectiveMax(r),
 			Queued: len(m.demand[r.Name]), Error: m.repoErr[r.Name]}
 		for _, i := range m.insts {
-			if i.Repo == r.Name {
+			if strings.EqualFold(i.Repo, r.Name) {
 				rs.Active++
 			}
 		}
-		if e, ok := m.lastJob[r.Name]; ok {
+		if e, ok := m.lastJob[strings.ToLower(r.Name)]; ok {
 			e := e
 			rs.LastJob = &e
 		}

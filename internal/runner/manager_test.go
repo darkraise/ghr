@@ -38,6 +38,18 @@ func TestLastJobKeepsNewest(t *testing.T) {
 	}
 }
 
+func TestStatusIgnoresRepoCase(t *testing.T) {
+	h := newHarness(t)
+	h.m.mu.Lock()
+	h.m.insts["dddddd"] = &instance{Meta: Meta{ID: "dddddd", Repo: "DarkMem"}, State: sched.Idle, StateSince: h.now}
+	h.m.recordLastJob(model.HistoryEntry{ID: "renamed", Repo: "DARKMEM", FinishedAt: h.now})
+	h.m.mu.Unlock()
+	st := h.m.Status()
+	if st.Repos[1].Active != 1 || st.Repos[1].LastJob == nil || st.Repos[1].LastJob.ID != "renamed" {
+		t.Fatalf("repos %+v", st.Repos)
+	}
+}
+
 func TestStatusEpochChangesPerStart(t *testing.T) {
 	h := newHarness(t)
 	first := h.m.Status().Epoch
