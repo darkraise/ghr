@@ -3,9 +3,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+
+	"github.com/darkraise/ghr/internal/api"
 )
 
 var version = "dev"
@@ -13,6 +17,16 @@ var version = "dev"
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
+
+func socketPath() string {
+	if s := os.Getenv("GHR_SOCKET"); s != "" {
+		return s
+	}
+	return api.DefaultSocket
+}
+
+// newClient is replaced in tests.
+var newClient = func() *api.Client { return api.NewUnixClient(socketPath()) }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -27,9 +41,17 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
-	fmt.Fprintln(stderr, "ghr: unknown command "+args[0])
-	fmt.Fprint(stderr, usage)
-	return 2
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := cli(ctx, newClient(), args, stdin, stdout); err != nil {
+		fmt.Fprintln(stderr, "ghr:", err)
+		if _, ok := err.(usageError); ok {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		return 1
+	}
+	return 0
 }
 
 const usage = `usage: ghr <command>
