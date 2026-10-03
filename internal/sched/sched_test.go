@@ -150,3 +150,22 @@ func TestStartTimedOut(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestRepoNamesIgnoreCase(t *testing.T) {
+	busy := Instance{ID: "1", Repo: "a", State: Busy, StateSince: t0.Add(-time.Hour), JobConfirmed: true}
+	if got := repos(Plan(cfg("queue", 2, config.Repo{Name: "A"}), []Instance{busy}, Demand{"A": jobs("A", 1)}, t0)); len(got) != 0 {
+		t.Fatalf("queue: repo cap must count a differently-cased instance, got %v", got)
+	}
+	idle := Instance{ID: "1", Repo: "a", State: Idle, StateSince: t0}
+	if got := repos(Plan(cfg("all", 1, config.Repo{Name: "A"}), []Instance{idle}, Demand{}, t0)); len(got) != 0 {
+		t.Fatalf("all: a differently-cased idle instance must satisfy warm, got %v", got)
+	}
+	al := cfg("all", 2, config.Repo{Name: "A", Warm: ptr(1)})
+	got := IdleToStop(al, []Instance{
+		{ID: "warm", Repo: "a", State: Idle, StateSince: t0.Add(-time.Hour)},
+		{ID: "extra", Repo: "A", State: Idle, StateSince: t0.Add(-10 * time.Minute)},
+	}, t0)
+	if !reflect.DeepEqual(got, []string{"extra"}) {
+		t.Fatalf("idle grouping must ignore case, got %v", got)
+	}
+}

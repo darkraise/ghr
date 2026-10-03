@@ -77,7 +77,7 @@ func covers(i Instance, now time.Time) bool {
 func Covering(insts []Instance, repo string, now time.Time) int {
 	n := 0
 	for _, i := range insts {
-		if i.Repo == repo && covers(i, now) {
+		if strings.EqualFold(i.Repo, repo) && covers(i, now) {
 			n++
 		}
 	}
@@ -98,7 +98,7 @@ func Uncovered(insts []Instance, repo string, jobs []QueuedJob, now time.Time) [
 func repoActive(insts []Instance, repo string) int {
 	n := 0
 	for _, i := range insts {
-		if i.Repo == repo {
+		if strings.EqualFold(i.Repo, repo) {
 			n++ // starting, idle, busy and cleaning all count toward the repo cap
 		}
 	}
@@ -119,7 +119,7 @@ func totalActive(insts []Instance) int {
 func countStates(insts []Instance, repo string, states ...State) int {
 	n := 0
 	for _, i := range insts {
-		if i.Repo != repo || i.Stale {
+		if !strings.EqualFold(i.Repo, repo) || i.Stale {
 			continue
 		}
 		for _, s := range states {
@@ -208,7 +208,10 @@ func IdleToStop(cfg *config.Config, insts []Instance, now time.Time) []string {
 			out = append(out, i.ID)
 			continue
 		}
-		byRepo[i.Repo] = append(byRepo[i.Repo], i)
+		// Repo names are case-insensitive; a case-only config rename leaves live
+		// instances with the old spelling.
+		key := strings.ToLower(i.Repo)
+		byRepo[key] = append(byRepo[key], i)
 	}
 	timeout := cfg.IdleTimeout.D()
 	repos := make([]string, 0, len(byRepo))
