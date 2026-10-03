@@ -104,3 +104,34 @@ func TestJobCompletedWithoutJobJSON(t *testing.T) {
 	}
 	checkTime(t, "finished_at", rec["finished_at"], before, time.Now())
 }
+
+func TestJobCompletedWithEmptyJobJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "job.json"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now()
+	runHook(t, "job-completed.sh", "GHR_INSTANCE_DIR="+dir)
+	rec := readRecord(t, dir)
+	if len(rec) != 1 {
+		t.Fatalf("want finished_at only, got %v", rec)
+	}
+	checkTime(t, "finished_at", rec["finished_at"], before, time.Now())
+}
+
+// The runner invokes .sh hooks as `bash -e <file>`. A job.json directory holding a
+// job.json.tmp directory makes the final mv fail; the hooks must still exit 0.
+func TestHooksExitZeroUnderErrexitWhenRenameFails(t *testing.T) {
+	runHook(t, "job-started.sh", "GHR_INSTANCE_DIR=") // applies runHook's bash/jq skip rules
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "job.json", "job.json.tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, script := range []string{"job-started.sh", "job-completed.sh"} {
+		cmd := exec.Command("bash", "-e", script)
+		cmd.Env = append(os.Environ(), "GHR_INSTANCE_DIR="+dir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s under bash -e exited non-zero: %v\n%s", script, err, out)
+		}
+	}
+}
