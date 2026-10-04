@@ -8,8 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
@@ -60,10 +58,10 @@ type overlay int
 const (
 	ovNone overlay = iota
 	ovConfirm
-	ovPrompt
 	ovDetail
 	ovHelp
 	ovUnsaved
+	ovAddRepo
 )
 
 // leaveTarget is where the user was going when the unsaved-changes dialog opened.
@@ -157,14 +155,12 @@ type Model struct {
 	overlay       overlay
 	confirmText   string
 	confirmAction func() tea.Cmd
-	dlg           ui.Group     // focus across the open dialog's buttons
-	dlgButtons    []*ui.Button // the open dialog's buttons, in display order
-	dlgCancel     string       // the button esc presses
-	leaveTo       leaveTarget  // where to go once unsaved Settings changes are handled
-	leaving       bool         // a save started from the unsaved-changes dialog is in flight
-	prompt        textinput.Model
-	promptLabel   string
-	promptSubmit  func(string) tea.Cmd
+	dlg           ui.Group       // focus across the open dialog's buttons
+	dlgButtons    []*ui.Button   // the open dialog's buttons, in display order
+	dlgCancel     string         // the button esc presses
+	leaveTo       leaveTarget    // where to go once unsaved Settings changes are handled
+	leaving       bool           // a save started from the unsaved-changes dialog is in flight
+	add           *addRepoDialog // the open Add repository dialog
 
 	toast     ui.Toast
 	frame     int
@@ -173,11 +169,8 @@ type Model struct {
 }
 
 func New(c Client) Model {
-	ti := textinput.New()
-	ti.CharLimit = 200
-	ti.Cursor.SetMode(cursor.CursorStatic)
 	return Model{
-		c: c, now: time.Now, width: 120, height: 40, prompt: ti, settings: newSettingsPage(),
+		c: c, now: time.Now, width: 120, height: 40, settings: newSettingsPage(),
 		copyFn: func(s string) {
 			fmt.Fprintf(os.Stdout, "\x1b]52;c;%s\a", base64.StdEncoding.EncodeToString([]byte(s)))
 		},
@@ -418,6 +411,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.saved(msg)
 	case refetchedMsg:
 		return m.refetched(msg)
+	case addedMsg:
+		return m.added(msg)
 	case doneMsg:
 		if msg.err != nil {
 			m.toast.Show(clean(msg.err.Error()), true, m.now())
@@ -433,11 +428,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
-	}
-	if m.overlay == ovPrompt {
-		var cmd tea.Cmd
-		m.prompt, cmd = m.prompt.Update(msg)
-		return m, cmd
 	}
 	return m, nil
 }

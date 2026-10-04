@@ -17,6 +17,7 @@ import (
 
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
 func TestMain(m *testing.M) {
@@ -37,6 +38,7 @@ type fakeClient struct {
 	ctrs     []model.Container
 	cfg      *config.Config
 	patches  []model.ConfigPatch
+	addErr   error                   // returned by AddRepo when set
 	patchErr error                   // returned by PatchConfig when set
 	cfgErr   error                   // returned by Config when set
 	onPatch  func(model.ConfigPatch) // applies a patch to cfg, as a daemon would
@@ -109,7 +111,12 @@ func (f *fakeClient) PatchConfig(_ context.Context, p model.ConfigPatch) error {
 	return f.rec("patch")
 }
 func (f *fakeClient) AddRepo(_ context.Context, r model.AddRepoRequest) error {
-	return f.rec("add %s %s", r.Name, strings.Join(r.Labels, ","))
+	max := "-"
+	if r.Max != nil {
+		max = fmt.Sprint(*r.Max)
+	}
+	f.rec("add %s %s max=%s public=%v", r.Name, strings.Join(r.Labels, ","), max, r.AllowPublic)
+	return f.addErr
 }
 func (f *fakeClient) RemoveRepo(_ context.Context, n string) error { return f.rec("rm %s", n) }
 func (f *fakeClient) Pause(_ context.Context, n string) error      { return f.rec("pause %s", n) }
@@ -443,18 +450,100 @@ func TestHiddenSelectionKeysDoNothing(t *testing.T) {
 	}
 }
 
-func TestAddRepoPrompt(t *testing.T) {
+func TestAddRepoDialog(t *testing.T) {
 	c := &fakeClient{}
-	m := run(t, sampleModel(c, 120, 30), "a")
-	if m.overlay != ovPrompt {
-		t.Fatal("prompt not open")
+	m := feed(sampleModel(c, 120, 30), key("a"))
+	if m.overlay != ovAddRepo {
+		t.Fatal("dialog not open")
 	}
-	for _, r := range "newrepo homelab,gpu" {
-		m = run(t, m, string(r))
+	v := m.View()
+	for _, want := range []string{"Add repository", "Name", "› [ ", "[ − ] 1 [ + ] (default)", "Allow public repo",
+		"self-hosted runners on a public repo can run anyone's code", "( Cancel )", "[ Add ]"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("dialog missing %q", want)
+		}
 	}
-	m = run(t, m, "enter")
-	if len(c.calls) != 1 || c.calls[0] != "add newrepo homelab,gpu" {
-		t.Fatalf("calls %v", c.calls)
+	// enter in the name field commits it and moves focus to Max.
+	m = feed(m, keys("n", "e", "w", "r", "e", "p", "o", "enter", "+", "+", "tab", "enter", "g", "p", "u", "enter", "esc", "tab", " ", "tab", "tab", "enter")...)
+	if got := strings.Join(c.actions(), "|"); got != "add newrepo gpu max=3 public=true" {
+		t.Fatalf("actions %q", got)
+	}
+	if m.overlay != ovNone || !strings.Contains(m.View(), "✔ added newrepo") {
+		t.Fatalf("after add: overlay %v", m.overlay)
+	}
+}
+
+func TestAddRepoDialogErrorsStayInside(t *testing.T) {
+	// The daemon's own message (internal/daemon/backend.go), on an 80-column screen.
+	c := &fakeClient{addErr: errors.New("site is public; self-hosted runners must only serve private repos (pass --allow-public to override)")}
+	m := feed(sampleModel(c, 80, 30), key("a"))
+	m = click(t, m, addOK)
+	if m.overlay != ovAddRepo || !strings.Contains(m.View(), "✖ name is required") || len(c.actions()) != 0 {
+		t.Fatalf("empty name: overlay %v actions %v", m.overlay, c.actions())
+	}
+	m = click(t, m, addName)
+	m = feed(m, keys("s", "i", "t", "e")...)
+	upd, cmd := m.Update(ui.Pressed{ID: addOK})
+	m = upd.(Model)
+	if !strings.Contains(m.View(), "[ Adding… ]") || m.add.group.FocusedID() == addOK {
+		t.Fatalf("Add not disabled while in flight, or still focused (%q)", m.add.group.FocusedID())
+	}
+	if _, again := m.Update(ui.Pressed{ID: addOK}); again != nil {
+		t.Fatal("a second add was sent while one was in flight")
+	}
+	m = feed(m, collect(cmd)...)
+	v := m.View()
+	if m.overlay != ovAddRepo || !strings.Contains(v, "✖ site is public;") || !strings.Contains(v, "--allow-public") || m.add.busy {
+		t.Fatalf("rejection: overlay %v\n%s", m.overlay, v)
+	}
+	for i, line := range strings.Split(v, "\n") {
+		if lipgloss.Width(line) > 80 {
+			t.Fatalf("line %d is %d wide:\n%s", i, lipgloss.Width(line), v)
+		}
+	}
+	if got := strings.Join(c.actions(), "|"); got != "add site  max=- public=false" {
+		t.Fatalf("untouched max sent: %q", got)
+	}
+	m = click(t, m, addCancel)
+	if m.overlay != ovNone {
+		t.Fatal("cancel did not close")
+	}
+}
+
+// A reply to a dialog that was cancelled never touches the dialog opened after it.
+func TestAddRepoLateReplyIgnoresNewDialog(t *testing.T) {
+	c := &fakeClient{addErr: errors.New("repo site is already configured")}
+	m := feed(sampleModel(c, 120, 30), key("a"))
+	m = feed(m, keys("s", "i", "t", "e")...)
+	upd, cmd := m.Update(ui.Pressed{ID: addOK})
+	m = feed(upd.(Model), ui.Pressed{ID: addCancel}, key("a"))
+	fresh := m.add
+	m = feed(m, collect(cmd)...)
+	// The open dialog hides the toast line, so check the toast itself.
+	if m.add != fresh || fresh.err != "" || fresh.busy || m.toast.Text != "repo site is already configured" {
+		t.Fatalf("late reply reached the new dialog: err %q busy %v", fresh.err, fresh.busy)
+	}
+}
+
+// The dialog fits the narrowest supported screen without re-wrapping its rows.
+func TestAddRepoDialogFitsNarrowScreen(t *testing.T) {
+	m := feed(sampleModel(&fakeClient{}, 40, 30), key("a"))
+	v := m.View()
+	for i, line := range strings.Split(v, "\n") {
+		if lipgloss.Width(line) > 40 {
+			t.Fatalf("line %d is %d wide:\n%s", i, lipgloss.Width(line), v)
+		}
+	}
+	if !strings.Contains(v, "Add repository") || !strings.Contains(v, "[ Add ]") {
+		t.Fatalf("dialog incomplete:\n%s", v)
+	}
+}
+
+// While the daemon is unreachable, a does not open the dialog and says why.
+func TestAddRepoUnavailableWhileUnreachable(t *testing.T) {
+	m := feed(sampleModel(&fakeClient{}, 120, 30), statusMsg{err: errors.New("connection refused")})
+	if m = feed(m, key("a")); m.overlay == ovAddRepo || !strings.Contains(m.View(), "daemon is unreachable") {
+		t.Fatalf("a opened the dialog while unreachable: overlay %v", m.overlay)
 	}
 }
 

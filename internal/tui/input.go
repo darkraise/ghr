@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -22,18 +21,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	switch m.overlay {
-	case ovPrompt:
-		switch key {
-		case "esc":
-			m.overlay = ovNone
-			return m, nil
-		case "enter":
-			m.overlay = ovNone
-			return m, m.promptSubmit(strings.TrimSpace(m.prompt.Value()))
-		}
-		var cmd tea.Cmd
-		m.prompt, cmd = m.prompt.Update(k)
-		return m, cmd
+	case ovAddRepo:
+		return m.addRepoKey(k)
 	case ovConfirm, ovHelp, ovUnsaved:
 		return m.dialogKey(k)
 	case ovDetail:
@@ -104,17 +93,7 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 			return m.c.PatchConfig(c, model.ConfigPatch{Mode: &mode})
 		})
 	case "a":
-		return m.openPrompt("Add repo — name [label,label]", "", func(v string) tea.Cmd {
-			f := strings.Fields(v)
-			if len(f) == 0 {
-				return nil
-			}
-			req := model.AddRepoRequest{Name: f[0]}
-			if len(f) > 1 {
-				req.Labels = strings.Split(f[1], ",")
-			}
-			return m.action("added "+f[0], func(c context.Context) error { return m.c.AddRepo(c, req) })
-		})
+		return m.openAddRepo()
 	case "d":
 		if r := m.selectedRepo(); r != nil && m.repoFocus() {
 			name := r.Name
@@ -260,15 +239,6 @@ func (m Model) globalCap(up bool) tea.Cmd {
 	})
 }
 
-func (m Model) openPrompt(label, value string, submit func(string) tea.Cmd) (tea.Model, tea.Cmd) {
-	m.overlay, m.promptLabel, m.promptSubmit = ovPrompt, label, submit
-	m.prompt.SetValue(value)
-	m.prompt.CursorEnd()
-	// Focus mutates m.prompt; Go leaves unspecified whether `return m, m.prompt.Focus()` copies m first.
-	cmd := m.prompt.Focus()
-	return m, cmd
-}
-
 func (m Model) runnerFocus() bool {
 	return m.page == pageRunners || (m.page == pageDashboard && m.focus == paneRunners)
 }
@@ -301,7 +271,7 @@ func (m Model) enter() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// dialogButtons map each detail or prompt overlay button zone to the key it stands for.
+// dialogButtons map each runner detail overlay button zone to the key it stands for.
 var dialogButtons = []struct {
 	zone string
 	key  tea.KeyType
@@ -310,6 +280,10 @@ var dialogButtons = []struct {
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.overlay == ovConfirm || m.overlay == ovHelp || m.overlay == ovUnsaved {
 		_, cmd := m.dlg.Mouse(msg)
+		return m, cmd
+	}
+	if m.overlay == ovAddRepo {
+		_, cmd := m.add.group.Mouse(msg)
 		return m, cmd
 	}
 	if m.overlay == ovNone && m.page == pageSettings {
