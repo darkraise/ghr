@@ -77,6 +77,11 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		return m, m.confirmAction()
 	case btnNo, btnClose:
 		m.overlay = ovNone
+	case setSave:
+		return m.saveSettings()
+	case setDiscard:
+		m.settings.form.Discard()
+		m.settings.alert = nil
 	}
 	return m, nil
 }

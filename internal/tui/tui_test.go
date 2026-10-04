@@ -30,12 +30,16 @@ var now = time.Date(2026, 10, 3, 14, 5, 0, 0, time.UTC)
 // fakeClient records actions; reads return the configured fields (zero values
 // mean the sample status and empty results).
 type fakeClient struct {
-	calls  []string
-	st     *model.Status
-	events []model.Event
-	steps  []model.Step
-	ctrs   []model.Container
-	cfg    *config.Config
+	calls    []string
+	st       *model.Status
+	events   []model.Event
+	steps    []model.Step
+	ctrs     []model.Container
+	cfg      *config.Config
+	patches  []model.ConfigPatch
+	patchErr error                   // returned by PatchConfig when set
+	cfgErr   error                   // returned by Config when set
+	onPatch  func(model.ConfigPatch) // applies a patch to cfg, as a daemon would
 }
 
 func (f *fakeClient) rec(s string, a ...any) error {
@@ -69,6 +73,9 @@ func (f *fakeClient) Containers(_ context.Context, id string) ([]model.Container
 	return f.ctrs, nil
 }
 func (f *fakeClient) Config(_ context.Context, out any) error {
+	if f.cfgErr != nil {
+		return f.cfgErr
+	}
 	if f.cfg != nil {
 		*out.(*config.Config) = *f.cfg
 	}
@@ -78,6 +85,13 @@ func (f *fakeClient) History(context.Context, string, string, int) ([]model.Hist
 	return nil, nil
 }
 func (f *fakeClient) PatchConfig(_ context.Context, p model.ConfigPatch) error {
+	f.patches = append(f.patches, p)
+	if f.patchErr != nil {
+		return f.patchErr
+	}
+	if f.onPatch != nil {
+		f.onPatch(p)
+	}
 	switch {
 	case p.GlobalMax != nil:
 		return f.rec("global_max=%d", *p.GlobalMax)

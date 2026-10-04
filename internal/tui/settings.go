@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/config"
+	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
@@ -23,6 +25,9 @@ const (
 	setLabels           = "settings/labels"
 	setMemoryMax        = "settings/memory_max"
 	setCPUQuota         = "settings/cpu_quota"
+
+	setSave    = "settings/save"
+	setDiscard = "settings/discard"
 )
 
 // repoKey is the key of a per-repo field: max, warm, labels or cleanup.
@@ -40,9 +45,31 @@ type settingsPage struct {
 	group  ui.Group
 	scroll int
 	repos  []config.Repo // the repos of the last loaded config, in order
+	saving bool
+	alert  []string // the daemon's messages from a rejected save
+
+	save, discard *ui.Button
 }
 
-func newSettingsPage() *settingsPage { return &settingsPage{} }
+func newSettingsPage() *settingsPage {
+	return &settingsPage{
+		save:    ui.NewButton(setSave, "Save changes", ui.Primary),
+		discard: ui.NewButton(setDiscard, "Discard", ui.Secondary),
+	}
+}
+
+// Results of a save: the patch's outcome, then the config fetched after it.
+type (
+	savedMsg struct {
+		sent map[string]ui.Value
+		err  error
+	}
+	refetchedMsg struct {
+		cfg  *config.Config
+		sent map[string]ui.Value
+		err  error
+	}
+)
 
 func durationCheck(s string) error {
 	_, err := config.ParseDuration(s)
@@ -137,6 +164,216 @@ func (s *settingsPage) row(label, key, desc string) ui.Row {
 	return ui.Row{Label: label, Items: []ui.Widget{f.Input}, Desc: desc, Dirty: f.Dirty()}
 }
 
+// checkErrors returns the in-app check failures by field key: a duration that
+// does not parse, and a repo's warm above its explicit max. Size, memory and
+// CPU values are left to the daemon.
+func (s *settingsPage) checkErrors() map[string]string {
+	errs := map[string]string{}
+	for _, f := range s.form.Fields() {
+		if tf, ok := f.Input.(*ui.TextField); ok && tf.Err() != nil {
+			errs[f.Key] = tf.Err().Error()
+		}
+	}
+	for _, r := range s.repos {
+		if r.Removing {
+			continue
+		}
+		mx, wm := s.input(repoKey(r.Name, "max")).Value(), s.input(repoKey(r.Name, "warm")).Value()
+		warm := 1
+		if wm.Set {
+			warm = wm.Num
+		}
+		if mx.Set && mx.Num > 0 && warm > mx.Num {
+			errs[repoKey(r.Name, "warm")] = "warm must be <= max"
+		}
+	}
+	return errs
+}
+
+// buildPatch turns the dirty fields into one ConfigPatch and returns the
+// value sent for each key. A repo being removed has no dirty fields: the
+// merge that marked it removing dropped its edits.
+func (s *settingsPage) buildPatch() (model.ConfigPatch, map[string]ui.Value) {
+	var p model.ConfigPatch
+	sent := map[string]ui.Value{}
+	for _, f := range s.form.Dirty() {
+		v := f.Input.Value()
+		text, num, list := v.Text, v.Num, append([]string{}, v.List...)
+		sent[f.Key] = v
+		if rest, ok := strings.CutPrefix(f.Key, "settings/repo/"); ok {
+			name, field, _ := strings.Cut(rest, "/")
+			if p.Repos == nil {
+				p.Repos = map[string]model.RepoPatch{}
+			}
+			rp := p.Repos[name]
+			switch field {
+			case "max":
+				rp.Max = &num
+			case "warm":
+				rp.Warm = &num
+			case "labels":
+				rp.Labels = &list
+			case "cleanup":
+				rp.CleanupNamePrefixes = &list
+			}
+			p.Repos[name] = rp
+			continue
+		}
+		switch f.Key {
+		case setMode:
+			p.Mode = &text
+		case setGlobalMax:
+			p.GlobalMax = &num
+		case setPollInterval:
+			p.PollInterval = &text
+		case setStartTimeout:
+			p.StartTimeout = &text
+		case setIdleTimeout:
+			p.IdleTimeout = &text
+		case setDiskHighWater:
+			p.DiskHighWater = &num
+		case setBuildCacheKeep:
+			p.BuildCacheKeep = &text
+		case setHistoryRetention:
+			p.HistoryRetention = &text
+		case setLabels:
+			p.Labels = &list
+		case setMemoryMax, setCPUQuota:
+			if p.RunnerLimits == nil {
+				p.RunnerLimits = &model.RunnerLimitsPatch{}
+			}
+			if f.Key == setMemoryMax {
+				p.RunnerLimits.MemoryMax = &text
+			} else {
+				p.RunnerLimits.CPUQuota = &text
+			}
+		}
+	}
+	return p, sent
+}
+
+// fieldName is a field's name as config.yaml spells it, for messages.
+func fieldName(key string) string {
+	if rest, ok := strings.CutPrefix(key, "settings/repo/"); ok {
+		name, field, _ := strings.Cut(rest, "/")
+		if field == "cleanup" {
+			field = "cleanup_name_prefixes"
+		}
+		return name + "." + field
+	}
+	return strings.TrimPrefix(key, "settings/")
+}
+
+// saveSettings runs the in-app checks, then sends the dirty fields as one patch.
+func (m Model) saveSettings() (tea.Model, tea.Cmd) {
+	s := m.settings
+	if m.cfg == nil || s.saving || !m.connected {
+		return m, nil
+	}
+	if len(s.checkErrors()) > 0 {
+		m.toast.Show("fix the highlighted settings first", true, m.now())
+		return m, nil
+	}
+	p, sent := s.buildPatch()
+	if len(sent) == 0 {
+		return m, nil
+	}
+	s.saving, s.alert = true, nil
+	c := m.c
+	return m, func() tea.Msg {
+		cx, cancel := ctx()
+		defer cancel()
+		return savedMsg{sent, c.PatchConfig(cx, p)}
+	}
+}
+
+// saved handles the patch's outcome. A rejection keeps the edits and lists
+// the daemon's messages. A success fetches the config to reset the saved
+// fields; the save stays busy until that refetch is handled, so a second
+// save cannot overlap it.
+func (m Model) saved(msg savedMsg) (tea.Model, tea.Cmd) {
+	s := m.settings
+	if msg.err != nil {
+		s.saving = false
+		s.alert = strings.Split(clean(msg.err.Error()), "; ")
+		m.toast.Show("settings not saved", true, m.now())
+		return m, nil
+	}
+	m.toast.Show("Settings saved", false, m.now())
+	c := m.c
+	return m, func() tea.Msg {
+		cx, cancel := ctx()
+		defer cancel()
+		var cfg config.Config
+		if err := c.Config(cx, &cfg); err != nil {
+			return refetchedMsg{sent: msg.sent, err: err}
+		}
+		return refetchedMsg{cfg: &cfg, sent: msg.sent}
+	}
+}
+
+// refetched merges the config fetched after a save. Every saved field resets
+// to its new base (a reset, not a merge), and a field whose new base differs
+// from what was sent means the daemon ignored it.
+//
+// If the refetch fails, the save stands but cannot be checked: the edits stay
+// as typed, a toast says so, and the next periodic refresh brings the form
+// up to date.
+func (m Model) refetched(msg refetchedMsg) (tea.Model, tea.Cmd) {
+	s := m.settings
+	s.saving = false
+	if msg.err != nil {
+		m.toast.Show("saved, but re-reading the config failed: "+clean(msg.err.Error()), true, m.now())
+		return m, nil
+	}
+	m.cfg = msg.cfg
+	s.load(msg.cfg)
+	var keys []string
+	for k := range msg.sent {
+		keys = append(keys, k)
+	}
+	s.form.Reset(keys)
+	for _, f := range s.form.Fields() {
+		if v, ok := msg.sent[f.Key]; ok && !ui.Equal(f.Kind, f.Base, v) {
+			m.toast.Show("daemon did not apply "+fieldName(f.Key)+"; is it older than this ghr?", true, m.now())
+			break
+		}
+	}
+	return m, nil
+}
+
+// unsavedBar is the sticky line shown while anything is dirty.
+func (m Model) unsavedBar() string {
+	s := m.settings
+	n := len(s.form.Dirty())
+	if n == 0 {
+		return ""
+	}
+	text := fmt.Sprintf("● %d unsaved changes", n)
+	if n == 1 {
+		text = "● 1 unsaved change"
+	}
+	focused := s.group.FocusedID()
+	return sAmber.Render(text) + "  " + s.discard.View(focused == setDiscard, 0) + "  " + s.save.View(focused == setSave, 0)
+}
+
+// alertBox lists the daemon's messages from a rejected save.
+func (m Model) alertBox(w int) []string {
+	s := m.settings
+	if len(s.alert) == 0 {
+		return nil
+	}
+	// At most three messages, so the form keeps room at the 22-row minimum.
+	var lines []string
+	for _, a := range s.alert[:min(len(s.alert), 3)] {
+		lines = append(lines, sRed.Render("✖ "+a))
+	}
+	if n := len(s.alert) - 3; n > 0 {
+		lines = append(lines, sRed.Render(fmt.Sprintf("… and %d more", n)))
+	}
+	return strings.Split(box("Save rejected", w, lines), "\n")
+}
+
 // settingsSections lays out the form as cards. It first brings the controls
 // up to date with the rest of the model (disabled while the daemon is
 // unreachable or the repo is being removed, repo defaults that follow the
@@ -156,6 +393,13 @@ func (m Model) settingsSections() []ui.Section {
 		}
 		f.Input.SetDisabled(off)
 	}
+	s.save.Label = "Save changes"
+	if s.saving {
+		s.save.Label = "Saving…"
+	}
+	s.save.SetDisabled(s.saving || !m.connected)
+	s.discard.SetDisabled(s.saving || !m.connected)
+	errs := s.checkErrors()
 
 	secs := []ui.Section{
 		{Title: "General", Rows: []ui.Row{
@@ -188,7 +432,7 @@ func (m Model) settingsSections() []ui.Section {
 		title := clean(r.Name)
 		card := ui.Section{Title: title, Rows: []ui.Row{
 			s.row("Max", repoKey(r.Name, "max"), "once set, it stays explicit"),
-			s.row("Warm", repoKey(r.Name, "warm"), "applies in all mode"),
+			s.warmRow(r.Name, errs),
 			s.row("Labels", repoKey(r.Name, "labels"), "added to this repo's runners"),
 			s.row("Cleanup prefixes", repoKey(r.Name, "cleanup"), "container name prefixes removed after each job"),
 		}}
@@ -207,8 +451,17 @@ func (m Model) settingsSections() []ui.Section {
 			ws = append(ws, r.Items...)
 		}
 	}
+	if len(s.form.Dirty()) > 0 {
+		ws = append(ws, s.discard, s.save)
+	}
 	s.group.Set(ws)
 	return secs
+}
+
+func (s *settingsPage) warmRow(name string, errs map[string]string) ui.Row {
+	r := s.row("Warm", repoKey(name, "warm"), "applies in all mode")
+	r.Err = errs[repoKey(name, "warm")]
+	return r
 }
 
 // settingsKey handles a key on the Settings page in precedence order: the
@@ -234,6 +487,9 @@ func (m Model) settingsKey(k tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
 		s.group.Next()
 	case "shift+tab", "up", "k":
 		s.group.Prev()
+	case "ctrl+s":
+		mm, cmd := m.saveSettings()
+		return true, mm, cmd
 	case "pgup":
 		s.scroll = max(s.scroll-m.settingsBodyH()/2, 0)
 		return true, m, nil
@@ -303,10 +559,15 @@ func (m Model) settingsFooterKeys() []footerKey {
 	return []footerKey{{"tab", "next"}, {"shift+tab", "previous"}, {"ctrl+s", "save"}, {"?", "help"}, {"q", "quit"}}
 }
 
-// settingsBodyH is the number of form lines the page shows at once.
+// settingsBodyH is the number of form lines the page shows at once: the
+// content height less the alert box and the unsaved-changes bar.
 func (m Model) settingsBodyH() int {
-	_, h := m.contentSize()
-	return h
+	w, h := m.contentSize()
+	h -= len(m.alertBox(w))
+	if m.unsavedBar() != "" {
+		h--
+	}
+	return max(h, 1)
 }
 
 // scrollToFocus scrolls the focused control into view. It uses the line
@@ -327,6 +588,21 @@ func (m Model) settingsView(w, h int) string {
 	}
 	s := m.settings
 	lines, _ := ui.Render(m.settingsSections(), s.group.FocusedID(), w, m.width >= wideMin)
-	s.scroll = min(max(s.scroll, 0), max(len(lines)-h, 0))
-	return zone.Mark("settings/body", strings.Join(lines[s.scroll:min(s.scroll+h, len(lines))], "\n"))
+	top, bar := m.alertBox(w), m.unsavedBar()
+	bodyH := h - len(top)
+	if bar != "" {
+		bodyH--
+	}
+	bodyH = max(bodyH, 1)
+	s.scroll = min(max(s.scroll, 0), max(len(lines)-bodyH, 0))
+	body := lines[s.scroll:min(s.scroll+bodyH, len(lines))]
+	out := append(top, zone.Mark("settings/body", strings.Join(body, "\n")))
+	if bar != "" {
+		// The bar sticks to the bottom of the page.
+		for range bodyH - len(body) {
+			out = append(out, "")
+		}
+		out = append(out, bar)
+	}
+	return strings.Join(out, "\n")
 }

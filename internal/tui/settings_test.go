@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/config"
+	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
@@ -354,5 +356,171 @@ func TestSettingsConfigKeysInactiveWhileLoading(t *testing.T) {
 	}
 	if m.cfg != nil || len(c.actions()) != 0 {
 		t.Fatalf("config keys acted while loading: %v", c.actions())
+	}
+}
+
+func set(m Model, key string, v ui.Value) { m.settings.input(key).SetValue(v) }
+
+func TestSettingsSavePatchHoldsOnlyDirtyFields(t *testing.T) {
+	c := &fakeClient{}
+	m := onSettings(t, c, 120, 30)
+	set(m, setPollInterval, ui.Value{Text: "30s"})
+	set(m, setLabels, ui.Value{List: []string{"homelab", "gpu"}})
+	set(m, setMemoryMax, ui.Value{Text: "4G"})
+	set(m, repoKey("darkmem", "max"), ui.Value{Num: 2, Set: true})
+	set(m, repoKey("darkcloud", "cleanup"), ui.Value{List: []string{}})
+	if v := m.View(); !strings.Contains(v, "● 5 unsaved changes") || !strings.Contains(v, "( Discard )") || !strings.Contains(v, "[ Save changes ]") {
+		t.Fatalf("unsaved bar missing:\n%s", v)
+	}
+	m = feed(m, key("ctrl+s"))
+	if len(c.patches) != 1 {
+		t.Fatalf("patches %d", len(c.patches))
+	}
+	p := c.patches[0]
+	if *p.PollInterval != "30s" || strings.Join(*p.Labels, ",") != "homelab,gpu" || *p.RunnerLimits.MemoryMax != "4G" ||
+		p.RunnerLimits.CPUQuota != nil || *p.Repos["darkmem"].Max != 2 || len(*p.Repos["darkcloud"].CleanupNamePrefixes) != 0 {
+		t.Fatalf("patch %+v", p)
+	}
+	if p.Mode != nil || p.GlobalMax != nil || p.StartTimeout != nil || p.IdleTimeout != nil || p.HistoryRetention != nil ||
+		p.DiskHighWater != nil || p.BuildCacheKeep != nil || p.Repos["darkmem"].Warm != nil || p.Repos["darkcloud"].Max != nil || len(p.Repos) != 2 {
+		t.Fatalf("patch carries clean fields: %+v", p)
+	}
+}
+
+// A saved 120s comes back as 2m0s: the field resets to the new base and is
+// not dirty, and no mismatch is reported.
+func TestSettingsSavedDurationIsNotDirtyAfterRefetch(t *testing.T) {
+	c := &fakeClient{}
+	c.onPatch = func(p model.ConfigPatch) {
+		if p.PollInterval != nil {
+			d, _ := config.ParseDuration(*p.PollInterval)
+			c.cfg.PollInterval = d
+		}
+	}
+	m := onSettings(t, c, 120, 30)
+	set(m, setPollInterval, ui.Value{Text: "120s"})
+	m = click(t, m, setSave)
+	f := m.settings.form.Field(setPollInterval)
+	if f.Dirty() || f.Input.Value().Text != "2m0s" {
+		t.Fatalf("after save: dirty %v value %q", f.Dirty(), f.Input.Value().Text)
+	}
+	v := m.View()
+	if !strings.Contains(v, "✔ Settings saved") || strings.Contains(v, "unsaved change") || strings.Contains(v, "did not apply") {
+		t.Fatalf("after save:\n%s", v)
+	}
+}
+
+func TestSettingsRejectedSaveKeepsEditsAndShowsAlert(t *testing.T) {
+	c := &fakeClient{patchErr: errors.New("build_cache_keep must look like 20GB; runner_limits.cpu_quota must be a positive percentage such as 200%")}
+	m := onSettings(t, c, 120, 30)
+	set(m, setBuildCacheKeep, ui.Value{Text: "lots"})
+	set(m, setCPUQuota, ui.Value{Text: "fast"})
+	m = feed(m, key("ctrl+s"))
+	v := m.View()
+	for _, want := range []string{"Save rejected", "✖ build_cache_keep must look like 20GB", "✖ runner_limits.cpu_quota must be a positive",
+		"✖ settings not saved", "● 2 unsaved changes"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if m.settings.input(setBuildCacheKeep).Value().Text != "lots" || m.settings.saving {
+		t.Fatal("rejected save lost the edit or stayed saving")
+	}
+	m = click(t, m, setDiscard)
+	if v := m.View(); strings.Contains(v, "Save rejected") || strings.Contains(v, "unsaved change") {
+		t.Fatalf("discard left the alert or edits:\n%s", v)
+	}
+}
+
+func TestSettingsSaveDisabledWhileInFlight(t *testing.T) {
+	c := &fakeClient{}
+	m := onSettings(t, c, 120, 30)
+	set(m, setPollInterval, ui.Value{Text: "30s"})
+	upd, cmd := m.Update(key("ctrl+s"))
+	m = upd.(Model)
+	if cmd == nil || !m.settings.saving || !strings.Contains(m.View(), "[ Saving… ]") {
+		t.Fatal("save did not enter the saving state")
+	}
+	if _, again := m.Update(key("ctrl+s")); again != nil {
+		t.Fatal("a second save was sent while one was in flight")
+	}
+	m = feed(m, collect(cmd)...)
+	if m.settings.saving || len(c.patches) != 1 {
+		t.Fatalf("saving %v patches %d", m.settings.saving, len(c.patches))
+	}
+}
+
+func TestSettingsWarnsWhenDaemonIgnoresAField(t *testing.T) {
+	c := &fakeClient{} // accepts the patch but applies nothing, like an older daemon
+	m := onSettings(t, c, 120, 30)
+	set(m, setHistoryRetention, ui.Value{Text: "14d"})
+	m = feed(m, key("ctrl+s"))
+	if v := m.View(); !strings.Contains(v, "daemon did not apply history_retention; is it older than this ghr?") {
+		t.Fatalf("no mismatch warning:\n%s", v)
+	}
+}
+
+func TestSettingsInAppChecksBlockSave(t *testing.T) {
+	c := &fakeClient{}
+	m := onSettings(t, c, 120, 30)
+	set(m, repoKey("darkcloud", "warm"), ui.Value{Num: 3, Set: true}) // darkcloud has max: 2
+	m = feed(m, key("ctrl+s"))
+	v := m.View()
+	if len(c.patches) != 0 || !strings.Contains(v, "✖ warm must be <= max") || !strings.Contains(v, "fix the highlighted settings first") {
+		t.Fatalf("patches %d:\n%s", len(c.patches), v)
+	}
+	set(m, repoKey("darkcloud", "warm"), ui.Value{Num: 2, Set: true})
+	set(m, setIdleTimeout, ui.Value{Text: "soon"})
+	if m = feed(m, key("ctrl+s")); len(c.patches) != 0 {
+		t.Fatal("an unparseable duration was sent")
+	}
+}
+
+// The save stays busy until the config fetched after it is handled.
+func TestSettingsStaysBusyUntilRefetch(t *testing.T) {
+	c := &fakeClient{}
+	m := onSettings(t, c, 120, 30)
+	set(m, setPollInterval, ui.Value{Text: "30s"})
+	upd, cmd := m.Update(key("ctrl+s"))
+	saved := collect(cmd) // the patch's outcome only
+	upd, refetch := upd.Update(saved[0])
+	m = upd.(Model)
+	if !m.settings.saving || !strings.Contains(m.View(), "[ Saving… ]") {
+		t.Fatal("not busy while the refetch is pending")
+	}
+	if _, again := m.Update(key("ctrl+s")); again != nil {
+		t.Fatal("a second save overlapped the refetch")
+	}
+	m = feed(m, collect(refetch)...)
+	if m.settings.saving || len(c.patches) != 1 || m.settings.form.Field(setPollInterval).Dirty() {
+		t.Fatalf("after the refetch: saving %v patches %d", m.settings.saving, len(c.patches))
+	}
+}
+
+func TestSettingsRefetchFailureIsReported(t *testing.T) {
+	c := &fakeClient{}
+	c.onPatch = func(model.ConfigPatch) { c.cfgErr = errors.New("connection refused") }
+	m := onSettings(t, c, 120, 30)
+	set(m, setPollInterval, ui.Value{Text: "30s"})
+	m = feed(m, key("ctrl+s"))
+	if v := m.View(); m.settings.saving || !strings.Contains(v, "saved, but re-reading the config failed: connection refused") {
+		t.Fatalf("saving %v:\n%s", m.settings.saving, v)
+	}
+}
+
+// Many rejection messages cannot push the form and footer off a 22-row screen.
+func TestSettingsAlertIsBounded(t *testing.T) {
+	var msgs []string
+	for i := 0; i < 6; i++ {
+		msgs = append(msgs, "repo"+string(rune('0'+i))+": needs at least one label in labels or repo labels")
+	}
+	c := &fakeClient{patchErr: errors.New(strings.Join(msgs, "; "))}
+	m := onSettings(t, c, 120, 22)
+	set(m, setLabels, ui.Value{List: []string{}})
+	m = feed(m, key("ctrl+s"))
+	v := m.View()
+	if !strings.Contains(v, "repo2: needs") || strings.Contains(v, "repo3: needs") || !strings.Contains(v, "… and 3 more") ||
+		lipgloss.Height(v) > 22 || !strings.Contains(v, "q quit") {
+		t.Fatalf("alert not bounded (%d lines):\n%s", lipgloss.Height(v), v)
 	}
 }

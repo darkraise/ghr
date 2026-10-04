@@ -401,6 +401,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cfg = msg
 		m.settings.load(msg)
 		return m, nil
+	case savedMsg:
+		return m.saved(msg)
+	case refetchedMsg:
+		return m.refetched(msg)
 	case doneMsg:
 		if msg.err != nil {
 			m.toast.Show(clean(msg.err.Error()), true, m.now())
