@@ -338,10 +338,10 @@ func TestSettingsFooterFollowsFocus(t *testing.T) {
 	if f.Editing() {
 		t.Fatal("the esc hint did not stop editing")
 	}
-	z := zoneOf(t, m, "key-q")
-	upd, cmd := m.Update(leftClick(z.StartX, z.StartY))
-	if !quits(cmd) || upd.(Model).settings.input(setPollInterval).Value().Text != "10s" {
-		t.Fatal("the q hint typed into the field instead of quitting")
+	// A focused text field takes ? and q as typing, so the footer does not offer them.
+	if v := m.View(); !strings.Contains(v, "enter edit") || !strings.Contains(v, "ctrl+s save") ||
+		strings.Contains(v, "q quit") || strings.Contains(v, "? help") {
+		t.Fatalf("text field footer:\n%s", v)
 	}
 	m.settings.group.Focus(setGlobalMax)
 	if v := m.View(); !strings.Contains(v, "left less") || !strings.Contains(v, "right more") {

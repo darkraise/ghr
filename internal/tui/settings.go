@@ -676,6 +676,8 @@ func (m Model) settingsFooterKeys() []footerKey {
 		if w.Editing() {
 			return []footerKey{{"enter", "commit"}, {"esc", "stop editing"}, {"tab", "next"}}
 		}
+		// A printable key starts editing, so ? and q would type into the field.
+		return []footerKey{{"enter", "edit"}, {"tab", "next"}, {"shift+tab", "previous"}, {"ctrl+s", "save"}}
 	case *ui.TagList:
 		if w.Adding() {
 			return []footerKey{{"enter", "add"}, {"esc", "done"}, {"tab", "next"}}
