@@ -332,6 +332,23 @@ func TestKillBusyRunnerNeedsConfirm(t *testing.T) {
 	}
 }
 
+func TestHiddenSelectionKeysDoNothing(t *testing.T) {
+	c := &fakeClient{}
+	m := sampleModel(c, 120, 30)
+	m = run(t, m, "x")
+	if len(c.actions()) != 0 || m.overlay != ovNone {
+		t.Fatalf("x on the Repos pane: overlay %v actions %v", m.overlay, c.actions())
+	}
+	m = run(t, m, "2", "p", "+", "d")
+	if len(c.actions()) != 0 || m.overlay != ovNone {
+		t.Fatalf("repo keys on the Runners tab: overlay %v actions %v", m.overlay, c.actions())
+	}
+	run(t, m, "4", "x")
+	if len(c.actions()) != 0 {
+		t.Fatalf("x on the Config tab: actions %v", c.actions())
+	}
+}
+
 func TestAddRepoPrompt(t *testing.T) {
 	c := &fakeClient{}
 	m := run(t, sampleModel(c, 120, 30), "a")
@@ -376,6 +393,23 @@ func TestConfigTabEdit(t *testing.T) {
 	run(t, m, "enter")
 	if len(c.calls) != 1 || c.calls[0] != "darkcloud.labels=a,b" {
 		t.Fatalf("calls %v", c.calls)
+	}
+}
+
+func TestConfigUnchangedSaveSendsNothing(t *testing.T) {
+	c := &fakeClient{}
+	m := sampleModel(c, 120, 30)
+	upd, _ := m.Update(configMsg(sampleConfig(t, "darkcloud")))
+	m = run(t, upd.(Model), "4", "down", "down", "down", "down") // darkcloud.max
+	m = run(t, m, "enter", "enter")
+	if len(c.actions()) != 0 {
+		t.Fatalf("an unchanged save sent %v", c.actions())
+	}
+	m = run(t, m, "enter")
+	m.prompt.SetValue("2")
+	run(t, m, "enter")
+	if strings.Join(c.actions(), "|") != "darkcloud.max=2" {
+		t.Fatalf("actions %v", c.actions())
 	}
 }
 
@@ -533,6 +567,18 @@ func TestEventsResetOnDaemonRestart(t *testing.T) {
 	}
 }
 
+func TestConfigTabRetriesLoad(t *testing.T) {
+	c := &fakeClient{}
+	m := sampleModel(c, 120, 30)
+	m.tab = tabConfig
+	c.cfg = sampleConfig(t, "darkcloud")
+	m = ticks(m, 1)
+	v := m.View()
+	if !strings.Contains(v, "darkcloud.max") || strings.Contains(v, "loading…") {
+		t.Fatalf("config not loaded by the tick:\n%s", v)
+	}
+}
+
 func TestShortTerminalKeepsSelectionVisible(t *testing.T) {
 	const h = 22
 	st := sampleStatus()
@@ -612,5 +658,23 @@ func TestHelpMentionsMouseNotes(t *testing.T) {
 		if !strings.Contains(v, want) {
 			t.Errorf("help missing %q", want)
 		}
+	}
+}
+
+func TestUntrustedTextIsSanitized(t *testing.T) {
+	m := feed(sampleModel(&fakeClient{}, 120, 30), key("2"))
+	m.logText, m.logBusy = "", false
+	m = feed(m, logMsg{gen: m.logGen, cursor: m.logCursor, chunk: model.LogChunk{Data: "ok\x1b]52;c;ZXZpbA==\a\x1b[2Jdone\r\n", Next: "+"}})
+	if !strings.HasSuffix(m.logText, "okdone\n") {
+		t.Fatalf("log text %q", m.logText)
+	}
+	m = feed(m, eventsMsg{m.epoch, []model.Event{{Seq: 1000, Time: now, Level: "info", Msg: "evil\x1b]0;pwned\a"}}})
+	v := feed(m, key("1")).View() // events are drawn on the Dashboard only
+	if !strings.Contains(v, "evil") || strings.Contains(v, "\x1b]") || strings.Contains(v, "\a") {
+		t.Fatalf("event text not sanitised: %q", v)
+	}
+	got := clean("a\x9bb\tc")
+	if strings.ContainsRune(got, 0x9b) || strings.Contains(got, "\x9b") || strings.Contains(got, "\x1b") || !strings.Contains(got, "\t") {
+		t.Fatalf("clean: %q", got)
 	}
 }

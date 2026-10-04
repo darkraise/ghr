@@ -77,10 +77,16 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 		m.eventScroll = max(0, m.eventScroll-5)
 		m.logScroll = max(0, m.logScroll-10)
 	case "p":
+		if !m.repoFocus() {
+			return m, nil
+		}
 		return m, m.togglePause()
 	case "P":
 		return m, m.togglePauseAll()
 	case "+", "=", "-":
+		if !m.repoFocus() {
+			return m, nil
+		}
 		return m, m.repoCap(key != "-")
 	case "[", "]":
 		return m, m.globalCap(key == "]")
@@ -105,14 +111,14 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 			return m.action("added "+f[0], func(c context.Context) error { return m.c.AddRepo(c, req) })
 		})
 	case "d":
-		if r := m.selectedRepo(); r != nil {
+		if r := m.selectedRepo(); r != nil && m.repoFocus() {
 			name := r.Name
 			return m.openConfirm(fmt.Sprintf("Remove repo %s? Its running jobs finish first.", name), func() tea.Cmd {
 				return m.action("removing "+name, func(c context.Context) error { return m.c.RemoveRepo(c, name) })
 			})
 		}
 	case "x":
-		if r := m.selectedRunner(); r != nil {
+		if r := m.selectedRunner(); r != nil && m.runnerFocus() {
 			id, busy := r.ID, r.State == "busy"
 			kill := func() tea.Cmd {
 				return m.action("stopped "+id, func(c context.Context) error { return m.c.Kill(c, id) })
@@ -265,6 +271,14 @@ func (m Model) openPrompt(label, value string, submit func(string) tea.Cmd) (tea
 	return m, cmd
 }
 
+func (m Model) runnerFocus() bool {
+	return m.tab == tabRunners || (m.tab == tabDashboard && m.focus == paneRunners)
+}
+
+func (m Model) repoFocus() bool {
+	return m.tab == tabDashboard && m.focus == paneRepos
+}
+
 func (m Model) enter() (tea.Model, tea.Cmd) {
 	switch m.tab {
 	case tabHistory:
@@ -283,6 +297,9 @@ func (m Model) enter() (tea.Model, tea.Cmd) {
 		if m.cfgSel < len(fields) {
 			f := fields[m.cfgSel]
 			return m.openPrompt("Set "+f.label, f.value, func(v string) tea.Cmd {
+				if v == f.value {
+					return nil
+				}
 				p, err := f.apply(v)
 				if err != nil {
 					return func() tea.Msg { return doneMsg{err: err} }

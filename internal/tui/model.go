@@ -309,15 +309,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.overlay == ovDetail && m.frame%slowPoll == 0 && m.instance(m.detailID) != nil {
 			cmds = append(cmds, m.fetchSteps(), m.fetchContainers())
 		}
+		if m.tab == tabConfig && m.cfg == nil {
+			cmds = append(cmds, m.fetchConfig())
+		}
 		return m, tea.Batch(cmds...)
 	case statusMsg:
 		if msg.err != nil {
 			m.connected = false
-			m.connErr = msg.err.Error()
+			m.connErr = clean(msg.err.Error())
 			return m, nil
 		}
 		m.connected = true
-		m.st = msg.st
+		m.st = cleanStatus(msg.st)
 		m.clampSelections()
 		var cmds []tea.Cmd
 		if msg.st.Epoch != m.epoch {
@@ -332,6 +335,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		for _, e := range msg.ev {
+			e.Repo, e.Msg = clean(e.Repo), clean(e.Msg)
 			if e.Seq > m.lastSeq {
 				m.events = append(m.events, e)
 				m.lastSeq = e.Seq
@@ -343,6 +347,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case historyMsg:
 		if msg.repo == m.histRepo && msg.concl == m.histConcl {
+			for i := range msg.hist {
+				cleanEntry(&msg.hist[i])
+			}
 			m.hist = msg.hist
 			m.clampSelections()
 		}
@@ -353,7 +360,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.logBusy = false
 		if msg.err == nil && msg.cursor == m.logCursor {
-			m.logText += msg.chunk.Data
+			m.logText += clean(msg.chunk.Data)
 			m.logCursor = msg.chunk.Next
 			if len(m.logText) > 256*1024 {
 				m.logText = m.logText[len(m.logText)-256*1024:]
@@ -363,8 +370,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stepsMsg:
 		if m.overlay == ovDetail && msg.id == m.detailID {
 			if msg.err != nil {
-				m.stepsErr = msg.err.Error()
+				m.stepsErr = clean(msg.err.Error())
 			} else {
+				for i := range msg.steps {
+					msg.steps[i].Name = clean(msg.steps[i].Name)
+				}
 				m.steps, m.stepsErr = msg.steps, ""
 			}
 		}
@@ -372,8 +382,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case containersMsg:
 		if m.overlay == ovDetail && msg.id == m.detailID {
 			if msg.err != nil {
-				m.ctrsErr = msg.err.Error()
+				m.ctrsErr = clean(msg.err.Error())
 			} else {
+				for i := range msg.ctrs {
+					c := &msg.ctrs[i]
+					c.Name, c.Image, c.Project, c.State = clean(c.Name), clean(c.Image), clean(c.Project), clean(c.State)
+				}
 				m.containers, m.ctrsErr = msg.ctrs, ""
 			}
 		}
@@ -384,7 +398,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case doneMsg:
 		if msg.err != nil {
-			m.flash, m.flashErr = msg.err.Error(), true
+			m.flash, m.flashErr = clean(msg.err.Error()), true
 		} else if msg.text != "" {
 			m.flash, m.flashErr = msg.text, false
 		}
@@ -400,6 +414,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+func cleanEntry(h *model.HistoryEntry) {
+	h.Repo, h.JobName, h.RunNumber = clean(h.Repo), clean(h.JobName), clean(h.RunNumber)
+	h.Conclusion, h.HTMLURL = clean(h.Conclusion), clean(h.HTMLURL)
+}
+
+// cleanStatus sanitises the text fields of st in place; the slices come from
+// a freshly decoded response nobody else holds.
+func cleanStatus(st model.Status) model.Status {
+	st.DegradedReason = clean(st.DegradedReason)
+	for i := range st.Repos {
+		r := &st.Repos[i]
+		r.Error = clean(r.Error)
+		if r.LastJob != nil {
+			r.LastJob.JobName, r.LastJob.RunNumber = clean(r.LastJob.JobName), clean(r.LastJob.RunNumber)
+		}
+	}
+	for i := range st.Instances {
+		if j := st.Instances[i].Job; j != nil {
+			j.Name, j.Workflow, j.RunNumber, j.HTMLURL = clean(j.Name), clean(j.Workflow), clean(j.RunNumber), clean(j.HTMLURL)
+		}
+	}
+	return st
 }
 
 func clamp(v, n int) int {

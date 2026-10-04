@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -119,6 +121,15 @@ func (m Model) tabBar(w int) string {
 		gap = 1
 	}
 	return bar + strings.Repeat(" ", gap) + help
+}
+
+func clean(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == utf8.RuneError || (unicode.IsControl(r) && r != '\n' && r != '\t') {
+			return -1
+		}
+		return r
+	}, ansi.Strip(s))
 }
 
 func (m Model) row(id string, selected bool, s string, w int) string {
