@@ -10,6 +10,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/charmbracelet/x/term"
+
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/daemon"
 	"github.com/darkraise/ghr/internal/tui"
@@ -31,8 +33,33 @@ func socketPath() string {
 // newClient is replaced in tests.
 var newClient = func() *api.Client { return api.NewUnixClient(socketPath()) }
 
+// runTUI, isTerminal and fdIsTerminal are replaced in tests.
+var (
+	runTUI       = tui.Run
+	isTerminal   = stdioIsTerminal
+	fdIsTerminal = term.IsTerminal
+)
+
+// stdioIsTerminal reports whether both stdin and stdout are terminals.
+func stdioIsTerminal() bool {
+	return fdIsTerminal(os.Stdin.Fd()) && fdIsTerminal(os.Stdout.Fd())
+}
+
+// openTUI runs the dashboard and returns the process exit code.
+func openTUI(stderr io.Writer) int {
+	if err := runTUI(newClient()); err != nil {
+		fmt.Fprintln(stderr, "ghr:", err)
+		return 1
+	}
+	return 0
+}
+
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
+		// Scripts and pipes keep the old usage-and-exit-2 behaviour.
+		if isTerminal() {
+			return openTUI(stderr)
+		}
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
@@ -52,11 +79,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, usage)
 		return 0
 	case "tui":
-		if err := tui.Run(newClient()); err != nil {
-			fmt.Fprintln(stderr, "ghr tui:", err)
-			return 1
-		}
-		return 0
+		return openTUI(stderr)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -71,10 +94,11 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return 0
 }
 
-const usage = `usage: ghr <command>
+const usage = `usage: ghr [command]
 
+  (no command)                    open the interactive dashboard
   daemon                          run the supervisor (systemd runs this)
-  tui                             interactive dashboard
+  tui                             same as no command
   status                          repos, runners and health
   pause <repo> | resume <repo>    stop/start new runners for a repo
   drain | resume-all              pause/resume every repo
