@@ -391,12 +391,6 @@ func (m Model) configFields() []configField {
 	return fields
 }
 
-// footerKeys are the clickable hints shown in the footer, in order.
-var footerKeys = []struct{ key, label string }{
-	{"p", "pause"}, {"+", "repo cap"}, {"-", ""}, {"[", "global cap"}, {"]", ""}, {"m", "mode"},
-	{"x", "kill"}, {"l", "logs"}, {"enter", "details"}, {"?", "help"}, {"q", "quit"},
-}
-
 // dialogButtons map each overlay button zone to the key it stands for.
 var dialogButtons = []struct {
 	zone string
@@ -447,13 +441,19 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	for i := range pageNames {
-		if zone.Get(fmt.Sprintf("tab-%d", i)).InBounds(msg) {
+		if zone.Get(navZone(page(i))).InBounds(msg) {
 			return m.switchPage(page(i))
 		}
 	}
-	for _, f := range footerKeys {
+	if zone.Get("nav/help").InBounds(msg) {
+		return m.press("?")
+	}
+	if zone.Get("nav/quit").InBounds(msg) {
+		return m.press("q")
+	}
+	for _, f := range m.footerKeys() {
 		if zone.Get("key-" + f.key).InBounds(msg) {
-			return m.press(f.key)
+			return m.handleKey(keyMsg(f.key))
 		}
 	}
 	hit := func(prefix string, n int) int {

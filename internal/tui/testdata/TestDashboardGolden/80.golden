@@ -1,7 +1,6 @@
-╭─ ghr ────────────────────────────────────────────────────────────────────────╮
-│  mode ● QUEUE   global ▕██░▏ 2/3   api ▕█████████░▏ 4800   disk ▕██████░░░░… │
-╰──────────────────────────────────────────────────────────────────────────────╯
+ ghr   mode ● QUEUE   runners ▕██░▏ 2/3   api 4800   disk ▕██████░░░░▏ 61%   ●
 [ 1 Dashboard ]  2 Runners    3 History    4 Settings                    ? help
+Dashboard                                                                       
 ╭─ Repos ──────────────────────────────────────────────────────────────────────╮
 │   REPO           STATE      RUN   QUEUE  LAST JOB                            │
 │ ▸ darkcloud      ● active   1/1   ⧗ 2    ✔ #411 lint  2m ago                 │
@@ -18,6 +17,7 @@
 │ HH:MM:SS  ✔ darkcloud   #411 lint success 2m10s  cleanup: 3 ctrs             │
 │ HH:MM:SS  ▶ darkcloud   spawned a3f9c1 (2.330.0)                             │
 │ HH:MM:SS  ⚠             disk 81% > high-water 80% — pruned build cache       │
+│                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │

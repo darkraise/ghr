@@ -174,7 +174,7 @@ func TestDashboardGolden(t *testing.T) {
 
 func TestDashboardContent(t *testing.T) {
 	v := sampleModel(&fakeClient{}, 120, 30).View()
-	for _, want := range []string{"mode ● QUEUE", "global", "2/3", "darkcloud", "⧗ 2", "#411 lint", "2m ago",
+	for _, want := range []string{"mode ● QUEUE", "runners", "2/3", "darkcloud", "⧗ 2", "#411 lint", "2m ago",
 		"◌ paused", "a3f9c1", "CI / e2e-journeys  #412", "12m04s", "2 jobs queued (repo cap 1)", "disk 81%", "x kill"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("missing %q", want)

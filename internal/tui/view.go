@@ -46,84 +46,25 @@ func maxText(n int) string {
 }
 
 func (m Model) View() string {
-	w := m.width
-	if w < 40 {
-		w = 40
-	}
-	var parts []string
-	parts = append(parts, m.header(w))
-	if !m.connected {
-		parts = append(parts, sBanner.Render("daemon unreachable: "+m.connErr+" — retrying"))
-	} else if m.st.Degraded {
-		parts = append(parts, sBanner.Render("DEGRADED: "+m.st.DegradedReason+" — no new runners"))
-	}
-	if m.toast.Active() {
-		parts = append(parts, m.toast.View(w))
-	}
-	parts = append(parts, m.tabBar(w))
-	used := lipgloss.Height(strings.Join(parts, "\n")) + 1 // footer
-	bodyH := m.height - used
-	if bodyH < 6 {
-		bodyH = 6
-	}
-	switch m.page {
-	case pageDashboard:
-		parts = append(parts, m.dashboard(w, bodyH))
-	case pageRunners:
-		parts = append(parts, m.runnersTab(w, bodyH))
-	case pageHistory:
-		parts = append(parts, m.historyTab(w, bodyH))
-	case pageSettings:
-		parts = append(parts, m.configTab(w, bodyH))
-	}
-	parts = append(parts, m.footer(w))
-	out := strings.Join(parts, "\n")
+	w := max(m.width, 40)
+	out := m.layout(w, m.pageBody)
 	if m.overlay != ovNone {
 		out = m.withOverlay(out, w)
 	}
 	return zone.Scan(out)
 }
 
-func (m Model) header(w int) string {
-	running := 0
-	for _, i := range m.st.Instances {
-		if i.State != "cleaning" {
-			running++
-		}
+// pageBody renders the current page's content in w columns and h lines.
+func (m Model) pageBody(w, h int) string {
+	switch m.page {
+	case pageRunners:
+		return m.runnersTab(w, h)
+	case pageHistory:
+		return m.historyTab(w, h)
+	case pageSettings:
+		return m.configTab(w, h)
 	}
-	mode := sGreen.Render("● " + strings.ToUpper(m.st.Mode))
-	global := fmt.Sprintf("%s %d/%d", gauge(running, m.st.GlobalMax, 3), running, m.st.GlobalMax)
-	if m.st.Mode == "all" {
-		global = fmt.Sprintf("%d/∞", running)
-	}
-	api := fmt.Sprintf("%s %d", gauge(max(m.st.RateRemaining, 0), 5000, 10), m.st.RateRemaining)
-	diskStyle := sDim
-	if m.st.DiskPct >= 80 {
-		diskStyle = sAmber
-	}
-	disk := diskStyle.Render(fmt.Sprintf("%s %d%%", gauge(m.st.DiskPct, 100, 10), m.st.DiskPct))
-	line := fmt.Sprintf(" mode %s   global %s   api %s   disk %s", mode, global, api, disk)
-	return box("ghr", w, []string{line})
-}
-
-func (m Model) tabBar(w int) string {
-	var tabs []string
-	for i, name := range pageNames {
-		label := fmt.Sprintf(" %d %s ", i+1, name)
-		if page(i) == m.page {
-			label = sAccent.Render("[" + label + "]")
-		} else {
-			label = sDim.Render(" " + label + " ")
-		}
-		tabs = append(tabs, zone.Mark(fmt.Sprintf("tab-%d", i), label))
-	}
-	bar := strings.Join(tabs, "")
-	help := sDim.Render("? help")
-	gap := w - ansi.StringWidth(bar) - ansi.StringWidth(help) - 1
-	if gap < 1 {
-		gap = 1
-	}
-	return bar + strings.Repeat(" ", gap) + help
+	return m.dashboard(w, h)
 }
 
 func clean(s string) string {
@@ -366,18 +307,6 @@ func (m Model) configTab(w, h int) string {
 		lines = append(lines, m.row(fmt.Sprintf("cfg-%d", i), i == m.cfgSel, line, inner))
 	}
 	return box("Config", w, fit(lines, 1, m.cfgSel, h-2))
-}
-
-func (m Model) footer(w int) string {
-	var parts []string
-	for _, f := range footerKeys {
-		text := sAccent.Render(f.key)
-		if f.label != "" {
-			text += " " + sDim.Render(f.label)
-		}
-		parts = append(parts, zone.Mark("key-"+f.key, text))
-	}
-	return " " + ansi.Truncate(strings.Join(parts, "  "), w-1, "…")
 }
 
 // buttons renders the clickable dialog buttons: ok runs enter, cancel runs esc.
