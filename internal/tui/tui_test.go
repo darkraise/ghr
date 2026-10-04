@@ -1004,3 +1004,19 @@ func TestUntrustedTextIsSanitized(t *testing.T) {
 		t.Fatalf("clean: %q", got)
 	}
 }
+
+// Every status string a page renders is cleaned on arrival.
+func TestStatusTextIsCleanedOnArrival(t *testing.T) {
+	st := sampleStatus()
+	st.Mode = "queue\x1b[31m"
+	st.Repos[0].Name = "dark\x07cloud"
+	i := &st.Instances[0]
+	i.ID, i.Repo, i.RunnerName, i.State = "a3f9\x1b]0;x\x07c1", "dark\x00cloud", "ghr-\x1b[2Ja3f9c1", "bu\rsy"
+	m := newModel(&fakeClient{}, 120, 30, st)
+	got := []string{m.st.Mode, m.st.Repos[0].Name, m.st.Instances[0].ID, m.st.Instances[0].Repo,
+		m.st.Instances[0].RunnerName, m.st.Instances[0].State}
+	want := []string{"queue", "darkcloud", "a3f9c1", "darkcloud", "ghr-a3f9c1", "busy"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

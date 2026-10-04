@@ -464,16 +464,18 @@ func cleanEntry(h *model.HistoryEntry) {
 // cleanStatus sanitises the text fields of st in place; the slices come from
 // a freshly decoded response nobody else holds.
 func cleanStatus(st model.Status) model.Status {
-	st.DegradedReason = clean(st.DegradedReason)
+	st.Mode, st.DegradedReason = clean(st.Mode), clean(st.DegradedReason)
 	for i := range st.Repos {
 		r := &st.Repos[i]
-		r.Error = clean(r.Error)
+		r.Name, r.Error = clean(r.Name), clean(r.Error)
 		if r.LastJob != nil {
 			r.LastJob.JobName, r.LastJob.RunNumber = clean(r.LastJob.JobName), clean(r.LastJob.RunNumber)
 		}
 	}
 	for i := range st.Instances {
-		if j := st.Instances[i].Job; j != nil {
+		in := &st.Instances[i]
+		in.ID, in.Repo, in.RunnerName, in.State = clean(in.ID), clean(in.Repo), clean(in.RunnerName), clean(in.State)
+		if j := in.Job; j != nil {
 			j.Name, j.Workflow, j.RunNumber, j.HTMLURL = clean(j.Name), clean(j.Workflow), clean(j.RunNumber), clean(j.HTMLURL)
 		}
 	}
