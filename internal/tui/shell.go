@@ -173,7 +173,7 @@ func (m Model) footerKeys() []footerKey {
 	case pageHistory:
 		return []footerKey{{"r", "repo"}, {"c", "result"}, {"enter", "copy URL"}, {"?", "help"}, {"q", "quit"}}
 	case pageSettings:
-		return []footerKey{{"tab", "next"}, {"shift+tab", "previous"}, {"ctrl+s", "save"}, {"?", "help"}, {"q", "quit"}}
+		return m.settingsFooterKeys()
 	}
 	return []footerKey{
 		{"p", "pause"}, {"+", "repo cap"}, {"-", ""}, {"[", "global cap"}, {"]", ""}, {"m", "mode"},
@@ -193,11 +193,30 @@ func (m Model) footer(w int) string {
 	return " " + ansi.Truncate(strings.Join(parts, "  "), w-1, "…")
 }
 
-// keyMsg is the KeyMsg for a footer hint, so a click runs the same path as the key.
+// footerPress runs a clicked footer hint. Navigation and control keys take
+// the same path as the key; the global letter keys run directly, so a click
+// on "q quit" never types a q into a focused text field.
+func (m Model) footerPress(k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "tab", "shift+tab", "ctrl+s", "enter", "esc", "up", "left", "right":
+		return m.handleKey(keyMsg(k))
+	}
+	return m.press(k)
+}
+
+// keyMsg is the KeyMsg for a footer hint.
 func keyMsg(k string) tea.KeyMsg {
 	switch k {
 	case "enter":
 		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "up":
+		return tea.KeyMsg{Type: tea.KeyUp}
+	case "left":
+		return tea.KeyMsg{Type: tea.KeyLeft}
+	case "right":
+		return tea.KeyMsg{Type: tea.KeyRight}
 	case "tab":
 		return tea.KeyMsg{Type: tea.KeyTab}
 	case "shift+tab":
@@ -221,14 +240,31 @@ func (m Model) layout(w int, body func(w, h int) string) string {
 	if !wide {
 		top = append(top, m.tabRow(w))
 	}
-	bodyH := max(m.height-len(top)-1, 7) // the footer takes the last line
-	cw := w
+	cw, ch := m.contentSize()
+	content := m.pageHeader(cw) + "\n" + body(cw, ch)
 	if wide {
-		cw = w - sidebarWidth - 1
-	}
-	content := m.pageHeader(cw) + "\n" + body(cw, bodyH-1)
-	if wide {
-		content = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebar(bodyH), " ", content)
+		content = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebar(ch+1), " ", content)
 	}
 	return strings.Join(append(top, content, m.footer(w)), "\n")
+}
+
+// contentSize is the width and height layout gives the current page's body:
+// what is left after the top bar, the alert and toast lines, the tab row (or
+// the sidebar), the page header and the footer.
+func (m Model) contentSize() (int, int) {
+	w := max(m.width, 40)
+	rows := 2 // the top bar and the footer
+	if m.alertLine(w) != "" {
+		rows++
+	}
+	if m.toast.Active() {
+		rows++
+	}
+	cw := w
+	if w >= wideMin {
+		cw = w - sidebarWidth - 1
+	} else {
+		rows++
+	}
+	return cw, max(m.height-rows, 7) - 1
 }

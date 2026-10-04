@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/config"
@@ -208,6 +209,115 @@ func (m Model) settingsSections() []ui.Section {
 	}
 	s.group.Set(ws)
 	return secs
+}
+
+// settingsKey handles a key on the Settings page in precedence order: the
+// focused control first, then the page keys. It reports false for keys that
+// fall through to the global keys.
+func (m Model) settingsKey(k tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
+	if m.cfg == nil {
+		// Still loading: the config keys stay inactive here all the same.
+		switch k.String() {
+		case "m", "[", "]", "+", "=", "-":
+			return true, m, nil
+		}
+		return false, m, nil
+	}
+	s := m.settings
+	m.settingsSections()
+	if ok, cmd := s.group.Key(k); ok {
+		m.scrollToFocus()
+		return true, m, cmd
+	}
+	switch k.String() {
+	case "tab", "down", "j":
+		s.group.Next()
+	case "shift+tab", "up", "k":
+		s.group.Prev()
+	case "pgup":
+		s.scroll = max(s.scroll-m.settingsBodyH()/2, 0)
+		return true, m, nil
+	case "pgdown":
+		s.scroll += m.settingsBodyH() / 2
+		return true, m, nil
+	case "esc", "m", "[", "]", "+", "=", "-":
+		// Nothing to back out of; config edits go through the form on this page.
+		return true, m, nil
+	default:
+		return false, m, nil
+	}
+	m.scrollToFocus()
+	return true, m, nil
+}
+
+// settingsMouse handles the wheel over the form and clicks on its controls.
+// It reports false for events the shell should handle.
+func (m Model) settingsMouse(msg tea.MouseMsg) (bool, tea.Model, tea.Cmd) {
+	if m.cfg == nil {
+		return false, m, nil
+	}
+	s := m.settings
+	if msg.Action == tea.MouseActionPress && (msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
+		if !zone.Get("settings/body").InBounds(msg) {
+			return false, m, nil
+		}
+		if msg.Button == tea.MouseButtonWheelUp {
+			s.scroll = max(s.scroll-3, 0)
+		} else {
+			s.scroll += 3
+		}
+		return true, m, nil
+	}
+	m.settingsSections()
+	ok, cmd := s.group.Mouse(msg)
+	return ok, m, cmd
+}
+
+// advance moves focus past the control that asked for it (enter in a text field).
+func (m Model) advance(id string) (tea.Model, tea.Cmd) {
+	if m.page == pageSettings && m.settings.group.FocusedID() == id {
+		m.settings.group.Next()
+		m.scrollToFocus()
+	}
+	return m, nil
+}
+
+// settingsFooterKeys are the footer hints for the focused control.
+func (m Model) settingsFooterKeys() []footerKey {
+	switch w := m.settings.group.Focused().(type) {
+	case *ui.Select:
+		if w.Open() {
+			return []footerKey{{"up", "move"}, {"enter", "pick"}, {"esc", "close"}}
+		}
+	case *ui.TextField:
+		if w.Editing() {
+			return []footerKey{{"enter", "commit"}, {"esc", "stop editing"}, {"tab", "next"}}
+		}
+	case *ui.TagList:
+		if w.Adding() {
+			return []footerKey{{"enter", "add"}, {"esc", "done"}, {"tab", "next"}}
+		}
+	case *ui.Stepper:
+		return []footerKey{{"left", "less"}, {"right", "more"}, {"tab", "next"}, {"ctrl+s", "save"}, {"?", "help"}, {"q", "quit"}}
+	}
+	return []footerKey{{"tab", "next"}, {"shift+tab", "previous"}, {"ctrl+s", "save"}, {"?", "help"}, {"q", "quit"}}
+}
+
+// settingsBodyH is the number of form lines the page shows at once.
+func (m Model) settingsBodyH() int {
+	_, h := m.contentSize()
+	return h
+}
+
+// scrollToFocus scrolls the focused control into view. It uses the line
+// ranges the layout returns, not zone positions, which describe the last frame.
+func (m Model) scrollToFocus() {
+	s := m.settings
+	w, _ := m.contentSize()
+	_, ranges := ui.Render(m.settingsSections(), s.group.FocusedID(), w, m.width >= wideMin)
+	if r, ok := ranges[s.group.FocusedID()]; ok {
+		s.scroll = ui.ScrollTo(s.scroll, m.settingsBodyH(), r)
+	}
 }
 
 // settingsView renders the form scrolled to the page's offset in w columns and h lines.

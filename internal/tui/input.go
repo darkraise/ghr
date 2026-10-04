@@ -17,6 +17,10 @@ const doubleClick = 400 * time.Millisecond
 
 func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := k.String()
+	if key == "ctrl+c" {
+		// The terminal's emergency exit: nothing guards it.
+		return m, tea.Quit
+	}
 	switch m.overlay {
 	case ovPrompt:
 		switch key {
@@ -37,6 +41,11 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.overlay = ovNone
 		}
 		return m, nil
+	}
+	if m.page == pageSettings {
+		if ok, mm, cmd := m.settingsKey(k); ok {
+			return mm, cmd
+		}
 	}
 	return m.press(key)
 }
@@ -305,6 +314,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		_, cmd := m.dlg.Mouse(msg)
 		return m, cmd
 	}
+	if m.overlay == ovNone && m.page == pageSettings {
+		// First, so an open dropdown can swallow a click anywhere, the sidebar included.
+		if ok, mm, cmd := m.settingsMouse(msg); ok {
+			return mm, cmd
+		}
+	}
 	if m.overlay != ovNone {
 		if msg.Action == tea.MouseActionRelease && msg.Button == tea.MouseButtonLeft {
 			for _, b := range dialogButtons {
@@ -360,7 +375,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	for _, f := range m.footerKeys() {
 		if zone.Get("key-" + f.key).InBounds(msg) {
-			return m.handleKey(keyMsg(f.key))
+			return m.footerPress(f.key)
 		}
 	}
 	hit := func(prefix string, n int) int {

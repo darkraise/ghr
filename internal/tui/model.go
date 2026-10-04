@@ -410,6 +410,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.fetchStatus(), m.fetchEvents(), m.fetchConfig())
 	case ui.Pressed:
 		return m.pressed(msg.ID)
+	case ui.Advance:
+		return m.advance(msg.ID)
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	case tea.MouseMsg:
