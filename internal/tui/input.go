@@ -67,9 +67,15 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 	case "pgup":
 		m.eventScroll += 5
 		m.logScroll += 10
+		if m.page == pageDetail {
+			m.scrollDetail(-10)
+		}
 	case "pgdown":
 		m.eventScroll = max(0, m.eventScroll-5)
 		m.logScroll = max(0, m.logScroll-10)
+		if m.page == pageDetail {
+			m.scrollDetail(10)
+		}
 	case "p":
 		if !m.repoFocus() {
 			return m, nil
@@ -107,8 +113,8 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 			return m.stopRunner(id, busy)
 		}
 	case "l":
-		if m.selectedRunner() != nil {
-			return m.leave(leaveTarget{page: pageRunners})
+		if r := m.selectedRunner(); r != nil && m.runnerFocus() {
+			return m.openDetail(r.ID, tabLog)
 		}
 	case "r":
 		if m.page == pageHistory {
@@ -144,6 +150,8 @@ func (m *Model) move(d int) tea.Cmd {
 	switch {
 	case m.page == pageHistory:
 		m.histSel = clamp(m.histSel+d, len(m.hist))
+	case m.page == pageDetail:
+		m.scrollDetail(d)
 	case m.page == pageSettings, m.page == pageDashboard && !m.onCard():
 		return nil
 	case m.page == pageRunners || m.focus == paneRunners:
@@ -254,7 +262,7 @@ func (m Model) enter() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if r := m.selectedRunner(); r != nil && m.runnerFocus() {
-		return m.openDetail(r.ID)
+		return m.openDetail(r.ID, tabSteps)
 	}
 	return m, nil
 }
@@ -281,8 +289,13 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.overlay == ovNone && m.page == pageDetail {
 		m.detailButtons()
+		tab := m.groups.tabs.active
 		if ok, cmd := m.groups.detail.Mouse(msg); ok {
-			return m, cmd
+			if m.groups.tabs.active != tab {
+				m.detailScroll = 0
+			}
+			follow := m.follow() // a click on Log points the log at this runner at once
+			return m, tea.Batch(cmd, follow)
 		}
 	}
 	if msg.Action == tea.MouseActionPress && (msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {

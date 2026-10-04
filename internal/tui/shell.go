@@ -40,6 +40,7 @@ type pageGroups struct {
 	add, pauseAll       *ui.Button
 	detail              ui.Group
 	copyURL, stopRunner *ui.Button
+	tabs                *tabStrip
 }
 
 const (
@@ -55,6 +56,7 @@ func newPageGroups() *pageGroups {
 		pauseAll:   ui.NewButton(dashPauseAll, "Pause all", ui.Secondary),
 		copyURL:    ui.NewButton(detailCopy, "Copy run URL", ui.Secondary),
 		stopRunner: ui.NewButton(detailStop, "Stop runner", ui.Danger),
+		tabs:       &tabStrip{},
 	}
 	g.dash.Set([]ui.Widget{g.add, g.pauseAll, stop{dashRepos}, stop{dashRunners}})
 	g.dash.Focus(dashRepos)
@@ -228,7 +230,7 @@ type footerKey struct{ key, label string }
 func (m Model) footerKeys() []footerKey {
 	switch m.page {
 	case pageDetail:
-		return []footerKey{{"esc", "back"}, {"x", "stop"}, {"tab", "next"}, {"?", "help"}, {"q", "quit"}}
+		return []footerKey{{"esc", "back"}, {"left", "prev tab"}, {"right", "next tab"}, {"x", "stop"}, {"?", "help"}, {"q", "quit"}}
 	case pageRunners:
 		return []footerKey{{"x", "kill"}, {"l", "logs"}, {"enter", "details"}, {"?", "help"}, {"q", "quit"}}
 	case pageHistory:

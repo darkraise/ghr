@@ -154,6 +154,7 @@ type Model struct {
 	detailID          string
 	detailFrom        page                 // the page esc returns to
 	detailSnap        model.InstanceStatus // the runner as last seen in /status
+	detailScroll      int                  // first line shown of the Steps or Containers list
 
 	overlay       overlay
 	confirmText   string
@@ -250,14 +251,29 @@ func (m *Model) fetchLog() tea.Cmd {
 	}
 }
 
-// follow points the log pane of the Runners page at the selected runner,
-// starting its log over when that is a different runner.
+// logTarget is the runner whose log a view on screen shows: the Runners
+// page's preview follows the selection, the detail page's Log tab its runner
+// (also after the runner finished: the daemon serves archived logs).
+func (m Model) logTarget() string {
+	switch {
+	case m.page == pageRunners:
+		if r := m.selectedRunner(); r != nil {
+			return r.ID
+		}
+	case m.page == pageDetail && m.groups.tabs.active == tabLog:
+		return m.detailID
+	}
+	return ""
+}
+
+// follow points the log at the runner a visible view shows, starting it over
+// when that is a different runner. Only one log is followed at a time.
 func (m *Model) follow() tea.Cmd {
-	r := m.selectedRunner()
-	if m.page != pageRunners || r == nil || r.ID == m.logID {
+	id := m.logTarget()
+	if id == "" || id == m.logID {
 		return nil
 	}
-	m.logID, m.logText, m.logCursor, m.logScroll = r.ID, "", "", 0
+	m.logID, m.logText, m.logCursor, m.logScroll = id, "", "", 0
 	m.logGen++
 	m.logBusy = false
 	return m.fetchLog()
@@ -314,7 +330,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.frame++
 		m.toast.Tick(m.now())
 		cmds := []tea.Cmd{tick(), m.fetchStatus(), m.fetchEvents()}
-		if m.page == pageRunners {
+		if m.logTarget() != "" {
 			cmds = append(cmds, m.fetchLog())
 		}
 		if m.page == pageHistory && m.frame%slowPoll == 0 {

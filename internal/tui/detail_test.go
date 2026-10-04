@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/darkraise/ghr/internal/model"
 )
 
 // detailModel is the sample model on a3f9c1's detail page, opened from the
@@ -79,5 +82,89 @@ func TestDetailFooterAndCleanText(t *testing.T) {
 	m.detailSnap.Repo, m.detailSnap.State = "dark\x1b]0;pwned\x07cloud", "busy\x1b[2J"
 	if v := m.View(); strings.Contains(v, "\x1b]0;") || strings.Contains(v, "\x1b[2J") || !strings.Contains(v, "darkcloud") {
 		t.Fatalf("unsanitized detail text: %q", v)
+	}
+}
+
+// ←/→ and clicks switch the tabs; only the Log tab follows the runner's log.
+func TestDetailTabs(t *testing.T) {
+	c := &fakeClient{steps: []model.Step{{Number: 1, Name: "Set up job", Status: "completed", Conclusion: "success"}},
+		ctrs: []model.Container{{Name: "darkcloud-db-1", State: "running"}}}
+	m := detailModel(t, c)
+	m.logID, m.logText = "", ""
+	v := m.View()
+	if !strings.Contains(v, "[ Steps ]") || !strings.Contains(v, "✔ Set up job") || strings.Contains(v, "darkcloud-db-1") {
+		t.Fatalf("Steps tab:\n%s", v)
+	}
+	if m = ticks(m, slowPoll); m.logID != "" {
+		t.Fatalf("the Steps tab followed log %q", m.logID)
+	}
+	m = feed(m, key("right"))
+	if m.groups.tabs.active != tabLog || m.logID != "a3f9c1" {
+		t.Fatalf("right: tab %d log %q", m.groups.tabs.active, m.logID)
+	}
+	m.logText = "hello from the job\n"
+	if v = m.View(); !strings.Contains(v, "Log — following") || !strings.Contains(v, "hello from the job") {
+		t.Fatalf("Log tab:\n%s", v)
+	}
+	if m = click(t, m, tabZone(tabContainers)); m.groups.tabs.active != tabContainers || !strings.Contains(m.View(), "darkcloud-db-1") {
+		t.Fatalf("click: tab %d\n%s", m.groups.tabs.active, m.View())
+	}
+	if m = feed(m, key("right")); m.groups.tabs.active != tabSteps {
+		t.Fatalf("right wraps to tab %d", m.groups.tabs.active)
+	}
+	if m = feed(m, key("down"), key("down")); m.runnerSel != 0 || m.detailID != "a3f9c1" {
+		t.Fatalf("down moved the hidden selection to %d", m.runnerSel)
+	}
+}
+
+// l on a runner row opens its detail page on the Log tab; Tab reaches the
+// tab strip after the header buttons.
+func TestLogKeyOpensDetailLog(t *testing.T) {
+	m := feed(sampleModel(&fakeClient{}, 120, 40), keys("2", "l")...)
+	if m.page != pageDetail || m.groups.tabs.active != tabLog || m.logID != "a3f9c1" {
+		t.Fatalf("page %v tab %d log %q", m.page, m.groups.tabs.active, m.logID)
+	}
+	if v := m.View(); !strings.Contains(v, "›   Steps   [ Log ]") || !strings.Contains(v, "right next tab") {
+		t.Fatalf("tab strip not focused or footer missing:\n%s", v)
+	}
+	if m = feed(m, key("tab")); m.groups.detail.FocusedID() == detailTabs {
+		t.Fatal("tab did not move focus off the tab strip")
+	}
+}
+
+// A step list longer than the page scrolls with pgdn, pgup and the arrows,
+// and starts at the top again on another tab.
+func TestDetailListScrolls(t *testing.T) {
+	c := &fakeClient{}
+	for i := 1; i <= 60; i++ {
+		c.steps = append(c.steps, model.Step{Number: i, Name: fmt.Sprintf("step %02d", i), Status: "completed", Conclusion: "success"})
+	}
+	m := detailModel(t, c)
+	if v := m.View(); !strings.Contains(v, "step 01") || strings.Contains(v, "step 60") {
+		t.Fatalf("top of the list:\n%s", v)
+	}
+	m = feed(m, keys("pgdown", "pgdown", "pgdown", "pgdown", "pgdown", "pgdown", "pgdown")...)
+	if v := m.View(); strings.Contains(v, "step 01") || !strings.Contains(v, "step 60") {
+		t.Fatalf("after pgdn:\n%s", v)
+	}
+	before := m.detailScroll
+	if m = feed(m, key("pgup"), key("down")); m.detailScroll != before-9 {
+		t.Fatalf("pgup then down: scroll %d, want %d", m.detailScroll, before-9)
+	}
+	if m = feed(m, key("right"), key("left")); m.detailScroll != 0 {
+		t.Fatalf("tab change kept scroll %d", m.detailScroll)
+	}
+}
+
+// Clicking the Log tab follows this runner's log at once, not the log of
+// the runner followed before.
+func TestDetailLogTabClickFollows(t *testing.T) {
+	m := feed(sampleModel(&fakeClient{}, 120, 40), key("2")) // follows a3f9c1
+	m = feed(m, keys("1", "right", "down")...)               // Dashboard, Runners card, 7be210
+	if m = feed(m, key("enter")); m.detailID != "7be210" || m.logID != "a3f9c1" {
+		t.Fatalf("detail %q log %q", m.detailID, m.logID)
+	}
+	if m = click(t, m, tabZone(tabLog)); m.logID != "7be210" {
+		t.Fatalf("log tab click follows %q", m.logID)
 	}
 }

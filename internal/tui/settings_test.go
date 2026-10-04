@@ -767,12 +767,12 @@ func TestLeaveWaitsForSaveInFlight(t *testing.T) {
 	}
 }
 
-// l (follow a runner's log) leaves Settings, so it is guarded too.
-func TestLogKeyIsGuarded(t *testing.T) {
+// l acts on a runner row; Settings has none, so l leaves nothing unsaved behind.
+func TestLogKeyIsInactiveOnSettings(t *testing.T) {
 	m := dirtySettings(t, &fakeClient{})
 	m.View()
-	if m = feed(m, key("l")); m.overlay != ovUnsaved || m.leaveTo != (leaveTarget{page: pageRunners}) {
-		t.Fatalf("l: overlay %v target %+v page %v", m.overlay, m.leaveTo, m.page)
+	if m = feed(m, key("l")); m.overlay != ovNone || m.page != pageSettings {
+		t.Fatalf("l: overlay %v page %v", m.overlay, m.page)
 	}
 }
 

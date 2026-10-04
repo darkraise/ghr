@@ -588,8 +588,8 @@ func TestDetailShowsContainers(t *testing.T) {
 	if m.page != pageDetail || strings.Join(c.calls, "|") != "containers a3f9c1" {
 		t.Fatalf("page %v calls %v", m.page, c.calls)
 	}
-	v := m.View()
-	for _, want := range []string{"Containers", "running", "darkcloud-db-1", "postgres:17", "ghr-a3f9c1",
+	v := feed(m, key("left")).View() // the Containers tab, wrapping round from Steps
+	for _, want := range []string{"[ Containers ]", "running", "darkcloud-db-1", "postgres:17", "ghr-a3f9c1",
 		"exited", "darkcloud-web-1", "nginx:1.27", "ghr-a3f9c1-e2e"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("detail view missing %q", want)
@@ -612,9 +612,10 @@ func TestDetailStepsRefreshOnTicks(t *testing.T) {
 	if !strings.Contains(v, spinnerFrames[m.frame%len(spinnerFrames)]+" Set up job") {
 		t.Fatalf("running step not refreshed:\n%s", v)
 	}
-	if !strings.Contains(v, "darkcloud-db-1") {
+	if m = feed(m, key("left")); !strings.Contains(m.View(), "darkcloud-db-1") {
 		t.Fatal("containers not refreshed")
 	}
+	m = feed(m, key("right")) // back to Steps
 	c.steps = []model.Step{{Number: 1, Name: "Set up job", Status: "completed", Conclusion: "success"}}
 	m = ticks(m, slowPoll)
 	if v := m.View(); !strings.Contains(v, "✔ Set up job") {
@@ -681,9 +682,9 @@ func TestRunnersTabFollowsSelection(t *testing.T) {
 	if !strings.Contains(m.logText, `a3f9c1 after "+"`) {
 		t.Fatalf("followed log not polled from its cursor: %q", m.logText)
 	}
-	m = feed(m, keys("1", "l")...)
-	if m.page != pageRunners || m.logID != "a3f9c1" {
-		t.Fatalf("l: page %v log %q", m.page, m.logID)
+	m = feed(m, keys("1", "l")...) // the Runners card kept focus from the click
+	if m.page != pageDetail || m.groups.tabs.active != tabLog || m.logID != "a3f9c1" {
+		t.Fatalf("l: page %v tab %d log %q", m.page, m.groups.tabs.active, m.logID)
 	}
 }
 
