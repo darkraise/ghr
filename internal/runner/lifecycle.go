@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/darkraise/ghr/internal/config"
@@ -327,11 +328,18 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	pendingPath := m.pendingPath(id)
 	if hadJob {
 		if err := readJSON(pendingPath, &p); err != nil {
-			if err := os.MkdirAll(m.Paths.Pending, 0o755); err != nil {
-				return err
+			err := os.MkdirAll(m.Paths.Pending, 0o755)
+			if err == nil {
+				err = writeJSONAtomic(pendingPath, p)
 			}
-			if err := writeJSONAtomic(pendingPath, p); err != nil {
-				return fmt.Errorf("write pending history: %w", err)
+			if err != nil {
+				if !errors.Is(err, syscall.ENOSPC) {
+					return fmt.Errorf("write pending history: %w", err)
+				}
+				// Docker cleanup is what frees space, so a full disk must not block
+				// it; the record is written again below, before the instance dir
+				// (and its job.json) is removed.
+				m.Events.Add("warn", i.Repo, "write pending history of %s: %v; freeing Docker resources first", id, err)
 			}
 		}
 	}

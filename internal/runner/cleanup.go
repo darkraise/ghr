@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -68,8 +69,20 @@ func (m *Manager) cleanupDocker(ctx context.Context, cfg *config.Config, id, rep
 		return 0, err
 	}
 	known := filepath.Join(m.instanceDir(id), projectsFile)
-	if err := os.WriteFile(known, []byte(strings.Join(names, "\n")+"\n"), 0o644); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return 0, fmt.Errorf("record compose projects: %w", err)
+	record := func() error {
+		if err := writeFile(known, []byte(strings.Join(names, "\n")+"\n"), 0o644); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("record compose projects: %w", err)
+		}
+		return nil
+	}
+	recordAgain := false
+	if err := record(); err != nil {
+		if !errors.Is(err, syscall.ENOSPC) {
+			return 0, err
+		}
+		// Removing the projects is what frees space; record them once it has run.
+		m.Events.Add("warn", repo, "%s: %v; removing them first", id, err)
+		recordAgain = true
 	}
 	var errs []error
 	removed := 0
@@ -88,6 +101,11 @@ func (m *Manager) cleanupDocker(ctx context.Context, cfg *config.Config, id, rep
 		}
 		if err := m.Docker.RemoveVolumesByLabel(ctx, label); err != nil {
 			errs = append(errs, fmt.Errorf("remove volumes of %s: %w", p, err))
+		}
+	}
+	if recordAgain {
+		if err := record(); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	r := cfg.Repo(repo)

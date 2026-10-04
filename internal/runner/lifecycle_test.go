@@ -3,10 +3,12 @@ package runner
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -321,6 +323,72 @@ func TestPersistentDockerFailureReleasesSlot(t *testing.T) {
 	}
 	if !reflect.DeepEqual(h.history(t), []string{"aaaaaa success"}) {
 		t.Fatalf("history %v", h.history(t))
+	}
+}
+
+// diskFullUntilCleanup fails the pending-history and ghr-projects writes with
+// fail until Docker cleanup has removed a volume, like a disk only that frees.
+func diskFullUntilCleanup(t *testing.T, h *harness, fail error) {
+	t.Helper()
+	orig := writeFile
+	t.Cleanup(func() { writeFile = orig })
+	writeFile = func(name string, data []byte, perm os.FileMode) error {
+		h.docker.mu.Lock()
+		full := len(h.docker.volLabels) == 0
+		h.docker.mu.Unlock()
+		if full && (strings.HasPrefix(name, h.m.Paths.Pending) || filepath.Base(name) == projectsFile) {
+			return &fs.PathError{Op: "write", Path: name, Err: fail}
+		}
+		return orig(name, data, perm)
+	}
+}
+
+// On a full disk the metadata writes must not block the Docker cleanup that
+// frees space; they are retried once it has run.
+func TestFullDiskStillRunsDockerCleanup(t *testing.T) {
+	for _, withJob := range []bool{true, false} {
+		h := newHarness(t)
+		diskFullUntilCleanup(t, h, syscall.ENOSPC)
+		h.m.spawn(context.Background(), h.cfg, "darkcloud")
+		if withJob {
+			h.writeJob(t, "aaaaaa", 55)
+			h.gh.setJobs(55, completedJob(h, 55, "ghr-darkcloud-aaaaaa", "success"))
+		}
+		h.docker.byLabel["com.docker.compose.project=ghr-aaaaaa"] = []string{"c1"}
+		h.sd.active["ghr-runner-aaaaaa"] = false
+		h.m.refreshUnits(context.Background())
+		h.m.Wait()
+		if h.state("aaaaaa") != "gone" || !reflect.DeepEqual(h.docker.removed, []string{"c1"}) {
+			t.Fatalf("job %v: state %s removed %v events %s", withJob, h.state("aaaaaa"), h.docker.removed, h.eventText())
+		}
+		if !strings.Contains(h.eventText(), syscall.ENOSPC.Error()) {
+			t.Fatalf("job %v: the full disk was not reported: %s", withJob, h.eventText())
+		}
+		if withJob && !reflect.DeepEqual(h.history(t), []string{"aaaaaa success"}) {
+			t.Fatalf("history %v", h.history(t))
+		}
+	}
+}
+
+// Any other write error keeps the crash-safe order: nothing is freed before the record exists.
+func TestFailedPendingWriteKeepsDockerResources(t *testing.T) {
+	h := newHarness(t)
+	orig := writeFile
+	t.Cleanup(func() { writeFile = orig })
+	writeFile = func(name string, data []byte, perm os.FileMode) error {
+		if strings.HasPrefix(name, h.m.Paths.Pending) {
+			return &fs.PathError{Op: "write", Path: name, Err: syscall.EIO}
+		}
+		return orig(name, data, perm)
+	}
+	h.m.spawn(context.Background(), h.cfg, "darkcloud")
+	h.writeJob(t, "aaaaaa", 55)
+	h.docker.byLabel["com.docker.compose.project=ghr-aaaaaa"] = []string{"c1"}
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if h.state("aaaaaa") != "cleaning" || len(h.docker.removed) != 0 || !strings.Contains(h.eventText(), "write pending history") {
+		t.Fatalf("state %s removed %v events %s", h.state("aaaaaa"), h.docker.removed, h.eventText())
 	}
 }
 

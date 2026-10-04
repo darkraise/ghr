@@ -227,12 +227,15 @@ func (m *Manager) schedInstances(cfg *config.Config) []sched.Instance {
 	return out
 }
 
+// writeFile is os.WriteFile; tests replace it to simulate a full disk.
+var writeFile = os.WriteFile
+
 func writeJSON(path string, v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return writeFile(path, data, 0o644)
 }
 
 // writeJSONAtomic writes via a temp file and rename so a crash never leaves a partial file.
