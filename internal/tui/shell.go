@@ -42,6 +42,9 @@ type pageGroups struct {
 	copyURL, stopRunner *ui.Button
 	back                *ui.Button
 	tabs                *tabStrip
+	hist                ui.Group
+	histRepo            *ui.Select
+	histResult          *ui.Select
 }
 
 const (
@@ -59,9 +62,13 @@ func newPageGroups() *pageGroups {
 		stopRunner: ui.NewButton(detailStop, "Stop runner", ui.Danger),
 		back:       ui.NewButton(detailBack, "Back to runners", ui.Primary),
 		tabs:       &tabStrip{},
+		histRepo:   ui.NewSelect(histRepoSel, []ui.Option{{Value: "", Label: "all"}}),
+		histResult: ui.NewSelect(histResultSel, resultOptions),
 	}
 	g.dash.Set([]ui.Widget{g.add, g.pauseAll, stop{dashRepos}, stop{dashRunners}})
 	g.dash.Focus(dashRepos)
+	g.hist.Set([]ui.Widget{g.histRepo, g.histResult, stop{histTable}})
+	g.hist.Focus(histTable)
 	return g
 }
 
@@ -236,7 +243,7 @@ func (m Model) footerKeys() []footerKey {
 	case pageRunners:
 		return []footerKey{{"x", "kill"}, {"l", "logs"}, {"enter", "details"}, {"?", "help"}, {"q", "quit"}}
 	case pageHistory:
-		return []footerKey{{"r", "repo"}, {"c", "result"}, {"enter", "copy URL"}, {"?", "help"}, {"q", "quit"}}
+		return m.histFooterKeys()
 	case pageSettings:
 		return m.settingsFooterKeys()
 	}

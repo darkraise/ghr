@@ -41,6 +41,11 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return mm, cmd
 		}
 	}
+	if m.page == pageHistory {
+		if ok, mm, cmd := m.histKey(k); ok {
+			return mm, cmd
+		}
+	}
 	return m.press(key)
 }
 
@@ -70,11 +75,17 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 		if m.page == pageDetail {
 			m.scrollDetail(-10)
 		}
+		if m.page == pageHistory {
+			m.histSel = clamp(m.histSel-10, len(m.hist))
+		}
 	case "pgdown":
 		m.eventScroll = max(0, m.eventScroll-5)
 		m.logScroll = max(0, m.logScroll-10)
 		if m.page == pageDetail {
 			m.scrollDetail(10)
+		}
+		if m.page == pageHistory {
+			m.histSel = clamp(m.histSel+10, len(m.hist))
 		}
 	case "p":
 		if !m.repoFocus() {
@@ -149,7 +160,9 @@ func (m Model) switchPage(p page) (tea.Model, tea.Cmd) {
 func (m *Model) move(d int) tea.Cmd {
 	switch {
 	case m.page == pageHistory:
-		m.histSel = clamp(m.histSel+d, len(m.hist))
+		if m.groups.hist.FocusedID() == histTable {
+			m.histSel = clamp(m.histSel+d, len(m.hist))
+		}
 	case m.page == pageDetail:
 		m.scrollDetail(d)
 	case m.page == pageSettings, m.page == pageDashboard && !m.onCard():
@@ -298,6 +311,14 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmd, follow)
 		}
 	}
+	if m.overlay == ovNone && m.page == pageHistory {
+		// Before the sidebar, so an open dropdown can swallow a click anywhere.
+		m.histFilters()
+		if ok, _ := m.groups.hist.Mouse(msg); ok {
+			cmd := m.histApply()
+			return m, cmd
+		}
+	}
 	if msg.Action == tea.MouseActionPress && (msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
 		up := msg.Button == tea.MouseButtonWheelUp
 		switch {
@@ -347,7 +368,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	// A row button runs its key, so the row keys and the buttons stay one path.
-	for id, k := range map[string]string{rowPause: "p", rowRemove: "d", rowLogs: "l", rowStop: "x"} {
+	for id, k := range map[string]string{rowPause: "p", rowRemove: "d", rowLogs: "l", rowStop: "x", rowCopy: "enter"} {
 		if zone.Get(id).InBounds(msg) {
 			return m.press(k)
 		}
@@ -380,6 +401,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if i := hit("hist", len(m.hist)); i >= 0 {
 		m.histSel = i
+		m.groups.hist.Focus(histTable)
 		return m, nil
 	}
 	return m, nil

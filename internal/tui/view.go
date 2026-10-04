@@ -59,7 +59,7 @@ func (m Model) pageBody(w, h int) string {
 	case pageRunners:
 		return m.runnersPage(w, h)
 	case pageHistory:
-		return m.historyTab(w, h)
+		return m.historyPage(w, h)
 	case pageSettings:
 		return m.settingsView(w, h)
 	case pageDetail:
@@ -121,37 +121,4 @@ func fit(lines []string, hdr, sel, n int) []string {
 	body, vis := lines[hdr:], max(n-hdr, 1)
 	start := min(max(sel-vis+1, 0), len(body)-vis)
 	return append(lines[:hdr:hdr], body[start:start+vis]...)
-}
-
-func (m Model) historyTab(w, h int) string {
-	inner := w - 4
-	filter := "repo: all"
-	if m.histRepo != "" {
-		filter = "repo: " + m.histRepo
-	}
-	if m.histConcl != "" {
-		filter += "  result: " + m.histConcl
-	} else {
-		filter += "  result: all"
-	}
-	lines := []string{
-		sDim.Render(filter + "   (r repo, c result, enter copies run URL)"),
-		sDim.Render(fmt.Sprintf("  %-16s %-12s %-7s %-*s %-10s %s", "FINISHED", "REPO", "RUN", inner-62, "JOB", "RESULT", "DURATION")),
-	}
-	visible := h - 4
-	start := 0
-	if m.histSel >= visible {
-		start = m.histSel - visible + 1
-	}
-	for i := start; i < len(m.hist) && i < start+visible; i++ {
-		e := m.hist[i]
-		line := "  " + cell(e.FinishedAt.Local().Format("2006-01-02 15:04"), 16) + " " + cell(e.Repo, 12) + " " +
-			cell("#"+e.RunNumber, 7) + " " + cell(e.JobName, inner-62) + " " + stateStyle(e.Conclusion).Render(cell(e.Conclusion, 10)) + " " +
-			dur(e.FinishedAt.Sub(e.StartedAt))
-		lines = append(lines, m.row(fmt.Sprintf("hist-%d", i), i == m.histSel, line, inner))
-	}
-	if len(m.hist) == 0 {
-		lines = append(lines, sDim.Render("  no finished jobs yet"))
-	}
-	return box("History", w, lines)
 }

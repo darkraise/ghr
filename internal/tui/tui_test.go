@@ -43,6 +43,8 @@ type fakeClient struct {
 	patchErr error                   // returned by PatchConfig when set
 	cfgErr   error                   // returned by Config when set
 	onPatch  func(model.ConfigPatch) // applies a patch to cfg, as a daemon would
+	hist     []model.HistoryEntry    // History returns the entries matching its filters
+	histReqs []string                // each History request as "repo|conclusion"
 }
 
 func (f *fakeClient) rec(s string, a ...any) error {
@@ -84,8 +86,15 @@ func (f *fakeClient) Config(_ context.Context, out any) error {
 	}
 	return nil
 }
-func (f *fakeClient) History(context.Context, string, string, int) ([]model.HistoryEntry, error) {
-	return nil, nil
+func (f *fakeClient) History(_ context.Context, repo, concl string, _ int) ([]model.HistoryEntry, error) {
+	f.histReqs = append(f.histReqs, repo+"|"+concl)
+	var out []model.HistoryEntry
+	for _, e := range f.hist {
+		if (repo == "" || e.Repo == repo) && (concl == "" || e.Conclusion == concl) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 func (f *fakeClient) PatchConfig(_ context.Context, p model.ConfigPatch) error {
 	f.patches = append(f.patches, p)
