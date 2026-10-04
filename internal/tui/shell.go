@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
+
+	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
 const (
@@ -16,6 +18,38 @@ const (
 )
 
 func navZone(p page) string { return "nav/" + strings.ToLower(pageNames[p]) }
+
+// stop is a tab stop that is not a control, such as a table card: it takes
+// no keys and no clicks of its own; the page acts on whatever has focus.
+type stop struct{ id string }
+
+func (s stop) ID() string                           { return s.id }
+func (s stop) Update(tea.Msg) (ui.Control, tea.Cmd) { return s, nil }
+func (s stop) View(bool, int) string                { return "" }
+func (s stop) Focusable() bool                      { return true }
+func (s stop) TakesKey(tea.KeyMsg) bool             { return false }
+func (s stop) Capturing() bool                      { return false }
+func (s stop) Hit(tea.MouseMsg) bool                { return false }
+func (s stop) Blur()                                {}
+func (s stop) SetDisabled(bool)                     {}
+
+// pageGroups holds the focus groups of the pages other than Settings. The
+// Model keeps it by pointer so focus survives Bubble Tea copying the Model.
+type pageGroups struct {
+	dash ui.Group
+}
+
+const (
+	dashRepos   = "dash/repos"
+	dashRunners = "dash/runners"
+)
+
+func newPageGroups() *pageGroups {
+	g := &pageGroups{}
+	g.dash.Set([]ui.Widget{stop{dashRepos}, stop{dashRunners}})
+	g.dash.Focus(dashRepos)
+	return g
+}
 
 // topBar renders the status chips, shedding detail until they fit in w
 // columns: the connection chip shrinks to its dot, then the API, disk and

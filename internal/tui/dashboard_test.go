@@ -45,3 +45,22 @@ func TestStatTilesCollapse(t *testing.T) {
 		t.Fatalf("tiles not compact on a short screen:\n%s", v)
 	}
 }
+
+// The cards are tab stops; focus and the row keys' pane move together.
+func TestDashboardCardFocus(t *testing.T) {
+	m := sampleModel(&fakeClient{}, 120, 30)
+	if m.groups.dash.FocusedID() != dashRepos || m.focus != paneRepos {
+		t.Fatalf("start: focus %q pane %v", m.groups.dash.FocusedID(), m.focus)
+	}
+	ok, mm, _ := m.dashKey(key("tab"))
+	if m = mm.(Model); !ok || m.groups.dash.FocusedID() != dashRunners || m.focus != paneRunners {
+		t.Fatalf("tab: ok %v focus %q pane %v", ok, m.groups.dash.FocusedID(), m.focus)
+	}
+	if ok, _, _ = m.dashKey(key("p")); ok {
+		t.Fatal("dashKey took a row key")
+	}
+	m.focusCard(paneRepos)
+	if m.groups.dash.FocusedID() != dashRepos || m.focus != paneRepos {
+		t.Fatalf("focusCard: focus %q pane %v", m.groups.dash.FocusedID(), m.focus)
+	}
+}

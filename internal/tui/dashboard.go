@@ -4,11 +4,46 @@ import (
 	"fmt"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/config"
 )
+
+// focusCard focuses a Dashboard card and points the row keys at it.
+func (m *Model) focusCard(p pane) {
+	m.focus = p
+	if p == paneRepos {
+		m.groups.dash.Focus(dashRepos)
+	} else {
+		m.groups.dash.Focus(dashRunners)
+	}
+}
+
+// dashKey handles tab, shift+tab and the header buttons' keys on the
+// Dashboard. It reports false for keys the page and global keys handle.
+func (m Model) dashKey(k tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
+	g := m.groups
+	if ok, cmd := g.dash.Key(k); ok {
+		return true, m, cmd
+	}
+	switch k.String() {
+	case "tab":
+		g.dash.Next()
+	case "shift+tab":
+		g.dash.Prev()
+	default:
+		return false, m, nil
+	}
+	switch g.dash.FocusedID() {
+	case dashRepos:
+		m.focus = paneRepos
+	case dashRunners:
+		m.focus = paneRunners
+	}
+	return true, m, nil
+}
 
 // statTiles renders the Dashboard's four stat tiles across w columns: boxed
 // side by side, or on one line when compact.

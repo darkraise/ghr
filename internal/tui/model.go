@@ -132,6 +132,7 @@ type Model struct {
 	st       model.Status
 	epoch    string
 	settings *settingsPage
+	groups   *pageGroups
 	events   []model.Event
 	lastSeq  int64
 	hist     []model.HistoryEntry
@@ -170,7 +171,7 @@ type Model struct {
 
 func New(c Client) Model {
 	return Model{
-		c: c, now: time.Now, width: 120, height: 40, settings: newSettingsPage(),
+		c: c, now: time.Now, width: 120, height: 40, settings: newSettingsPage(), groups: newPageGroups(),
 		copyFn: func(s string) {
 			fmt.Fprintf(os.Stdout, "\x1b]52;c;%s\a", base64.StdEncoding.EncodeToString([]byte(s)))
 		},
