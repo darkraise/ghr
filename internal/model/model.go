@@ -98,12 +98,23 @@ type RepoPatch struct {
 	Paused              *bool     `json:"paused,omitempty"`
 }
 
+type RunnerLimitsPatch struct {
+	MemoryMax *string `json:"memory_max,omitempty"`
+	CPUQuota  *string `json:"cpu_quota,omitempty"`
+}
+
 type ConfigPatch struct {
-	Mode         *string              `json:"mode,omitempty"`
-	GlobalMax    *int                 `json:"global_max,omitempty"`
-	StartTimeout *string              `json:"start_timeout,omitempty"`
-	IdleTimeout  *string              `json:"idle_timeout,omitempty"`
-	Repos        map[string]RepoPatch `json:"repos,omitempty"`
+	Mode             *string              `json:"mode,omitempty"`
+	GlobalMax        *int                 `json:"global_max,omitempty"`
+	PollInterval     *string              `json:"poll_interval,omitempty"`
+	StartTimeout     *string              `json:"start_timeout,omitempty"`
+	IdleTimeout      *string              `json:"idle_timeout,omitempty"`
+	HistoryRetention *string              `json:"history_retention,omitempty"`
+	DiskHighWater    *int                 `json:"disk_high_water,omitempty"`
+	BuildCacheKeep   *string              `json:"build_cache_keep,omitempty"`
+	Labels           *[]string            `json:"labels,omitempty"`
+	RunnerLimits     *RunnerLimitsPatch   `json:"runner_limits,omitempty"`
+	Repos            map[string]RepoPatch `json:"repos,omitempty"`
 }
 
 type AddRepoRequest struct {

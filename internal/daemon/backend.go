@@ -136,15 +136,42 @@ func (b *Backend) PatchConfig(p model.ConfigPatch) error {
 		if p.GlobalMax != nil {
 			c.GlobalMax = *p.GlobalMax
 		}
-		for field, v := range map[*config.Duration]*string{&c.StartTimeout: p.StartTimeout, &c.IdleTimeout: p.IdleTimeout} {
-			if v == nil {
+		// A slice, not a map, so the first bad duration reported is deterministic.
+		for _, f := range []struct {
+			name  string
+			field *config.Duration
+			v     *string
+		}{
+			{"poll_interval", &c.PollInterval, p.PollInterval},
+			{"start_timeout", &c.StartTimeout, p.StartTimeout},
+			{"idle_timeout", &c.IdleTimeout, p.IdleTimeout},
+			{"history_retention", &c.HistoryRetention, p.HistoryRetention},
+		} {
+			if f.v == nil {
 				continue
 			}
-			d, err := config.ParseDuration(*v)
+			d, err := config.ParseDuration(*f.v)
 			if err != nil {
-				return api.BadRequest(err.Error())
+				return api.BadRequest(f.name + ": " + err.Error())
 			}
-			*field = d
+			*f.field = d
+		}
+		if p.DiskHighWater != nil {
+			c.DiskHighWater = *p.DiskHighWater
+		}
+		if p.BuildCacheKeep != nil {
+			c.BuildCacheKeep = *p.BuildCacheKeep
+		}
+		if p.Labels != nil {
+			c.Labels = *p.Labels
+		}
+		if rl := p.RunnerLimits; rl != nil {
+			if rl.MemoryMax != nil {
+				c.RunnerLimits.MemoryMax = *rl.MemoryMax
+			}
+			if rl.CPUQuota != nil {
+				c.RunnerLimits.CPUQuota = *rl.CPUQuota
+			}
 		}
 		for name, rp := range p.Repos {
 			r := c.Repo(name)

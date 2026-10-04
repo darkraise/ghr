@@ -1,13 +1,18 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/darkraise/ghr/internal/api"
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/events"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/history"
@@ -104,6 +109,100 @@ func TestPatchConfig(t *testing.T) {
 	}
 	if err := b.PatchConfig(model.ConfigPatch{Repos: map[string]model.RepoPatch{"nope": {Max: &two}}}); apiStatus(err) != 404 {
 		t.Fatalf("unknown repo err %v", err)
+	}
+}
+
+// Every setting except owner can be patched live, and the change is persisted.
+func TestPatchConfigSettings(t *testing.T) {
+	b, _, _ := newBackend(t)
+	poll, retention, keep := "30s", "14d", "10GB"
+	mem, cpu, disk := "4G", "150%", 70
+	labels := []string{"homelab", "docker"}
+	if err := b.PatchConfig(model.ConfigPatch{PollInterval: &poll, HistoryRetention: &retention, DiskHighWater: &disk,
+		BuildCacheKeep: &keep, Labels: &labels, RunnerLimits: &model.RunnerLimitsPatch{MemoryMax: &mem, CPUQuota: &cpu}}); err != nil {
+		t.Fatal(err)
+	}
+	c := b.Store.Config()
+	if c.PollInterval.String() != "30s" || c.HistoryRetention.String() != "14d" || c.DiskHighWater != 70 || c.BuildCacheKeep != "10GB" ||
+		!reflect.DeepEqual(c.Labels, labels) || c.RunnerLimits != (config.RunnerLimits{MemoryMax: "4G", CPUQuota: "150%"}) {
+		t.Fatalf("cfg %+v", c)
+	}
+	saved, _, err := config.Load(b.Store.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.PollInterval != c.PollInterval || saved.HistoryRetention != c.HistoryRetention || saved.DiskHighWater != 70 ||
+		saved.BuildCacheKeep != "10GB" || !reflect.DeepEqual(saved.Labels, labels) || saved.RunnerLimits != c.RunnerLimits {
+		t.Fatalf("not persisted: %+v", saved)
+	}
+	// A partial runner_limits patch leaves the other limit alone.
+	mem = "8G"
+	if err := b.PatchConfig(model.ConfigPatch{RunnerLimits: &model.RunnerLimitsPatch{MemoryMax: &mem}}); err != nil {
+		t.Fatal(err)
+	}
+	if rl := b.Store.Config().RunnerLimits; rl != (config.RunnerLimits{MemoryMax: "8G", CPUQuota: "150%"}) {
+		t.Fatalf("limits %+v", rl)
+	}
+}
+
+// The JSON keys clients send (PATCH /config decodes straight into ConfigPatch)
+// reach the new fields; a wrong or missing struct tag fails here.
+func TestPatchConfigJSONKeys(t *testing.T) {
+	b, _, _ := newBackend(t)
+	body := `{"poll_interval":"20s","history_retention":"7d","disk_high_water":75,"build_cache_keep":"5GB",` +
+		`"labels":["homelab","x"],"runner_limits":{"memory_max":"2G","cpu_quota":"100%"}}`
+	var p model.ConfigPatch
+	if err := json.Unmarshal([]byte(body), &p); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.PatchConfig(p); err != nil {
+		t.Fatal(err)
+	}
+	c := b.Store.Config()
+	if c.PollInterval.String() != "20s" || c.HistoryRetention.String() != "7d" || c.DiskHighWater != 75 || c.BuildCacheKeep != "5GB" ||
+		!reflect.DeepEqual(c.Labels, []string{"homelab", "x"}) || c.RunnerLimits != (config.RunnerLimits{MemoryMax: "2G", CPUQuota: "100%"}) {
+		t.Fatalf("cfg %+v", c)
+	}
+}
+
+// An invalid setting is a 400 that names the problem and leaves config.yaml untouched.
+func TestPatchConfigRejectsInvalidSettings(t *testing.T) {
+	zero, size, cpu, mem, dur := 0, "lots", "fast", "6 gigs", "soon"
+	empty := []string{}
+	cases := []struct {
+		name string
+		p    model.ConfigPatch
+		msg  string
+	}{
+		{"disk", model.ConfigPatch{DiskHighWater: &zero}, "disk_high_water must be 1..100"},
+		{"size", model.ConfigPatch{BuildCacheKeep: &size}, "build_cache_keep must look like 20GB"},
+		{"cpu", model.ConfigPatch{RunnerLimits: &model.RunnerLimitsPatch{CPUQuota: &cpu}}, "runner_limits.cpu_quota"},
+		{"memory", model.ConfigPatch{RunnerLimits: &model.RunnerLimitsPatch{MemoryMax: &mem}}, "runner_limits.memory_max"},
+		{"poll", model.ConfigPatch{PollInterval: &dur}, `poll_interval: invalid duration "soon"`},
+		{"start", model.ConfigPatch{StartTimeout: &dur}, `start_timeout: invalid duration "soon"`},
+		{"idle", model.ConfigPatch{IdleTimeout: &dur}, `idle_timeout: invalid duration "soon"`},
+		{"retention", model.ConfigPatch{HistoryRetention: &dur}, `history_retention: invalid duration "soon"`},
+		{"labels", model.ConfigPatch{Labels: &empty}, "needs at least one label"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _, _ := newBackend(t)
+			before, err := os.ReadFile(b.Store.ConfigPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = b.PatchConfig(tc.p)
+			if apiStatus(err) != 400 || !strings.Contains(err.Error(), tc.msg) {
+				t.Fatalf("err %v, want 400 containing %q", err, tc.msg)
+			}
+			after, err := os.ReadFile(b.Store.ConfigPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatalf("config.yaml changed:\n%s", after)
+			}
+		})
 	}
 }
 
