@@ -6,7 +6,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
@@ -292,6 +291,8 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		return m.openAddRepo()
 	case dashPauseAll:
 		return m, m.togglePauseAll()
+	case detailCopy, detailStop:
+		return m.detailPressed(id)
 	case setSave:
 		return m.saveSettings()
 	case setDiscard:
@@ -340,16 +341,6 @@ func helpText() string {
 	}, "\n")
 }
 
-// buttons renders the runner detail overlay's clickable buttons: ok runs
-// enter, cancel runs esc.
-func buttons(ok, cancel string) string {
-	b := func(id, label string) string { return zone.Mark(id, sAccent.Render("[ "+label+" ]")) }
-	if ok == "" {
-		return b("btn-cancel", cancel)
-	}
-	return b("btn-ok", ok) + "  " + b("btn-cancel", cancel)
-}
-
 // withOverlay replaces the screen with the open dialog, centred on a blank
 // canvas the size of base; base itself is not drawn behind it.
 func (m Model) withOverlay(base string, w int) string {
@@ -368,8 +359,6 @@ func (m Model) withOverlay(base string, w int) string {
 		dialog = modal("Unsaved changes", body, m.dlgButtons, m.dlg.FocusedID(), w)
 	case ovAddRepo:
 		dialog = m.addRepoView(w)
-	case ovDetail:
-		dialog = sDialog.Render(m.detailBody())
 	}
 	return lipgloss.Place(w, lipgloss.Height(base), lipgloss.Center, lipgloss.Center, dialog,
 		lipgloss.WithWhitespaceChars(" "))

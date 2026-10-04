@@ -22,6 +22,7 @@ import (
 
 func TestMain(m *testing.M) {
 	lipgloss.SetColorProfile(termenv.Ascii)
+	time.Local = time.UTC // the views print local times; keep snapshots machine-independent
 	zone.NewGlobal()
 	os.Exit(m.Run())
 }
@@ -571,8 +572,8 @@ func TestMouseClickSelectsRunnerAndDoubleClickOpensDetail(t *testing.T) {
 		t.Fatalf("sel %d focus %v", m.runnerSel, m.focus)
 	}
 	upd, _ = m.Update(click)
-	if upd.(Model).overlay != ovDetail {
-		t.Fatal("double click did not open detail view")
+	if upd.(Model).page != pageDetail {
+		t.Fatal("double click did not open the detail page")
 	}
 }
 
@@ -584,8 +585,8 @@ func TestDetailShowsContainers(t *testing.T) {
 	m := sampleModel(c, 120, 30)
 	m.focus = paneRunners
 	m = feed(m, key("enter"))
-	if m.overlay != ovDetail || strings.Join(c.calls, "|") != "containers a3f9c1" {
-		t.Fatalf("overlay %v calls %v", m.overlay, c.calls)
+	if m.page != pageDetail || strings.Join(c.calls, "|") != "containers a3f9c1" {
+		t.Fatalf("page %v calls %v", m.page, c.calls)
 	}
 	v := m.View()
 	for _, want := range []string{"Containers", "running", "darkcloud-db-1", "postgres:17", "ghr-a3f9c1",

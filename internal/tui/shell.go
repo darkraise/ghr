@@ -36,8 +36,10 @@ func (s stop) SetDisabled(bool)                     {}
 // pageGroups holds the focus groups of the pages other than Settings. The
 // Model keeps it by pointer so focus survives Bubble Tea copying the Model.
 type pageGroups struct {
-	dash          ui.Group
-	add, pauseAll *ui.Button
+	dash                ui.Group
+	add, pauseAll       *ui.Button
+	detail              ui.Group
+	copyURL, stopRunner *ui.Button
 }
 
 const (
@@ -49,8 +51,10 @@ const (
 
 func newPageGroups() *pageGroups {
 	g := &pageGroups{
-		add:      ui.NewButton(dashAdd, "+ Add", ui.Primary),
-		pauseAll: ui.NewButton(dashPauseAll, "Pause all", ui.Secondary),
+		add:        ui.NewButton(dashAdd, "+ Add", ui.Primary),
+		pauseAll:   ui.NewButton(dashPauseAll, "Pause all", ui.Secondary),
+		copyURL:    ui.NewButton(detailCopy, "Copy run URL", ui.Secondary),
+		stopRunner: ui.NewButton(detailStop, "Stop runner", ui.Danger),
 	}
 	g.dash.Set([]ui.Widget{g.add, g.pauseAll, stop{dashRepos}, stop{dashRunners}})
 	g.dash.Focus(dashRepos)
@@ -136,12 +140,21 @@ func (m Model) alertLine(w int) string {
 	return ""
 }
 
+// navPage is the page the navigation marks as current: a runner's detail
+// page belongs to Runners.
+func (m Model) navPage() page {
+	if m.page == pageDetail {
+		return pageRunners
+	}
+	return m.page
+}
+
 // sidebar is the wide layout's page list, h lines tall, with Help and Quit at the bottom.
 func (m Model) sidebar(h int) string {
 	var lines []string
 	for i, name := range pageNames {
 		label := fmt.Sprintf("%d %s", i+1, name)
-		if page(i) == m.page {
+		if page(i) == m.navPage() {
 			label = sAccent.Render("▌ " + label)
 		} else {
 			label = "  " + label
@@ -173,7 +186,7 @@ func (m Model) tabRow(w int) string {
 			case 2:
 				label = fmt.Sprintf(" %d ", i+1)
 			}
-			if page(i) == m.page {
+			if page(i) == m.navPage() {
 				label = sAccent.Render("[" + label + "]")
 			} else {
 				label = sDim.Render(" " + label + " ")
@@ -194,13 +207,16 @@ func (m Model) tabRow(w int) string {
 // pageHeader is the first line of the content area: the page title on the
 // left and the page's status on the right.
 func (m Model) pageHeader(w int) string {
-	title := sBold.Render(pageNames[m.page])
-	right := ""
+	var title, right string
 	switch {
+	case m.page == pageDetail:
+		title, right = sBold.Render("Runners › "+clean(m.detailID)), m.detailButtons()
 	case m.page == pageSettings && !m.connected:
-		right = sRed.Render("reconnecting")
+		title, right = sBold.Render(pageNames[m.page]), sRed.Render("reconnecting")
 	case m.page == pageDashboard:
-		right = m.dashButtons()
+		title, right = sBold.Render(pageNames[m.page]), m.dashButtons()
+	default:
+		title = sBold.Render(pageNames[m.page])
 	}
 	gap := max(w-ansi.StringWidth(title)-ansi.StringWidth(right), 1)
 	return title + strings.Repeat(" ", gap) + right
@@ -211,6 +227,8 @@ type footerKey struct{ key, label string }
 // footerKeys are the clickable key hints for the current page.
 func (m Model) footerKeys() []footerKey {
 	switch m.page {
+	case pageDetail:
+		return []footerKey{{"esc", "back"}, {"x", "stop"}, {"tab", "next"}, {"?", "help"}, {"q", "quit"}}
 	case pageRunners:
 		return []footerKey{{"x", "kill"}, {"l", "logs"}, {"enter", "details"}, {"?", "help"}, {"q", "quit"}}
 	case pageHistory:
@@ -241,10 +259,14 @@ func (m Model) footer(w int) string {
 
 // footerPress runs a clicked footer hint. Navigation and control keys take
 // the same path as the key; the global letter keys run directly, so a click
-// on "q quit" never types a q into a focused text field.
+// on "q quit" never types a q into a focused text field. The detail page has
+// no text fields and its own x, so every hint there takes the key's path.
 func (m Model) footerPress(k string) (tea.Model, tea.Cmd) {
 	switch k {
 	case "tab", "shift+tab", "ctrl+s", "enter", "esc", "up", "left", "right":
+		return m.handleKey(keyMsg(k))
+	}
+	if m.page == pageDetail {
 		return m.handleKey(keyMsg(k))
 	}
 	return m.press(k)

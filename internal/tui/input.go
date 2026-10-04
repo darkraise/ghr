@@ -25,11 +25,11 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.addRepoKey(k)
 	case ovConfirm, ovHelp, ovUnsaved:
 		return m.dialogKey(k)
-	case ovDetail:
-		if key == "esc" || key == "q" || key == "enter" || key == "?" {
-			m.overlay = ovNone
+	}
+	if m.page == pageDetail {
+		if ok, mm, cmd := m.detailKey(k); ok {
+			return mm, cmd
 		}
-		return m, nil
 	}
 	if m.page == pageSettings {
 		if ok, mm, cmd := m.settingsKey(k); ok {
@@ -104,13 +104,7 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 	case "x":
 		if r := m.selectedRunner(); r != nil && m.runnerFocus() {
 			id, busy := r.ID, r.State == "busy"
-			kill := func() tea.Cmd {
-				return m.action("stopped "+id, func(c context.Context) error { return m.c.Kill(c, id) })
-			}
-			if busy {
-				return m.openConfirm(fmt.Sprintf("Runner %s is running a job. Stop it?", id), kill)
-			}
-			return m, kill()
+			return m.stopRunner(id, busy)
 		}
 	case "l":
 		if m.selectedRunner() != nil {
@@ -259,19 +253,11 @@ func (m Model) enter() (tea.Model, tea.Cmd) {
 	case pageSettings:
 		return m, nil
 	}
-	if r := m.selectedRunner(); r != nil && (m.page == pageRunners || m.focus == paneRunners) {
-		m.overlay, m.detailID = ovDetail, r.ID
-		m.steps, m.containers, m.stepsErr, m.ctrsErr = nil, nil, "", ""
-		return m, tea.Batch(m.fetchSteps(), m.fetchContainers())
+	if r := m.selectedRunner(); r != nil && m.runnerFocus() {
+		return m.openDetail(r.ID)
 	}
 	return m, nil
 }
-
-// dialogButtons map each runner detail overlay button zone to the key it stands for.
-var dialogButtons = []struct {
-	zone string
-	key  tea.KeyType
-}{{"btn-ok", tea.KeyEnter}, {"btn-cancel", tea.KeyEsc}}
 
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.overlay == ovConfirm || m.overlay == ovHelp || m.overlay == ovUnsaved {
@@ -293,15 +279,11 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	}
-	if m.overlay != ovNone {
-		if msg.Action == tea.MouseActionRelease && msg.Button == tea.MouseButtonLeft {
-			for _, b := range dialogButtons {
-				if zone.Get(b.zone).InBounds(msg) {
-					return m.handleKey(tea.KeyMsg{Type: b.key})
-				}
-			}
+	if m.overlay == ovNone && m.page == pageDetail {
+		m.detailButtons()
+		if ok, cmd := m.groups.detail.Mouse(msg); ok {
+			return m, cmd
 		}
-		return m, nil
 	}
 	if msg.Action == tea.MouseActionPress && (msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
 		up := msg.Button == tea.MouseButtonWheelUp

@@ -62,6 +62,8 @@ func (m Model) pageBody(w, h int) string {
 		return m.historyTab(w, h)
 	case pageSettings:
 		return m.settingsView(w, h)
+	case pageDetail:
+		return m.detailPage(w, h)
 	}
 	return m.dashboard(w, h)
 }
@@ -152,51 +154,4 @@ func (m Model) historyTab(w, h int) string {
 		lines = append(lines, sDim.Render("  no finished jobs yet"))
 	}
 	return box("History", w, lines)
-}
-
-func (m Model) detailBody() string {
-	r := m.instance(m.detailID)
-	if r == nil {
-		return "runner " + m.detailID + " has finished\n\n" + buttons("", "Close")
-	}
-	lines := []string{sBold.Render(fmt.Sprintf("Runner %s · %s · %s", r.ID, r.Repo, r.State))}
-	if r.Job != nil {
-		lines = append(lines, fmt.Sprintf("%s  #%s  %s", r.Job.Name, r.Job.RunNumber, r.Job.Workflow))
-		if r.Job.HTMLURL != "" {
-			lines = append(lines, sDim.Render(r.Job.HTMLURL))
-		}
-	}
-	lines = append(lines, "", sBold.Render("Steps"))
-	if m.stepsErr != "" {
-		lines = append(lines, sRed.Render(m.stepsErr))
-	}
-	if len(m.steps) == 0 {
-		lines = append(lines, sDim.Render("no steps reported yet"))
-	}
-	for _, s := range m.steps {
-		icon, style := "○", sDim
-		switch {
-		case s.Status == "in_progress":
-			icon, style = spinnerFrames[m.frame%len(spinnerFrames)], sAccent
-		case s.Conclusion == "success":
-			icon, style = "✔", sGreen
-		case s.Conclusion == "failure":
-			icon, style = "✖", sRed
-		case s.Conclusion == "skipped":
-			icon = "–"
-		}
-		lines = append(lines, style.Render(icon)+" "+s.Name)
-	}
-	lines = append(lines, "", sBold.Render("Containers"))
-	if m.ctrsErr != "" {
-		lines = append(lines, sRed.Render(m.ctrsErr))
-	}
-	if len(m.containers) == 0 {
-		lines = append(lines, sDim.Render("none in this runner's compose projects"))
-	}
-	for _, c := range m.containers {
-		lines = append(lines, stateStyle(c.State).Render(cell(c.State, 9))+" "+cell(c.Name, 28)+" "+cell(c.Image, 28)+" "+sDim.Render(c.Project))
-	}
-	lines = append(lines, "", buttons("", "Close")+"  "+sDim.Render("esc close"))
-	return strings.Join(lines, "\n")
 }

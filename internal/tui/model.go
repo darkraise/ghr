@@ -42,6 +42,7 @@ const (
 	pageRunners
 	pageHistory
 	pageSettings
+	pageDetail // a runner's detail page; not in the sidebar
 )
 
 var pageNames = []string{"Dashboard", "Runners", "History", "Settings"}
@@ -58,7 +59,6 @@ type overlay int
 const (
 	ovNone overlay = iota
 	ovConfirm
-	ovDetail
 	ovHelp
 	ovUnsaved
 	ovAddRepo
@@ -152,6 +152,8 @@ type Model struct {
 	containers        []model.Container
 	stepsErr, ctrsErr string
 	detailID          string
+	detailFrom        page                 // the page esc returns to
+	detailSnap        model.InstanceStatus // the runner as last seen in /status
 
 	overlay       overlay
 	confirmText   string
@@ -318,7 +320,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.page == pageHistory && m.frame%slowPoll == 0 {
 			cmds = append(cmds, m.fetchHistory())
 		}
-		if m.overlay == ovDetail && m.frame%slowPoll == 0 && m.instance(m.detailID) != nil {
+		if m.page == pageDetail && m.frame%slowPoll == 0 && m.instance(m.detailID) != nil {
 			cmds = append(cmds, m.fetchSteps(), m.fetchContainers())
 		}
 		if m.frame%slowPoll == 0 || (m.page == pageSettings && m.cfg == nil) {
@@ -334,6 +336,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.connected = true
 		m.st = cleanStatus(msg.st)
 		m.clampSelections()
+		if inst := m.instance(m.detailID); inst != nil {
+			m.detailSnap = *inst
+		}
 		var cmds []tea.Cmd
 		if msg.st.Epoch != m.epoch {
 			// The daemon restarted: its event sequence numbers started over, and
@@ -381,7 +386,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case stepsMsg:
-		if m.overlay == ovDetail && msg.id == m.detailID {
+		if m.page == pageDetail && msg.id == m.detailID {
 			if msg.err != nil {
 				m.stepsErr = clean(msg.err.Error())
 			} else {
@@ -393,7 +398,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case containersMsg:
-		if m.overlay == ovDetail && msg.id == m.detailID {
+		if m.page == pageDetail && msg.id == m.detailID {
 			if msg.err != nil {
 				m.ctrsErr = clean(msg.err.Error())
 			} else {

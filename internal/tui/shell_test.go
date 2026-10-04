@@ -122,7 +122,7 @@ func TestFooterFollowsPageAndClicksRunKeys(t *testing.T) {
 		t.Fatal("enter on the Repos card opened the detail view")
 	}
 	m.focus = paneRunners
-	if m = click(t, m, "key-enter"); m.overlay != ovDetail {
+	if m = click(t, m, "key-enter"); m.page != pageDetail {
 		t.Fatal("a footer click did not run the key")
 	}
 }
