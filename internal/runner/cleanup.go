@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
@@ -25,6 +26,11 @@ func within(path, dir string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// projectsFile remembers the compose projects cleanup has seen: custom projects
+// are found only through their containers, so a retry after those are removed
+// must still reach the project's networks and volumes.
+const projectsFile = "ghr-projects"
+
 // projects returns the compose projects of an instance: ghr-<id> plus every
 // project whose working_dir label lies inside the instance dir, sorted.
 func (m *Manager) projects(ctx context.Context, id string) ([]string, error) {
@@ -37,6 +43,11 @@ func (m *Manager) projects(ctx context.Context, id string) ([]string, error) {
 	for _, c := range cc {
 		if c.Project != "" && within(filepath.FromSlash(c.WorkingDir), dir) {
 			set[c.Project] = true
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, projectsFile)); err == nil {
+		for _, p := range strings.Fields(string(b)) {
+			set[p] = true
 		}
 	}
 	names := make([]string, 0, len(set))
@@ -54,6 +65,10 @@ func (m *Manager) cleanupDocker(ctx context.Context, cfg *config.Config, id, rep
 	names, err := m.projects(ctx, id)
 	if err != nil {
 		return 0, err
+	}
+	known := filepath.Join(m.instanceDir(id), projectsFile)
+	if err := os.WriteFile(known, []byte(strings.Join(names, "\n")+"\n"), 0o644); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return 0, fmt.Errorf("record compose projects: %w", err)
 	}
 	var errs []error
 	removed := 0
@@ -183,11 +198,16 @@ func (m *Manager) prune(cfg *config.Config, now time.Time) {
 	if err := m.History.Prune(cutoff); err != nil {
 		m.Events.Add("warn", "", "history prune: %v", err)
 	}
-	entries, _ := os.ReadDir(m.Paths.Logs)
+	entries, err := os.ReadDir(m.Paths.Logs)
+	if err != nil && !os.IsNotExist(err) {
+		m.Events.Add("warn", "", "log archive prune: %v", err)
+	}
 	for _, e := range entries {
 		info, err := e.Info()
 		if err == nil && info.ModTime().Before(cutoff) {
-			os.RemoveAll(filepath.Join(m.Paths.Logs, e.Name()))
+			if err := os.RemoveAll(filepath.Join(m.Paths.Logs, e.Name())); err != nil {
+				m.Events.Add("warn", "", "log archive prune: %v", err)
+			}
 		}
 	}
 	m.lastPrune = now
@@ -230,7 +250,12 @@ func (m *Manager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 		files = append(files, matches...)
 	}
 	offsets := parseCursor(cursor)
+	// Keep offsets of files this listing missed (the logs can move to the archive
+	// mid-listing) so a later call does not replay them.
 	next := url.Values{}
+	for name, off := range offsets {
+		next.Set(name, strconv.FormatInt(off, 10))
+	}
 	var data []byte
 	for _, f := range files {
 		name := filepath.Base(f)
@@ -255,5 +280,24 @@ func readFrom(path string, off int64, limit int) ([]byte, error) {
 	if _, err := f.Seek(off, io.SeekStart); err != nil {
 		return nil, err
 	}
-	return io.ReadAll(io.LimitReader(f, int64(limit)))
+	b, err := io.ReadAll(io.LimitReader(f, int64(limit)))
+	if err != nil {
+		return nil, err
+	}
+	return trimPartialRune(b), nil
+}
+
+// trimPartialRune drops a trailing incomplete UTF-8 sequence (a chunk boundary or
+// a half-flushed write) so the next call re-reads it whole; JSON would otherwise
+// replace it with U+FFFD while the cursor skipped its bytes.
+func trimPartialRune(b []byte) []byte {
+	for i := 1; i < utf8.UTFMax && i <= len(b); i++ {
+		if utf8.RuneStart(b[len(b)-i]) {
+			if !utf8.FullRune(b[len(b)-i:]) {
+				return b[:len(b)-i]
+			}
+			return b
+		}
+	}
+	return b
 }

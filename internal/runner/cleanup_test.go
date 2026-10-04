@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -70,6 +71,28 @@ func TestCleanupReportsEveryFailure(t *testing.T) {
 		if _, err := h.m.cleanupDocker(context.Background(), h.cfg, "aaaaaa", "darkcloud"); err == nil || !strings.Contains(err.Error(), method+" broke") {
 			t.Errorf("%s: err %v", method, err)
 		}
+	}
+}
+
+func TestCleanupRetryRemembersCustomProjects(t *testing.T) {
+	h := newHarness(t)
+	dir := h.m.instanceDir("aaaaaa")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.docker.compose = []system.ComposeContainer{{ID: "c1", Project: "custom-p", WorkingDir: filepath.Join(dir, "_work", "r", "r")}}
+	h.docker.setErr("RemoveNetworksByLabel", errors.New("network busy"))
+	if _, err := h.m.cleanupDocker(context.Background(), h.cfg, "aaaaaa", "darkmem"); err == nil {
+		t.Fatal("network failure not reported")
+	}
+	h.docker.compose = nil
+	h.docker.setErr("RemoveNetworksByLabel", nil)
+	if _, err := h.m.cleanupDocker(context.Background(), h.cfg, "aaaaaa", "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"com.docker.compose.project=custom-p", "com.docker.compose.project=ghr-aaaaaa"}
+	if !reflect.DeepEqual(h.docker.netLabels, want) {
+		t.Fatalf("retry networks %v", h.docker.netLabels)
 	}
 }
 
@@ -174,6 +197,26 @@ func TestPruneHistoryAndLogs(t *testing.T) {
 	}
 }
 
+func TestPruneReportsLogArchiveFailure(t *testing.T) {
+	// Windows reports a file used as a directory as "not found", which prune rightly treats as an absent archive.
+	if runtime.GOOS == "windows" {
+		t.Skip("a file in place of the archive dir is a not-found error on Windows")
+	}
+	h := newHarness(t)
+	os.RemoveAll(h.m.Paths.Logs)
+	h.m.prune(h.cfg, h.now)
+	if strings.Contains(h.eventText(), "log archive prune") {
+		t.Fatalf("missing archive dir reported: %s", h.eventText())
+	}
+	if err := os.WriteFile(h.m.Paths.Logs, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.m.prune(h.cfg, h.now)
+	if !strings.Contains(h.eventText(), "log archive prune") {
+		t.Fatalf("unreadable archive dir not reported: %s", h.eventText())
+	}
+}
+
 func appendFile(t *testing.T, path, s string) {
 	t.Helper()
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -182,6 +225,34 @@ func appendFile(t *testing.T, path, s string) {
 	}
 	defer f.Close()
 	f.WriteString(s)
+}
+
+// A chunk boundary or a half-flushed write must not split a UTF-8 character.
+func TestRunnerLogKeepsCharactersWhole(t *testing.T) {
+	h := newHarness(t)
+	diag := filepath.Join(h.m.instanceDir("aaaaaa"), "_diag")
+	os.MkdirAll(diag, 0o755)
+	runnerLog := filepath.Join(diag, "Runner_1.log")
+	appendFile(t, runnerLog, "ok \xe2\x9c")
+	c, err := h.m.RunnerLog("aaaaaa", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Data != "ok " {
+		t.Fatalf("half-flushed chunk %q", c.Data)
+	}
+	appendFile(t, runnerLog, "\x93\n")
+	if c, _ = h.m.RunnerLog("aaaaaa", c.Next); c.Data != "✓\n" {
+		t.Fatalf("completed chunk %q", c.Data)
+	}
+	pad := strings.Repeat("a", maxLogChunk-1)
+	os.WriteFile(filepath.Join(diag, "Worker_2.log"), []byte(pad+"✓"), 0o644)
+	if c, _ = h.m.RunnerLog("aaaaaa", c.Next); c.Data != pad {
+		t.Fatalf("boundary chunk has %d bytes", len(c.Data))
+	}
+	if c, _ = h.m.RunnerLog("aaaaaa", c.Next); c.Data != "✓" {
+		t.Fatalf("after boundary %q", c.Data)
+	}
 }
 
 // Both logs grow between polls and the logs are archived mid-follow:
@@ -225,5 +296,19 @@ func TestRunnerLogCursorFollowsGrowingFiles(t *testing.T) {
 	}
 	if _, err := h.m.RunnerLog("../etc", ""); err == nil {
 		t.Fatal("path traversal accepted")
+	}
+}
+
+func TestRunnerLogKeepsOffsetsOfUnlistedFiles(t *testing.T) {
+	h := newHarness(t)
+	diag := filepath.Join(h.m.instanceDir("aaaaaa"), "_diag")
+	os.MkdirAll(diag, 0o755)
+	appendFile(t, filepath.Join(diag, "Runner_1.log"), "r1\n")
+	c, err := h.m.RunnerLog("aaaaaa", "Worker_2.log=7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Data != "r1\n" || c.Next != "Runner_1.log=3&Worker_2.log=7" {
+		t.Fatalf("data %q next %q", c.Data, c.Next)
 	}
 }
