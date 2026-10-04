@@ -801,7 +801,7 @@ func TestMouseOverlayButtons(t *testing.T) {
 }
 
 // Confirm and Help share one modal: a bold title, the body, buttons on the
-// right. enter presses the primary button (Yes), esc presses No.
+// right. enter presses the focused button (Yes at first), esc presses No.
 func TestConfirmModal(t *testing.T) {
 	c := &fakeClient{}
 	m := sampleModel(c, 120, 30)
@@ -831,14 +831,30 @@ func TestConfirmModal(t *testing.T) {
 	}
 }
 
-// enter presses the primary button even when another button has focus.
-func TestModalEnterPressesPrimary(t *testing.T) {
+// enter presses the focused button; focus opens on the primary.
+func TestModalEnterPressesFocused(t *testing.T) {
 	c := &fakeClient{}
 	m := sampleModel(c, 120, 30)
 	m.focus = paneRunners
 	m = feed(m, keys("x", "tab", "enter")...)
+	if m.overlay != ovNone || len(c.actions()) != 0 {
+		t.Fatalf("enter on No: overlay %v actions %v", m.overlay, c.actions())
+	}
+	m = feed(m, keys("x", "enter")...)
 	if m.overlay != ovNone || strings.Join(c.actions(), "|") != "kill a3f9c1" {
-		t.Fatalf("overlay %v actions %v", m.overlay, c.actions())
+		t.Fatalf("enter on Yes: overlay %v actions %v", m.overlay, c.actions())
+	}
+}
+
+func TestAddRepoEnterOnCancelCancels(t *testing.T) {
+	c := &fakeClient{}
+	m := feed(sampleModel(c, 120, 30), keys("a", "tab", "tab", "tab", "tab")...)
+	if m.add == nil || m.add.group.FocusedID() != addCancel {
+		t.Fatalf("focus not on Cancel: %v", m.add)
+	}
+	m = feed(m, key("enter"))
+	if m.overlay != ovNone || len(c.actions()) != 0 {
+		t.Fatalf("enter on Cancel: overlay %v actions %v", m.overlay, c.actions())
 	}
 }
 

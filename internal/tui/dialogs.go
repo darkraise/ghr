@@ -88,12 +88,12 @@ func (d *addRepoDialog) sync(connected bool) {
 }
 
 // addRepoKey routes a key in the Add repository dialog: the focused control
-// first (but enter on a button is always the primary, Add), then esc
-// cancels, tab and the arrows move focus, and enter adds.
+// first (enter on a button presses that button), then esc cancels, tab and
+// the arrows move focus, and enter adds.
 func (m Model) addRepoKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	d := m.add
 	if _, onButton := d.group.Focused().(*ui.Button); onButton && k.String() == "enter" {
-		return m.pressed(addOK)
+		return m.pressed(d.group.FocusedID())
 	}
 	if ok, cmd := d.group.Key(k); ok {
 		return m, cmd
@@ -230,13 +230,16 @@ func (m Model) openHelp() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// dialogKey handles a key while a button dialog is open: enter presses the
-// primary (last) button, space presses the focused one, esc presses cancel,
-// and tab or the arrow keys move between the buttons. A confirmation also
-// takes y and n.
+// dialogKey handles a key while a button dialog is open: enter and space
+// press the focused button (the primary at first), esc presses cancel, and
+// tab or the arrow keys move between the buttons. A confirmation also takes
+// y and n.
 func (m Model) dialogKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "enter":
+		if id := m.dlg.FocusedID(); id != "" {
+			return m.pressed(id)
+		}
 		return m.pressed(m.dlgButtons[len(m.dlgButtons)-1].ID())
 	case "esc":
 		return m.pressed(m.dlgCancel)
