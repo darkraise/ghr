@@ -269,8 +269,28 @@ func (m Model) dialogKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// pressed runs the action of the button with id.
+// buttonOverlay is the dialog a button belongs to; page buttons belong to ovNone.
+func buttonOverlay(id string) overlay {
+	switch id {
+	case btnYes, btnNo:
+		return ovConfirm
+	case btnClose:
+		return ovHelp
+	case btnLeaveSave, btnLeaveDiscard, btnLeaveStay:
+		return ovUnsaved
+	case addOK, addCancel:
+		return ovAddRepo
+	}
+	return ovNone
+}
+
+// pressed runs the action of the button with id. A press arrives as a
+// message, so a double click can deliver one after its dialog has closed or
+// once another has opened; it acts only while the button's own dialog shows.
 func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
+	if buttonOverlay(id) != m.overlay {
+		return m, nil
+	}
 	switch id {
 	case btnYes:
 		m.overlay = ovNone

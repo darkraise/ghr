@@ -6,6 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
 // Help lists every group and fits a 22-row screen at 80 columns and wider.
@@ -77,5 +79,32 @@ func TestHelpScrollsWhenShort(t *testing.T) {
 		if m = feed(m, key("esc")); m.overlay != ovNone {
 			t.Fatalf("width %d: esc did not close help", w)
 		}
+	}
+}
+
+// A press reaches pressed() as a message, so a double click can deliver a
+// second one after its dialog closed; a button acts only while its dialog
+// (or, for a page button, no dialog) is open.
+func TestStalePressIsIgnored(t *testing.T) {
+	c := &fakeClient{}
+	m := sampleModel(c, 120, 30)
+	m.focusCard(paneRunners)
+	if m = feed(m, key("x")); m.overlay != ovConfirm {
+		t.Fatalf("x on a busy runner: overlay %v", m.overlay)
+	}
+	m = feed(m, ui.Pressed{ID: btnYes}, ui.Pressed{ID: btnYes})
+	if got := strings.Join(c.actions(), "|"); got != "kill a3f9c1" {
+		t.Fatalf("actions %q", got)
+	}
+
+	c = &fakeClient{}
+	applyPoll(c)
+	m = dirtySettings(t, c)
+	if m = feed(m, key("2")); m.overlay != ovUnsaved {
+		t.Fatalf("2: overlay %v", m.overlay)
+	}
+	m, _ = pump(m, ui.Pressed{ID: setSave}, ui.Pressed{ID: btnLeaveSave}, ui.Pressed{ID: btnLeaveSave})
+	if m.page != pageRunners || len(c.patches) != 1 {
+		t.Fatalf("page %v patches %d", m.page, len(c.patches))
 	}
 }
