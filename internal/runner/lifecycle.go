@@ -134,6 +134,17 @@ func parseTime(s string) (time.Time, bool) {
 	return t, err == nil
 }
 
+// jobInfo builds the running-job view from a hook record; a missing or
+// unparsable start time falls back to now.
+func jobInfo(rec JobRecord, now time.Time) *model.JobInfo {
+	runID, _ := strconv.ParseInt(rec.RunID, 10, 64)
+	started, ok := parseTime(rec.StartedAt)
+	if !ok {
+		started = now
+	}
+	return &model.JobInfo{RunID: runID, RunNumber: rec.RunNumber, Workflow: rec.Workflow, Name: rec.Job, StartedAt: started}
+}
+
 // readJobFiles marks instances busy once their job-started hook has written job.json.
 func (m *Manager) readJobFiles() {
 	for _, i := range m.snapshot() {
@@ -152,12 +163,7 @@ func (m *Manager) readJobFiles() {
 				inst.StateSince = m.Now()
 			}
 			if inst.Job == nil {
-				runID, _ := strconv.ParseInt(rec.RunID, 10, 64)
-				started, ok := parseTime(rec.StartedAt)
-				if !ok {
-					started = m.Now()
-				}
-				inst.Job = &model.JobInfo{RunID: runID, RunNumber: rec.RunNumber, Workflow: rec.Workflow, Name: rec.Job, StartedAt: started}
+				inst.Job = jobInfo(rec, m.Now())
 			} else if inst.Job.RunNumber == "" && rec.RunNumber != "" {
 				// A copy, not an in-place edit: finish may hold the old pointer.
 				j := *inst.Job
