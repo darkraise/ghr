@@ -473,6 +473,29 @@ func TestSettingsInAppChecksBlockSave(t *testing.T) {
 	}
 }
 
+// The duration fields check what config.Validate checks, so a value the
+// daemon would reject is flagged before saving.
+func TestSettingsDurationFloors(t *testing.T) {
+	c := &fakeClient{}
+	m := onSettings(t, c, 120, 30)
+	for _, tc := range []struct{ key, text, err string }{
+		{setPollInterval, "1s", "poll_interval must be at least 5s"},
+		{setPollInterval, "5s", ""},
+		{setStartTimeout, "0s", "start_timeout must be greater than 0"},
+		{setIdleTimeout, "-1m", "idle_timeout must be greater than 0"},
+		{setHistoryRetention, "12h", "history_retention must be at least 1d"},
+		{setHistoryRetention, "24h", ""},
+	} {
+		set(m, tc.key, ui.Value{Text: tc.text})
+		if got := m.settings.checkErrors()[tc.key]; got != tc.err {
+			t.Errorf("%s = %s: error %q, want %q", tc.key, tc.text, got, tc.err)
+		}
+	}
+	if m = feed(m, key("ctrl+s")); len(c.patches) != 0 {
+		t.Fatal("a duration below its floor was sent")
+	}
+}
+
 // The save stays busy until the config fetched after it is handled.
 func TestSettingsStaysBusyUntilRefetch(t *testing.T) {
 	c := &fakeClient{}

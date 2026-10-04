@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
@@ -77,9 +78,22 @@ type (
 	}
 )
 
-func durationCheck(s string) error {
-	_, err := config.ParseDuration(s)
-	return err
+// durationCheck checks a duration field as config.Validate does: above zero
+// and at least floor.
+func durationCheck(key string, floor time.Duration) func(string) error {
+	name := fieldName(key)
+	return func(s string) error {
+		d, err := config.ParseDuration(s)
+		switch {
+		case err != nil:
+			return err
+		case d <= 0:
+			return fmt.Errorf("%s must be greater than 0", name)
+		case d.D() < floor:
+			return fmt.Errorf("%s must be at least %s", name, config.Duration(floor))
+		}
+		return nil
+	}
 }
 
 func textSpec(key, v string, kind ui.Kind, width int, check func(string) error) ui.Spec {
@@ -119,16 +133,17 @@ func settingsSpecs(c *config.Config) []ui.Spec {
 		{Key: setMode, Kind: ui.KindText, Base: ui.Value{Text: c.Mode},
 			New: func() ui.Input { return ui.NewSelect(setMode, modeOptions) }},
 		intSpec(setGlobalMax, &gm, func() *ui.Stepper { return ui.NewStepper(setGlobalMax, 1, 99, 1) }),
-		textSpec(setPollInterval, c.PollInterval.String(), ui.KindDuration, 10, durationCheck),
-		textSpec(setStartTimeout, c.StartTimeout.String(), ui.KindDuration, 10, durationCheck),
-		textSpec(setIdleTimeout, c.IdleTimeout.String(), ui.KindDuration, 10, durationCheck),
+		textSpec(setPollInterval, c.PollInterval.String(), ui.KindDuration, 10, durationCheck(setPollInterval, config.MinPollInterval)),
+		textSpec(setStartTimeout, c.StartTimeout.String(), ui.KindDuration, 10, durationCheck(setStartTimeout, 0)),
+		textSpec(setIdleTimeout, c.IdleTimeout.String(), ui.KindDuration, 10, durationCheck(setIdleTimeout, 0)),
 		intSpec(setDiskHighWater, &disk, func() *ui.Stepper {
 			s := ui.NewStepper(setDiskHighWater, 1, 100, 5)
 			s.Suffix = "%"
 			return s
 		}),
 		textSpec(setBuildCacheKeep, clean(c.BuildCacheKeep), ui.KindText, 10, nil),
-		textSpec(setHistoryRetention, c.HistoryRetention.String(), ui.KindDuration, 10, durationCheck),
+		textSpec(setHistoryRetention, c.HistoryRetention.String(), ui.KindDuration, 10,
+			durationCheck(setHistoryRetention, config.MinHistoryRetention)),
 		listSpec(setLabels, c.Labels),
 		textSpec(setMemoryMax, clean(c.RunnerLimits.MemoryMax), ui.KindText, 10, nil),
 		textSpec(setCPUQuota, clean(c.RunnerLimits.CPUQuota), ui.KindText, 10, nil),
@@ -251,7 +266,7 @@ func (s *settingsPage) row(label, key, desc string) ui.Row {
 }
 
 // checkErrors returns the in-app check failures by field key: a duration that
-// does not parse, and a repo's warm above its explicit max. Size, memory and
+// does not parse or is below its floor, and a repo's warm above its explicit max. Size, memory and
 // CPU values are left to the daemon.
 func (s *settingsPage) checkErrors() map[string]string {
 	errs := map[string]string{}
