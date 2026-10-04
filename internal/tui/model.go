@@ -129,9 +129,9 @@ type Model struct {
 	hist     []model.HistoryEntry
 	cfg      *config.Config
 
-	repoSel, runnerSel, histSel, cfgSel int
-	eventScroll, logScroll              int
-	histRepo, histConcl                 string
+	repoSel, runnerSel, histSel int
+	eventScroll, logScroll      int
+	histRepo, histConcl         string
 
 	logID     string
 	logText   string
@@ -399,7 +399,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case configMsg:
 		m.cfg = msg
-		m.clampSelections()
+		m.settings.load(msg)
 		return m, nil
 	case doneMsg:
 		if msg.err != nil {
@@ -461,7 +461,6 @@ func (m *Model) clampSelections() {
 	m.repoSel = clamp(m.repoSel, len(m.st.Repos))
 	m.runnerSel = clamp(m.runnerSel, len(m.st.Instances))
 	m.histSel = clamp(m.histSel, len(m.hist))
-	m.cfgSel = clamp(m.cfgSel, len(m.configFields()))
 }
 
 func (m Model) selectedRepo() *model.RepoStatus {
@@ -485,11 +484,4 @@ func (m Model) instance(id string) *model.InstanceStatus {
 		}
 	}
 	return nil
-}
-
-// configField is one editable row of the Config tab.
-type configField struct {
-	label string
-	value string
-	apply func(v string) (model.ConfigPatch, error)
 }

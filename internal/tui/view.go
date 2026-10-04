@@ -62,7 +62,7 @@ func (m Model) pageBody(w, h int) string {
 	case pageHistory:
 		return m.historyTab(w, h)
 	case pageSettings:
-		return m.configTab(w, h)
+		return m.settingsView(w, h)
 	}
 	return m.dashboard(w, h)
 }
@@ -293,20 +293,6 @@ func (m Model) historyTab(w, h int) string {
 		lines = append(lines, sDim.Render("  no finished jobs yet"))
 	}
 	return box("History", w, lines)
-}
-
-func (m Model) configTab(w, h int) string {
-	inner := w - 4
-	fields := m.configFields()
-	lines := []string{sDim.Render("enter edits the selected setting; the daemon validates before saving")}
-	if fields == nil {
-		lines = append(lines, sDim.Render("loading…"))
-	}
-	for i, f := range fields {
-		line := "  " + cell(f.label, 36) + " " + f.value
-		lines = append(lines, m.row(fmt.Sprintf("cfg-%d", i), i == m.cfgSel, line, inner))
-	}
-	return box("Config", w, fit(lines, 1, m.cfgSel, h-2))
 }
 
 func (m Model) detailBody() string {

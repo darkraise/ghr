@@ -1,0 +1,30 @@
+ ghr   mode ● QUEUE   runners ▕██░▏ 2/3   api ▕█████████░▏ 4800   disk ▕██████░░░░▏ 61%   ● connected
+  1 Dashboard    Settings                                                                                               
+  2 Runners      ╭─ General ───────────────────────────────────────────────────────────────────────────────────────────╮
+  3 History      │ Mode               › [ queue ▾ ]  start runners only for queued jobs, up to the global max          │
+▌ 4 Settings     │ Global max           [ − ] 3 [ + ]  applies in queue mode                                           │
+                 │ Owner                darkraise  change in config.yaml and restart the daemon                        │
+                 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                 ╭─ Timing ────────────────────────────────────────────────────────────────────────────────────────────╮
+                 │ Poll interval        [ 10s        ]  how often GitHub is checked (at least 5s)                      │
+                 │ Start timeout        [ 2m0s       ]  a runner not online by then is replaced                        │
+                 │ Idle timeout         [ 5m0s       ]  idle runners beyond warm stop after this                       │
+                 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                 ╭─ Disk and retention ────────────────────────────────────────────────────────────────────────────────╮
+                 │ Disk high-water      [ − ] 80% [ + ]  disk use that triggers pruning                                │
+                 │ Build cache keep     [ 20GB       ]  build cache kept when pruning, e.g. 20GB                       │
+                 │ History retention    [ 30d        ]  history and logs older than this are removed (at least 1d)     │
+                 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                 ╭─ Runner defaults ───────────────────────────────────────────────────────────────────────────────────╮
+                 │ limits apply to newly started runners                                                               │
+                 │ Global labels        homelab ✕  + add  added to every runner                                        │
+                 │ Memory max           [ 6G         ]  per runner, e.g. 6G, 50% or infinity                           │
+                 │ CPU quota            [ 200%       ]  per runner, e.g. 200%                                          │
+                 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                 ╭─ darkcloud ─────────────────────────────────────────────────────────────────────────────────────────╮
+                 │ Max                  [ − ] 2 [ + ]  once set, it stays explicit                                     │
+                 │ Warm                 [ − ] 1 [ + ] (default)  applies in all mode                                   │
+                 │ Labels               darkcloud-linux ✕  + add  added to this repo's runners                         │
+  ? Help         │ Cleanup prefixes     dc-e2e- ✕  + add  container name prefixes removed after each job               │
+  q Quit         ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ tab next  shift+tab previous  ctrl+s save  ? help  q quit

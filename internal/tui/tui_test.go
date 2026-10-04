@@ -439,42 +439,6 @@ func sampleConfig(t *testing.T, repos ...string) *config.Config {
 	return cfg
 }
 
-func TestConfigTabEdit(t *testing.T) {
-	c := &fakeClient{}
-	m := sampleModel(c, 120, 30)
-	upd, _ := m.Update(configMsg(sampleConfig(t, "darkcloud")))
-	m = run(t, upd.(Model), "4")
-	if !strings.Contains(m.View(), "darkcloud.cleanup_name_prefixes") {
-		t.Fatal("config fields not rendered")
-	}
-	m = run(t, m, "down", "down", "down", "down", "down", "down", "enter") // darkcloud.labels
-	if m.overlay != ovPrompt || !strings.Contains(m.promptLabel, "darkcloud.labels") {
-		t.Fatalf("prompt %q", m.promptLabel)
-	}
-	m.prompt.SetValue("a, b")
-	run(t, m, "enter")
-	if len(c.calls) != 1 || c.calls[0] != "darkcloud.labels=a,b" {
-		t.Fatalf("calls %v", c.calls)
-	}
-}
-
-func TestConfigUnchangedSaveSendsNothing(t *testing.T) {
-	c := &fakeClient{}
-	m := sampleModel(c, 120, 30)
-	upd, _ := m.Update(configMsg(sampleConfig(t, "darkcloud")))
-	m = run(t, upd.(Model), "4", "down", "down", "down", "down") // darkcloud.max
-	m = run(t, m, "enter", "enter")
-	if len(c.actions()) != 0 {
-		t.Fatalf("an unchanged save sent %v", c.actions())
-	}
-	m = run(t, m, "enter")
-	m.prompt.SetValue("2")
-	run(t, m, "enter")
-	if strings.Join(c.actions(), "|") != "darkcloud.max=2" {
-		t.Fatalf("actions %v", c.actions())
-	}
-}
-
 func TestMouseClickSelectsRunnerAndDoubleClickOpensDetail(t *testing.T) {
 	c := &fakeClient{}
 	m := sampleModel(c, 120, 30)
@@ -628,15 +592,28 @@ func TestEventsResetOnDaemonRestart(t *testing.T) {
 	}
 }
 
-func TestConfigTabRetriesLoad(t *testing.T) {
+func TestSettingsRetriesLoad(t *testing.T) {
 	c := &fakeClient{}
 	m := sampleModel(c, 120, 30)
 	m.page = pageSettings
+	if v := m.View(); !strings.Contains(v, "loading…") {
+		t.Fatalf("no loading state:\n%s", v)
+	}
 	c.cfg = sampleConfig(t, "darkcloud")
 	m = ticks(m, 1)
 	v := m.View()
-	if !strings.Contains(v, "darkcloud.max") || strings.Contains(v, "loading…") {
+	if !strings.Contains(v, "─ darkcloud ") || strings.Contains(v, "loading…") {
 		t.Fatalf("config not loaded by the tick:\n%s", v)
+	}
+}
+
+func TestSettingsGolden(t *testing.T) {
+	for _, w := range []int{120, 80} {
+		t.Run(fmt.Sprint(w), func(t *testing.T) {
+			c := &fakeClient{cfg: parseConfig(t, settingsYAML)}
+			m := feed(sampleModel(c, w, 30), key("4"))
+			golden.RequireEqual(t, []byte(m.View()))
+		})
 	}
 }
 
@@ -674,9 +651,9 @@ func TestShortTerminalKeepsSelectionVisible(t *testing.T) {
 	t.Run("runners", func(t *testing.T) {
 		check(t, run(t, newModel(&fakeClient{}, 120, h, st), down("2", 9)...), "▸ run09")
 	})
-	t.Run("config", func(t *testing.T) {
+	t.Run("settings", func(t *testing.T) {
 		upd, _ := newModel(&fakeClient{}, 120, h, st).Update(configMsg(sampleConfig(t, repos[:6]...)))
-		check(t, run(t, upd.(Model), down("4", 27)...), "repo05.cleanup_name_prefixes")
+		check(t, run(t, upd.(Model), "4"), "[ queue ▾ ]")
 	})
 }
 
@@ -695,21 +672,10 @@ func TestMouseOverlayButtons(t *testing.T) {
 		t.Fatalf("overlay %v calls %v", m.overlay, c.actions())
 	}
 
-	c.cfg = sampleConfig(t, "darkcloud")
-	m = feed(m, key("4"))
-	m = click(t, m, "cfg-1") // global_max
-	if m.overlay != ovPrompt || !strings.Contains(m.promptLabel, "global_max") {
-		t.Fatalf("overlay %v prompt %q", m.overlay, m.promptLabel)
-	}
-	m.prompt.SetValue("5")
-	m = click(t, m, "btn-ok")
-	if m.overlay != ovNone || strings.Join(c.actions(), "|") != "kill a3f9c1|global_max=5" {
-		t.Fatalf("overlay %v calls %v", m.overlay, c.actions())
-	}
-	m = click(t, m, "cfg-1")
-	m = click(t, m, "btn-cancel")
-	if m.overlay != ovNone || len(c.actions()) != 2 {
-		t.Fatalf("cancel: overlay %v calls %v", m.overlay, c.actions())
+	m = run(t, m, "x")
+	m = click(t, m, btnNo)
+	if m.overlay != ovNone || len(c.actions()) != 1 {
+		t.Fatalf("No: overlay %v calls %v", m.overlay, c.actions())
 	}
 }
 

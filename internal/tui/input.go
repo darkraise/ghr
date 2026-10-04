@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -166,7 +165,7 @@ func (m *Model) move(d int) tea.Cmd {
 	case m.page == pageHistory:
 		m.histSel = clamp(m.histSel+d, len(m.hist))
 	case m.page == pageSettings:
-		m.cfgSel = clamp(m.cfgSel+d, len(m.configFields()))
+		return nil
 	case m.page == pageRunners || m.focus == paneRunners:
 		m.runnerSel = clamp(m.runnerSel+d, len(m.st.Instances))
 		return m.follow()
@@ -285,20 +284,6 @@ func (m Model) enter() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case pageSettings:
-		fields := m.configFields()
-		if m.cfgSel < len(fields) {
-			f := fields[m.cfgSel]
-			return m.openPrompt("Set "+f.label, f.value, func(v string) tea.Cmd {
-				if v == f.value {
-					return nil
-				}
-				p, err := f.apply(v)
-				if err != nil {
-					return func() tea.Msg { return doneMsg{err: err} }
-				}
-				return m.action(f.label+" = "+v, func(c context.Context) error { return m.c.PatchConfig(c, p) })
-			})
-		}
 		return m, nil
 	}
 	if r := m.selectedRunner(); r != nil && (m.page == pageRunners || m.focus == paneRunners) {
@@ -307,79 +292,6 @@ func (m Model) enter() (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.fetchSteps(), m.fetchContainers())
 	}
 	return m, nil
-}
-
-func intPtr(v string) (*int, error) {
-	if v == "" || v == "∞" {
-		z := 0
-		return &z, nil
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return nil, fmt.Errorf("not a number: %s", v)
-	}
-	return &n, nil
-}
-
-func listPtr(v string) *[]string {
-	out := []string{}
-	for _, s := range strings.Split(v, ",") {
-		if s = strings.TrimSpace(s); s != "" {
-			out = append(out, s)
-		}
-	}
-	return &out
-}
-
-// configFields lists the editable settings of the Settings page.
-func (m Model) configFields() []configField {
-	c := m.cfg
-	if c == nil {
-		return nil
-	}
-	strPatch := func(set func(p *model.ConfigPatch, v *string)) func(string) (model.ConfigPatch, error) {
-		return func(v string) (model.ConfigPatch, error) {
-			var p model.ConfigPatch
-			set(&p, &v)
-			return p, nil
-		}
-	}
-	fields := []configField{
-		{"mode", c.Mode, strPatch(func(p *model.ConfigPatch, v *string) { p.Mode = v })},
-		{"global_max", strconv.Itoa(c.GlobalMax), func(v string) (model.ConfigPatch, error) {
-			n, err := intPtr(v)
-			return model.ConfigPatch{GlobalMax: n}, err
-		}},
-		{"start_timeout", c.StartTimeout.String(), strPatch(func(p *model.ConfigPatch, v *string) { p.StartTimeout = v })},
-		{"idle_timeout", c.IdleTimeout.String(), strPatch(func(p *model.ConfigPatch, v *string) { p.IdleTimeout = v })},
-	}
-	for _, r := range c.Repos {
-		name := r.Name
-		repoPatch := func(rp model.RepoPatch) model.ConfigPatch {
-			return model.ConfigPatch{Repos: map[string]model.RepoPatch{name: rp}}
-		}
-		maxText := "∞"
-		if eff := c.EffectiveMax(r); eff > 0 {
-			maxText = strconv.Itoa(eff)
-		}
-		fields = append(fields,
-			configField{name + ".max", maxText, func(v string) (model.ConfigPatch, error) {
-				n, err := intPtr(v)
-				return repoPatch(model.RepoPatch{Max: n}), err
-			}},
-			configField{name + ".warm", strconv.Itoa(c.EffectiveWarm(r)), func(v string) (model.ConfigPatch, error) {
-				n, err := intPtr(v)
-				return repoPatch(model.RepoPatch{Warm: n}), err
-			}},
-			configField{name + ".labels", strings.Join(r.Labels, ","), func(v string) (model.ConfigPatch, error) {
-				return repoPatch(model.RepoPatch{Labels: listPtr(v)}), nil
-			}},
-			configField{name + ".cleanup_name_prefixes", strings.Join(r.CleanupNamePrefixes, ","), func(v string) (model.ConfigPatch, error) {
-				return repoPatch(model.RepoPatch{CleanupNamePrefixes: listPtr(v)}), nil
-			}},
-		)
-	}
-	return fields
 }
 
 // dialogButtons map each detail or prompt overlay button zone to the key it stands for.
@@ -478,10 +390,6 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if i := hit("hist", len(m.hist)); i >= 0 {
 		m.histSel = i
 		return m, nil
-	}
-	if i := hit("cfg", len(m.configFields())); i >= 0 {
-		m.cfgSel = i
-		return m.enter()
 	}
 	return m, nil
 }
