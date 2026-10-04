@@ -84,58 +84,6 @@ func (m Model) row(id string, selected bool, s string, w int) string {
 	return zone.Mark(id, s)
 }
 
-func (m Model) reposLines(w int) []string {
-	narrow := w < 80
-	inner := w - 4
-	hdr := fmt.Sprintf("  %-14s %-10s %-5s %-6s", "REPO", "STATE", "RUN", "QUEUE")
-	if !narrow {
-		hdr += " LAST JOB"
-	}
-	lines := []string{sDim.Render(hdr)}
-	for i, r := range m.st.Repos {
-		state, st := "active", "active"
-		dot := "●"
-		if r.Paused {
-			state, st, dot = "paused", "paused", "◌"
-		}
-		if r.Removing {
-			state, st, dot = "removing", "removing", "◌"
-		}
-		if r.Error != "" {
-			state, st, dot = "error", "error", "✖"
-		}
-		queue := "–"
-		if r.Queued > 0 {
-			queue = sAmber.Render(fmt.Sprintf("⧗ %d", r.Queued))
-		}
-		sel := "  "
-		if i == m.repoSel && m.focus == paneRepos {
-			sel = "▸ "
-		}
-		line := sel + cell(r.Name, 14) + " " + stateStyle(st).Render(cell(dot+" "+state, 10)) + " " +
-			cell(fmt.Sprintf("%d/%s", r.Active, maxText(r.Max)), 5) + " " + cell(queue, 6)
-		if !narrow {
-			last := sDim.Render("–")
-			if j := r.LastJob; j != nil {
-				icon, style := "✔", sGreen
-				if j.Conclusion != "success" {
-					icon, style = "✖", sRed
-				}
-				last = style.Render(icon) + fmt.Sprintf(" #%s %s  %s", j.RunNumber, j.JobName, sDim.Render(ago(m.now().Sub(j.FinishedAt))))
-			}
-			line += " " + last
-		}
-		if r.Error != "" && !narrow {
-			line += "  " + sRed.Render(r.Error)
-		}
-		lines = append(lines, m.row(fmt.Sprintf("repo-%d", i), i == m.repoSel && m.focus == paneRepos, line, inner))
-	}
-	if len(m.st.Repos) == 0 {
-		lines = append(lines, sDim.Render("  no repos configured — press a to add one"))
-	}
-	return lines
-}
-
 func (m Model) runnerLine(i int, r model.InstanceStatus, selected bool, inner int) string {
 	state := r.State
 	icon := "○"
@@ -185,27 +133,6 @@ func (m Model) runnersLines(w int) []string {
 	return lines
 }
 
-func (m Model) eventLines(n, w int) []string {
-	inner := w - 4
-	end := len(m.events) - m.eventScroll
-	if end < 0 {
-		end = 0
-	}
-	start := end - n
-	if start < 0 {
-		start = 0
-	}
-	var lines []string
-	for _, e := range m.events[start:end] {
-		icon, style := eventStyle(e.Level)
-		lines = append(lines, cell(sDim.Render(e.Time.Local().Format("15:04:05"))+"  "+style.Render(icon)+" "+cell(e.Repo, 11)+" "+e.Msg, inner))
-	}
-	for len(lines) < n {
-		lines = append(lines, "")
-	}
-	return lines
-}
-
 // fit keeps the first hdr lines and scrolls the rest so that body line sel
 // stays visible within n lines.
 func fit(lines []string, hdr, sel, n int) []string {
@@ -215,24 +142,6 @@ func fit(lines []string, hdr, sel, n int) []string {
 	body, vis := lines[hdr:], max(n-hdr, 1)
 	start := min(max(sel-vis+1, 0), len(body)-vis)
 	return append(lines[:hdr:hdr], body[start:start+vis]...)
-}
-
-func (m Model) dashboard(w, h int) string {
-	repoLines, runnerLines := m.reposLines(w), m.runnersLines(w)
-	room := h - 9 // two table borders plus an Events box of at least 3 lines
-	nRepo, nRun := len(repoLines), len(runnerLines)
-	if nRepo+nRun > room {
-		nRepo = min(nRepo, max(room/2, room-nRun))
-		nRun = room - nRepo
-	}
-	repos := box("Repos", w, fit(repoLines, 1, m.repoSel, nRepo))
-	runners := box("Runners", w, fit(runnerLines, 1, m.runnerSel, nRun))
-	rest := h - lipgloss.Height(repos) - lipgloss.Height(runners) - 2
-	if w < 80 || rest < 3 {
-		rest = 3
-	}
-	events := zone.Mark("events", box("Events", w, m.eventLines(rest, w)))
-	return strings.Join([]string{repos, runners, events}, "\n")
 }
 
 func (m Model) runnersTab(w, h int) string {

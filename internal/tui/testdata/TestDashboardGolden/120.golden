@@ -1,8 +1,11 @@
  ghr   mode ● QUEUE   runners ▕██░▏ 2/3   api ▕█████████░▏ 4800   disk ▕██████░░░░▏ 61%   ● connected
 ▌ 1 Dashboard    Dashboard                                                                                              
-  2 Runners      ╭─ Repos ─────────────────────────────────────────────────────────────────────────────────────────────╮
-  3 History      │   REPO           STATE      RUN   QUEUE  LAST JOB                                                   │
-  4 Settings     │ ▸ darkcloud      ● active   1/1   ⧗ 2    ✔ #411 lint  2m ago                                        │
+  2 Runners      ╭─ Running ─────────────╮ ╭─ Queued jobs ─────────╮ ╭─ Repositories ────────╮ ╭─ Disk ────────────────╮
+  3 History      │ 2 / 3                 │ │ 3                     │ │ 2 active · 1 paused   │ │ 61%                   │
+  4 Settings     ╰───────────────────────╯ ╰───────────────────────╯ ╰───────────────────────╯ ╰───────────────────────╯
+                 ╭─ Repositories ──────────────────────────────────────────────────────────────────────────────────────╮
+                 │   REPO           STATE      RUN   QUEUE  LAST JOB                                                   │
+                 │ ▸ darkcloud      ● active   1/1   ⧗ 2    ✔ #411 lint  2m ago                                        │
                  │   darkmem        ● active   1/1   –      ✖ #87 build / test  1h ago                                 │
                  │   darkagents     ◌ paused   0/1   ⧗ 1    –                                                          │
                  ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -12,13 +15,10 @@
                  │   7be210   darkmem      ○ idle      –                                                 1m30s         │
                  │   –        darkcloud    ⧗ waiting   2 jobs queued (repo cap 1)                                      │
                  ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
-                 ╭─ Events ────────────────────────────────────────────────────────────────────────────────────────────╮
+                 ╭─ Activity ──────────────────────────────────────────────────────────────────────────────────────────╮
                  │ HH:MM:SS  ✔ darkcloud   #411 lint success 2m10s  cleanup: 3 ctrs                                    │
                  │ HH:MM:SS  ▶ darkcloud   spawned a3f9c1 (2.330.0)                                                    │
                  │ HH:MM:SS  ⚠             disk 81% > high-water 80% — pruned build cache                              │
-                 │                                                                                                     │
-                 │                                                                                                     │
-                 │                                                                                                     │
                  │                                                                                                     │
                  │                                                                                                     │
                  │                                                                                                     │

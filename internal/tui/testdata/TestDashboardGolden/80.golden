@@ -1,7 +1,8 @@
  ghr   mode ● QUEUE   runners ▕██░▏ 2/3   api 4800   disk ▕██████░░░░▏ 61%   ●
 [ 1 Dashboard ]  2 Runners    3 History    4 Settings                    ? help
 Dashboard                                                                       
-╭─ Repos ──────────────────────────────────────────────────────────────────────╮
+ Running 2 / 3   Queued jobs 3   Repositories 2 active · 1 paused   Disk 61%    
+╭─ Repositories ───────────────────────────────────────────────────────────────╮
 │   REPO           STATE      RUN   QUEUE  LAST JOB                            │
 │ ▸ darkcloud      ● active   1/1   ⧗ 2    ✔ #411 lint  2m ago                 │
 │   darkmem        ● active   1/1   –      ✖ #87 build / test  1h ago          │
@@ -13,11 +14,10 @@ Dashboard
 │   7be210   darkmem      ○ idle      –                          1m30s         │
 │   –        darkcloud    ⧗ waiting   2 jobs queued (repo cap 1)               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭─ Events ─────────────────────────────────────────────────────────────────────╮
+╭─ Activity ───────────────────────────────────────────────────────────────────╮
 │ HH:MM:SS  ✔ darkcloud   #411 lint success 2m10s  cleanup: 3 ctrs             │
 │ HH:MM:SS  ▶ darkcloud   spawned a3f9c1 (2.330.0)                             │
 │ HH:MM:SS  ⚠             disk 81% > high-water 80% — pruned build cache       │
-│                                                                              │
 │                                                                              │
 │                                                                              │
 │                                                                              │
