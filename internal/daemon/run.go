@@ -82,6 +82,21 @@ func listen(socket string) (net.Listener, error) {
 	return ln, nil
 }
 
+// checkToken validates a candidate token with the reads the manager depends on,
+// since a token that can read the repo may still lack the runner or run scopes.
+func checkToken(ctx context.Context, c *github.Client, repo string) error {
+	if _, err := c.GetRepo(ctx, repo); err != nil {
+		return err
+	}
+	if _, err := c.ListRunners(ctx, repo); err != nil {
+		return fmt.Errorf("listing runners failed; the token needs Administration: read/write: %w", err)
+	}
+	if _, err := c.ListRuns(ctx, repo, "queued"); err != nil {
+		return fmt.Errorf("listing workflow runs failed; the token needs Actions: read: %w", err)
+	}
+	return nil
+}
+
 // Run starts the daemon and blocks until ctx is cancelled. Runner units keep running after it exits.
 func Run(ctx context.Context, o Options) error {
 	store, warnings, err := OpenStore(o.ConfigPath, o.TokenPath)
@@ -137,8 +152,7 @@ func Run(ctx context.Context, o Options) error {
 		CheckToken: func(ctx context.Context, token, repo string) error {
 			c := github.New(owner, func() string { return token })
 			c.BaseURL = gh.BaseURL
-			_, err := c.GetRepo(ctx, repo)
-			return err
+			return checkToken(ctx, c, repo)
 		},
 		Wake: func() {
 			select {

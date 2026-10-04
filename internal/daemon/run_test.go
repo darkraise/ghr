@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/darkraise/ghr/internal/api"
+	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/runner"
 	"github.com/darkraise/ghr/internal/system"
 )
@@ -95,6 +96,43 @@ func fakeGitHub(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// A token that can read the repo but not its runners or runs must be rejected,
+// naming the permission it lacks.
+func TestCheckTokenNeedsRunnerAndRunAccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		p := r.URL.Path
+		switch {
+		case strings.HasSuffix(p, "/actions/runners") && tok == "no-admin",
+			strings.HasSuffix(p, "/actions/runs") && tok == "no-runs":
+			w.WriteHeader(403)
+			fmt.Fprint(w, `{"message":"Resource not accessible by personal access token"}`)
+		case strings.HasSuffix(p, "/actions/runners"):
+			fmt.Fprint(w, `{"runners":[]}`)
+		case strings.HasSuffix(p, "/actions/runs"):
+			fmt.Fprint(w, `{"workflow_runs":[]}`)
+		case p == "/repos/darkraise/darkmem":
+			fmt.Fprint(w, `{"full_name":"darkraise/darkmem","private":true}`)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	check := func(tok string) error {
+		c := github.New("darkraise", func() string { return tok })
+		c.BaseURL = srv.URL
+		return checkToken(context.Background(), c, "darkmem")
+	}
+	if err := check("good"); err != nil {
+		t.Fatalf("a token with every permission was rejected: %v", err)
+	}
+	for tok, perm := range map[string]string{"no-admin": "Administration", "no-runs": "Actions"} {
+		if err := check(tok); err == nil || !strings.Contains(err.Error(), perm) {
+			t.Errorf("%s: got %v, want a rejection naming %s", tok, err, perm)
+		}
+	}
 }
 
 func waitFor(t *testing.T, what string, cond func() bool) {

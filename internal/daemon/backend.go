@@ -38,7 +38,7 @@ type Backend struct {
 	GH     GitHub
 	Events *events.Ring
 	Hist   *history.Store
-	// CheckToken validates a candidate token by reading repo with it.
+	// CheckToken validates a candidate token by reading repo, its runners and its runs with it.
 	CheckToken func(ctx context.Context, token, repo string) error
 	// Wake asks the run loop for an immediate tick after a config change, so a
 	// pause stops idle runners at once; nil in tests.
