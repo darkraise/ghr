@@ -43,7 +43,12 @@ func fakeDaemon(t *testing.T) *[]recorded {
 			json.NewEncoder(w).Encode([]model.HistoryEntry{{Repo: "darkmem", RunNumber: "88", JobName: "build", Conclusion: "failure",
 				StartedAt: now.Add(-time.Minute), FinishedAt: now}})
 		case strings.HasSuffix(r.URL.Path, "/log"):
-			json.NewEncoder(w).Encode(model.LogChunk{Data: "hello log\n", Next: "Runner_1.log=10"})
+			// Two chunks, then nothing new: an unknown cursor gets an empty chunk.
+			chunks := map[string]model.LogChunk{
+				"":                {Data: "hello log\n", Next: "Runner_1.log=10"},
+				"Runner_1.log=10": {Data: "second chunk\n", Next: "Runner_1.log=23"},
+			}
+			json.NewEncoder(w).Encode(chunks[r.URL.Query().Get("cursor")])
 		case r.URL.Path == "/repos" && strings.Contains(string(b), `"public"`) && !strings.Contains(string(b), `"allow_public":true`):
 			w.WriteHeader(409)
 			json.NewEncoder(w).Encode(map[string]string{"error": "public is public"})
@@ -197,7 +202,7 @@ func TestErrorsAndUsage(t *testing.T) {
 
 func TestLogsAndHistory(t *testing.T) {
 	fakeDaemon(t)
-	if code, out, _ := runCLI(t, "", "logs", "a3f9c1"); code != 0 || out != "hello log\n" {
+	if code, out, _ := runCLI(t, "", "logs", "a3f9c1"); code != 0 || out != "hello log\nsecond chunk\n" {
 		t.Fatalf("logs %d %q", code, out)
 	}
 	code, out, _ := runCLI(t, "", "history", "--repo", "darkmem")

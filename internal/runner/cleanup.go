@@ -18,7 +18,8 @@ import (
 	"github.com/darkraise/ghr/internal/model"
 )
 
-// maxLogChunk bounds one RunnerLog response; the cursor resumes where it stopped.
+// maxLogChunk bounds the log bytes of one RunnerLog response (file headers come
+// on top); the cursor resumes where it stopped.
 const maxLogChunk = 256 * 1024
 
 func within(path, dir string) bool {
@@ -228,10 +229,16 @@ func parseCursor(cursor string) map[string]int64 {
 	return out
 }
 
+// lastLogKey is the cursor key naming the file the previous chunk ended in; log
+// file names always match Runner_*.log or Worker_*.log, so it never collides.
+const lastLogKey = "last"
+
 // RunnerLog returns the runner's diagnostic logs (Runner_* then Worker_*) after
 // cursor, read from the live instance or its archive. The Runner and Worker logs
 // grow concurrently, so the cursor tracks one offset per file rather than one
 // offset into their concatenation; archiving keeps file names, so it stays valid.
+// A "==> file <==" header marks every switch to another file, including one
+// across chunks, so a partial last line never runs into the next file's text.
 func (m *Manager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 	if !idRe.MatchString(id) {
 		return model.LogChunk{}, ErrUnknownRunner(id)
@@ -250,6 +257,10 @@ func (m *Manager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 		files = append(files, matches...)
 	}
 	offsets := parseCursor(cursor)
+	last := ""
+	if q, err := url.ParseQuery(cursor); err == nil {
+		last = q.Get(lastLogKey)
+	}
 	// Keep offsets of files this listing missed (the logs can move to the archive
 	// mid-listing) so a later call does not replay them.
 	next := url.Values{}
@@ -261,12 +272,22 @@ func (m *Manager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 		name := filepath.Base(f)
 		off := offsets[name]
 		if budget := maxLogChunk - len(data); budget > 0 {
-			if b, err := readFrom(f, off, budget); err == nil {
+			if b, err := readFrom(f, off, budget); err == nil && len(b) > 0 {
+				if name != last {
+					if last != "" {
+						data = append(data, '\n')
+					}
+					data = append(data, "==> "+name+" <==\n"...)
+					last = name
+				}
 				data = append(data, b...)
 				off += int64(len(b))
 			}
 		}
 		next.Set(name, strconv.FormatInt(off, 10))
+	}
+	if last != "" {
+		next.Set(lastLogKey, last)
 	}
 	return model.LogChunk{Data: string(data), Next: next.Encode()}, nil
 }

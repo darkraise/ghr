@@ -238,7 +238,7 @@ func TestRunnerLogKeepsCharactersWhole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Data != "ok " {
+	if c.Data != "==> Runner_1.log <==\nok " {
 		t.Fatalf("half-flushed chunk %q", c.Data)
 	}
 	appendFile(t, runnerLog, "\x93\n")
@@ -247,7 +247,7 @@ func TestRunnerLogKeepsCharactersWhole(t *testing.T) {
 	}
 	pad := strings.Repeat("a", maxLogChunk-1)
 	os.WriteFile(filepath.Join(diag, "Worker_2.log"), []byte(pad+"✓"), 0o644)
-	if c, _ = h.m.RunnerLog("aaaaaa", c.Next); c.Data != pad {
+	if c, _ = h.m.RunnerLog("aaaaaa", c.Next); c.Data != "\n==> Worker_2.log <==\n"+pad {
 		t.Fatalf("boundary chunk has %d bytes", len(c.Data))
 	}
 	if c, _ = h.m.RunnerLog("aaaaaa", c.Next); c.Data != "✓" {
@@ -270,7 +270,7 @@ func TestRunnerLogCursorFollowsGrowingFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Data != "r1\nw1\n" {
+	if c.Data != "==> Runner_1.log <==\nr1\n\n==> Worker_2.log <==\nw1\n" {
 		t.Fatalf("first chunk %q", c.Data)
 	}
 	got.WriteString(c.Data)
@@ -288,7 +288,8 @@ func TestRunnerLogCursorFollowsGrowingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	got.WriteString(c.Data)
-	if got.String() != "r1\nw1\nr2\nw2\nw3\n" {
+	if got.String() != "==> Runner_1.log <==\nr1\n\n==> Worker_2.log <==\nw1\n"+
+		"\n==> Runner_1.log <==\nr2\n\n==> Worker_2.log <==\nw2\nw3\n" {
 		t.Fatalf("stream %q", got.String())
 	}
 	if c, _ = h.m.RunnerLog("aaaaaa", c.Next); c.Data != "" {
@@ -308,7 +309,42 @@ func TestRunnerLogKeepsOffsetsOfUnlistedFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Data != "r1\n" || c.Next != "Runner_1.log=3&Worker_2.log=7" {
+	if c.Data != "==> Runner_1.log <==\nr1\n" || c.Next != "Runner_1.log=3&Worker_2.log=7&last=Runner_1.log" {
 		t.Fatalf("data %q next %q", c.Data, c.Next)
+	}
+}
+
+// A log longer than one chunk arrives whole, and a partial last line in the
+// Runner log stays apart from the Worker log that follows it.
+func TestRunnerLogMarksFileSwitchesAcrossChunks(t *testing.T) {
+	h := newHarness(t)
+	diag := filepath.Join(h.m.instanceDir("aaaaaa"), "_diag")
+	os.MkdirAll(diag, 0o755)
+	runnerLog := filepath.Join(diag, "Runner_1.log")
+	long := strings.Repeat("r", maxLogChunk+5)
+	appendFile(t, runnerLog, long)
+	appendFile(t, filepath.Join(diag, "Worker_2.log"), "w1\n")
+	var got strings.Builder
+	cursor, chunks := "", 0
+	for {
+		c, err := h.m.RunnerLog("aaaaaa", cursor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Data == "" {
+			break
+		}
+		got.WriteString(c.Data)
+		cursor = c.Next
+		if chunks++; chunks > 3 {
+			t.Fatal("the log never ends")
+		}
+	}
+	if want := "==> Runner_1.log <==\n" + long + "\n==> Worker_2.log <==\nw1\n"; chunks != 2 || got.String() != want {
+		t.Fatalf("%d chunks, stream of %d bytes, want 2 chunks of %d bytes", chunks, got.Len(), len(want))
+	}
+	appendFile(t, runnerLog, "r\n")
+	if c, _ := h.m.RunnerLog("aaaaaa", cursor); c.Data != "\n==> Runner_1.log <==\nr\n" {
+		t.Fatalf("switch back %q", c.Data)
 	}
 }

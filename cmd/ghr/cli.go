@@ -192,7 +192,11 @@ func logs(ctx context.Context, c *api.Client, args []string, out io.Writer) erro
 		}
 		cursor = chunk.Next
 		if !follow {
-			return nil
+			// One response is capped, so read until the daemon has nothing more.
+			if chunk.Data == "" {
+				return nil
+			}
+			continue
 		}
 		select {
 		case <-ctx.Done():
