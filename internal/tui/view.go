@@ -7,11 +7,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
-	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
@@ -59,7 +57,7 @@ func (m Model) View() string {
 func (m Model) pageBody(w, h int) string {
 	switch m.page {
 	case pageRunners:
-		return m.runnersTab(w, h)
+		return m.runnersPage(w, h)
 	case pageHistory:
 		return m.historyTab(w, h)
 	case pageSettings:
@@ -112,60 +110,6 @@ func (m Model) selectedRow(id, s, buttons, tail string, w int) string {
 	return zone.Mark(id, sSel.Render(ansi.Strip(cell(s, w-bw-tw)))) + buttons + sSel.Render(ansi.Strip(tail))
 }
 
-func (m Model) runnerLine(i int, r model.InstanceStatus, selected bool, inner int) string {
-	state := r.State
-	icon := "○"
-	switch state {
-	case "busy":
-		icon = spinnerFrames[m.frame%len(spinnerFrames)]
-	case "starting":
-		icon = "◔"
-	case "cleaning":
-		icon = "♻"
-	}
-	job, elapsed := sDim.Render("–"), dur(m.now().Sub(r.Since))
-	if r.Job != nil {
-		job = r.Job.Name
-		if r.Job.RunNumber != "" {
-			job += "  #" + r.Job.RunNumber
-		}
-		if !r.Job.StartedAt.IsZero() {
-			elapsed = dur(m.now().Sub(r.Job.StartedAt))
-		}
-	}
-	sel := "  "
-	if selected {
-		sel = "▸ "
-	}
-	line := sel + cell(r.ID, 8) + " " + cell(r.Repo, 12) + " " + stateStyle(state).Render(cell(icon+" "+state, 11)) + " " +
-		cell(job, inner-50)
-	tail := " " + cell(elapsed, 8)
-	if selected {
-		return m.selectedRow(fmt.Sprintf("runner-%d", i), line,
-			rowButtons(ui.NewButton(rowLogs, "Logs", ui.Secondary), ui.NewButton(rowStop, "Stop", ui.Danger)), tail, inner)
-	}
-	return m.row(fmt.Sprintf("runner-%d", i), false, line+tail, inner)
-}
-
-func (m Model) runnersLines(w int) []string {
-	inner := w - 4
-	lines := []string{sDim.Render(fmt.Sprintf("  %-8s %-12s %-11s %-*s %s", "ID", "REPO", "STATE", inner-50, "JOB", "ELAPSED"))}
-	for i, r := range m.st.Instances {
-		selected := i == m.runnerSel && m.runnerFocus()
-		lines = append(lines, m.runnerLine(i, r, selected, inner))
-	}
-	for _, r := range m.st.Repos {
-		if r.Paused || r.Queued == 0 || r.Max == 0 || r.Active < r.Max {
-			continue
-		}
-		lines = append(lines, sAmber.Render(fmt.Sprintf("  %-8s %-12s %-11s %d jobs queued (repo cap %d)", "–", r.Name, "⧗ waiting", r.Queued, r.Max)))
-	}
-	if len(m.st.Instances) == 0 {
-		lines = append(lines, sDim.Render("  no runners — they start when jobs are queued"))
-	}
-	return lines
-}
-
 // fit keeps the first hdr lines and scrolls the rest so that body line sel
 // stays visible within n lines.
 func fit(lines []string, hdr, sel, n int) []string {
@@ -175,33 +119,6 @@ func fit(lines []string, hdr, sel, n int) []string {
 	body, vis := lines[hdr:], max(n-hdr, 1)
 	start := min(max(sel-vis+1, 0), len(body)-vis)
 	return append(lines[:hdr:hdr], body[start:start+vis]...)
-}
-
-func (m Model) runnersTab(w, h int) string {
-	runners := box("Runners", w, fit(m.runnersLines(w), 1, m.runnerSel, max(h/2-2, 2)))
-	logH := h - lipgloss.Height(runners) - 2
-	if logH < 3 {
-		logH = 3
-	}
-	title := "Log — no runner selected"
-	var lines []string
-	if m.logID != "" {
-		title = "Log " + m.logID + " (following)"
-		all := strings.Split(strings.TrimRight(m.logText, "\n"), "\n")
-		end := len(all) - m.logScroll
-		if end < 0 {
-			end = 0
-		}
-		start := end - logH
-		if start < 0 {
-			start = 0
-		}
-		lines = all[start:end]
-	}
-	for len(lines) < logH {
-		lines = append(lines, "")
-	}
-	return runners + "\n" + zone.Mark("log", box(title, w, lines))
 }
 
 func (m Model) historyTab(w, h int) string {
