@@ -690,7 +690,7 @@ func TestMouseOverlayButtons(t *testing.T) {
 	if m.overlay != ovConfirm {
 		t.Fatal("a click outside the buttons closed the confirmation")
 	}
-	m = click(t, m, "btn-ok")
+	m = click(t, m, btnYes)
 	if m.overlay != ovNone || strings.Join(c.actions(), "|") != "kill a3f9c1" {
 		t.Fatalf("overlay %v calls %v", m.overlay, c.actions())
 	}
@@ -713,9 +713,66 @@ func TestMouseOverlayButtons(t *testing.T) {
 	}
 }
 
+// Confirm and Help share one modal: a bold title, the body, buttons on the
+// right. enter presses the primary button (Yes), esc presses No.
+func TestConfirmModal(t *testing.T) {
+	c := &fakeClient{}
+	m := sampleModel(c, 120, 30)
+	m.focus = paneRunners
+	m = run(t, m, "x")
+	v := m.View()
+	for _, want := range []string{"Confirm", "Runner a3f9c1 is running a job. Stop it?", "( No )  › [ Yes ]"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("modal missing %q:\n%s", want, v)
+		}
+	}
+	m = feed(m, key("q")) // not a dialog key: ignored, the dialog stays
+	if m.overlay != ovConfirm {
+		t.Fatal("an unrelated key closed the dialog")
+	}
+	m = feed(m, keys("tab", " ")...) // focus No, press it with space
+	if m.overlay != ovNone || len(c.actions()) != 0 {
+		t.Fatalf("No: overlay %v actions %v", m.overlay, c.actions())
+	}
+	m = feed(m, keys("x", "esc")...)
+	if m.overlay != ovNone || len(c.actions()) != 0 {
+		t.Fatalf("esc: overlay %v actions %v", m.overlay, c.actions())
+	}
+	m = feed(m, keys("x", "enter")...)
+	if m.overlay != ovNone || strings.Join(c.actions(), "|") != "kill a3f9c1" {
+		t.Fatalf("enter: overlay %v actions %v", m.overlay, c.actions())
+	}
+}
+
+// enter presses the primary button even when another button has focus.
+func TestModalEnterPressesPrimary(t *testing.T) {
+	c := &fakeClient{}
+	m := sampleModel(c, 120, 30)
+	m.focus = paneRunners
+	m = feed(m, keys("x", "tab", "enter")...)
+	if m.overlay != ovNone || strings.Join(c.actions(), "|") != "kill a3f9c1" {
+		t.Fatalf("overlay %v actions %v", m.overlay, c.actions())
+	}
+}
+
+// A long body wraps so the dialog and its buttons stay on an 80-column screen.
+func TestModalWrapsToViewport(t *testing.T) {
+	m := sampleModel(&fakeClient{}, 80, 30)
+	upd, _ := m.openConfirm(strings.Repeat("a very long confirmation sentence ", 6), func() tea.Cmd { return nil })
+	v := upd.(Model).View()
+	for i, line := range strings.Split(v, "\n") {
+		if lipgloss.Width(line) > 80 {
+			t.Fatalf("line %d is %d wide", i, lipgloss.Width(line))
+		}
+	}
+	if !strings.Contains(v, "[ Yes ]") {
+		t.Fatalf("buttons lost:\n%s", v)
+	}
+}
+
 func TestHelpMentionsMouseNotes(t *testing.T) {
 	v := run(t, sampleModel(&fakeClient{}, 120, 30), "?").View()
-	for _, want := range []string{"Shift-drag", "Option-drag in iTerm2", "set -g mouse on"} {
+	for _, want := range []string{"Shift-drag", "Option-drag in iTerm2", "set -g mouse on", "Close", "takes digits"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("help missing %q", want)
 		}

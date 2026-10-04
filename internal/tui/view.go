@@ -309,46 +309,6 @@ func (m Model) configTab(w, h int) string {
 	return box("Config", w, fit(lines, 1, m.cfgSel, h-2))
 }
 
-// buttons renders the clickable dialog buttons: ok runs enter, cancel runs esc.
-func buttons(ok, cancel string) string {
-	b := func(id, label string) string { return zone.Mark(id, sAccent.Render("[ "+label+" ]")) }
-	if ok == "" {
-		return b("btn-cancel", cancel)
-	}
-	return b("btn-ok", ok) + "  " + b("btn-cancel", cancel)
-}
-
-func (m Model) withOverlay(base string, w int) string {
-	var body string
-	switch m.overlay {
-	case ovConfirm:
-		body = m.confirmText + "\n\n" + buttons("Yes", "No") + "\n" + sDim.Render("y confirm · any other key cancels")
-	case ovPrompt:
-		body = sBold.Render(m.promptLabel) + "\n\n" + m.prompt.View() + "\n\n" + buttons("Save", "Cancel") + "\n" +
-			sDim.Render("enter save · esc cancel")
-	case ovHelp:
-		body = sBold.Render("Keys") + "\n\n" + strings.Join([]string{
-			"1-4         switch page           ↑↓ / j k   move selection",
-			"tab         move focus",
-			"h / →       focus repos / runners  p          pause/resume repo",
-			"+ / -       repo cap               [ / ]      global cap",
-			"m           toggle queue/all       P          pause/resume all",
-			"a / d       add / remove repo      x          stop runner",
-			"l           follow runner log      enter      details / edit / copy URL",
-			"pgup/pgdn   scroll events and log  q          quit",
-			"",
-			"Mouse: click tabs, rows, footer keys and dialog buttons; double-click a runner; wheel scrolls.",
-			"Selecting terminal text needs Shift-drag (Option-drag in iTerm2).",
-			"Under tmux, mouse input requires `set -g mouse on`.",
-		}, "\n") + "\n\n" + buttons("", "Close")
-	case ovDetail:
-		body = m.detailBody()
-	}
-	dialog := sDialog.Render(body)
-	return lipgloss.Place(w, lipgloss.Height(base), lipgloss.Center, lipgloss.Center, dialog,
-		lipgloss.WithWhitespaceChars(" "))
-}
-
 func (m Model) detailBody() string {
 	r := m.instance(m.detailID)
 	if r == nil {

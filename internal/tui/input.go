@@ -31,13 +31,9 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.prompt, cmd = m.prompt.Update(k)
 		return m, cmd
-	case ovConfirm:
-		m.overlay = ovNone
-		if key == "y" || key == "enter" {
-			return m, m.confirmAction()
-		}
-		return m, nil
-	case ovDetail, ovHelp:
+	case ovConfirm, ovHelp:
+		return m.dialogKey(k)
+	case ovDetail:
 		if key == "esc" || key == "q" || key == "enter" || key == "?" {
 			m.overlay = ovNone
 		}
@@ -52,7 +48,7 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "?":
-		m.overlay = ovHelp
+		return m.openHelp()
 	case "1", "2", "3", "4":
 		return m.switchPage(page(key[0] - '1'))
 	case "tab", "shift+tab":
@@ -258,11 +254,6 @@ func (m Model) globalCap(up bool) tea.Cmd {
 	})
 }
 
-func (m Model) openConfirm(text string, action func() tea.Cmd) (tea.Model, tea.Cmd) {
-	m.overlay, m.confirmText, m.confirmAction = ovConfirm, text, action
-	return m, nil
-}
-
 func (m Model) openPrompt(label, value string, submit func(string) tea.Cmd) (tea.Model, tea.Cmd) {
 	m.overlay, m.promptLabel, m.promptSubmit = ovPrompt, label, submit
 	m.prompt.SetValue(value)
@@ -391,13 +382,17 @@ func (m Model) configFields() []configField {
 	return fields
 }
 
-// dialogButtons map each overlay button zone to the key it stands for.
+// dialogButtons map each detail or prompt overlay button zone to the key it stands for.
 var dialogButtons = []struct {
 	zone string
 	key  tea.KeyType
 }{{"btn-ok", tea.KeyEnter}, {"btn-cancel", tea.KeyEsc}}
 
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.overlay == ovConfirm || m.overlay == ovHelp {
+		_, cmd := m.dlg.Mouse(msg)
+		return m, cmd
+	}
 	if m.overlay != ovNone {
 		if msg.Action == tea.MouseActionRelease && msg.Button == tea.MouseButtonLeft {
 			for _, b := range dialogButtons {
