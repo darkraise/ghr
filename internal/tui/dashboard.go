@@ -9,6 +9,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/config"
+	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
 // allPaused reports whether every repo not being removed is paused: then the
@@ -171,8 +172,9 @@ func (m Model) reposLines(w int) []string {
 		if r.Queued > 0 {
 			queue = sAmber.Render(fmt.Sprintf("⧗ %d", r.Queued))
 		}
+		selected := i == m.repoSel && m.repoFocus()
 		sel := "  "
-		if i == m.repoSel && m.focus == paneRepos {
+		if selected {
 			sel = "▸ "
 		}
 		line := sel + cell(r.Name, 14) + " " + stateStyle(st).Render(cell(dot+" "+state, 10)) + " " +
@@ -191,7 +193,15 @@ func (m Model) reposLines(w int) []string {
 		if r.Error != "" && !narrow {
 			line += "  " + sRed.Render(r.Error)
 		}
-		lines = append(lines, m.row(fmt.Sprintf("repo-%d", i), i == m.repoSel && m.focus == paneRepos, line, inner))
+		if selected {
+			pause := ui.NewButton(rowPause, "Pause", ui.Secondary)
+			if r.Paused {
+				pause.Label = "Resume"
+			}
+			lines = append(lines, m.selectedRow(fmt.Sprintf("repo-%d", i), line, rowButtons(pause, ui.NewButton(rowRemove, "Remove", ui.Danger)), "", inner))
+			continue
+		}
+		lines = append(lines, m.row(fmt.Sprintf("repo-%d", i), false, line, inner))
 	}
 	if len(m.st.Repos) == 0 {
 		lines = append(lines, sDim.Render("  no repos configured — press a to add one"))

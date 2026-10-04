@@ -12,6 +12,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
 func dur(d time.Duration) string {
@@ -84,6 +85,33 @@ func (m Model) row(id string, selected bool, s string, w int) string {
 	return zone.Mark(id, s)
 }
 
+// The selected row's buttons. Only the focused card's selected row shows
+// them, so each zone appears once per frame.
+const (
+	rowPause  = "row/pause"
+	rowRemove = "row/remove"
+	rowLogs   = "row/logs"
+	rowStop   = "row/stop"
+)
+
+// rowButtons renders buttons for the right end of a selected row.
+func rowButtons(buttons ...*ui.Button) string {
+	var parts []string
+	for _, b := range buttons {
+		parts = append(parts, b.View(false, 0))
+	}
+	return strings.Join(parts, "")
+}
+
+// selectedRow renders a selected row of width w: the text s, the row's
+// buttons, then tail, the row's fixed right-hand columns, which keep their
+// place under the header. s gives way to the buttons, so its last column
+// should be the flexible one.
+func (m Model) selectedRow(id, s, buttons, tail string, w int) string {
+	bw, tw := ansi.StringWidth(buttons), ansi.StringWidth(tail)
+	return zone.Mark(id, sSel.Render(ansi.Strip(cell(s, w-bw-tw)))) + buttons + sSel.Render(ansi.Strip(tail))
+}
+
 func (m Model) runnerLine(i int, r model.InstanceStatus, selected bool, inner int) string {
 	state := r.State
 	icon := "○"
@@ -110,15 +138,20 @@ func (m Model) runnerLine(i int, r model.InstanceStatus, selected bool, inner in
 		sel = "▸ "
 	}
 	line := sel + cell(r.ID, 8) + " " + cell(r.Repo, 12) + " " + stateStyle(state).Render(cell(icon+" "+state, 11)) + " " +
-		cell(job, inner-50) + " " + cell(elapsed, 8)
-	return m.row(fmt.Sprintf("runner-%d", i), selected, line, inner)
+		cell(job, inner-50)
+	tail := " " + cell(elapsed, 8)
+	if selected {
+		return m.selectedRow(fmt.Sprintf("runner-%d", i), line,
+			rowButtons(ui.NewButton(rowLogs, "Logs", ui.Secondary), ui.NewButton(rowStop, "Stop", ui.Danger)), tail, inner)
+	}
+	return m.row(fmt.Sprintf("runner-%d", i), false, line+tail, inner)
 }
 
 func (m Model) runnersLines(w int) []string {
 	inner := w - 4
 	lines := []string{sDim.Render(fmt.Sprintf("  %-8s %-12s %-11s %-*s %s", "ID", "REPO", "STATE", inner-50, "JOB", "ELAPSED"))}
 	for i, r := range m.st.Instances {
-		selected := i == m.runnerSel && (m.focus == paneRunners || m.page == pageRunners)
+		selected := i == m.runnerSel && m.runnerFocus()
 		lines = append(lines, m.runnerLine(i, r, selected, inner))
 	}
 	for _, r := range m.st.Repos {

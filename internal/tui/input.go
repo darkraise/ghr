@@ -351,6 +351,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m.footerPress(f.key)
 		}
 	}
+	// A row button runs its key, so the row keys and the buttons stay one path.
+	for id, k := range map[string]string{rowPause: "p", rowRemove: "d", rowLogs: "l", rowStop: "x"} {
+		if zone.Get(id).InBounds(msg) {
+			return m.press(k)
+		}
+	}
 	hit := func(prefix string, n int) int {
 		for i := 0; i < n; i++ {
 			if zone.Get(fmt.Sprintf("%s-%d", prefix, i)).InBounds(msg) {

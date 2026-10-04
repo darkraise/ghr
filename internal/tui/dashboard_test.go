@@ -133,3 +133,46 @@ func TestDashboardHeaderButtons(t *testing.T) {
 		t.Fatalf("actions %q", got)
 	}
 }
+
+// The focused card's selected row carries buttons that run the row keys.
+// The selected row's buttons belong to the focused card: they go while a
+// header button has focus, and a selected runner keeps its elapsed time.
+func TestRowButtonsFollowFocus(t *testing.T) {
+	m := sampleModel(&fakeClient{}, 120, 40)
+	m.focusCard(paneRunners)
+	if v := m.View(); !strings.Contains(v, "( Logs )") || !strings.Contains(v, "[ Stop ] 12m04s") {
+		t.Fatalf("selected runner row:\n%s", v)
+	}
+	if v := feed(m, key("tab")).View(); strings.Contains(v, "( Logs )") || strings.Contains(v, "( Pause )") {
+		t.Fatalf("row buttons shown while + Add has focus:\n%s", v)
+	}
+}
+
+func TestRowButtons(t *testing.T) {
+	c := &fakeClient{}
+	m := sampleModel(c, 120, 40)
+	v := m.View()
+	if !strings.Contains(v, "▸ darkcloud") || !strings.Contains(v, "( Pause )") || !strings.Contains(v, "[ Remove ]") || strings.Contains(v, "( Logs )") {
+		t.Fatalf("repo row buttons:\n%s", v)
+	}
+	m = click(t, m, rowPause)
+	if m = click(t, m, rowRemove); m.overlay != ovConfirm {
+		t.Fatal("Remove did not ask first")
+	}
+	m = feed(m, key("esc"))
+	m = feed(m, keys("down", "down")...) // darkagents is paused
+	if v := m.View(); !strings.Contains(v, "( Resume )") {
+		t.Fatalf("paused repo row:\n%s", v)
+	}
+	m = feed(m, key("right"))
+	if v := m.View(); !strings.Contains(v, "( Logs )") || !strings.Contains(v, "[ Stop ]") || strings.Contains(v, "( Resume )") {
+		t.Fatalf("runner row buttons:\n%s", v)
+	}
+	if m = click(t, m, rowStop); m.overlay != ovConfirm { // a3f9c1 is busy
+		t.Fatal("Stop on a busy runner did not ask first")
+	}
+	m = feed(m, key("enter"))
+	if got := strings.Join(c.actions(), "|"); got != "pause darkcloud|kill a3f9c1" {
+		t.Fatalf("actions %q", got)
+	}
+}
