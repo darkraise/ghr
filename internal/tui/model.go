@@ -63,7 +63,14 @@ const (
 	ovPrompt
 	ovDetail
 	ovHelp
+	ovUnsaved
 )
+
+// leaveTarget is where the user was going when the unsaved-changes dialog opened.
+type leaveTarget struct {
+	page page
+	quit bool
+}
 
 const maxEvents = 200
 
@@ -153,6 +160,8 @@ type Model struct {
 	dlg           ui.Group     // focus across the open dialog's buttons
 	dlgButtons    []*ui.Button // the open dialog's buttons, in display order
 	dlgCancel     string       // the button esc presses
+	leaveTo       leaveTarget  // where to go once unsaved Settings changes are handled
+	leaving       bool         // a save started from the unsaved-changes dialog is in flight
 	prompt        textinput.Model
 	promptLabel   string
 	promptSubmit  func(string) tea.Cmd

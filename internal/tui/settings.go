@@ -335,7 +335,7 @@ func (m Model) saveSettings() (tea.Model, tea.Cmd) {
 func (m Model) saved(msg savedMsg) (tea.Model, tea.Cmd) {
 	s := m.settings
 	if msg.err != nil {
-		s.saving = false
+		s.saving, m.leaving = false, false // a rejected save stays on Settings
 		s.alert = strings.Split(clean(msg.err.Error()), "; ")
 		m.toast.Show("settings not saved", true, m.now())
 		return m, nil
@@ -360,9 +360,15 @@ func (m Model) saved(msg savedMsg) (tea.Model, tea.Cmd) {
 // If the refetch fails, the save stands but cannot be checked: the edits stay
 // as typed, a toast says so, and the next periodic refresh brings the form
 // up to date.
+//
+// A save started from the unsaved-changes dialog leaves only from here, once
+// the check has run: a failed refetch or an ignored field stays on Settings
+// so the warning is seen.
 func (m Model) refetched(msg refetchedMsg) (tea.Model, tea.Cmd) {
 	s := m.settings
 	s.saving = false
+	leaving := m.leaving
+	m.leaving = false
 	if msg.err != nil {
 		m.toast.Show("saved, but re-reading the config failed: "+clean(msg.err.Error()), true, m.now())
 		return m, nil
@@ -378,8 +384,11 @@ func (m Model) refetched(msg refetchedMsg) (tea.Model, tea.Cmd) {
 	for _, f := range s.form.Fields() {
 		if v, ok := msg.sent[f.Key]; ok && !ui.Equal(f.Kind, f.Base, v) {
 			m.toast.Show("daemon did not apply "+fieldName(f.Key)+"; is it older than this ghr?", true, m.now())
-			break
+			return m, nil
 		}
+	}
+	if leaving {
+		return m.goTo(m.leaveTo)
 	}
 	return m, nil
 }

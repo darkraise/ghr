@@ -34,7 +34,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.prompt, cmd = m.prompt.Update(k)
 		return m, cmd
-	case ovConfirm, ovHelp:
+	case ovConfirm, ovHelp, ovUnsaved:
 		return m.dialogKey(k)
 	case ovDetail:
 		if key == "esc" || key == "q" || key == "enter" || key == "?" {
@@ -53,12 +53,12 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 // press runs the action bound to key; mouse clicks on footer hints call it too.
 func (m Model) press(key string) (tea.Model, tea.Cmd) {
 	switch key {
-	case "q", "ctrl+c":
-		return m, tea.Quit
+	case "q":
+		return m.leave(leaveTarget{quit: true})
 	case "?":
 		return m.openHelp()
 	case "1", "2", "3", "4":
-		return m.switchPage(page(key[0] - '1'))
+		return m.leave(leaveTarget{page: page(key[0] - '1')})
 	case "tab", "shift+tab":
 		// tab moves focus within a page; on the Dashboard, between its two tables.
 		if m.page == pageDashboard {
@@ -135,9 +135,7 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 		}
 	case "l":
 		if m.selectedRunner() != nil {
-			m.page = pageRunners
-			cmd := m.follow()
-			return m, cmd
+			return m.leave(leaveTarget{page: pageRunners})
 		}
 	case "r":
 		if m.page == pageHistory {
@@ -310,7 +308,7 @@ var dialogButtons = []struct {
 }{{"btn-ok", tea.KeyEnter}, {"btn-cancel", tea.KeyEsc}}
 
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.overlay == ovConfirm || m.overlay == ovHelp {
+	if m.overlay == ovConfirm || m.overlay == ovHelp || m.overlay == ovUnsaved {
 		_, cmd := m.dlg.Mouse(msg)
 		return m, cmd
 	}
@@ -364,7 +362,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	for i := range pageNames {
 		if zone.Get(navZone(page(i))).InBounds(msg) {
-			return m.switchPage(page(i))
+			return m.leave(leaveTarget{page: page(i)})
 		}
 	}
 	if zone.Get("nav/help").InBounds(msg) {

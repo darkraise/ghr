@@ -391,12 +391,7 @@ func TestSettingsSavePatchHoldsOnlyDirtyFields(t *testing.T) {
 // not dirty, and no mismatch is reported.
 func TestSettingsSavedDurationIsNotDirtyAfterRefetch(t *testing.T) {
 	c := &fakeClient{}
-	c.onPatch = func(p model.ConfigPatch) {
-		if p.PollInterval != nil {
-			d, _ := config.ParseDuration(*p.PollInterval)
-			c.cfg.PollInterval = d
-		}
-	}
+	applyPoll(c)
 	m := onSettings(t, c, 120, 30)
 	set(m, setPollInterval, ui.Value{Text: "120s"})
 	m = click(t, m, setSave)
@@ -631,6 +626,141 @@ func TestSettingsRefreshScrollsMovedFocusIntoView(t *testing.T) {
 	}
 	if v := m.View(); !strings.Contains(v, "Max                › [ − ]") {
 		t.Fatalf("new focus not in view (scroll %d):\n%s", m.settings.scroll, v)
+	}
+}
+
+// dirtySettings is onSettings with one unsaved change.
+func dirtySettings(t *testing.T, c *fakeClient) Model {
+	t.Helper()
+	m := onSettings(t, c, 120, 30)
+	set(m, setPollInterval, ui.Value{Text: "30s"})
+	return m
+}
+
+func TestLeaveGuardAsksOnQDigitsAndSidebar(t *testing.T) {
+	m := dirtySettings(t, &fakeClient{})
+	upd, cmd := m.Update(key("q"))
+	m = upd.(Model)
+	if quits(cmd) || m.overlay != ovUnsaved {
+		t.Fatalf("q with unsaved changes: overlay %v", m.overlay)
+	}
+	v := m.View()
+	for _, want := range []string{"Unsaved changes", "You have 1 unsaved change on the Settings page.", "( Stay )    ( Discard )  › [ Save ]"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("dialog missing %q:\n%s", want, v)
+		}
+	}
+	m = feed(m, key("esc")) // esc means Stay
+	if m.overlay != ovNone || m.page != pageSettings || m.settings.input(setPollInterval).Value().Text != "30s" {
+		t.Fatalf("esc: overlay %v page %v", m.overlay, m.page)
+	}
+	if m = feed(m, key("1")); m.overlay != ovUnsaved || m.leaveTo != (leaveTarget{page: pageDashboard}) {
+		t.Fatalf("1: overlay %v target %+v", m.overlay, m.leaveTo)
+	}
+	m = click(t, m, btnLeaveStay)
+	if m = click(t, m, "nav/history"); m.overlay != ovUnsaved || m.leaveTo != (leaveTarget{page: pageHistory}) {
+		t.Fatalf("sidebar: overlay %v target %+v", m.overlay, m.leaveTo)
+	}
+	m = click(t, m, btnLeaveDiscard)
+	if m.overlay != ovNone || m.page != pageHistory || len(m.settings.form.Dirty()) != 0 {
+		t.Fatalf("discard: overlay %v page %v dirty %d", m.overlay, m.page, len(m.settings.form.Dirty()))
+	}
+}
+
+func TestLeaveGuardSaveThenNavigate(t *testing.T) {
+	c := &fakeClient{}
+	applyPoll(c)
+	m := feed(dirtySettings(t, c), keys("2", "enter")...) // enter presses Save, the primary
+	if m.page != pageRunners || len(c.patches) != 1 || *c.patches[0].PollInterval != "30s" {
+		t.Fatalf("page %v patches %d", m.page, len(c.patches))
+	}
+}
+
+func TestLeaveGuardRejectedSaveStays(t *testing.T) {
+	c := &fakeClient{patchErr: errors.New("poll_interval must be >= 5s")}
+	m := feed(dirtySettings(t, c), keys("3", "enter")...)
+	if m.page != pageSettings || !strings.Contains(m.View(), "✖ poll_interval must be >= 5s") || m.leaving {
+		t.Fatalf("page %v leaving %v", m.page, m.leaving)
+	}
+}
+
+// pump applies msgs and every message their commands produce, running each
+// command exactly once, and reports whether any of them asked to quit.
+func pump(m Model, msgs ...tea.Msg) (Model, bool) {
+	quit := false
+	for len(msgs) > 0 {
+		msg := msgs[0]
+		msgs = msgs[1:]
+		if _, ok := msg.(tea.QuitMsg); ok {
+			quit = true
+			continue
+		}
+		upd, cmd := m.Update(msg)
+		m = upd.(Model)
+		msgs = append(msgs, collect(cmd)...)
+	}
+	return m, quit
+}
+
+// applyPoll makes the fake daemon apply a patched poll interval.
+func applyPoll(c *fakeClient) {
+	c.onPatch = func(p model.ConfigPatch) {
+		if p.PollInterval != nil {
+			d, _ := config.ParseDuration(*p.PollInterval)
+			c.cfg.PollInterval = d
+		}
+	}
+}
+
+// Save, then quit: the quit comes only after the patch and the check of the
+// refetched config.
+func TestLeaveGuardSaveThenQuit(t *testing.T) {
+	c := &fakeClient{}
+	applyPoll(c)
+	m, quit := pump(dirtySettings(t, c), key("q"), key("enter"))
+	if !quit || len(c.patches) != 1 || m.settings.form.Field(setPollInterval).Dirty() || m.settings.saving {
+		t.Fatalf("quit %v patches %d", quit, len(c.patches))
+	}
+}
+
+// When the daemon ignores a saved field, the save does not leave: the
+// warning stays on screen.
+func TestLeaveGuardStaysWhenDaemonIgnoresAField(t *testing.T) {
+	c := &fakeClient{} // accepts the patch but applies nothing
+	m, quit := pump(dirtySettings(t, c), key("q"), key("enter"))
+	if quit || m.page != pageSettings || !strings.Contains(m.View(), "daemon did not apply poll_interval") {
+		t.Fatalf("quit %v page %v", quit, m.page)
+	}
+}
+
+// While a save is in flight, leaving waits for it instead of opening a second guard.
+func TestLeaveWaitsForSaveInFlight(t *testing.T) {
+	m := dirtySettings(t, &fakeClient{})
+	upd, _ := m.Update(key("ctrl+s"))
+	upd, cmd := upd.Update(key("q"))
+	m = upd.(Model)
+	if quits(cmd) || m.overlay != ovNone || !strings.Contains(m.View(), "wait for the save to finish") {
+		t.Fatalf("overlay %v", m.overlay)
+	}
+}
+
+// l (follow a runner's log) leaves Settings, so it is guarded too.
+func TestLogKeyIsGuarded(t *testing.T) {
+	m := dirtySettings(t, &fakeClient{})
+	m.View()
+	if m = feed(m, key("l")); m.overlay != ovUnsaved || m.leaveTo != (leaveTarget{page: pageRunners}) {
+		t.Fatalf("l: overlay %v target %+v page %v", m.overlay, m.leaveTo, m.page)
+	}
+}
+
+func TestNoGuardWhenCleanOrOnCtrlC(t *testing.T) {
+	m := onSettings(t, &fakeClient{}, 120, 30)
+	if m = feed(m, key("1")); m.page != pageDashboard || m.overlay != ovNone {
+		t.Fatalf("clean form guarded: page %v overlay %v", m.page, m.overlay)
+	}
+	m = dirtySettings(t, &fakeClient{})
+	if _, cmd := m.Update(key("ctrl+c")); !quits(cmd) {
+		t.Fatal("ctrl+c was guarded")
 	}
 }
 
