@@ -406,9 +406,9 @@ func TestTabMovesFocusNotPage(t *testing.T) {
 	if m.page != pageDashboard || m.focus != paneRunners {
 		t.Fatalf("tab: page %v focus %v", m.page, m.focus)
 	}
-	m = run(t, m, "tab")
-	if m.focus != paneRepos {
-		t.Fatalf("second tab: focus %v", m.focus)
+	m = run(t, m, "tab", "tab", "tab") // + Add, Pause all, back to Repositories
+	if m.focus != paneRepos || m.groups.dash.FocusedID() != dashRepos {
+		t.Fatalf("tab cycle: focus %v on %q", m.focus, m.groups.dash.FocusedID())
 	}
 	if m = run(t, m, "2", "tab"); m.page != pageRunners {
 		t.Fatalf("tab on Runners switched to page %v", m.page)

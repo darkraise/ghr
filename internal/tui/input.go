@@ -36,6 +36,11 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return mm, cmd
 		}
 	}
+	if m.page == pageDashboard {
+		if ok, mm, cmd := m.dashKey(k); ok {
+			return mm, cmd
+		}
+	}
 	return m.press(key)
 }
 
@@ -48,15 +53,10 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 		return m.openHelp()
 	case "1", "2", "3", "4":
 		return m.leave(leaveTarget{page: page(key[0] - '1')})
-	case "tab", "shift+tab":
-		// tab moves focus within a page; on the Dashboard, between its two tables.
-		if m.page == pageDashboard {
-			m.focus = 1 - m.focus
-		}
 	case "left", "h":
-		m.focus = paneRepos
+		m.focusCard(paneRepos)
 	case "right":
-		m.focus = paneRunners
+		m.focusCard(paneRunners)
 	case "up", "k", "down", "j":
 		d := 1
 		if key == "up" || key == "k" {
@@ -150,7 +150,7 @@ func (m *Model) move(d int) tea.Cmd {
 	switch {
 	case m.page == pageHistory:
 		m.histSel = clamp(m.histSel+d, len(m.hist))
-	case m.page == pageSettings:
+	case m.page == pageSettings, m.page == pageDashboard && !m.onCard():
 		return nil
 	case m.page == pageRunners || m.focus == paneRunners:
 		m.runnerSel = clamp(m.runnerSel+d, len(m.st.Instances))
@@ -198,11 +198,7 @@ func (m Model) togglePause() tea.Cmd {
 }
 
 func (m Model) togglePauseAll() tea.Cmd {
-	all := len(m.st.Repos) > 0
-	for _, r := range m.st.Repos {
-		all = all && r.Paused
-	}
-	if all {
+	if m.allPaused() {
 		return m.action("resumed all repos", m.c.ResumeAll)
 	}
 	return m.action("paused all repos (drain)", m.c.PauseAll)
@@ -240,11 +236,11 @@ func (m Model) globalCap(up bool) tea.Cmd {
 }
 
 func (m Model) runnerFocus() bool {
-	return m.page == pageRunners || (m.page == pageDashboard && m.focus == paneRunners)
+	return m.page == pageRunners || (m.page == pageDashboard && m.onCard() && m.focus == paneRunners)
 }
 
 func (m Model) repoFocus() bool {
-	return m.page == pageDashboard && m.focus == paneRepos
+	return m.page == pageDashboard && m.onCard() && m.focus == paneRepos
 }
 
 func (m Model) enter() (tea.Model, tea.Cmd) {
@@ -290,6 +286,11 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		// First, so an open dropdown can swallow a click anywhere, the sidebar included.
 		if ok, mm, cmd := m.settingsMouse(msg); ok {
 			return mm, cmd
+		}
+	}
+	if m.overlay == ovNone && m.page == pageDashboard {
+		if ok, cmd := m.groups.dash.Mouse(msg); ok {
+			return m, cmd
 		}
 	}
 	if m.overlay != ovNone {
@@ -359,11 +360,13 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return -1
 	}
 	if i := hit("repo", len(m.st.Repos)); i >= 0 {
-		m.repoSel, m.focus = i, paneRepos
+		m.repoSel = i
+		m.focusCard(paneRepos)
 		return m, nil
 	}
 	if i := hit("runner", len(m.st.Instances)); i >= 0 {
-		m.runnerSel, m.focus = i, paneRunners
+		m.runnerSel = i
+		m.focusCard(paneRunners)
 		id := fmt.Sprintf("runner-%d", i)
 		now := m.now()
 		if m.lastClick == id && now.Sub(m.lastAt) < doubleClick {

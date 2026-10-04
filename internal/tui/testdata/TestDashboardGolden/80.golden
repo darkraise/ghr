@@ -1,8 +1,8 @@
  ghr   mode ● QUEUE   runners ▕██░▏ 2/3   api 4800   disk ▕██████░░░░▏ 61%   ●
 [ 1 Dashboard ]  2 Runners    3 History    4 Settings                    ? help
-Dashboard                                                                       
+Dashboard                                             [ + Add ]    ( Pause all )
  Running 2 / 3   Queued jobs 3   Repositories 2 active · 1 paused   Disk 61%    
-╭─ Repositories ───────────────────────────────────────────────────────────────╮
+╭─ › Repositories ─────────────────────────────────────────────────────────────╮
 │   REPO           STATE      RUN   QUEUE  LAST JOB                            │
 │ ▸ darkcloud      ● active   1/1   ⧗ 2    ✔ #411 lint  2m ago                 │
 │   darkmem        ● active   1/1   –      ✖ #87 build / test  1h ago          │

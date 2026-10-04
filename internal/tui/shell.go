@@ -36,17 +36,23 @@ func (s stop) SetDisabled(bool)                     {}
 // pageGroups holds the focus groups of the pages other than Settings. The
 // Model keeps it by pointer so focus survives Bubble Tea copying the Model.
 type pageGroups struct {
-	dash ui.Group
+	dash          ui.Group
+	add, pauseAll *ui.Button
 }
 
 const (
-	dashRepos   = "dash/repos"
-	dashRunners = "dash/runners"
+	dashAdd      = "dash/add"
+	dashPauseAll = "dash/pauseall"
+	dashRepos    = "dash/repos"
+	dashRunners  = "dash/runners"
 )
 
 func newPageGroups() *pageGroups {
-	g := &pageGroups{}
-	g.dash.Set([]ui.Widget{stop{dashRepos}, stop{dashRunners}})
+	g := &pageGroups{
+		add:      ui.NewButton(dashAdd, "+ Add", ui.Primary),
+		pauseAll: ui.NewButton(dashPauseAll, "Pause all", ui.Secondary),
+	}
+	g.dash.Set([]ui.Widget{g.add, g.pauseAll, stop{dashRepos}, stop{dashRunners}})
 	g.dash.Focus(dashRepos)
 	return g
 }
@@ -190,8 +196,11 @@ func (m Model) tabRow(w int) string {
 func (m Model) pageHeader(w int) string {
 	title := sBold.Render(pageNames[m.page])
 	right := ""
-	if m.page == pageSettings && !m.connected {
+	switch {
+	case m.page == pageSettings && !m.connected:
 		right = sRed.Render("reconnecting")
+	case m.page == pageDashboard:
+		right = m.dashButtons()
 	}
 	gap := max(w-ansi.StringWidth(title)-ansi.StringWidth(right), 1)
 	return title + strings.Repeat(" ", gap) + right
@@ -208,6 +217,9 @@ func (m Model) footerKeys() []footerKey {
 		return []footerKey{{"r", "repo"}, {"c", "result"}, {"enter", "copy URL"}, {"?", "help"}, {"q", "quit"}}
 	case pageSettings:
 		return m.settingsFooterKeys()
+	}
+	if !m.onCard() {
+		return []footerKey{{"enter", "press"}, {"tab", "next"}, {"?", "help"}, {"q", "quit"}}
 	}
 	return []footerKey{
 		{"p", "pause"}, {"+", "repo cap"}, {"-", ""}, {"[", "global cap"}, {"]", ""}, {"m", "mode"},

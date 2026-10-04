@@ -11,6 +11,46 @@ import (
 	"github.com/darkraise/ghr/internal/config"
 )
 
+// allPaused reports whether every repo not being removed is paused: then the
+// header offers Resume all. Repos being removed stay paused, so they do not count.
+func (m Model) allPaused() bool {
+	seen := false
+	for _, r := range m.st.Repos {
+		if r.Removing {
+			continue
+		}
+		if !r.Paused {
+			return false
+		}
+		seen = true
+	}
+	return seen
+}
+
+// dashButtons renders the Dashboard header's buttons.
+func (m Model) dashButtons() string {
+	g := m.groups
+	g.pauseAll.Label = "Pause all"
+	if m.allPaused() {
+		g.pauseAll.Label = "Resume all"
+	}
+	g.add.SetDisabled(!m.connected)
+	g.pauseAll.SetDisabled(!m.connected)
+	if !m.connected && !m.onCard() {
+		m.focusCard(m.focus) // a disabled button hands focus to the card the row keys follow
+	}
+	f := g.dash.FocusedID()
+	return g.add.View(f == dashAdd, 0) + "  " + g.pauseAll.View(f == dashPauseAll, 0)
+}
+
+// cardTitle marks the focused card with the focus glyph.
+func (m Model) cardTitle(id, title string) string {
+	if m.groups.dash.FocusedID() == id {
+		return "› " + title
+	}
+	return title
+}
+
 // focusCard focuses a Dashboard card and points the row keys at it.
 func (m *Model) focusCard(p pane) {
 	m.focus = p
@@ -43,6 +83,12 @@ func (m Model) dashKey(k tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
 		m.focus = paneRunners
 	}
 	return true, m, nil
+}
+
+// onCard reports whether a Dashboard card, not a header button, has focus.
+func (m Model) onCard() bool {
+	id := m.groups.dash.FocusedID()
+	return id != dashAdd && id != dashPauseAll
 }
 
 // statTiles renders the Dashboard's four stat tiles across w columns: boxed
@@ -189,8 +235,8 @@ func (m Model) dashboard(w, h int) string {
 		nRun = room - nRepo
 	}
 	tiles := m.statTiles(w, tilesH == 1)
-	repos := box("Repositories", w, fit(repoLines, 1, m.repoSel, nRepo))
-	runners := box("Runners", w, fit(runnerLines, 1, m.runnerSel, nRun))
+	repos := box(m.cardTitle(dashRepos, "Repositories"), w, fit(repoLines, 1, m.repoSel, nRepo))
+	runners := box(m.cardTitle(dashRunners, "Runners"), w, fit(runnerLines, 1, m.runnerSel, nRun))
 	rest := h - tilesH - lipgloss.Height(repos) - lipgloss.Height(runners) - 2
 	if w < 80 || rest < 3 {
 		rest = 3
