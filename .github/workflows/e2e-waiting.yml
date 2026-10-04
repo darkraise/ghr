@@ -1,0 +1,12 @@
+name: e2e-waiting
+on: workflow_dispatch
+jobs:
+  gated:
+    runs-on: [self-hosted, homelab]
+    environment: e2e-wait
+    steps:
+      - run: echo "released after the wait timer"
+  independent:
+    runs-on: [self-hosted, homelab]
+    steps:
+      - run: echo "ran while gated waits, on $RUNNER_NAME"
