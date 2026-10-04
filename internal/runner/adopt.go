@@ -58,8 +58,11 @@ func (m *Manager) Adopt(ctx context.Context) error {
 					continue
 				}
 			}
-			os.RemoveAll(dir)
-			m.Events.Add("warn", "", "instance %s had no readable %s; stopped and removed", id, MetaFile)
+			if err := os.RemoveAll(dir); err != nil {
+				m.Events.Add("warn", "", "instance %s had no readable %s; its dir could not be removed (%v); reconciliation retries", id, MetaFile, err)
+			} else {
+				m.Events.Add("warn", "", "instance %s had no readable %s; stopped and removed", id, MetaFile)
+			}
 			delete(active, id)
 			continue
 		}
@@ -127,6 +130,7 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 	for _, r := range cfg.Repos {
 		runners, err := m.GH.ListRunners(ctx, r.Name)
 		if err != nil {
+			m.Events.Add("warn", r.Name, "reconcile: list runners: %v", err)
 			continue
 		}
 		prefix := "ghr-" + r.Name + "-"
@@ -153,14 +157,19 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 			}
 		}
 	}
-	entries, _ := os.ReadDir(m.Paths.Instances)
+	entries, err := os.ReadDir(m.Paths.Instances)
+	if err != nil && !os.IsNotExist(err) {
+		m.Events.Add("warn", "", "reconcile: read instance dirs: %v", err)
+	}
 	for _, e := range entries {
 		id := e.Name()
 		if _, ok := known[id]; !e.IsDir() || !idRe.MatchString(id) || ok || running[id] {
 			continue
 		}
 		if active, err := m.SD.Active(ctx, UnitPrefix+id); err == nil && !active {
-			os.RemoveAll(m.instanceDir(id))
+			if err := os.RemoveAll(m.instanceDir(id)); err != nil {
+				m.Events.Add("warn", "", "reconcile: remove orphan dir %s: %v", id, err)
+			}
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -138,6 +139,15 @@ func TestReconcileStopsUntrackedUnitBeforeDeletingRegistration(t *testing.T) {
 	h.m.Reconcile(context.Background(), h.cfg)
 	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-ffffff"}) || !reflect.DeepEqual(h.gh.deleted, []int64{3}) {
 		t.Fatalf("stopped %v deleted %v", h.sd.stopped, h.gh.deleted)
+	}
+}
+
+func TestReconcileReportsListRunnersFailure(t *testing.T) {
+	h := newHarness(t)
+	h.gh.setErr("ListRunners darkmem", errors.New("boom"))
+	h.m.Reconcile(context.Background(), h.cfg)
+	if !strings.Contains(h.eventText(), "warn darkmem reconcile: list runners: boom") {
+		t.Fatalf("events:\n%s", h.eventText())
 	}
 }
 
