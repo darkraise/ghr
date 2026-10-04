@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/ghr/internal/model"
 )
@@ -166,5 +167,36 @@ func TestDetailLogTabClickFollows(t *testing.T) {
 	}
 	if m = click(t, m, tabZone(tabLog)); m.logID != "7be210" {
 		t.Fatalf("log tab click follows %q", m.logID)
+	}
+}
+
+// When the runner leaves /status the page keeps its snapshot, freezes the
+// elapsed time and offers Back to runners; only the Log tab keeps polling.
+func TestDetailAfterRunnerFinishes(t *testing.T) {
+	c := &fakeClient{}
+	m := detailModel(t, c)
+	c.st.Instances = c.st.Instances[1:] // a3f9c1 is gone
+	m.now = func() time.Time { return now.Add(5 * time.Minute) }
+	m = ticks(m, 1)
+	m.now = func() time.Time { return now.Add(10 * time.Minute) }
+	v := m.View()
+	for _, want := range []string{"⚠ This runner has finished", "Back to runners", "● busy", "17m04s", "CI / e2e-journeys  #412"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("finished detail page missing %q", want)
+		}
+	}
+	c.calls = nil
+	if m = ticks(m, slowPoll); strings.Contains(strings.Join(c.calls, "|"), "containers") {
+		t.Fatalf("containers still polled: %v", c.calls)
+	}
+	c.calls = nil
+	if m = ticks(feed(m, key("right")), 2); !strings.Contains(strings.Join(c.calls, "|"), "log a3f9c1") {
+		t.Fatalf("the Log tab stopped polling: %v", c.calls)
+	}
+	if m = feed(m, key("x")); m.overlay != ovNone || strings.Contains(strings.Join(c.actions(), "|"), "kill") {
+		t.Fatal("x tried to stop a finished runner")
+	}
+	if m = click(t, m, detailBack); m.page != pageRunners {
+		t.Fatalf("Back to runners went to page %v", m.page)
 	}
 }

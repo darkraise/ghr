@@ -154,6 +154,7 @@ type Model struct {
 	detailID          string
 	detailFrom        page                 // the page esc returns to
 	detailSnap        model.InstanceStatus // the runner as last seen in /status
+	detailDone        time.Time            // when the runner left /status; zero while it runs
 	detailScroll      int                  // first line shown of the Steps or Containers list
 
 	overlay       overlay
@@ -354,6 +355,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clampSelections()
 		if inst := m.instance(m.detailID); inst != nil {
 			m.detailSnap = *inst
+		} else if m.page == pageDetail && !m.finished() {
+			m.detailDone = m.now()
 		}
 		var cmds []tea.Cmd
 		if msg.st.Epoch != m.epoch {

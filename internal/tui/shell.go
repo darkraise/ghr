@@ -40,6 +40,7 @@ type pageGroups struct {
 	add, pauseAll       *ui.Button
 	detail              ui.Group
 	copyURL, stopRunner *ui.Button
+	back                *ui.Button
 	tabs                *tabStrip
 }
 
@@ -56,6 +57,7 @@ func newPageGroups() *pageGroups {
 		pauseAll:   ui.NewButton(dashPauseAll, "Pause all", ui.Secondary),
 		copyURL:    ui.NewButton(detailCopy, "Copy run URL", ui.Secondary),
 		stopRunner: ui.NewButton(detailStop, "Stop runner", ui.Danger),
+		back:       ui.NewButton(detailBack, "Back to runners", ui.Primary),
 		tabs:       &tabStrip{},
 	}
 	g.dash.Set([]ui.Widget{g.add, g.pauseAll, stop{dashRepos}, stop{dashRunners}})

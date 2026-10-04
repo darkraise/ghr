@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
@@ -15,6 +16,7 @@ const (
 	detailCopy = "detail/copy"
 	detailStop = "detail/stop"
 	detailTabs = "detail/tabs"
+	detailBack = "detail/back"
 )
 
 // The detail page's tabs.
@@ -86,7 +88,7 @@ func (m Model) openDetail(id string, tab int) (tea.Model, tea.Cmd) {
 	if m.page != pageDetail {
 		m.detailFrom = m.page
 	}
-	m.page, m.detailID, m.detailSnap = pageDetail, id, *inst
+	m.page, m.detailID, m.detailSnap, m.detailDone = pageDetail, id, *inst, time.Time{}
 	m.steps, m.containers, m.stepsErr, m.ctrsErr, m.detailScroll = nil, nil, "", "", 0
 	m.groups.tabs.active = tab
 	m.detailButtons()
@@ -99,19 +101,27 @@ func (m Model) openDetail(id string, tab int) (tea.Model, tea.Cmd) {
 func (m Model) closeDetail() (tea.Model, tea.Cmd) { return m.switchPage(m.detailFrom) }
 
 // detailButtons renders the header's buttons: Copy run URL when the run's
-// URL is known, and Stop runner.
+// URL is known, and Stop runner, disabled once the runner has finished. It
+// also sets the page's focus order, which takes in Back to runners while the
+// finished alert shows.
 func (m Model) detailButtons() string {
 	g := m.groups
-	items := []ui.Widget{g.stopRunner, g.tabs}
+	items := []ui.Widget{g.stopRunner}
 	out := g.stopRunner.View(g.detail.FocusedID() == detailStop, 0)
 	if j := m.detailSnap.Job; j != nil && j.HTMLURL != "" {
 		items = append([]ui.Widget{g.copyURL}, items...)
 		out = g.copyURL.View(g.detail.FocusedID() == detailCopy, 0) + "  " + out
 	}
-	g.stopRunner.SetDisabled(!m.connected)
-	g.detail.Set(items)
+	if m.finished() {
+		items = append(items, g.back)
+	}
+	g.stopRunner.SetDisabled(!m.connected || m.finished())
+	g.detail.Set(append(items, g.tabs))
 	return out
 }
+
+// finished reports whether the detail page's runner has left /status.
+func (m Model) finished() bool { return !m.detailDone.IsZero() }
 
 // detailSummary is the line under the header: state, repo, job and run,
 // elapsed time and start time.
@@ -130,15 +140,23 @@ func (m Model) detailSummary() string {
 			start = j.StartedAt
 		}
 	}
-	parts = append(parts, dur(m.now().Sub(start)), "started "+start.Local().Format("2006-01-02 15:04:05"))
+	end := m.now()
+	if m.finished() {
+		end = m.detailDone
+	}
+	parts = append(parts, dur(end.Sub(start)), "started "+start.Local().Format("2006-01-02 15:04:05"))
 	return strings.Join(parts, sDim.Render("  ·  "))
 }
 
 // detailTop is the part of the detail page above the active tab: the
-// summary and the tab strip.
+// summary, the finished alert once the runner has gone, and the tab strip.
 func (m Model) detailTop(w int) []string {
 	g := m.groups
-	return []string{m.detailSummary(), "", g.tabs.View(g.detail.FocusedID() == detailTabs, w), ""}
+	top := []string{m.detailSummary(), ""}
+	if m.finished() {
+		top = append(top, sAmber.Render("⚠ This runner has finished")+"   "+g.back.View(g.detail.FocusedID() == detailBack, 0), "")
+	}
+	return append(top, g.tabs.View(g.detail.FocusedID() == detailTabs, w), "")
 }
 
 // detailList is the Steps or Containers tab's lines; nil on the Log tab.
@@ -255,7 +273,7 @@ func (m Model) detailKey(k tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
 		cmd := m.follow()
 		return true, m, cmd
 	case "x":
-		mm, cmd := m.stopRunner(m.detailID, m.detailSnap.State == "busy")
+		mm, cmd := m.detailPressed(detailStop)
 		return true, mm, cmd
 	case "tab":
 		m.groups.detail.Next()
@@ -276,7 +294,11 @@ func (m Model) detailPressed(id string) (tea.Model, tea.Cmd) {
 			m.toast.Show("copied "+j.HTMLURL, false, m.now())
 		}
 	case detailStop:
-		return m.stopRunner(m.detailID, m.detailSnap.State == "busy")
+		if !m.finished() {
+			return m.stopRunner(m.detailID, m.detailSnap.State == "busy")
+		}
+	case detailBack:
+		return m.switchPage(pageRunners)
 	}
 	return m, nil
 }

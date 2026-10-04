@@ -291,7 +291,7 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		return m.openAddRepo()
 	case dashPauseAll:
 		return m, m.togglePauseAll()
-	case detailCopy, detailStop:
+	case detailCopy, detailStop, detailBack:
 		return m.detailPressed(id)
 	case setSave:
 		return m.saveSettings()
