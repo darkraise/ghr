@@ -121,12 +121,13 @@ type Model struct {
 	connected     bool
 	connErr       string
 
-	st      model.Status
-	epoch   string
-	events  []model.Event
-	lastSeq int64
-	hist    []model.HistoryEntry
-	cfg     *config.Config
+	st       model.Status
+	epoch    string
+	settings *settingsPage
+	events   []model.Event
+	lastSeq  int64
+	hist     []model.HistoryEntry
+	cfg      *config.Config
 
 	repoSel, runnerSel, histSel, cfgSel int
 	eventScroll, logScroll              int
@@ -164,7 +165,7 @@ func New(c Client) Model {
 	ti.CharLimit = 200
 	ti.Cursor.SetMode(cursor.CursorStatic)
 	return Model{
-		c: c, now: time.Now, width: 120, height: 40, prompt: ti,
+		c: c, now: time.Now, width: 120, height: 40, prompt: ti, settings: newSettingsPage(),
 		copyFn: func(s string) {
 			fmt.Fprintf(os.Stdout, "\x1b]52;c;%s\a", base64.StdEncoding.EncodeToString([]byte(s)))
 		},
