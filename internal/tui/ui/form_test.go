@@ -96,6 +96,22 @@ func TestFormMergeKeepsEditsAndControls(t *testing.T) {
 	}
 }
 
+// A control already showing the new base is not rewritten: SetValue would
+// close a tag input the user just opened.
+func TestFormMergeLeavesControlShowingNewBase(t *testing.T) {
+	var f Form
+	f.Merge(testSpecs("10s", nil))
+	tags := f.Field("labels").Input.(*TagList)
+	tags.Update(key("enter"))
+	if !tags.Adding() {
+		t.Fatal("tag input did not open")
+	}
+	f.Merge(testSpecs("10s", nil))
+	if !tags.Adding() {
+		t.Fatal("merge closed a tag input that already showed the base")
+	}
+}
+
 func TestFormMergeRefreshesCleanFieldsAndLockedDropsEdits(t *testing.T) {
 	var f Form
 	f.Merge(testSpecs("10s", nil, "darkmem"))
