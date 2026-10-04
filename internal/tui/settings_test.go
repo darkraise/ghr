@@ -2,11 +2,13 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/exp/golden"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/config"
@@ -208,11 +210,11 @@ func TestSettingsFocusOrderScrollsIntoView(t *testing.T) {
 		t.Fatalf("after up, shift+tab, k: %q", got)
 	}
 	m = feed(m, key("shift+tab")) // wraps to the last control
-	if got := m.settings.group.FocusedID(); got != repoKey("darkagents", "remove") {
+	if got := m.settings.group.FocusedID(); got != setAddRepo {
 		t.Fatalf("wrap: %q", got)
 	}
 	v := m.View()
-	if !strings.Contains(v, "[ Resume ] › [ Remove ]") || lipgloss.Height(v) > 22 || m.settings.scroll == 0 {
+	if !strings.Contains(v, "› [ + Add repository ]") || lipgloss.Height(v) > 22 || m.settings.scroll == 0 {
 		t.Fatalf("last control not scrolled into view (scroll %d):\n%s", m.settings.scroll, v)
 	}
 	m = feed(m, key("tab"))
@@ -797,6 +799,34 @@ func TestSettingsRepoActionsDisabledWhileRemoving(t *testing.T) {
 	}
 	if !m.settings.buttons[repoKey("darkcloud", "remove")].Focusable() {
 		t.Error("another repo's button was disabled")
+	}
+}
+
+func TestSettingsAddRepositoryButton(t *testing.T) {
+	m := onSettings(t, &fakeClient{}, 120, 80)
+	if form := strings.Join(settingsLines(m, 103), "\n"); !strings.Contains(form, "[ + Add repository ]") {
+		t.Fatalf("no Add repository button:\n%s", form)
+	}
+	if m = click(t, m, setAddRepo); m.overlay != ovAddRepo {
+		t.Fatalf("overlay %v", m.overlay)
+	}
+}
+
+func TestSettingsDialogGolden(t *testing.T) {
+	for _, w := range []int{120, 80} {
+		t.Run(fmt.Sprint(w), func(t *testing.T) {
+			m := feed(onSettings(t, &fakeClient{}, w, 30), key("a"))
+			golden.RequireEqual(t, []byte(m.View()))
+		})
+	}
+}
+
+func TestSettingsDropdownGolden(t *testing.T) {
+	for _, w := range []int{120, 80} {
+		t.Run(fmt.Sprint(w), func(t *testing.T) {
+			m := feed(onSettings(t, &fakeClient{}, w, 30), key("enter"))
+			golden.RequireEqual(t, []byte(m.View()))
+		})
 	}
 }
 

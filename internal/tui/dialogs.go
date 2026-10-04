@@ -285,6 +285,8 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		m.overlay, m.add = ovNone, nil
 	case addOK:
 		return m.submitAddRepo()
+	case setAddRepo:
+		return m.openAddRepo()
 	case setSave:
 		return m.saveSettings()
 	case setDiscard:

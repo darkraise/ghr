@@ -29,6 +29,7 @@ const (
 
 	setSave    = "settings/save"
 	setDiscard = "settings/discard"
+	setAddRepo = "settings/add_repo"
 )
 
 // repoKey is the key of a per-repo field: max, warm, labels or cleanup.
@@ -549,6 +550,9 @@ func (m Model) settingsSections() []ui.Section {
 		}
 		secs = append(secs, card)
 	}
+	add := s.button(setAddRepo, "+ Add repository", ui.Primary)
+	add.SetDisabled(!m.connected)
+	secs = append(secs, ui.Section{Rows: []ui.Row{{Items: []ui.Widget{add}}}})
 
 	var ws []ui.Widget
 	for _, sec := range secs {
