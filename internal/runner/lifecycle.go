@@ -363,7 +363,10 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	fails := 0
 	m.mu.Lock()
 	if ip, ok := m.insts[id]; ok {
-		if err != nil {
+		if errors.Is(err, errListProjects) {
+			// Docker unreachable: giving up would delete the instance dir and
+			// leak the job's resources, so wait it out without counting.
+		} else if err != nil {
 			ip.cleanupFails++
 		} else {
 			ip.cleanupFails = 0

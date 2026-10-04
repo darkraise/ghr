@@ -326,6 +326,40 @@ func TestPersistentDockerFailureReleasesSlot(t *testing.T) {
 	}
 }
 
+// An unreachable Docker daemon never counts toward the give-up: releasing the
+// slot would delete the instance dir and leak the job's containers and volumes.
+func TestDockerUnreachableKeepsCleaning(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud")
+	h.writeJob(t, "aaaaaa", 55)
+	h.gh.setJobs(55, completedJob(h, 55, "ghr-darkcloud-aaaaaa", "success"))
+	h.docker.setErr("ComposeContainers", errors.New("Cannot connect to the Docker daemon"))
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	for n := 1; n <= maxCleanupFailures+2; n++ {
+		h.m.refreshUnits(context.Background())
+		h.m.Wait()
+		if h.state("aaaaaa") != "cleaning" {
+			t.Fatalf("attempt %d: state %s, must keep retrying", n, h.state("aaaaaa"))
+		}
+		h.now = h.now.Add(finishRetry)
+	}
+	if _, err := os.Stat(h.m.instanceDir("aaaaaa")); err != nil {
+		t.Fatalf("instance dir: %v", err)
+	}
+	if strings.Contains("\n"+h.eventText(), "\nerror ") || len(h.gh.deleted) != 0 {
+		t.Fatalf("gave up: deleted %v events %s", h.gh.deleted, h.eventText())
+	}
+	h.docker.setErr("ComposeContainers", nil)
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if h.state("aaaaaa") != "gone" || len(h.gh.deleted) != 1 || h.gh.deleted[0] != 101 {
+		t.Fatalf("after recovery: state %s deleted %v", h.state("aaaaaa"), h.gh.deleted)
+	}
+	if !reflect.DeepEqual(h.history(t), []string{"aaaaaa success"}) {
+		t.Fatalf("history %v", h.history(t))
+	}
+}
+
 // diskFullUntilCleanup fails the pending-history and ghr-projects writes with
 // fail until Docker cleanup has removed a volume, like a disk only that frees.
 func diskFullUntilCleanup(t *testing.T, h *harness, fail error) {

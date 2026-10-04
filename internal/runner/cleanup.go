@@ -33,6 +33,10 @@ func within(path, dir string) bool {
 // must still reach the project's networks and volumes.
 const projectsFile = "ghr-projects"
 
+// errListProjects marks a cleanup that could not even list Docker containers,
+// usually because the daemon is down; it must not count toward the give-up.
+var errListProjects = errors.New("list compose containers")
+
 // projects returns the compose projects of an instance: ghr-<id> plus every
 // project whose working_dir label lies inside the instance dir, sorted.
 func (m *Manager) projects(ctx context.Context, id string) ([]string, error) {
@@ -40,7 +44,7 @@ func (m *Manager) projects(ctx context.Context, id string) ([]string, error) {
 	set := map[string]bool{"ghr-" + id: true}
 	cc, err := m.Docker.ComposeContainers(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list compose containers: %w", err)
+		return nil, fmt.Errorf("%w: %w", errListProjects, err)
 	}
 	for _, c := range cc {
 		if c.Project != "" && within(filepath.FromSlash(c.WorkingDir), dir) {
