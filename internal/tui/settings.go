@@ -629,13 +629,21 @@ func (m Model) settingsView(w, h int) string {
 		return sDim.Render("loading…")
 	}
 	s := m.settings
-	lines, _ := ui.Render(m.settingsSections(), s.group.FocusedID(), w, m.width >= wideMin)
+	focus := s.group.FocusedID()
+	sections := m.settingsSections()
+	lines, ranges := ui.Render(sections, s.group.FocusedID(), w, m.width >= wideMin)
 	top, bar := m.alertBox(w), m.unsavedBar()
 	bodyH := h - len(top)
 	if bar != "" {
 		bodyH--
 	}
 	bodyH = max(bodyH, 1)
+	// Rendering moves focus off a control that a refresh disabled while the page was hidden.
+	if f := s.group.FocusedID(); f != focus {
+		if r, ok := ranges[f]; ok {
+			s.scroll = ui.ScrollTo(s.scroll, bodyH, r)
+		}
+	}
 	s.scroll = min(max(s.scroll, 0), max(len(lines)-bodyH, 0))
 	body := lines[s.scroll:min(s.scroll+bodyH, len(lines))]
 	out := append(top, zone.Mark("settings/body", strings.Join(body, "\n")))

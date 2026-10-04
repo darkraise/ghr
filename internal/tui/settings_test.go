@@ -633,3 +633,27 @@ func TestSettingsRefreshScrollsMovedFocusIntoView(t *testing.T) {
 		t.Fatalf("new focus not in view (scroll %d):\n%s", m.settings.scroll, v)
 	}
 }
+
+// When a refresh disables the focused control while the page is hidden, the
+// first render after returning moves focus and must scroll it into view.
+func TestSettingsPageSwitchScrollsMovedFocusIntoView(t *testing.T) {
+	c := &fakeClient{}
+	m := onSettings(t, c, 120, 22)
+	m.View()
+	m.settings.group.Focus(repoKey("darkcloud", "labels"))
+	m.scrollToFocus()
+	mm, _ := m.switchPage(pageDashboard)
+	m = mm.(Model)
+	c.cfg = parseConfig(t, strings.Replace(settingsYAML, "  - name: darkcloud\n", "  - name: darkcloud\n    paused: true\n    removing: true\n", 1))
+	m = ticks(m, slowPoll)
+	mm, cmd := m.switchPage(pageSettings)
+	m = mm.(Model)
+	v := m.View()
+	m = feed(m, cmd())
+	if got := m.settings.group.FocusedID(); got != repoKey("darkmem", "max") {
+		t.Fatalf("focus %q", got)
+	}
+	if !strings.Contains(v, "Max                › [ − ]") {
+		t.Fatalf("new focus not in view (scroll %d):\n%s", m.settings.scroll, v)
+	}
+}
