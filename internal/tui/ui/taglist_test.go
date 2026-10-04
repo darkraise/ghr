@@ -33,9 +33,11 @@ func TestTagListAddAndRemove(t *testing.T) {
 	if got := l.Value().List; !reflect.DeepEqual(got, []string{"homelab"}) {
 		t.Fatalf("backspace: %v", got)
 	}
-	_, cmd := l.Update(key("enter")) // enter on an empty input closes it and advances
-	if l.Adding() || msgOf(cmd) != (Advance{"t/labels"}) {
-		t.Fatalf("empty enter: adding %v msg %v", l.Adding(), msgOf(cmd))
+	g := &Group{}
+	g.Set([]Widget{l, NewButton("t/next", "Next", Primary)})
+	g.Key(key("enter")) // enter on an empty input closes it and advances
+	if l.Adding() || g.FocusedID() != "t/next" {
+		t.Fatalf("empty enter: adding %v focus %q", l.Adding(), g.FocusedID())
 	}
 }
 

@@ -19,6 +19,7 @@ type TextField struct {
 	Disabled bool
 	in       textinput.Model
 	editing  bool
+	advance  bool // enter committed; Group.Key moves focus on
 }
 
 func NewTextField(id string, width int) *TextField {
@@ -74,7 +75,14 @@ func (f *TextField) startEditing() {
 	f.in.CursorEnd()
 }
 
+func (f *TextField) takeAdvance() bool {
+	a := f.advance
+	f.advance = false
+	return a
+}
+
 func (f *TextField) Update(msg tea.Msg) (Control, tea.Cmd) {
+	f.advance = false
 	if f.Disabled {
 		return f, nil
 	}
@@ -94,7 +102,8 @@ func (f *TextField) Update(msg tea.Msg) (Control, tea.Cmd) {
 		switch msg.String() {
 		case "enter":
 			f.Blur()
-			return f, send(Advance{f.id})
+			f.advance = true
+			return f, nil
 		case "esc":
 			f.Blur()
 			return f, nil

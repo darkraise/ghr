@@ -102,6 +102,9 @@ func (g *Group) Key(k tea.KeyMsg) (bool, tea.Cmd) {
 		return false, nil
 	}
 	_, cmd := w.Update(k)
+	if a, ok := w.(advancer); ok && a.takeAdvance() {
+		g.Next()
+	}
 	return true, cmd
 }
 

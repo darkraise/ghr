@@ -21,6 +21,7 @@ type TagList struct {
 	Disabled bool
 	tags     []string
 	adding   bool
+	advance  bool // enter on an empty input; Group.Key moves focus on
 	in       textinput.Model
 }
 
@@ -116,7 +117,14 @@ func (l *TagList) startAdding() {
 func (l *TagList) xZone(i int) string   { return ZoneID(l.id, fmt.Sprintf("x-%d", i)) }
 func (l *TagList) tagZone(i int) string { return ZoneID(l.id, fmt.Sprintf("tag-%d", i)) }
 
+func (l *TagList) takeAdvance() bool {
+	a := l.advance
+	l.advance = false
+	return a
+}
+
 func (l *TagList) Update(msg tea.Msg) (Control, tea.Cmd) {
+	l.advance = false
 	if l.Disabled {
 		return l, nil
 	}
@@ -132,7 +140,8 @@ func (l *TagList) Update(msg tea.Msg) (Control, tea.Cmd) {
 		case "enter":
 			if l.draft() == "" {
 				l.Blur()
-				return l, send(Advance{l.id})
+				l.advance = true
+				return l, nil
 			}
 			l.commit()
 			return l, nil

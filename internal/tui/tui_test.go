@@ -563,6 +563,20 @@ func TestAddRepoDialog(t *testing.T) {
 	}
 }
 
+// Two enters in one read (a paste, or tmux send-keys Enter Enter): the first
+// commits the name and moves to Max, the second adds the repo.
+func TestAddRepoDialogTwoEntersSubmit(t *testing.T) {
+	c := &fakeClient{}
+	m := feed(sampleModel(c, 120, 30), key("a"))
+	m, _ = pump(m, keys("n", "e", "w", "enter", "enter")...)
+	if got := strings.Join(c.actions(), "|"); got != "add new  max=- public=false" {
+		t.Fatalf("actions %q", got)
+	}
+	if m.overlay != ovNone {
+		t.Fatalf("overlay %v", m.overlay)
+	}
+}
+
 func TestAddRepoDialogErrorsStayInside(t *testing.T) {
 	// The daemon's own message (internal/daemon/backend.go), on an 80-column screen.
 	c := &fakeClient{addErr: errors.New("site is public; self-hosted runners must only serve private repos (pass --allow-public to override)")}

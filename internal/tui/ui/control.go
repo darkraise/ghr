@@ -50,8 +50,12 @@ type Input interface {
 // Pressed is sent when a button is activated.
 type Pressed struct{ ID string }
 
-// Advance asks the page to move focus past the widget (enter in a text field).
-type Advance struct{ ID string }
+// advancer is a widget that can ask to move focus past itself (enter in a
+// text field). Group.Key moves focus before returning, not through a message,
+// so a key that arrives in the same read lands on the next widget.
+type advancer interface {
+	takeAdvance() bool
+}
 
 // ZoneID joins ID parts with "/", for example ZoneID("settings", "mode", "opt-1").
 func ZoneID(parts ...string) string { return strings.Join(parts, "/") }

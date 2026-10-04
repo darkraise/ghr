@@ -31,9 +31,11 @@ func TestTextFieldEditing(t *testing.T) {
 	if f.TakesKey(key("tab")) || f.TakesKey(key("ctrl+s")) || !f.TakesKey(key("q")) || !f.TakesKey(key("left")) {
 		t.Fatal("TakesKey while editing")
 	}
-	_, cmd := f.Update(key("enter"))
-	if f.Editing() || msgOf(cmd) != (Advance{"t/poll"}) {
-		t.Fatalf("enter: editing %v msg %v", f.Editing(), msgOf(cmd))
+	g := &Group{}
+	g.Set([]Widget{f, NewButton("t/next", "Next", Primary)})
+	g.Key(key("enter")) // enter commits and moves focus on at once, with no message in between
+	if f.Editing() || g.FocusedID() != "t/next" {
+		t.Fatalf("enter: editing %v focus %q", f.Editing(), g.FocusedID())
 	}
 	f.Update(key("enter")) // enter starts editing and keeps the value
 	f.Update(key("backspace"))

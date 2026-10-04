@@ -642,18 +642,6 @@ func (m Model) settingsMouse(msg tea.MouseMsg) (bool, tea.Model, tea.Cmd) {
 	return ok, m, cmd
 }
 
-// advance moves focus past the control that asked for it (enter in a text field).
-func (m Model) advance(id string) (tea.Model, tea.Cmd) {
-	switch {
-	case m.overlay == ovAddRepo && m.add != nil && m.add.group.FocusedID() == id:
-		m.add.group.Next()
-	case m.overlay == ovNone && m.page == pageSettings && m.settings.group.FocusedID() == id:
-		m.settings.group.Next()
-		m.scrollToFocus()
-	}
-	return m, nil
-}
-
 // settingsFooterKeys are the footer hints for the focused control.
 func (m Model) settingsFooterKeys() []footerKey {
 	switch w := m.settings.group.Focused().(type) {
