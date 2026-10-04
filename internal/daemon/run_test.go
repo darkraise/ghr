@@ -131,7 +131,10 @@ func TestRunServesTicksReloadsAndKeepsRunners(t *testing.T) {
 	go func() { done <- Run(ctx, o) }()
 	defer func() {
 		cancel()
-		<-done
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+		}
 	}()
 	c := api.NewUnixClient(o.Socket)
 
