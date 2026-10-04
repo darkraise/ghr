@@ -159,6 +159,7 @@ type Model struct {
 
 	overlay       overlay
 	confirmText   string
+	helpScroll    int // first Help line shown when Help is taller than the screen
 	confirmAction func() tea.Cmd
 	dlg           ui.Group       // focus across the open dialog's buttons
 	dlgButtons    []*ui.Button   // the open dialog's buttons, in display order

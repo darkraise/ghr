@@ -225,6 +225,7 @@ func (m Model) goTo(t leaveTarget) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) openHelp() (tea.Model, tea.Cmd) {
+	m.helpScroll = 0
 	m.openDialog(ovHelp, btnClose, ui.NewButton(btnClose, "Close", ui.Primary))
 	return m, nil
 }
@@ -234,6 +235,13 @@ func (m Model) openHelp() (tea.Model, tea.Cmd) {
 // tab or the arrow keys move between the buttons. A confirmation also takes
 // y and n.
 func (m Model) dialogKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.overlay == ovHelp {
+		if d, ok := map[string]int{"up": -1, "k": -1, "down": 1, "j": 1, "pgup": -10, "pgdown": 10}[k.String()]; ok {
+			lines, n := m.helpLines(max(m.width, 40))
+			m.helpScroll = min(max(m.helpScroll+d, 0), max(len(lines)-n, 0))
+			return m, nil
+		}
+	}
 	switch k.String() {
 	case "enter":
 		if id := m.dlg.FocusedID(); id != "" {
@@ -323,22 +331,93 @@ func modal(title, body string, buttons []*ui.Button, focused string, maxW int) s
 	return sDialog.Render(sBold.Render(title) + "\n\n" + body + "\n\n" + row)
 }
 
-func helpText() string {
-	return strings.Join([]string{
-		"1-4         switch page           ↑↓ / j k   move selection",
-		"tab         move focus             ctrl+s     save settings",
-		"h / →       focus repos / runners  p          pause/resume repo",
-		"+ / -       repo cap               [ / ]      global cap",
-		"m           toggle queue/all       P          pause/resume all",
-		"a / d       add / remove repo      x          stop runner",
-		"l           follow runner log      enter      details / copy URL",
-		"pgup/pgdn   scroll                 q          quit",
-		"",
-		"A focused number field takes digits, so 1-4 type into it instead of switching pages.",
-		"Mouse: click the sidebar, rows, buttons and footer keys; double-click a runner; wheel scrolls.",
-		"Selecting terminal text needs Shift-drag (Option-drag in iTerm2).",
-		"Under tmux, mouse input requires `set -g mouse on`.",
-	}, "\n")
+type helpGroup struct {
+	title string
+	keys  [][2]string // key, what it does
+}
+
+// helpGroups in reading order. They render as three columns of two groups,
+// Global over Detail, Dashboard over History and Runners over Settings, so
+// the dialog fits the 22-row minimum screen.
+var helpGroups = []helpGroup{
+	{"Global", [][2]string{{"1-4", "switch page"}, {"tab", "move focus"}, {"↑↓ j k", "move selection"}, {"? / q", "help / quit"}}},
+	{"Dashboard", [][2]string{{"h / →", "repos / runners"}, {"p / P", "pause repo/all"}, {"+ - [ ]", "repo/global cap"}, {"m", "queue/all mode"}, {"a / d", "add/remove repo"}}},
+	{"Runners", [][2]string{{"enter", "open details"}, {"l / x", "log / stop"}, {"pgup/dn", "scroll the log"}}},
+	{"Detail", [][2]string{{"← / →", "switch tab"}, {"x / esc", "stop / back"}}},
+	{"History", [][2]string{{"r / c", "repo / result"}, {"enter", "copy run URL"}}},
+	{"Settings", [][2]string{{"ctrl+s", "save"}, {"← / →", "choose / step"}, {"enter", "open / edit"}, {"esc", "close / stop"}}},
+}
+
+const helpColW = 23 // an 8-column key and a 15-column description
+
+// helpText lists the keys by group in three columns, stacked into one when
+// inner columns cannot hold three, followed by the notes on digits, the mouse
+// and tmux.
+func helpText(inner int) string {
+	col := func(gs ...helpGroup) []string {
+		var out []string
+		for i, g := range gs {
+			if i > 0 {
+				out = append(out, "")
+			}
+			out = append(out, sAccent.Render(cell(g.title, helpColW)))
+			for _, k := range g.keys {
+				out = append(out, sBold.Render(cell(k[0], 8))+cell(k[1], helpColW-8))
+			}
+		}
+		return out
+	}
+	g := helpGroups
+	cols := [][]string{col(g[0], g[3]), col(g[1], g[4]), col(g[2], g[5])}
+	var lines []string
+	if inner < 3*helpColW+4 {
+		lines = col(g...)
+	} else {
+		for i := 0; i < max(len(cols[0]), len(cols[1]), len(cols[2])); i++ {
+			row := make([]string, 3)
+			for c := range cols {
+				if i < len(cols[c]) {
+					row[c] = cols[c][i]
+				}
+				row[c] = cell(row[c], helpColW)
+			}
+			lines = append(lines, strings.TrimRight(strings.Join(row, "  "), " "))
+		}
+	}
+	return strings.Join(append(lines, "",
+		"A focused stepper takes digits: 1-4 type into it instead of switching.",
+		"Mouse: click anything; double-click a runner; the wheel scrolls.",
+		"Shift-drag selects text (Option-drag in iTerm2). tmux: set -g mouse on",
+	), "\n")
+}
+
+// helpLines is the Help text wrapped for a w-column screen, and how many of
+// its lines the dialog can show: all of them when they fit the height,
+// otherwise one less than the room, leaving a line for the scroll hint.
+func (m Model) helpLines(w int) ([]string, int) {
+	inner := max(w-6, 20) // as modal computes it
+	text := helpText(inner)
+	if lipgloss.Width(text) > inner {
+		text = lipgloss.NewStyle().Width(inner).Render(text)
+	}
+	lines := strings.Split(text, "\n")
+	room := max(m.height-8, 3) // the dialog's border, padding, title and buttons take 8 rows
+	if len(lines) <= room {
+		return lines, len(lines)
+	}
+	return lines, room - 1
+}
+
+// helpBody is the part of the Help text that fits the screen, with a hint
+// line when ↑/↓ or pgup/pgdn can scroll the rest into view.
+func (m Model) helpBody(w int) string {
+	lines, n := m.helpLines(w)
+	if n == len(lines) {
+		return strings.Join(lines, "\n")
+	}
+	start := min(m.helpScroll, len(lines)-n)
+	hint := sDim.Render(fmt.Sprintf("↑↓ scroll · lines %d-%d of %d", start+1, start+n, len(lines)))
+	return strings.Join(append(lines[start:start+n:start+n], hint), "\n")
 }
 
 // withOverlay replaces the screen with the open dialog, centred on a blank
@@ -349,7 +428,7 @@ func (m Model) withOverlay(base string, w int) string {
 	case ovConfirm:
 		dialog = modal("Confirm", m.confirmText, m.dlgButtons, m.dlg.FocusedID(), w)
 	case ovHelp:
-		dialog = modal("Keys", helpText(), m.dlgButtons, m.dlg.FocusedID(), w)
+		dialog = modal("Keys", m.helpBody(w), m.dlgButtons, m.dlg.FocusedID(), w)
 	case ovUnsaved:
 		n := len(m.settings.form.Dirty())
 		body := fmt.Sprintf("You have %d unsaved changes on the Settings page.", n)
