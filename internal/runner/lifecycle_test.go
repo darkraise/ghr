@@ -380,3 +380,53 @@ func TestKill(t *testing.T) {
 		t.Fatalf("stopped %v", h.sd.stopped)
 	}
 }
+
+// A read error that is not a decode error is retried, not deleted.
+func TestFinalizeKeepsUnreadablePending(t *testing.T) {
+	h := newHarness(t)
+	path := h.m.pendingPath("aaaaaa")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.m.finalizePending(context.Background())
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("pending path removed: %v; events %s", err, h.eventText())
+	}
+	if strings.Contains(h.eventText(), "removed") {
+		t.Fatalf("events %s", h.eventText())
+	}
+}
+
+func TestHookRecordFillsRunNumberOfConfirmedJob(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.mu.Lock()
+	h.m.insts["aaaaaa"].State = sched.Busy
+	h.m.insts["aaaaaa"].Job = &model.JobInfo{RunID: 55, Name: "build"}
+	h.m.mu.Unlock()
+	h.writeJob(t, "aaaaaa", 55)
+	h.m.readJobFiles()
+	h.m.mu.Lock()
+	j := *h.m.insts["aaaaaa"].Job
+	h.m.mu.Unlock()
+	if j.RunNumber != "412" || j.Workflow != "CI" || j.Name != "build" {
+		t.Fatalf("job %+v", j)
+	}
+}
+
+func TestCompletionOnlyRecordHasNoNegativeDuration(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	finished := h.now.Add(time.Minute).UTC().Format(time.RFC3339)
+	if err := os.WriteFile(filepath.Join(h.m.instanceDir("aaaaaa"), JobFile), []byte(`{"finished_at":"`+finished+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.now = h.now.Add(5 * time.Minute)
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	got, _ := h.m.History.Query("", "", 0)
+	if len(got) != 1 || got[0].StartedAt.After(got[0].FinishedAt) {
+		t.Fatalf("history %+v", got)
+	}
+}

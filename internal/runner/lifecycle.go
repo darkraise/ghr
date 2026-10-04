@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -156,6 +158,14 @@ func (m *Manager) readJobFiles() {
 					started = m.Now()
 				}
 				inst.Job = &model.JobInfo{RunID: runID, RunNumber: rec.RunNumber, Workflow: rec.Workflow, Name: rec.Job, StartedAt: started}
+			} else if inst.Job.RunNumber == "" && rec.RunNumber != "" {
+				// A copy, not an in-place edit: finish may hold the old pointer.
+				j := *inst.Job
+				j.RunNumber = rec.RunNumber
+				if j.Workflow == "" {
+					j.Workflow = rec.Workflow
+				}
+				inst.Job = &j
 			}
 		}
 		m.mu.Unlock()
@@ -257,7 +267,7 @@ func (m *Manager) pendingFor(i instance, rec JobRecord, recOK bool) (pending, bo
 		return pending{}, false
 	}
 	now := m.Now()
-	e := model.HistoryEntry{ID: i.ID, Repo: i.Repo, Conclusion: "unknown", StartedAt: i.StateSince, FinishedAt: now}
+	e := model.HistoryEntry{ID: i.ID, Repo: i.Repo, Conclusion: "unknown", StartedAt: i.SpawnedAt, FinishedAt: now}
 	if i.Job != nil {
 		e.RunID, e.RunNumber, e.Workflow, e.JobName, e.HTMLURL = i.Job.RunID, i.Job.RunNumber, i.Job.Workflow, i.Job.Name, i.Job.HTMLURL
 		e.StartedAt = i.Job.StartedAt
@@ -347,14 +357,19 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 		m.Events.Add("warn", i.Repo, "delete registration %s: %v (reconciliation retries)", i.RunnerName, err)
 	}
 
-	m.mu.Lock()
-	delete(m.insts, id)
-	m.mu.Unlock()
 	if !hadJob {
+		m.mu.Lock()
+		delete(m.insts, id)
+		m.mu.Unlock()
 		m.Events.Add("info", i.Repo, "runner %s exited without a job; cleanup: %d ctrs", id, removed)
 		return nil
 	}
+	// The instance stays in the map until finalize returns, so finalizePending
+	// on the tick goroutine skips this record instead of finalizing it concurrently.
 	m.finalize(ctx, pendingPath)
+	m.mu.Lock()
+	delete(m.insts, id)
+	m.mu.Unlock()
 	return nil
 }
 
@@ -363,8 +378,15 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 func (m *Manager) finalize(ctx context.Context, path string) {
 	var p pending
 	if err := readJSON(path, &p); err != nil {
-		m.Events.Add("warn", "", "unreadable pending history %s removed: %v", filepath.Base(path), err)
-		os.Remove(path)
+		var syntaxErr *json.SyntaxError
+		var typeErr *json.UnmarshalTypeError
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+		case errors.As(err, &syntaxErr) || errors.As(err, &typeErr):
+			m.Events.Add("warn", "", "unreadable pending history %s removed: %v", filepath.Base(path), err)
+			os.Remove(path)
+		}
+		// Any other read error leaves the record for finalizePending to retry.
 		return
 	}
 	e := p.Entry
