@@ -25,6 +25,9 @@ const (
 	finishTimeout  = 15 * time.Minute // bounds one finish attempt, so Wait returns on shutdown
 	finishRetry    = 30 * time.Second // delay before a failed finish runs again
 	conclusionWait = 30 * time.Minute // how long a finished job's conclusion is polled before "unknown"
+	// maxCleanupFailures bounds consecutive failed Docker cleanups of one
+	// instance (about five minutes at finishRetry) before finish frees its slot.
+	maxCleanupFailures = 10
 )
 
 // RandomID returns 6 lowercase hex characters.
@@ -349,8 +352,26 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	}
 
 	removed, err := m.cleanupDocker(ctx, cfg, id, i.Repo)
+	fails := 0
+	m.mu.Lock()
+	if ip, ok := m.insts[id]; ok {
+		if err != nil {
+			ip.cleanupFails++
+		} else {
+			ip.cleanupFails = 0
+		}
+		fails = ip.cleanupFails
+	}
+	m.mu.Unlock()
 	if err != nil {
-		return fmt.Errorf("docker cleanup: %w", err)
+		// A resource held from outside the compose project (a foreign container
+		// on its network, say) fails every retry; holding the repo slot forever
+		// would stall the repo, so give up and leave the rest to the operator.
+		if fails < maxCleanupFailures {
+			return fmt.Errorf("docker cleanup: %w", err)
+		}
+		m.Events.Add("error", i.Repo, "cleanup of %s failed %d times in a row; releasing its slot, remove the leftovers by hand: %v",
+			id, fails, err)
 	}
 	if hadJob {
 		p.Cleanup = removed

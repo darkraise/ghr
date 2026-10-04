@@ -287,6 +287,43 @@ func TestDockerFailureKeepsSlotAndRetries(t *testing.T) {
 	}
 }
 
+// A network another container keeps attached never goes away: after
+// maxCleanupFailures attempts the slot and registration are released anyway.
+func TestPersistentDockerFailureReleasesSlot(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud")
+	h.writeJob(t, "aaaaaa", 55)
+	h.gh.setJobs(55, completedJob(h, 55, "ghr-darkcloud-aaaaaa", "success"))
+	h.docker.setErr("RemoveNetworksByLabel", errors.New("network ghr-aaaaaa_default has active endpoints"))
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	for n := 1; n < maxCleanupFailures; n++ {
+		h.m.refreshUnits(context.Background())
+		h.m.Wait()
+		if h.state("aaaaaa") != "cleaning" {
+			t.Fatalf("attempt %d: state %s, must keep retrying", n, h.state("aaaaaa"))
+		}
+		h.now = h.now.Add(finishRetry)
+	}
+	if strings.Contains("\n"+h.eventText(), "\nerror ") || len(h.gh.deleted) != 0 {
+		t.Fatalf("gave up early: deleted %v events %s", h.gh.deleted, h.eventText())
+	}
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if h.state("aaaaaa") != "gone" || len(h.gh.deleted) != 1 || h.gh.deleted[0] != 101 {
+		t.Fatalf("state %s deleted %v", h.state("aaaaaa"), h.gh.deleted)
+	}
+	if ev := h.eventText(); !strings.Contains(ev, "error darkcloud") || !strings.Contains(ev, "aaaaaa") ||
+		!strings.Contains(ev, "network ghr-aaaaaa_default has active endpoints") {
+		t.Fatalf("events %s", ev)
+	}
+	if spawns := sched.Plan(h.cfg, h.m.schedInstances(h.cfg), sched.Demand{"darkcloud": {{Repo: "darkcloud", ID: 1, CreatedAt: h.now}}}, h.now); len(spawns) != 1 {
+		t.Fatalf("repo slot not released, spawns %v", spawns)
+	}
+	if !reflect.DeepEqual(h.history(t), []string{"aaaaaa success"}) {
+		t.Fatalf("history %v", h.history(t))
+	}
+}
+
 func TestArchiveFailureKeepsInstanceDir(t *testing.T) {
 	h := newHarness(t)
 	h.m.spawn(context.Background(), h.cfg, "darkmem")

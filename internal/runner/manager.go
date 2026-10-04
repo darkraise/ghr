@@ -117,6 +117,7 @@ type instance struct {
 	Job          *model.JobInfo
 	finishing    bool      // a finish goroutine is running
 	retryFinish  time.Time // when a failed finish may run again
+	cleanupFails int       // consecutive failed Docker cleanups
 }
 
 type Manager struct {
