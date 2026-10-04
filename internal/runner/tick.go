@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/darkraise/ghr/internal/config"
@@ -147,6 +148,9 @@ func (m *Manager) confirm(id string, j github.Job, now time.Time) {
 	}
 	i.JobConfirmed = true
 	started := now
+	if i.Job != nil && !i.Job.StartedAt.IsZero() {
+		started = i.Job.StartedAt
+	}
 	if j.StartedAt != nil {
 		started = *j.StartedAt
 	}
@@ -172,12 +176,17 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 		}
 	}
 	m.mu.Unlock()
+	failed := map[string]bool{}
 	for _, s := range sched.Plan(&planCfg, m.schedInstances(cfg), demand, now) {
 		if m.Config() != cfg {
 			return
 		}
+		if failed[strings.ToLower(s.Repo)] {
+			continue
+		}
 		if err := m.spawn(ctx, cfg, s.Repo); err != nil {
 			m.Events.Add("error", s.Repo, "spawn failed: %v", err)
+			failed[strings.ToLower(s.Repo)] = true
 			var ae *github.APIError
 			if errors.As(err, &ae) && (ae.Kind == github.ErrAuth || ae.Kind == github.ErrRateLimit) {
 				m.apiErr(s.Repo, err, now)

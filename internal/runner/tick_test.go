@@ -8,6 +8,7 @@ import (
 
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/github"
+	"github.com/darkraise/ghr/internal/model"
 )
 
 func queuedRun(h *harness, repo string, runID int64, jobs ...github.Job) {
@@ -241,5 +242,55 @@ func TestPausedRepoGetsNoRunners(t *testing.T) {
 	h.m.Tick(context.Background())
 	if len(h.sd.started) != 0 {
 		t.Fatalf("started %d", len(h.sd.started))
+	}
+}
+
+// A failed spawn is retried on the next tick, not again for the same repo
+// within this one.
+func TestSpawnFailureStopsRepoForTick(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.Repos[1].Max = new(int)
+	*h.cfg.Repos[1].Max = 2
+	labels := []string{"homelab"}
+	queuedRun(h, "darkmem", 2, github.Job{ID: 3, Status: "queued", Labels: labels, CreatedAt: h.now.Add(-2 * time.Minute)},
+		github.Job{ID: 4, Status: "queued", Labels: labels, CreatedAt: h.now.Add(-time.Minute)})
+	h.gh.setErr("GenerateJITConfig darkmem", &github.APIError{Status: 502, Kind: github.ErrServer})
+	jitAttempts := func() int {
+		n := 0
+		for _, c := range h.gh.calls {
+			if c == "GenerateJITConfig darkmem" {
+				n++
+			}
+		}
+		return n
+	}
+	h.m.Tick(context.Background())
+	if n := jitAttempts(); n != 1 {
+		t.Fatalf("JIT attempts in one tick = %d: %v", n, h.gh.calls)
+	}
+	if n := strings.Count(h.eventText(), "error darkmem spawn failed"); n != 1 {
+		t.Fatalf("spawn failed events = %d:\n%s", n, h.eventText())
+	}
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background())
+	if n := jitAttempts(); n != 2 {
+		t.Fatalf("JIT attempts after the second tick = %d: %v", n, h.gh.calls)
+	}
+}
+
+// An in-progress API job without started_at keeps the start time already known.
+func TestConfirmKeepsKnownStartTime(t *testing.T) {
+	h := newHarness(t)
+	if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	past := h.now.Add(-7 * time.Minute)
+	h.m.mu.Lock()
+	h.m.insts["aaaaaa"].Job = &model.JobInfo{RunID: 1, RunNumber: "412", Workflow: "CI", Name: "build", StartedAt: past}
+	h.m.mu.Unlock()
+	h.m.confirm("aaaaaa", github.Job{ID: 13, Status: "in_progress", RunID: 1, Name: "build", WorkflowName: "CI", RunnerName: "ghr-darkmem-aaaaaa"}, h.now)
+	job := h.m.Status().Instances[0].Job
+	if job == nil || !job.StartedAt.Equal(past) || job.RunNumber != "412" {
+		t.Fatalf("job %+v, want StartedAt %v", job, past)
 	}
 }
