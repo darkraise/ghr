@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/api"
@@ -465,19 +466,28 @@ func (m Model) refetched(msg refetchedMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// unsavedBar is the sticky line shown while anything is dirty.
-func (m Model) unsavedBar() string {
+// unsavedBar is the sticky line shown while anything is dirty. Its text
+// shortens to fit w columns; the buttons are never cut.
+func (m Model) unsavedBar(w int) string {
 	s := m.settings
 	n := len(s.form.Dirty())
 	if n == 0 {
 		return ""
 	}
-	text := fmt.Sprintf("● %d unsaved changes", n)
+	full := fmt.Sprintf("● %d unsaved changes", n)
 	if n == 1 {
-		text = "● 1 unsaved change"
+		full = "● 1 unsaved change"
 	}
 	focused := s.group.FocusedID()
-	return sAmber.Render(text) + "  " + s.discard.View(focused == setDiscard, 0) + "  " + s.save.View(focused == setSave, 0)
+	buttons := "  " + s.discard.View(focused == setDiscard, 0) + "  " + s.save.View(focused == setSave, 0)
+	text := fmt.Sprintf("● %d", n)
+	for _, t := range []string{full, fmt.Sprintf("● %d unsaved", n)} {
+		if ansi.StringWidth(t+buttons) <= w {
+			text = t
+			break
+		}
+	}
+	return sAmber.Render(text) + buttons
 }
 
 // alertBox lists the daemon's messages from a rejected save.
@@ -693,7 +703,7 @@ func (m Model) settingsFooterKeys() []footerKey {
 func (m Model) settingsBodyH() int {
 	w, h := m.contentSize()
 	h -= len(m.alertBox(w))
-	if m.unsavedBar() != "" {
+	if len(m.settings.form.Dirty()) > 0 {
 		h--
 	}
 	return max(h, 1)
@@ -719,7 +729,7 @@ func (m Model) settingsView(w, h int) string {
 	focus := s.group.FocusedID()
 	sections := m.settingsSections()
 	lines, ranges := ui.Render(sections, s.group.FocusedID(), w, m.width >= wideMin)
-	top, bar := m.alertBox(w), m.unsavedBar()
+	top, bar := m.alertBox(w), m.unsavedBar(w)
 	bodyH := h - len(top)
 	if bar != "" {
 		bodyH--

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -90,6 +91,30 @@ func TestNarrowFramesFit(t *testing.T) {
 		}
 		if m = click(t, m, "nav/settings"); m.page != pageSettings {
 			t.Fatalf("width %d: tab row click went to page %v", w, m.page)
+		}
+		// Settings with an edit: the unsaved bar keeps both buttons whole, and so
+		// does the unsaved-changes dialog.
+		m = dirtySettings(t, &fakeClient{})
+		m = feed(m, tea.WindowSizeMsg{Width: w, Height: 30})
+		for _, tc := range []struct {
+			name  string
+			wants []string
+		}{{"settings", []string{"( Discard )", "[ Save changes ]"}}, {"dialog", []string{"( Stay )", "( Discard )", "[ Save ]"}}} {
+			name, wants := tc.name, tc.wants
+			if name == "dialog" {
+				m = feed(m, key("2"))
+			}
+			v := m.View()
+			for i, line := range strings.Split(v, "\n") {
+				if lipgloss.Width(line) > w {
+					t.Fatalf("width %d %s: line %d is %d wide: %q", w, name, i, lipgloss.Width(line), line)
+				}
+			}
+			for _, want := range wants {
+				if !strings.Contains(v, want) {
+					t.Errorf("width %d %s: missing %q:\n%s", w, name, want, v)
+				}
+			}
 		}
 	}
 }

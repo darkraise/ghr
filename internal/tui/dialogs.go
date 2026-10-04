@@ -341,14 +341,24 @@ func modal(title, body string, buttons []*ui.Button, focused string, maxW int) s
 	if lipgloss.Width(body) > inner {
 		body = lipgloss.NewStyle().Width(inner).Render(body)
 	}
-	var bs []string
+	// The buttons wrap onto more rows when one row would not fit inside.
+	var rows []string
 	for _, b := range buttons {
-		bs = append(bs, b.View(b.ID() == focused, 0))
+		v := b.View(b.ID() == focused, 0)
+		if n := len(rows); n > 0 && lipgloss.Width(rows[n-1]+"  "+v) <= inner {
+			rows[n-1] += "  " + v
+		} else {
+			rows = append(rows, v)
+		}
 	}
-	row := strings.Join(bs, "  ")
-	w := max(lipgloss.Width(title), lipgloss.Width(body), lipgloss.Width(row))
-	row = strings.Repeat(" ", w-lipgloss.Width(row)) + row
-	return sDialog.Render(sBold.Render(title) + "\n\n" + body + "\n\n" + row)
+	w := max(lipgloss.Width(title), lipgloss.Width(body))
+	for _, r := range rows {
+		w = max(w, lipgloss.Width(r))
+	}
+	for i, r := range rows {
+		rows[i] = strings.Repeat(" ", w-lipgloss.Width(r)) + r
+	}
+	return sDialog.Render(sBold.Render(title) + "\n\n" + body + "\n\n" + strings.Join(rows, "\n"))
 }
 
 type helpGroup struct {
