@@ -157,6 +157,30 @@ func TestDetailListScrolls(t *testing.T) {
 	}
 }
 
+// Paging only scrolls what is on screen: a log that is not shown keeps its
+// tail, so the Log tab never opens on a stale window titled "following".
+func TestPagingScrollsOnlyAShownLog(t *testing.T) {
+	c := &fakeClient{}
+	for i := 1; i <= 60; i++ {
+		c.steps = append(c.steps, model.Step{Number: i, Name: fmt.Sprintf("step %02d", i), Status: "completed", Conclusion: "success"})
+	}
+	m := detailModel(t, c)
+	m = feed(m, keys("pgup", "pgup")...)
+	if m.logScroll != 0 || m.eventScroll != 0 {
+		t.Fatalf("paging the Steps tab moved the log (%d) or the events (%d)", m.logScroll, m.eventScroll)
+	}
+	if m = feed(m, key("right")); m.logScroll != 0 {
+		t.Fatalf("the Log tab opened %d lines above the tail", m.logScroll)
+	}
+	if m = feed(m, key("pgup")); m.logScroll != 10 {
+		t.Fatalf("paging a shown log: scroll %d, want 10", m.logScroll)
+	}
+	m = feed(m, keys("esc", "1", "pgup")...)
+	if m.eventScroll != 5 || m.logScroll != 10 {
+		t.Fatalf("paging the Dashboard: events %d (want 5), log %d (want 10 kept)", m.eventScroll, m.logScroll)
+	}
+}
+
 // Clicking the Log tab follows this runner's log at once, not the log of
 // the runner followed before.
 func TestDetailLogTabClickFollows(t *testing.T) {

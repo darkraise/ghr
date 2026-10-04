@@ -70,8 +70,12 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 		cmd := m.move(d)
 		return m, cmd
 	case "pgup":
-		m.eventScroll += 5
-		m.logScroll += 10
+		if m.page == pageDashboard {
+			m.eventScroll += 5
+		}
+		if m.logTarget() != "" {
+			m.logScroll += 10
+		}
 		if m.page == pageDetail {
 			m.scrollDetail(-10)
 		}
@@ -79,8 +83,12 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 			m.histSel = clamp(m.histSel-10, len(m.hist))
 		}
 	case "pgdown":
-		m.eventScroll = max(0, m.eventScroll-5)
-		m.logScroll = max(0, m.logScroll-10)
+		if m.page == pageDashboard {
+			m.eventScroll = max(0, m.eventScroll-5)
+		}
+		if m.logTarget() != "" {
+			m.logScroll = max(0, m.logScroll-10)
+		}
 		if m.page == pageDetail {
 			m.scrollDetail(10)
 		}
