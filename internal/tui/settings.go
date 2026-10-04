@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
 
+	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/tui/ui"
@@ -388,14 +390,20 @@ func (m Model) saveSettings() (tea.Model, tea.Cmd) {
 	}
 }
 
-// saved handles the patch's outcome. A rejection keeps the edits and lists
-// the daemon's messages. A success fetches the config to reset the saved
+// saved handles the patch's outcome. A rejection (a 4xx answer) keeps the
+// edits and lists the daemon's messages; any other failure keeps them and
+// says what went wrong in a toast. A success fetches the config to reset the saved
 // fields; the save stays busy until that refetch is handled, so a second
 // save cannot overlap it.
 func (m Model) saved(msg savedMsg) (tea.Model, tea.Cmd) {
 	s := m.settings
 	if msg.err != nil {
-		s.saving, m.leaving = false, false // a rejected save stays on Settings
+		s.saving, m.leaving = false, false // a failed save stays on Settings
+		var ae *api.Error
+		if !errors.As(msg.err, &ae) || ae.Status < 400 || ae.Status >= 500 {
+			m.toast.Show("settings not saved: "+clean(msg.err.Error()), true, m.now())
+			return m, nil
+		}
 		s.alert = strings.Split(clean(msg.err.Error()), "; ")
 		m.toast.Show("settings not saved", true, m.now())
 		return m, nil

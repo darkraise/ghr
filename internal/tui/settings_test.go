@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 	zone "github.com/lrstanley/bubblezone"
 
+	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/tui/ui"
@@ -408,7 +409,7 @@ func TestSettingsSavedDurationIsNotDirtyAfterRefetch(t *testing.T) {
 }
 
 func TestSettingsRejectedSaveKeepsEditsAndShowsAlert(t *testing.T) {
-	c := &fakeClient{patchErr: errors.New("build_cache_keep must look like 20GB; runner_limits.cpu_quota must be a positive percentage such as 200%")}
+	c := &fakeClient{patchErr: rejected("build_cache_keep must look like 20GB; runner_limits.cpu_quota must be a positive percentage such as 200%")}
 	m := onSettings(t, c, 120, 30)
 	set(m, setBuildCacheKeep, ui.Value{Text: "lots"})
 	set(m, setCPUQuota, ui.Value{Text: "fast"})
@@ -426,6 +427,28 @@ func TestSettingsRejectedSaveKeepsEditsAndShowsAlert(t *testing.T) {
 	m = click(t, m, setDiscard)
 	if v := m.View(); strings.Contains(v, "Save rejected") || strings.Contains(v, "unsaved change") {
 		t.Fatalf("discard left the alert or edits:\n%s", v)
+	}
+}
+
+// rejected is the daemon's answer to a patch that fails validation.
+func rejected(msg string) error { return &api.Error{Status: 400, Msg: msg} }
+
+// A save that never reached the daemon, or that it failed to apply, is a
+// connection problem, not a rejection: a toast, no Save rejected box.
+func TestSettingsSaveFailureIsNotARejection(t *testing.T) {
+	for _, err := range []error{
+		fmt.Errorf("ghr daemon unreachable: %w", errors.New("connection refused")),
+		&api.Error{Status: 500, Msg: "write config.yaml: disk full"},
+	} {
+		c := &fakeClient{patchErr: err}
+		m := feed(dirtySettings(t, c), keys("2", "enter")...)
+		v := m.View()
+		if strings.Contains(v, "Save rejected") || !strings.Contains(v, "settings not saved: "+err.Error()) {
+			t.Errorf("%v:\n%s", err, v)
+		}
+		if m.page != pageSettings || m.leaving || m.settings.saving || m.settings.input(setPollInterval).Value().Text != "30s" {
+			t.Errorf("%v: page %v leaving %v saving %v", err, m.page, m.leaving, m.settings.saving)
+		}
 	}
 }
 
@@ -555,7 +578,7 @@ func TestSettingsAlertIsBounded(t *testing.T) {
 	for i := 0; i < 6; i++ {
 		msgs = append(msgs, "repo"+string(rune('0'+i))+": needs at least one label in labels or repo labels")
 	}
-	c := &fakeClient{patchErr: errors.New(strings.Join(msgs, "; "))}
+	c := &fakeClient{patchErr: rejected(strings.Join(msgs, "; "))}
 	m := onSettings(t, c, 120, 22)
 	set(m, setLabels, ui.Value{List: []string{}})
 	m = feed(m, key("ctrl+s"))
@@ -723,7 +746,7 @@ func TestLeaveGuardSaveThenNavigate(t *testing.T) {
 }
 
 func TestLeaveGuardRejectedSaveStays(t *testing.T) {
-	c := &fakeClient{patchErr: errors.New("poll_interval must be >= 5s")}
+	c := &fakeClient{patchErr: rejected("poll_interval must be >= 5s")}
 	m := feed(dirtySettings(t, c), keys("3", "enter")...)
 	if m.page != pageSettings || !strings.Contains(m.View(), "✖ poll_interval must be >= 5s") || m.leaving {
 		t.Fatalf("page %v leaving %v", m.page, m.leaving)
