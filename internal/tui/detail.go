@@ -107,6 +107,7 @@ func (m Model) closeDetail() (tea.Model, tea.Cmd) { return m.switchPage(m.detail
 // finished alert shows.
 func (m Model) detailButtons() string {
 	g := m.groups
+	g.stopRunner.SetDisabled(!m.connected || m.finished())
 	items := []ui.Widget{g.stopRunner}
 	out := g.stopRunner.View(g.detail.FocusedID() == detailStop, 0)
 	if j := m.detailSnap.Job; j != nil && j.HTMLURL != "" {
@@ -116,7 +117,6 @@ func (m Model) detailButtons() string {
 	if m.finished() {
 		items = append(items, g.back)
 	}
-	g.stopRunner.SetDisabled(!m.connected || m.finished())
 	g.detail.Set(append(items, g.tabs))
 	return out
 }
