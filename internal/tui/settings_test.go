@@ -920,3 +920,20 @@ func TestSettingsPageSwitchScrollsMovedFocusIntoView(t *testing.T) {
 		t.Fatalf("new focus not in view (scroll %d):\n%s", m.settings.scroll, v)
 	}
 }
+
+// A refresh that leaves nothing unsaved while the unsaved-changes dialog is
+// open (the daemon now holds the edited value) carries on where the user was
+// going: there is nothing left to save or discard.
+func TestUnsavedDialogClosesWhenNothingIsLeft(t *testing.T) {
+	c := &fakeClient{}
+	m := dirtySettings(t, c)
+	if m = feed(m, key("2")); m.overlay != ovUnsaved {
+		t.Fatalf("2: overlay %v", m.overlay)
+	}
+	cfg := parseConfig(t, settingsYAML)
+	cfg.PollInterval, _ = config.ParseDuration("30s")
+	m = feed(m, configMsg{seq: m.settings.seq + 1, cfg: cfg})
+	if m.overlay != ovNone || m.page != pageRunners {
+		t.Fatalf("overlay %v page %v", m.overlay, m.page)
+	}
+}

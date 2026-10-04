@@ -440,6 +440,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case configMsg:
 		m.loadConfig(msg.seq, msg.cfg)
+		if m.overlay == ovUnsaved && len(m.settings.form.Dirty()) == 0 {
+			// The refresh left nothing to save or discard: carry on leaving.
+			m.overlay = ovNone
+			return m.goTo(m.leaveTo)
+		}
 		return m, nil
 	case savedMsg:
 		return m.saved(msg)
