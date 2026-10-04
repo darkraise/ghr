@@ -32,6 +32,9 @@ type APIError struct {
 	Kind    ErrKind
 	Message string
 	RetryAt time.Time // set for ErrRateLimit
+	// Method and Path name the failed call; Permissions is GitHub's
+	// x-accepted-github-permissions header (such as "actions=read"), when sent.
+	Method, Path, Permissions string
 }
 
 func (e *APIError) Error() string { return fmt.Sprintf("github: %d %s", e.Status, e.Message) }
@@ -228,7 +231,8 @@ func (c *Client) classify(resp *http.Response, data []byte) *APIError {
 		Message string `json:"message"`
 	}
 	_ = json.Unmarshal(data, &msg)
-	e := &APIError{Status: resp.StatusCode, Message: msg.Message}
+	e := &APIError{Status: resp.StatusCode, Message: msg.Message,
+		Method: resp.Request.Method, Path: resp.Request.URL.Path, Permissions: resp.Header.Get("X-Accepted-GitHub-Permissions")}
 	switch {
 	case resp.StatusCode == 401:
 		e.Kind = ErrAuth

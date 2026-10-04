@@ -97,6 +97,22 @@ func TestAuthErrorDegradesAndRecovers(t *testing.T) {
 	}
 }
 
+func TestAuthErrorNamesCallAndPermission(t *testing.T) {
+	h := newHarness(t)
+	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 403, Kind: github.ErrAuth,
+		Message: "Resource not accessible by personal access token",
+		Method:  "GET", Path: "/repos/darkraise/darkcloud/actions/runs", Permissions: "actions=read"})
+	h.m.Tick(context.Background())
+	want := "GitHub rejected the token on GET /repos/darkraise/darkcloud/actions/runs (needs actions=read): " +
+		"github: 403 Resource not accessible by personal access token"
+	if got := h.m.Status().DegradedReason; got != want {
+		t.Fatalf("reason %q\nwant   %q", got, want)
+	}
+	if !strings.Contains(h.eventText(), "error darkcloud "+want+"; spawning stopped") {
+		t.Fatalf("events %s", h.eventText())
+	}
+}
+
 // The first repo answers, the second fails authentication: still degraded, no spawn.
 func TestAuthFailureOnSecondRepoKeepsDegraded(t *testing.T) {
 	h := newHarness(t)

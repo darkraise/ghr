@@ -125,6 +125,19 @@ func TestClassify(t *testing.T) {
 	}
 }
 
+func TestErrorNamesCallAndPermission(t *testing.T) {
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Accepted-GitHub-Permissions", "actions=read")
+		w.WriteHeader(403)
+		fmt.Fprint(w, `{"message":"Resource not accessible by personal access token"}`)
+	})
+	_, err := c.ListRuns(context.Background(), "darkcloud", "queued")
+	ae, ok := err.(*APIError)
+	if !ok || ae.Kind != ErrAuth || ae.Method != "GET" || ae.Path != "/repos/darkraise/darkcloud/actions/runs" || ae.Permissions != "actions=read" {
+		t.Fatalf("err = %#v", err)
+	}
+}
+
 func TestGenerateJITConfigBodyAndSpacing(t *testing.T) {
 	var bodies []map[string]any
 	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {

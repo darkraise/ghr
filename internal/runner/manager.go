@@ -358,14 +358,22 @@ func (m *Manager) apiErr(repo string, err error, now time.Time) {
 	if errors.As(err, &ae) {
 		switch ae.Kind {
 		case github.ErrAuth:
+			reason := "GitHub rejected the token"
+			if ae.Path != "" {
+				reason += " on " + ae.Method + " " + ae.Path
+			}
+			if ae.Permissions != "" {
+				reason += " (needs " + ae.Permissions + ")"
+			}
+			reason += ": " + ae.Error()
 			m.mu.Lock()
 			was := m.degraded
 			m.degraded = true
-			m.degradedReason = ae.Error()
+			m.degradedReason = reason
 			m.authCheckAt = now.Add(authRecheck)
 			m.mu.Unlock()
 			if !was {
-				m.Events.Add("error", repo, "GitHub rejected the token (%v); spawning stopped", ae)
+				m.Events.Add("error", repo, "%s; spawning stopped", reason)
 			}
 			return
 		case github.ErrRateLimit:
