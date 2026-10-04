@@ -50,12 +50,20 @@ func isDigit(k tea.KeyMsg) bool {
 
 func (s *Stepper) clamp(n int) int { return min(max(n, s.Min), s.Max) }
 
+// bump steps by d. A value outside the range (loaded from a hand-edited
+// config) moves toward it rather than jumping to the bound.
 func (s *Stepper) bump(d int) {
 	start := s.val
 	if !s.set {
 		start = s.Default
 	}
-	s.val, s.set, s.typed = s.clamp(start+d), true, ""
+	n := start + d
+	if d > 0 {
+		n = min(n, max(start, s.Max))
+	} else {
+		n = max(n, min(start, s.Min))
+	}
+	s.val, s.set, s.typed = n, true, ""
 }
 
 func (s *Stepper) Update(msg tea.Msg) (Control, tea.Cmd) {

@@ -110,3 +110,28 @@ func TestStepperMouse(t *testing.T) {
 		t.Fatal("Hit")
 	}
 }
+
+// A value loaded from outside the range (a hand-edited config) is kept
+// until stepped, and a step moves it toward the range, never past it.
+func TestStepperOutOfRangeValueStepsTowardRange(t *testing.T) {
+	s := NewStepper("t/max", 1, 99, 1)
+	s.SetValue(Value{Num: 150, Set: true})
+	s.Update(key("+"))
+	if s.Value().Num != 150 {
+		t.Fatalf("plus above max: %d", s.Value().Num)
+	}
+	s.Update(key("-"))
+	if s.Value().Num != 149 {
+		t.Fatalf("minus above max: %d", s.Value().Num)
+	}
+	s = NewStepper("t/pct", 10, 100, 5)
+	s.SetValue(Value{Num: 2, Set: true})
+	s.Update(key("-"))
+	if s.Value().Num != 2 {
+		t.Fatalf("minus below min: %d", s.Value().Num)
+	}
+	s.Update(key("+"))
+	if s.Value().Num != 7 {
+		t.Fatalf("plus below min: %d", s.Value().Num)
+	}
+}
