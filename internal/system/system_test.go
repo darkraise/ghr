@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,10 +45,32 @@ func TestSystemdStartArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "systemd-run --unit=ghr-runner-abc123 --uid=ghrunner --gid=ghrunner --collect --quiet " +
+	want := "systemd-run --unit=ghr-runner-abc123 --description=ghr runner abc123 --uid=ghrunner --gid=ghrunner --collect --quiet " +
 		"--working-directory=/var/lib/ghr/instances/abc123 --property=MemoryMax=6G --setenv=A=1 --setenv=B=2 -- /x/run.sh --jitconfig ENC"
 	if got := (*calls)[0].String(); got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+// Without --description systemd describes the unit by its command line, which
+// carries the JIT credential into list-units and the journal.
+func TestSystemdStartDescriptionHidesCredential(t *testing.T) {
+	run, calls := fake(nil)
+	const secret = "SECRET-JIT-CONFIG"
+	if err := (Systemd{Run: run}).Start(context.Background(), UnitSpec{
+		Unit: "ghr-runner-f00d42", User: "ghrunner", Command: []string{"/x/run.sh", "--jitconfig", secret},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	args := (*calls)[0].args
+	sep := slices.Index(args, "--")
+	if sep < 0 || !slices.Contains(args[:sep], "--description=ghr runner f00d42") {
+		t.Fatalf("no description in %q", args)
+	}
+	for _, a := range args[:sep] {
+		if strings.Contains(a, secret) {
+			t.Fatalf("credential in systemd-run option %q", a)
+		}
 	}
 }
 

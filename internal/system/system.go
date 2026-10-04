@@ -54,7 +54,10 @@ type UnitSpec struct {
 type Systemd struct{ Run Runner }
 
 func (s Systemd) Start(ctx context.Context, u UnitSpec) error {
-	args := []string{"--unit=" + u.Unit, "--uid=" + u.User, "--gid=" + u.User, "--collect", "--quiet"}
+	// Without a description systemd shows the command line, JIT credential
+	// included, in list-units and the journal.
+	desc := "ghr runner " + strings.TrimPrefix(u.Unit, "ghr-runner-")
+	args := []string{"--unit=" + u.Unit, "--description=" + desc, "--uid=" + u.User, "--gid=" + u.User, "--collect", "--quiet"}
 	if u.WorkDir != "" {
 		args = append(args, "--working-directory="+u.WorkDir)
 	}
