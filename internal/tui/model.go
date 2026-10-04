@@ -15,6 +15,7 @@ import (
 
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
 // Client is the subset of *api.Client the TUI uses.
@@ -36,16 +37,16 @@ type Client interface {
 	Kill(ctx context.Context, id string) error
 }
 
-type tab int
+type page int
 
 const (
-	tabDashboard tab = iota
-	tabRunners
-	tabHistory
-	tabConfig
+	pageDashboard page = iota
+	pageRunners
+	pageHistory
+	pageSettings
 )
 
-var tabNames = []string{"Dashboard", "Runners", "History", "Config"}
+var pageNames = []string{"Dashboard", "Runners", "History", "Settings"}
 
 type pane int
 
@@ -115,7 +116,7 @@ type Model struct {
 	copyFn func(string)
 
 	width, height int
-	tab           tab
+	page          page
 	focus         pane
 	connected     bool
 	connErr       string
@@ -149,8 +150,7 @@ type Model struct {
 	promptLabel   string
 	promptSubmit  func(string) tea.Cmd
 
-	flash     string
-	flashErr  bool
+	toast     ui.Toast
 	frame     int
 	lastClick string
 	lastAt    time.Time
@@ -238,11 +238,11 @@ func (m *Model) fetchLog() tea.Cmd {
 	}
 }
 
-// follow points the log pane of the Runners tab at the selected runner,
+// follow points the log pane of the Runners page at the selected runner,
 // starting its log over when that is a different runner.
 func (m *Model) follow() tea.Cmd {
 	r := m.selectedRunner()
-	if m.tab != tabRunners || r == nil || r.ID == m.logID {
+	if m.page != pageRunners || r == nil || r.ID == m.logID {
 		return nil
 	}
 	m.logID, m.logText, m.logCursor, m.logScroll = r.ID, "", "", 0
@@ -299,17 +299,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		m.frame++
+		m.toast.Tick(m.now())
 		cmds := []tea.Cmd{tick(), m.fetchStatus(), m.fetchEvents()}
-		if m.tab == tabRunners {
+		if m.page == pageRunners {
 			cmds = append(cmds, m.fetchLog())
 		}
-		if m.tab == tabHistory && m.frame%slowPoll == 0 {
+		if m.page == pageHistory && m.frame%slowPoll == 0 {
 			cmds = append(cmds, m.fetchHistory())
 		}
 		if m.overlay == ovDetail && m.frame%slowPoll == 0 && m.instance(m.detailID) != nil {
 			cmds = append(cmds, m.fetchSteps(), m.fetchContainers())
 		}
-		if m.tab == tabConfig && m.cfg == nil {
+		if m.page == pageSettings && m.cfg == nil {
 			cmds = append(cmds, m.fetchConfig())
 		}
 		return m, tea.Batch(cmds...)
@@ -398,9 +399,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case doneMsg:
 		if msg.err != nil {
-			m.flash, m.flashErr = clean(msg.err.Error()), true
+			m.toast.Show(clean(msg.err.Error()), true, m.now())
 		} else if msg.text != "" {
-			m.flash, m.flashErr = msg.text, false
+			m.toast.Show(msg.text, false, m.now())
 		}
 		return m, tea.Batch(m.fetchStatus(), m.fetchEvents(), m.fetchConfig())
 	case tea.KeyMsg:

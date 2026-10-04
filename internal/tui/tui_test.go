@@ -204,6 +204,8 @@ func key(k string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyDown}
 	case "right":
 		return tea.KeyMsg{Type: tea.KeyRight}
+	case "tab":
+		return tea.KeyMsg{Type: tea.KeyTab}
 	}
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 }
@@ -291,13 +293,34 @@ func leftClick(x, y int) tea.MouseMsg {
 	return tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft}
 }
 
+var syncN int
+
+// settle waits until every zone update already queued has been applied.
+// bubblezone applies Scan results from a buffered channel, so without this a
+// late update from an older frame can land after a Clear and hand back stale
+// coordinates.
+func settle(t *testing.T) {
+	t.Helper()
+	syncN++
+	id := fmt.Sprintf("sync/%d", syncN)
+	zone.Scan(zone.Mark(id, "x"))
+	waitZone(t, id)
+}
+
+// zoneOf renders m and returns zone id as that frame placed it.
+func zoneOf(t *testing.T, m Model, id string) *zone.ZoneInfo {
+	t.Helper()
+	settle(t)
+	zone.Clear(id)
+	m.View()
+	return waitZone(t, id)
+}
+
 // click renders m, waits for zone id and feeds a left click on it.
 func click(t *testing.T, m Model, id string) Model {
 	t.Helper()
-	zone.Clear(id)
-	m.View()
-	z := waitZone(t, id)
-	return feed(m, leftClick(z.StartX+1, z.StartY))
+	z := zoneOf(t, m, id)
+	return feed(m, leftClick(z.StartX, z.StartY))
 }
 
 func TestKeyActions(t *testing.T) {
@@ -310,7 +333,46 @@ func TestKeyActions(t *testing.T) {
 		t.Fatalf("calls %v", c.calls)
 	}
 	if !strings.Contains(m.View(), "resumed darkagents") {
-		t.Fatal("flash line missing")
+		t.Fatal("toast missing")
+	}
+}
+
+// A toast replaces the previous one and clears on the tick after it expires:
+// 4 s for a success, 10 s for an error. Its ✕ closes it early.
+func TestToastLifecycle(t *testing.T) {
+	c := &fakeClient{}
+	m := run(t, sampleModel(c, 120, 30), "p")
+	if v := m.View(); !strings.Contains(v, "✔ paused darkcloud") {
+		t.Fatalf("success toast missing:\n%s", v)
+	}
+	m.now = func() time.Time { return now.Add(4 * time.Second) }
+	m = ticks(m, 1)
+	if strings.Contains(m.View(), "paused darkcloud") {
+		t.Fatal("success toast still shown after 4s")
+	}
+	m.toast.Show("boom", true, now)
+	m.now = func() time.Time { return now.Add(9 * time.Second) }
+	if m = ticks(m, 1); !strings.Contains(m.View(), "✖ boom") {
+		t.Fatal("error toast cleared before 10s")
+	}
+	m = click(t, m, m.toast.CloseZone())
+	if m.toast.Active() || strings.Contains(m.View(), "boom") {
+		t.Fatal("✕ did not close the toast")
+	}
+}
+
+// tab moves focus within the page instead of switching pages.
+func TestTabMovesFocusNotPage(t *testing.T) {
+	m := run(t, sampleModel(&fakeClient{}, 120, 30), "tab")
+	if m.page != pageDashboard || m.focus != paneRunners {
+		t.Fatalf("tab: page %v focus %v", m.page, m.focus)
+	}
+	m = run(t, m, "tab")
+	if m.focus != paneRepos {
+		t.Fatalf("second tab: focus %v", m.focus)
+	}
+	if m = run(t, m, "2", "tab"); m.page != pageRunners {
+		t.Fatalf("tab on Runners switched to page %v", m.page)
 	}
 }
 
@@ -341,11 +403,11 @@ func TestHiddenSelectionKeysDoNothing(t *testing.T) {
 	}
 	m = run(t, m, "2", "p", "+", "d")
 	if len(c.actions()) != 0 || m.overlay != ovNone {
-		t.Fatalf("repo keys on the Runners tab: overlay %v actions %v", m.overlay, c.actions())
+		t.Fatalf("repo keys on the Runners page: overlay %v actions %v", m.overlay, c.actions())
 	}
 	run(t, m, "4", "x")
 	if len(c.actions()) != 0 {
-		t.Fatalf("x on the Config tab: actions %v", c.actions())
+		t.Fatalf("x on the Settings page: actions %v", c.actions())
 	}
 }
 
@@ -416,8 +478,7 @@ func TestConfigUnchangedSaveSendsNothing(t *testing.T) {
 func TestMouseClickSelectsRunnerAndDoubleClickOpensDetail(t *testing.T) {
 	c := &fakeClient{}
 	m := sampleModel(c, 120, 30)
-	m.View()
-	z := waitZone(t, "runner-1")
+	z := zoneOf(t, m, "runner-1")
 	click := leftClick(z.StartX+2, z.StartY)
 	upd, _ := m.Update(click)
 	m = upd.(Model)
@@ -535,8 +596,8 @@ func TestRunnersTabFollowsSelection(t *testing.T) {
 		t.Fatalf("followed log not polled from its cursor: %q", m.logText)
 	}
 	m = feed(m, keys("1", "l")...)
-	if m.tab != tabRunners || m.logID != "a3f9c1" {
-		t.Fatalf("l: tab %v log %q", m.tab, m.logID)
+	if m.page != pageRunners || m.logID != "a3f9c1" {
+		t.Fatalf("l: page %v log %q", m.page, m.logID)
 	}
 }
 
@@ -570,7 +631,7 @@ func TestEventsResetOnDaemonRestart(t *testing.T) {
 func TestConfigTabRetriesLoad(t *testing.T) {
 	c := &fakeClient{}
 	m := sampleModel(c, 120, 30)
-	m.tab = tabConfig
+	m.page = pageSettings
 	c.cfg = sampleConfig(t, "darkcloud")
 	m = ticks(m, 1)
 	v := m.View()

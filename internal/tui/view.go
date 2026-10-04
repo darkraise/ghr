@@ -57,23 +57,26 @@ func (m Model) View() string {
 	} else if m.st.Degraded {
 		parts = append(parts, sBanner.Render("DEGRADED: "+m.st.DegradedReason+" — no new runners"))
 	}
+	if m.toast.Active() {
+		parts = append(parts, m.toast.View(w))
+	}
 	parts = append(parts, m.tabBar(w))
-	used := lipgloss.Height(strings.Join(parts, "\n")) + 2 // footer + flash
+	used := lipgloss.Height(strings.Join(parts, "\n")) + 1 // footer
 	bodyH := m.height - used
 	if bodyH < 6 {
 		bodyH = 6
 	}
-	switch m.tab {
-	case tabDashboard:
+	switch m.page {
+	case pageDashboard:
 		parts = append(parts, m.dashboard(w, bodyH))
-	case tabRunners:
+	case pageRunners:
 		parts = append(parts, m.runnersTab(w, bodyH))
-	case tabHistory:
+	case pageHistory:
 		parts = append(parts, m.historyTab(w, bodyH))
-	case tabConfig:
+	case pageSettings:
 		parts = append(parts, m.configTab(w, bodyH))
 	}
-	parts = append(parts, m.flashLine(), m.footer(w))
+	parts = append(parts, m.footer(w))
 	out := strings.Join(parts, "\n")
 	if m.overlay != ovNone {
 		out = m.withOverlay(out, w)
@@ -105,9 +108,9 @@ func (m Model) header(w int) string {
 
 func (m Model) tabBar(w int) string {
 	var tabs []string
-	for i, name := range tabNames {
+	for i, name := range pageNames {
 		label := fmt.Sprintf(" %d %s ", i+1, name)
-		if tab(i) == m.tab {
+		if page(i) == m.page {
 			label = sAccent.Render("[" + label + "]")
 		} else {
 			label = sDim.Render(" " + label + " ")
@@ -226,7 +229,7 @@ func (m Model) runnersLines(w int) []string {
 	inner := w - 4
 	lines := []string{sDim.Render(fmt.Sprintf("  %-8s %-12s %-11s %-*s %s", "ID", "REPO", "STATE", inner-50, "JOB", "ELAPSED"))}
 	for i, r := range m.st.Instances {
-		selected := i == m.runnerSel && (m.focus == paneRunners || m.tab == tabRunners)
+		selected := i == m.runnerSel && (m.focus == paneRunners || m.page == pageRunners)
 		lines = append(lines, m.runnerLine(i, r, selected, inner))
 	}
 	for _, r := range m.st.Repos {
@@ -365,16 +368,6 @@ func (m Model) configTab(w, h int) string {
 	return box("Config", w, fit(lines, 1, m.cfgSel, h-2))
 }
 
-func (m Model) flashLine() string {
-	if m.flash == "" {
-		return ""
-	}
-	if m.flashErr {
-		return sRed.Render(" ✖ " + m.flash)
-	}
-	return sGreen.Render(" ✔ " + m.flash)
-}
-
 func (m Model) footer(w int) string {
 	var parts []string
 	for _, f := range footerKeys {
@@ -406,7 +399,8 @@ func (m Model) withOverlay(base string, w int) string {
 			sDim.Render("enter save · esc cancel")
 	case ovHelp:
 		body = sBold.Render("Keys") + "\n\n" + strings.Join([]string{
-			"1-4 / tab   switch tab            ↑↓ / j k   move selection",
+			"1-4         switch page           ↑↓ / j k   move selection",
+			"tab         move focus",
 			"h / →       focus repos / runners  p          pause/resume repo",
 			"+ / -       repo cap               [ / ]      global cap",
 			"m           toggle queue/all       P          pause/resume all",

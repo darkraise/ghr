@@ -54,11 +54,12 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 	case "?":
 		m.overlay = ovHelp
 	case "1", "2", "3", "4":
-		return m.switchTab(tab(key[0] - '1'))
-	case "tab":
-		return m.switchTab((m.tab + 1) % 4)
-	case "shift+tab":
-		return m.switchTab((m.tab + 3) % 4)
+		return m.switchPage(page(key[0] - '1'))
+	case "tab", "shift+tab":
+		// tab moves focus within a page; on the Dashboard, between its two tables.
+		if m.page == pageDashboard {
+			m.focus = 1 - m.focus
+		}
 	case "left", "h":
 		m.focus = paneRepos
 	case "right":
@@ -130,17 +131,17 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 		}
 	case "l":
 		if m.selectedRunner() != nil {
-			m.tab = tabRunners
+			m.page = pageRunners
 			cmd := m.follow()
 			return m, cmd
 		}
 	case "r":
-		if m.tab == tabHistory {
+		if m.page == pageHistory {
 			m.histRepo = m.cycle(m.histRepo, m.repoNames())
 			return m, m.fetchHistory()
 		}
 	case "c":
-		if m.tab == tabHistory {
+		if m.page == pageHistory {
 			m.histConcl = m.cycle(m.histConcl, []string{"success", "failure", "cancelled"})
 			return m, m.fetchHistory()
 		}
@@ -150,15 +151,15 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) switchTab(t tab) (tea.Model, tea.Cmd) {
-	m.tab = t
-	switch t {
-	case tabRunners:
+func (m Model) switchPage(p page) (tea.Model, tea.Cmd) {
+	m.page = p
+	switch p {
+	case pageRunners:
 		cmd := m.follow()
 		return m, cmd
-	case tabHistory:
+	case pageHistory:
 		return m, m.fetchHistory()
-	case tabConfig:
+	case pageSettings:
 		return m, m.fetchConfig()
 	}
 	return m, nil
@@ -166,11 +167,11 @@ func (m Model) switchTab(t tab) (tea.Model, tea.Cmd) {
 
 func (m *Model) move(d int) tea.Cmd {
 	switch {
-	case m.tab == tabHistory:
+	case m.page == pageHistory:
 		m.histSel = clamp(m.histSel+d, len(m.hist))
-	case m.tab == tabConfig:
+	case m.page == pageSettings:
 		m.cfgSel = clamp(m.cfgSel+d, len(m.configFields()))
-	case m.tab == tabRunners || m.focus == paneRunners:
+	case m.page == pageRunners || m.focus == paneRunners:
 		m.runnerSel = clamp(m.runnerSel+d, len(m.st.Instances))
 		return m.follow()
 	default:
@@ -229,7 +230,7 @@ func (m Model) togglePauseAll() tea.Cmd {
 func (m Model) repoCap(up bool) tea.Cmd {
 	r := m.selectedRepo()
 	if r == nil || r.Max == 0 {
-		return nil // unlimited: change it in the Config tab
+		return nil // unlimited: change it on the Settings page
 	}
 	n := r.Max - 1
 	if up {
@@ -272,27 +273,27 @@ func (m Model) openPrompt(label, value string, submit func(string) tea.Cmd) (tea
 }
 
 func (m Model) runnerFocus() bool {
-	return m.tab == tabRunners || (m.tab == tabDashboard && m.focus == paneRunners)
+	return m.page == pageRunners || (m.page == pageDashboard && m.focus == paneRunners)
 }
 
 func (m Model) repoFocus() bool {
-	return m.tab == tabDashboard && m.focus == paneRepos
+	return m.page == pageDashboard && m.focus == paneRepos
 }
 
 func (m Model) enter() (tea.Model, tea.Cmd) {
-	switch m.tab {
-	case tabHistory:
+	switch m.page {
+	case pageHistory:
 		if m.histSel < len(m.hist) {
 			url := m.hist[m.histSel].HTMLURL
 			if url == "" {
-				m.flash, m.flashErr = "no run URL recorded", true
+				m.toast.Show("no run URL recorded", true, m.now())
 				return m, nil
 			}
 			m.copyFn(url)
-			m.flash, m.flashErr = "copied "+url, false
+			m.toast.Show("copied "+url, false, m.now())
 		}
 		return m, nil
-	case tabConfig:
+	case pageSettings:
 		fields := m.configFields()
 		if m.cfgSel < len(fields) {
 			f := fields[m.cfgSel]
@@ -309,7 +310,7 @@ func (m Model) enter() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if r := m.selectedRunner(); r != nil && (m.tab == tabRunners || m.focus == paneRunners) {
+	if r := m.selectedRunner(); r != nil && (m.page == pageRunners || m.focus == paneRunners) {
 		m.overlay, m.detailID = ovDetail, r.ID
 		m.steps, m.containers, m.stepsErr, m.ctrsErr = nil, nil, "", ""
 		return m, tea.Batch(m.fetchSteps(), m.fetchContainers())
@@ -339,7 +340,7 @@ func listPtr(v string) *[]string {
 	return &out
 }
 
-// configFields lists the editable settings of the Config tab.
+// configFields lists the editable settings of the Settings page.
 func (m Model) configFields() []configField {
 	c := m.cfg
 	if c == nil {
@@ -441,9 +442,13 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionRelease || msg.Button != tea.MouseButtonLeft {
 		return m, nil
 	}
-	for i := range tabNames {
+	if zone.Get(m.toast.CloseZone()).InBounds(msg) {
+		m.toast.Close()
+		return m, nil
+	}
+	for i := range pageNames {
 		if zone.Get(fmt.Sprintf("tab-%d", i)).InBounds(msg) {
-			return m.switchTab(tab(i))
+			return m.switchPage(page(i))
 		}
 	}
 	for _, f := range footerKeys {
