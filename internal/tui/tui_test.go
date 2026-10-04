@@ -1043,3 +1043,30 @@ func TestSelectionFollowsRunnerAndRepoAcrossRefresh(t *testing.T) {
 		t.Fatalf("runner selection after its runner left: %+v", r)
 	}
 }
+
+// With the daemon unreachable, the keys that change its state send nothing
+// and say why, as the disabled header buttons do.
+func TestDaemonKeysWaitForConnection(t *testing.T) {
+	const want = "the daemon is unreachable; try again once it reconnects"
+	down := statusMsg{err: errors.New("connection refused")}
+	c := &fakeClient{}
+	m := feed(sampleModel(c, 120, 30), down)
+	for _, k := range []string{"p", "P", "+", "-", "[", "]", "m", "d"} {
+		m.toast.Text = ""
+		if m = feed(m, key(k)); m.toast.Text != want || m.overlay != ovNone {
+			t.Errorf("%s on the repos card: toast %q overlay %v", k, m.toast.Text, m.overlay)
+		}
+	}
+	m.focusCard(paneRunners)
+	m.toast.Text = ""
+	if m = feed(m, key("x")); m.toast.Text != want || m.overlay != ovNone {
+		t.Errorf("x on the runners card: toast %q overlay %v", m.toast.Text, m.overlay)
+	}
+	m = feed(detailModel(t, c), down)
+	if m = feed(m, key("x")); m.toast.Text != want || m.overlay != ovNone {
+		t.Errorf("x on the detail page: toast %q overlay %v", m.toast.Text, m.overlay)
+	}
+	if got := c.actions(); len(got) != 0 {
+		t.Fatalf("actions %q", got)
+	}
+}

@@ -298,7 +298,7 @@ func (m Model) detailPressed(id string) (tea.Model, tea.Cmd) {
 			m.toast.Show("copied "+j.HTMLURL, false, m.now())
 		}
 	case detailStop:
-		if !m.finished() {
+		if !m.finished() && !m.offline() {
 			return m.stopRunner(m.detailID, m.detailSnap.State == "busy")
 		}
 	case detailBack:

@@ -96,20 +96,29 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 			m.histSel = clamp(m.histSel+10, len(m.hist))
 		}
 	case "p":
-		if !m.repoFocus() {
+		if !m.repoFocus() || m.offline() {
 			return m, nil
 		}
 		return m, m.togglePause()
 	case "P":
+		if m.offline() {
+			return m, nil
+		}
 		return m, m.togglePauseAll()
 	case "+", "=", "-":
-		if !m.repoFocus() {
+		if !m.repoFocus() || m.offline() {
 			return m, nil
 		}
 		return m, m.repoCap(key != "-")
 	case "[", "]":
+		if m.offline() {
+			return m, nil
+		}
 		return m, m.globalCap(key == "]")
 	case "m":
+		if m.offline() {
+			return m, nil
+		}
 		mode := config.ModeAll
 		if m.st.Mode == config.ModeAll {
 			mode = config.ModeQueue
@@ -120,14 +129,14 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 	case "a":
 		return m.openAddRepo()
 	case "d":
-		if r := m.selectedRepo(); r != nil && m.repoFocus() {
+		if r := m.selectedRepo(); r != nil && m.repoFocus() && !m.offline() {
 			name := r.Name
 			return m.openConfirm(fmt.Sprintf("Remove repo %s? Its running jobs finish first.", name), func() tea.Cmd {
 				return m.action("removing "+name, func(c context.Context) error { return m.c.RemoveRepo(c, name) })
 			})
 		}
 	case "x":
-		if r := m.selectedRunner(); r != nil && m.runnerFocus() {
+		if r := m.selectedRunner(); r != nil && m.runnerFocus() && !m.offline() {
 			id, busy := r.ID, r.State == "busy"
 			return m.stopRunner(id, busy)
 		}
@@ -149,6 +158,15 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 		return m.enter()
 	}
 	return m, nil
+}
+
+// offline reports whether the daemon is unreachable, saying so in a toast.
+// The keys that change daemon state check it, as their disabled buttons would.
+func (m *Model) offline() bool {
+	if !m.connected {
+		m.toast.Show("the daemon is unreachable; try again once it reconnects", true, m.now())
+	}
+	return !m.connected
 }
 
 func (m Model) switchPage(p page) (tea.Model, tea.Cmd) {
