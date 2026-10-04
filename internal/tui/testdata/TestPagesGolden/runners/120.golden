@@ -1,0 +1,30 @@
+ ghr   mode ● QUEUE   runners ▕██░▏ 2/3   api ▕█████████░▏ 4800   disk ▕██████░░░░▏ 61%   ● connected
+  1 Dashboard    Runners                                                                                                
+▌ 2 Runners      ╭─ › Runners ─────────────────────────────────────────────────────────────────────────────────────────╮
+  3 History      │   ID       REPO         STATE       JOB                                               ELAPSED       │
+  4 Settings     │ ▸ a3f9c1   darkcloud    ⣾ busy      CI / e2e-journeys  #412          …  ( Logs )  [ Stop ] 12m04s   │
+                 │   7be210   darkmem      ○ idle      –                                                 1m30s         │
+                 │   –        darkcloud    ⧗ waiting   2 jobs queued (repo cap 1)                                      │
+                 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                 ╭─ Log preview — a3f9c1 (following) ──────────────────────────────────────────────────────────────────╮
+                 │ a3f9c1 after ""                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+                 │                                                                                                     │
+  ? Help         │                                                                                                     │
+  q Quit         ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ x kill  l logs  enter details  ? help  q quit

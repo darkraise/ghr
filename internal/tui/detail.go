@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/tui/ui"
@@ -203,6 +204,9 @@ func (m Model) detailPage(w, h int) string {
 		body = list[min(m.detailScroll, max(len(list)-bodyH, 0)):]
 	}
 	out := append(top, body[:min(len(body), bodyH)]...)
+	for i := range out {
+		out[i] = ansi.Truncate(out[i], w, "…") // the summary, step names, errors and container lines can be long
+	}
 	return strings.Join(out, "\n")
 }
 

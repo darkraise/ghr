@@ -194,13 +194,93 @@ func stripTimes(s string) string {
 	return strings.Join(out, "\n")
 }
 
-func TestDashboardGolden(t *testing.T) {
-	for _, w := range []int{120, 80} {
-		t.Run(fmt.Sprint(w), func(t *testing.T) {
-			v := sampleModel(&fakeClient{}, w, 30).View()
-			golden.RequireEqual(t, []byte(stripTimes(v)))
-		})
+// pageModels builds the sample model on each page other than Settings, w
+// columns wide.
+var pageModels = map[string]func(w int) Model{
+	"dashboard": func(w int) Model { return sampleModel(&fakeClient{}, w, 30) },
+	"runners":   func(w int) Model { return feed(sampleModel(&fakeClient{}, w, 30), key("2")) },
+	"detail": func(w int) Model {
+		c := &fakeClient{steps: []model.Step{
+			{Number: 1, Name: "Set up job", Status: "completed", Conclusion: "success"},
+			{Number: 2, Name: "Run e2e journeys", Status: "in_progress"},
+		}}
+		st := sampleStatus()
+		st.Instances[0].Job.HTMLURL = "https://github.com/darkraise/darkcloud/actions/runs/1"
+		c.st = &st
+		return feed(newModel(c, w, 30, st), keys("2", "enter")...)
+	},
+	"history": func(w int) Model {
+		m := feed(sampleModel(&fakeClient{}, w, 30), key("3"))
+		m.hist = []model.HistoryEntry{
+			{Repo: "darkcloud", RunNumber: "411", JobName: "lint", Conclusion: "success",
+				StartedAt: now.Add(-4 * time.Minute), FinishedAt: now.Add(-2 * time.Minute)},
+			{Repo: "darkmem", RunNumber: "87", JobName: "build / test", Conclusion: "failure",
+				StartedAt: now.Add(-70 * time.Minute), FinishedAt: now.Add(-time.Hour)},
+		}
+		return m
+	},
+}
+
+func TestPagesGolden(t *testing.T) {
+	for name, build := range pageModels {
+		for _, w := range []int{120, 80} {
+			t.Run(fmt.Sprintf("%s/%d", name, w), func(t *testing.T) {
+				golden.RequireEqual(t, []byte(stripTimes(build(w).View())))
+			})
+		}
 	}
+}
+
+// fits reports a line of v wider than w, or v not exactly h rows tall.
+func fits(t *testing.T, name string, v string, w, h int) {
+	t.Helper()
+	if got := lipgloss.Height(v); got != h {
+		t.Errorf("%s at %d columns: %d rows, want %d", name, w, got, h)
+	}
+	for i, line := range strings.Split(v, "\n") {
+		if lipgloss.Width(line) > w {
+			t.Errorf("%s at %d columns: line %d is %d wide: %q", name, w, i, lipgloss.Width(line), line)
+		}
+	}
+}
+
+// Every page fills its screen exactly, down to the 40-column minimum.
+func TestPagesFitNarrow(t *testing.T) {
+	for name, build := range pageModels {
+		for _, w := range []int{80, 56, 40} {
+			fits(t, name, build(w).View(), w, 30)
+		}
+	}
+}
+
+// Every state of the detail page fits: each tab with long text, an error,
+// and the finished alert.
+func TestDetailStatesFitNarrow(t *testing.T) {
+	long := strings.Repeat("a-very-long-name-", 8)
+	for _, w := range []int{80, 40} {
+		m := pageModels["detail"](w)
+		m.steps = append(m.steps, model.Step{Number: 3, Name: long, Status: "queued"})
+		m.stepsErr = "steps: " + long
+		m.containers = []model.Container{{Name: long, Image: long, State: "running", Project: long}}
+		m.detailDone = now
+		for tab := range tabNames {
+			m.groups.tabs.active = tab
+			fits(t, fmt.Sprintf("detail tab %d", tab), m.View(), w, 30)
+		}
+	}
+}
+
+// An open Repo filter with many repos stays within a short screen.
+func TestHistoryDropdownFitsShortScreen(t *testing.T) {
+	st := sampleStatus()
+	for i := 0; i < 20; i++ {
+		st.Repos = append(st.Repos, model.RepoStatus{Name: fmt.Sprintf("repository-number-%02d", i)})
+	}
+	m := feed(newModel(&fakeClient{}, 80, 22, st), keys("3", "tab", "enter")...)
+	if !m.groups.histRepo.Open() {
+		t.Fatal("the Repo filter did not open")
+	}
+	fits(t, "history dropdown", m.View(), 80, 22)
 }
 
 func TestDashboardContent(t *testing.T) {

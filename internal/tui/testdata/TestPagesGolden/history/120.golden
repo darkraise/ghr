@@ -1,0 +1,30 @@
+ ghr   mode ● QUEUE   runners ▕██░▏ 2/3   api ▕█████████░▏ 4800   disk ▕██████░░░░▏ 61%   ● connected
+  1 Dashboard    History                                                                                                
+  2 Runners      Repo   [ all ▾ ]    Result   [ all ▾ ]                                                                 
+▌ 3 History                                                                                                             
+  4 Settings     ╭─ › History ─────────────────────────────────────────────────────────────────────────────────────────╮
+                 │   FINISHED         REPO         RUN     JOB                                   RESULT     DURATION   │
+                 │   2026-10-03 14:03 darkcloud    #411    lint                   …  ( Copy run URL ) success    2m00s │
+                 │   2026-10-03 13:05 darkmem      #87     build / test                          failure    10m00s     │
+                 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+  ? Help                                                                                                                
+  q Quit                                                                                                                
+ r repo  c result  enter copy URL  tab next  ? help  q quit

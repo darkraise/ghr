@@ -215,6 +215,16 @@ func (m Model) tabRow(w int) string {
 	return row
 }
 
+// fitLines pads or cuts s to exactly n lines, so the footer stays on the
+// bottom row and a dialog's canvas is the height of the screen.
+func fitLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	for len(lines) < n {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines[:n], "\n")
+}
+
 // pageHeader is the first line of the content area: the page title on the
 // left and the page's status on the right.
 func (m Model) pageHeader(w int) string {
@@ -229,8 +239,12 @@ func (m Model) pageHeader(w int) string {
 	default:
 		title = sBold.Render(pageNames[m.page])
 	}
+	// Too narrow: the title gives way first, then the buttons are cut.
+	if over := ansi.StringWidth(title) + ansi.StringWidth(right) + 1 - w; over > 0 {
+		title = ansi.Truncate(title, max(ansi.StringWidth(title)-over, 1), "…")
+	}
 	gap := max(w-ansi.StringWidth(title)-ansi.StringWidth(right), 1)
-	return title + strings.Repeat(" ", gap) + right
+	return ansi.Truncate(title+strings.Repeat(" ", gap)+right, w, "…")
 }
 
 type footerKey struct{ key, label string }
@@ -320,7 +334,7 @@ func (m Model) layout(w int, body func(w, h int) string) string {
 		top = append(top, m.tabRow(w))
 	}
 	cw, ch := m.contentSize()
-	content := m.pageHeader(cw) + "\n" + body(cw, ch)
+	content := m.pageHeader(cw) + "\n" + fitLines(body(cw, ch), ch)
 	if wide {
 		content = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebar(ch+1), " ", content)
 	}
