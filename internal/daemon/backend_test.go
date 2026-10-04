@@ -1,0 +1,269 @@
+package daemon
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/darkraise/ghr/internal/api"
+	"github.com/darkraise/ghr/internal/events"
+	"github.com/darkraise/ghr/internal/github"
+	"github.com/darkraise/ghr/internal/history"
+	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/runner"
+)
+
+type fakeManager struct {
+	insts   []model.InstanceStatus
+	cleared bool
+	killed  []string
+}
+
+func (f *fakeManager) Status() model.Status { return model.Status{Instances: f.insts} }
+func (f *fakeManager) RunnerLog(id, cursor string) (model.LogChunk, error) {
+	return model.LogChunk{}, runner.ErrUnknownRunner(id)
+}
+func (f *fakeManager) RunnerContainers(ctx context.Context, id string) ([]model.Container, error) {
+	return nil, runner.ErrUnknownRunner(id)
+}
+func (f *fakeManager) RunnerRepoAndRun(id string) (string, int64, string, error) {
+	if id != "aaaaaa" {
+		return "", 0, "", runner.ErrUnknownRunner(id)
+	}
+	return "darkcloud", 55, "ghr-darkcloud-aaaaaa", nil
+}
+func (f *fakeManager) Kill(ctx context.Context, id string) error {
+	f.killed = append(f.killed, id)
+	return nil
+}
+func (f *fakeManager) ClearDegraded() { f.cleared = true }
+
+type fakeGH struct {
+	repos  map[string]*github.Repository
+	forgot bool
+}
+
+func (f *fakeGH) GetRepo(ctx context.Context, repo string) (*github.Repository, error) {
+	r, ok := f.repos[repo]
+	if !ok {
+		return nil, &github.APIError{Status: 404, Kind: github.ErrNotFound}
+	}
+	return r, nil
+}
+func (f *fakeGH) ListJobs(ctx context.Context, repo string, runID int64) ([]github.Job, error) {
+	return []github.Job{
+		{RunnerName: "someone-else", Steps: []github.Step{{Name: "x"}}},
+		{RunnerName: "ghr-darkcloud-aaaaaa", Steps: []github.Step{{Number: 1, Name: "checkout", Status: "completed", Conclusion: "success"}}},
+	}, nil
+}
+func (f *fakeGH) ForgetCache() { f.forgot = true }
+
+func newBackend(t *testing.T) (*Backend, *fakeManager, *fakeGH) {
+	t.Helper()
+	m := &fakeManager{}
+	gh := &fakeGH{repos: map[string]*github.Repository{
+		"newrepo": {Private: true}, "public": {Private: false}, "darkcloud": {Private: true},
+	}}
+	b := &Backend{
+		Store: newStore(t), M: m, GH: gh, Events: events.New(),
+		Hist: &history.Store{Path: filepath.Join(t.TempDir(), "h.jsonl")},
+		CheckToken: func(ctx context.Context, token, repo string) error {
+			if token == "bad" {
+				return errors.New("401 Bad credentials")
+			}
+			return nil
+		},
+	}
+	return b, m, gh
+}
+
+func apiStatus(err error) int {
+	var ae *api.Error
+	if errors.As(err, &ae) {
+		return ae.Status
+	}
+	return 0
+}
+
+func TestPatchConfig(t *testing.T) {
+	b, _, _ := newBackend(t)
+	all, two, idle := "all", 2, "10m"
+	paused := true
+	if err := b.PatchConfig(model.ConfigPatch{Mode: &all, IdleTimeout: &idle, Repos: map[string]model.RepoPatch{"darkmem": {Max: &two, Paused: &paused}}}); err != nil {
+		t.Fatal(err)
+	}
+	c := b.Store.Config()
+	if c.Mode != "all" || c.IdleTimeout.String() != "10m0s" || *c.Repo("darkmem").Max != 2 || !c.Repo("darkmem").Paused {
+		t.Fatalf("cfg %+v", c)
+	}
+	bad := "fast"
+	if err := b.PatchConfig(model.ConfigPatch{Mode: &bad}); apiStatus(err) != 400 {
+		t.Fatalf("bad mode err %v", err)
+	}
+	if err := b.PatchConfig(model.ConfigPatch{Repos: map[string]model.RepoPatch{"nope": {Max: &two}}}); apiStatus(err) != 404 {
+		t.Fatalf("unknown repo err %v", err)
+	}
+}
+
+func TestAddRepo(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "missing"}); apiStatus(err) != 400 || !strings.Contains(err.Error(), "repository access") {
+		t.Fatalf("missing err %v", err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "public"}); apiStatus(err) != 409 {
+		t.Fatalf("public err %v", err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "darkcloud"}); apiStatus(err) != 409 {
+		t.Fatalf("duplicate err %v", err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "public", AllowPublic: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "newrepo", Labels: []string{"x"}}); err != nil {
+		t.Fatal(err)
+	}
+	if b.Store.Config().Repo("newrepo") == nil {
+		t.Fatal("repo not saved")
+	}
+}
+
+func TestRemoveRepoWaitsForRunners(t *testing.T) {
+	b, m, _ := newBackend(t)
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa", Repo: "darkmem"}}
+	if err := b.RemoveRepo("darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	if !b.Store.Config().Repo("darkmem").Paused {
+		t.Fatal("not paused")
+	}
+	b.FinalizeRemovals()
+	if b.Store.Config().Repo("darkmem") == nil {
+		t.Fatal("removed while a runner was live")
+	}
+	m.insts = nil
+	b.FinalizeRemovals()
+	if b.Store.Config().Repo("darkmem") != nil {
+		t.Fatal("not removed after runners finished")
+	}
+	if err := b.RemoveRepo("nope"); apiStatus(err) != 404 {
+		t.Fatalf("unknown repo err %v", err)
+	}
+}
+
+// The removal intent lives in config.yaml: a restarted daemon (a new Store and
+// Backend over the same files) still finishes it.
+func TestRemovalSurvivesRestart(t *testing.T) {
+	b, m, _ := newBackend(t)
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa", Repo: "darkmem"}}
+	if err := b.RemoveRepo("darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	store, _, err := OpenStore(b.Store.ConfigPath, b.Store.TokenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := store.Config().Repo("darkmem"); r == nil || !r.Paused || !r.Removing {
+		t.Fatalf("removal intent not persisted: %+v", r)
+	}
+	restarted := &Backend{Store: store, M: &fakeManager{}, GH: b.GH, Events: events.New(), Hist: b.Hist}
+	restarted.FinalizeRemovals()
+	if store.Config().Repo("darkmem") != nil {
+		t.Fatal("restarted daemon did not finish the removal")
+	}
+}
+
+func TestResumeCancelsRemoval(t *testing.T) {
+	b, m, _ := newBackend(t)
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa", Repo: "darkmem"}}
+	b.RemoveRepo("darkmem")
+	resume := false
+	if err := b.PatchConfig(model.ConfigPatch{Repos: map[string]model.RepoPatch{"darkmem": {Paused: &resume}}}); err != nil {
+		t.Fatal(err)
+	}
+	m.insts = nil
+	b.FinalizeRemovals()
+	if r := b.Store.Config().Repo("darkmem"); r == nil || r.Paused || r.Removing {
+		t.Fatalf("resumed repo removed or still marked: %+v", r)
+	}
+}
+
+// A rejected patch changes nothing, including a pending removal.
+func TestRejectedPatchKeepsRemoval(t *testing.T) {
+	b, _, _ := newBackend(t)
+	b.RemoveRepo("darkmem")
+	resume, zero := false, 0
+	err := b.PatchConfig(model.ConfigPatch{GlobalMax: &zero, Repos: map[string]model.RepoPatch{"darkmem": {Paused: &resume}}})
+	if apiStatus(err) != 400 {
+		t.Fatalf("err %v", err)
+	}
+	if r := b.Store.Config().Repo("darkmem"); !r.Paused || !r.Removing {
+		t.Fatalf("removal lost by a rejected patch: %+v", r)
+	}
+}
+
+func TestResumeAllKeepsRemovingReposPaused(t *testing.T) {
+	b, _, _ := newBackend(t)
+	b.SetPausedAll(true)
+	b.RemoveRepo("darkmem")
+	if err := b.SetPausedAll(false); err != nil {
+		t.Fatal(err)
+	}
+	c := b.Store.Config()
+	if c.Repo("darkcloud").Paused || !c.Repo("darkmem").Paused || !c.Repo("darkmem").Removing {
+		t.Fatalf("repos %+v", c.Repos)
+	}
+}
+
+func TestConfigChangesWakeTheLoop(t *testing.T) {
+	b, _, _ := newBackend(t)
+	wakes := 0
+	b.Wake = func() { wakes++ }
+	b.RemoveRepo("darkmem")
+	b.SetPausedAll(true)
+	zero := 0
+	b.PatchConfig(model.ConfigPatch{GlobalMax: &zero}) // rejected: no wake
+	if wakes != 2 {
+		t.Fatalf("wakes = %d", wakes)
+	}
+}
+
+func TestPauseAllStepsKillToken(t *testing.T) {
+	b, m, gh := newBackend(t)
+	ctx := context.Background()
+	if err := b.SetPausedAll(true); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range b.Store.Config().Repos {
+		if !r.Paused {
+			t.Fatalf("%s not paused", r.Name)
+		}
+	}
+	steps, err := b.RunnerSteps(ctx, "aaaaaa")
+	if err != nil || len(steps) != 1 || steps[0].Name != "checkout" {
+		t.Fatalf("steps %+v err %v", steps, err)
+	}
+	if _, err := b.RunnerSteps(ctx, "zzzzzz"); apiStatus(err) != 404 {
+		t.Fatalf("unknown runner err %v", err)
+	}
+	if _, err := b.RunnerLog("zzzzzz", ""); apiStatus(err) != 404 {
+		t.Fatalf("log err %v", err)
+	}
+	if _, err := b.RunnerContainers(ctx, "zzzzzz"); apiStatus(err) != 404 {
+		t.Fatalf("containers err %v", err)
+	}
+	if err := b.KillRunner(ctx, "aaaaaa"); err != nil || m.killed[0] != "aaaaaa" {
+		t.Fatalf("kill err %v", err)
+	}
+	if err := b.SetToken(ctx, "bad"); apiStatus(err) != 400 || b.Store.Token() != "tok1" {
+		t.Fatalf("bad token err %v token %q", err, b.Store.Token())
+	}
+	if err := b.SetToken(ctx, "tok2"); err != nil {
+		t.Fatal(err)
+	}
+	if b.Store.Token() != "tok2" || !gh.forgot || !m.cleared {
+		t.Fatal("token not applied")
+	}
+}
