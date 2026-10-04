@@ -1,0 +1,450 @@
+// Package tui is the interactive ghr dashboard (Bubble Tea, mouse via bubblezone).
+package tui
+
+import (
+	"context"
+	"encoding/base64"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	zone "github.com/lrstanley/bubblezone"
+
+	"github.com/darkraise/ghr/internal/config"
+	"github.com/darkraise/ghr/internal/model"
+)
+
+// Client is the subset of *api.Client the TUI uses.
+type Client interface {
+	Status(ctx context.Context) (model.Status, error)
+	Events(ctx context.Context, after int64) ([]model.Event, error)
+	History(ctx context.Context, repo, conclusion string, limit int) ([]model.HistoryEntry, error)
+	Log(ctx context.Context, id, cursor string) (model.LogChunk, error)
+	Steps(ctx context.Context, id string) ([]model.Step, error)
+	Containers(ctx context.Context, id string) ([]model.Container, error)
+	Config(ctx context.Context, out any) error
+	PatchConfig(ctx context.Context, p model.ConfigPatch) error
+	AddRepo(ctx context.Context, req model.AddRepoRequest) error
+	RemoveRepo(ctx context.Context, name string) error
+	Pause(ctx context.Context, name string) error
+	Resume(ctx context.Context, name string) error
+	PauseAll(ctx context.Context) error
+	ResumeAll(ctx context.Context) error
+	Kill(ctx context.Context, id string) error
+}
+
+type tab int
+
+const (
+	tabDashboard tab = iota
+	tabRunners
+	tabHistory
+	tabConfig
+)
+
+var tabNames = []string{"Dashboard", "Runners", "History", "Config"}
+
+type pane int
+
+const (
+	paneRepos pane = iota
+	paneRunners
+)
+
+type overlay int
+
+const (
+	ovNone overlay = iota
+	ovConfirm
+	ovPrompt
+	ovDetail
+	ovHelp
+)
+
+const maxEvents = 200
+
+// slowPoll is the tick interval of polls that are costly on the daemon side:
+// steps go to the GitHub jobs API on every request.
+const slowPoll = 5
+
+// Async results carry what they were requested for, so a late response for an
+// earlier selection, filter, cursor or daemon epoch is dropped.
+type (
+	tickMsg   time.Time
+	statusMsg struct {
+		st  model.Status
+		err error
+	}
+	eventsMsg struct {
+		epoch string
+		ev    []model.Event
+	}
+	historyMsg struct {
+		repo, concl string
+		hist        []model.HistoryEntry
+	}
+	logMsg struct {
+		gen    int
+		cursor string
+		chunk  model.LogChunk
+		err    error
+	}
+	stepsMsg struct {
+		id    string
+		steps []model.Step
+		err   error
+	}
+	containersMsg struct {
+		id   string
+		ctrs []model.Container
+		err  error
+	}
+	configMsg *config.Config
+	doneMsg   struct {
+		text string
+		err  error
+	}
+)
+
+type Model struct {
+	c      Client
+	now    func() time.Time
+	copyFn func(string)
+
+	width, height int
+	tab           tab
+	focus         pane
+	connected     bool
+	connErr       string
+
+	st      model.Status
+	epoch   string
+	events  []model.Event
+	lastSeq int64
+	hist    []model.HistoryEntry
+	cfg     *config.Config
+
+	repoSel, runnerSel, histSel, cfgSel int
+	eventScroll, logScroll              int
+	histRepo, histConcl                 string
+
+	logID     string
+	logText   string
+	logCursor string
+	logGen    int
+	logBusy   bool
+
+	steps             []model.Step
+	containers        []model.Container
+	stepsErr, ctrsErr string
+	detailID          string
+
+	overlay       overlay
+	confirmText   string
+	confirmAction func() tea.Cmd
+	prompt        textinput.Model
+	promptLabel   string
+	promptSubmit  func(string) tea.Cmd
+
+	flash     string
+	flashErr  bool
+	frame     int
+	lastClick string
+	lastAt    time.Time
+}
+
+func New(c Client) Model {
+	ti := textinput.New()
+	ti.CharLimit = 200
+	ti.Cursor.SetMode(cursor.CursorStatic)
+	return Model{
+		c: c, now: time.Now, width: 120, height: 40, prompt: ti,
+		copyFn: func(s string) {
+			fmt.Fprintf(os.Stdout, "\x1b]52;c;%s\a", base64.StdEncoding.EncodeToString([]byte(s)))
+		},
+	}
+}
+
+// Run starts the full-screen TUI with mouse support.
+func Run(c Client) error {
+	zone.NewGlobal()
+	_, err := tea.NewProgram(New(c), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	return err
+}
+
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(m.fetchStatus(), m.fetchEvents(), m.fetchConfig(), tick())
+}
+
+func tick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+func ctx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 5*time.Second)
+}
+
+func (m Model) fetchStatus() tea.Cmd {
+	return func() tea.Msg {
+		c, cancel := ctx()
+		defer cancel()
+		st, err := m.c.Status(c)
+		return statusMsg{st, err}
+	}
+}
+
+func (m Model) fetchEvents() tea.Cmd {
+	after, epoch := m.lastSeq, m.epoch
+	return func() tea.Msg {
+		c, cancel := ctx()
+		defer cancel()
+		ev, err := m.c.Events(c, after)
+		if err != nil {
+			return nil
+		}
+		return eventsMsg{epoch, ev}
+	}
+}
+
+func (m Model) fetchHistory() tea.Cmd {
+	repo, concl := m.histRepo, m.histConcl
+	return func() tea.Msg {
+		c, cancel := ctx()
+		defer cancel()
+		h, err := m.c.History(c, repo, concl, 200)
+		if err != nil {
+			return doneMsg{err: err}
+		}
+		return historyMsg{repo, concl, h}
+	}
+}
+
+// fetchLog requests the followed log after the current cursor. Only one request
+// is in flight: overlapping polls would carry the same cursor.
+func (m *Model) fetchLog() tea.Cmd {
+	if m.logID == "" || m.logBusy {
+		return nil
+	}
+	m.logBusy = true
+	cl, id, cur, gen := m.c, m.logID, m.logCursor, m.logGen
+	return func() tea.Msg {
+		c, cancel := ctx()
+		defer cancel()
+		chunk, err := cl.Log(c, id, cur)
+		return logMsg{gen, cur, chunk, err}
+	}
+}
+
+// follow points the log pane of the Runners tab at the selected runner,
+// starting its log over when that is a different runner.
+func (m *Model) follow() tea.Cmd {
+	r := m.selectedRunner()
+	if m.tab != tabRunners || r == nil || r.ID == m.logID {
+		return nil
+	}
+	m.logID, m.logText, m.logCursor, m.logScroll = r.ID, "", "", 0
+	m.logGen++
+	m.logBusy = false
+	return m.fetchLog()
+}
+
+func (m Model) fetchSteps() tea.Cmd {
+	id := m.detailID
+	return func() tea.Msg {
+		c, cancel := ctx()
+		defer cancel()
+		s, err := m.c.Steps(c, id)
+		return stepsMsg{id, s, err}
+	}
+}
+
+func (m Model) fetchContainers() tea.Cmd {
+	id := m.detailID
+	return func() tea.Msg {
+		c, cancel := ctx()
+		defer cancel()
+		cs, err := m.c.Containers(c, id)
+		return containersMsg{id, cs, err}
+	}
+}
+
+func (m Model) fetchConfig() tea.Cmd {
+	return func() tea.Msg {
+		c, cancel := ctx()
+		defer cancel()
+		var cfg config.Config
+		if err := m.c.Config(c, &cfg); err != nil {
+			return nil
+		}
+		return configMsg(&cfg)
+	}
+}
+
+// action runs fn against the daemon and reports text on success.
+func (m Model) action(text string, fn func(c context.Context) error) tea.Cmd {
+	return func() tea.Msg {
+		c, cancel := ctx()
+		defer cancel()
+		return doneMsg{text: text, err: fn(c)}
+	}
+}
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+	case tickMsg:
+		m.frame++
+		cmds := []tea.Cmd{tick(), m.fetchStatus(), m.fetchEvents()}
+		if m.tab == tabRunners {
+			cmds = append(cmds, m.fetchLog())
+		}
+		if m.tab == tabHistory && m.frame%slowPoll == 0 {
+			cmds = append(cmds, m.fetchHistory())
+		}
+		if m.overlay == ovDetail && m.frame%slowPoll == 0 && m.instance(m.detailID) != nil {
+			cmds = append(cmds, m.fetchSteps(), m.fetchContainers())
+		}
+		return m, tea.Batch(cmds...)
+	case statusMsg:
+		if msg.err != nil {
+			m.connected = false
+			m.connErr = msg.err.Error()
+			return m, nil
+		}
+		m.connected = true
+		m.st = msg.st
+		m.clampSelections()
+		var cmds []tea.Cmd
+		if msg.st.Epoch != m.epoch {
+			// The daemon restarted and its event sequence numbers started over.
+			m.epoch, m.lastSeq, m.events, m.eventScroll = msg.st.Epoch, 0, nil, 0
+			cmds = append(cmds, m.fetchEvents())
+		}
+		cmds = append(cmds, m.follow())
+		return m, tea.Batch(cmds...)
+	case eventsMsg:
+		if msg.epoch != m.epoch {
+			return m, nil
+		}
+		for _, e := range msg.ev {
+			if e.Seq > m.lastSeq {
+				m.events = append(m.events, e)
+				m.lastSeq = e.Seq
+			}
+		}
+		if len(m.events) > maxEvents {
+			m.events = m.events[len(m.events)-maxEvents:]
+		}
+		return m, nil
+	case historyMsg:
+		if msg.repo == m.histRepo && msg.concl == m.histConcl {
+			m.hist = msg.hist
+			m.clampSelections()
+		}
+		return m, nil
+	case logMsg:
+		if msg.gen != m.logGen {
+			return m, nil
+		}
+		m.logBusy = false
+		if msg.err == nil && msg.cursor == m.logCursor {
+			m.logText += msg.chunk.Data
+			m.logCursor = msg.chunk.Next
+			if len(m.logText) > 256*1024 {
+				m.logText = m.logText[len(m.logText)-256*1024:]
+			}
+		}
+		return m, nil
+	case stepsMsg:
+		if m.overlay == ovDetail && msg.id == m.detailID {
+			if msg.err != nil {
+				m.stepsErr = msg.err.Error()
+			} else {
+				m.steps, m.stepsErr = msg.steps, ""
+			}
+		}
+		return m, nil
+	case containersMsg:
+		if m.overlay == ovDetail && msg.id == m.detailID {
+			if msg.err != nil {
+				m.ctrsErr = msg.err.Error()
+			} else {
+				m.containers, m.ctrsErr = msg.ctrs, ""
+			}
+		}
+		return m, nil
+	case configMsg:
+		m.cfg = msg
+		m.clampSelections()
+		return m, nil
+	case doneMsg:
+		if msg.err != nil {
+			m.flash, m.flashErr = msg.err.Error(), true
+		} else if msg.text != "" {
+			m.flash, m.flashErr = msg.text, false
+		}
+		return m, tea.Batch(m.fetchStatus(), m.fetchEvents(), m.fetchConfig())
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+	}
+	if m.overlay == ovPrompt {
+		var cmd tea.Cmd
+		m.prompt, cmd = m.prompt.Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func clamp(v, n int) int {
+	if v >= n {
+		v = n - 1
+	}
+	if v < 0 {
+		v = 0
+	}
+	return v
+}
+
+func (m *Model) clampSelections() {
+	m.repoSel = clamp(m.repoSel, len(m.st.Repos))
+	m.runnerSel = clamp(m.runnerSel, len(m.st.Instances))
+	m.histSel = clamp(m.histSel, len(m.hist))
+	m.cfgSel = clamp(m.cfgSel, len(m.configFields()))
+}
+
+func (m Model) selectedRepo() *model.RepoStatus {
+	if m.repoSel < len(m.st.Repos) {
+		return &m.st.Repos[m.repoSel]
+	}
+	return nil
+}
+
+func (m Model) selectedRunner() *model.InstanceStatus {
+	if m.runnerSel < len(m.st.Instances) {
+		return &m.st.Instances[m.runnerSel]
+	}
+	return nil
+}
+
+func (m Model) instance(id string) *model.InstanceStatus {
+	for i := range m.st.Instances {
+		if m.st.Instances[i].ID == id {
+			return &m.st.Instances[i]
+		}
+	}
+	return nil
+}
+
+// configField is one editable row of the Config tab.
+type configField struct {
+	label string
+	value string
+	apply func(v string) (model.ConfigPatch, error)
+}

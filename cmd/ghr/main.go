@@ -12,6 +12,7 @@ import (
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/daemon"
+	"github.com/darkraise/ghr/internal/tui"
 )
 
 var version = "dev"
@@ -49,6 +50,12 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
+		return 0
+	case "tui":
+		if err := tui.Run(newClient()); err != nil {
+			fmt.Fprintln(stderr, "ghr tui:", err)
+			return 1
+		}
 		return 0
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
