@@ -20,7 +20,7 @@ func TestSpawnWritesMetaAndStartsUnit(t *testing.T) {
 	if err := h.m.spawn(context.Background(), h.cfg, "darkcloud"); err != nil {
 		t.Fatal(err)
 	}
-	if h.gh.jitCalls[0] != "ghr-darkcloud-aaaaaa homelab" {
+	if h.gh.jitCalls[0] != "ghr-darkcloud-aaaaaa self-hosted,linux,x64,homelab" {
 		t.Fatalf("jit call %q", h.gh.jitCalls[0])
 	}
 	var meta Meta

@@ -230,7 +230,7 @@ func TestLabelChangeReplacesStaleIdleRunner(t *testing.T) {
 	if len(h.sd.stopped) != 1 || h.sd.stopped[0] != "ghr-runner-aaaaaa" {
 		t.Fatalf("stale idle runner not stopped: %v", h.sd.stopped)
 	}
-	if len(h.gh.jitCalls) != 2 || h.gh.jitCalls[1] != "ghr-darkmem-bbbbbb homelab,gpu" {
+	if len(h.gh.jitCalls) != 2 || h.gh.jitCalls[1] != "ghr-darkmem-bbbbbb self-hosted,linux,x64,homelab,gpu" {
 		t.Fatalf("jit calls %v", h.gh.jitCalls)
 	}
 }

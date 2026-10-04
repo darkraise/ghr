@@ -72,7 +72,9 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 	}
 	name := "ghr-" + r.Name + "-" + id
 	labels := cfg.CustomLabels(*r)
-	jit, err := m.GH.GenerateJITConfig(ctx, r.Name, name, labels)
+	// GitHub gives a JIT runner exactly the labels it is registered with, so the
+	// system labels that jobs request (self-hosted, linux, x64) must be sent too.
+	jit, err := m.GH.GenerateJITConfig(ctx, r.Name, name, cfg.EffectiveLabels(*r))
 	if err != nil {
 		return err
 	}
