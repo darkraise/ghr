@@ -421,9 +421,13 @@ func (m Model) refetched(msg refetchedMsg) (tea.Model, tea.Cmd) {
 	// A newer refresh may already be shown; the reset and the check below
 	// then run against it, which reflects the save just as well.
 	m.loadConfig(msg.seq, msg.cfg)
+	// Controls stay editable while a save is in flight, so a field edited
+	// again since the patch was sent keeps its newer edit.
 	var keys []string
-	for k := range msg.sent {
-		keys = append(keys, k)
+	for k, v := range msg.sent {
+		if f := s.form.Field(k); f != nil && ui.Equal(f.Kind, f.Input.Value(), v) {
+			keys = append(keys, k)
+		}
 	}
 	s.form.Reset(keys)
 	for _, f := range s.form.Fields() {

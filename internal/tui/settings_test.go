@@ -494,6 +494,27 @@ func TestSettingsStaysBusyUntilRefetch(t *testing.T) {
 	}
 }
 
+// A field edited again between the patch and its refetch keeps the newer edit
+// instead of being reset to the saved value.
+func TestSettingsRefetchKeepsEditMadeWhileSaving(t *testing.T) {
+	c := &fakeClient{}
+	applyPoll(c)
+	m := onSettings(t, c, 120, 30)
+	set(m, setPollInterval, ui.Value{Text: "30s"})
+	upd, cmd := m.Update(key("ctrl+s"))
+	upd, refetch := upd.Update(collect(cmd)[0])
+	m = upd.(Model)
+	set(m, setPollInterval, ui.Value{Text: "45s"})
+	m = feed(m, collect(refetch)...)
+	poll := m.settings.form.Field(setPollInterval)
+	if got := poll.Input.Value().Text; got != "45s" || !poll.Dirty() {
+		t.Fatalf("newer edit lost: value %q dirty %v", got, poll.Dirty())
+	}
+	if m.toast.Err {
+		t.Fatalf("unexpected error toast %q", m.toast.Text)
+	}
+}
+
 func TestSettingsRefetchFailureIsReported(t *testing.T) {
 	c := &fakeClient{}
 	c.onPatch = func(model.ConfigPatch) { c.cfgErr = errors.New("connection refused") }
