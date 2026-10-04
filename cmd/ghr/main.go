@@ -8,8 +8,10 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"github.com/darkraise/ghr/internal/api"
+	"github.com/darkraise/ghr/internal/daemon"
 )
 
 var version = "dev"
@@ -34,6 +36,14 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
+	case "daemon":
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := daemon.Run(ctx, daemon.DefaultOptions()); err != nil {
+			fmt.Fprintln(stderr, "ghr daemon:", err)
+			return 1
+		}
+		return 0
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return 0

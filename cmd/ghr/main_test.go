@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -17,5 +18,15 @@ func TestVersionAndUsage(t *testing.T) {
 	}
 	if code := run(nil, strings.NewReader(""), &out, &errb); code != 2 {
 		t.Fatalf("no args: exit %d", code)
+	}
+}
+
+func TestDaemonFailsWithoutConfig(t *testing.T) {
+	if _, err := os.Stat("/etc/ghr/config.yaml"); err == nil {
+		t.Skip("a real ghr config exists on this machine; not starting a daemon from a test")
+	}
+	var out, errb bytes.Buffer
+	if code := run([]string{"daemon"}, strings.NewReader(""), &out, &errb); code != 1 || !strings.Contains(errb.String(), "ghr daemon:") {
+		t.Fatalf("exit %d stderr %q", code, errb.String())
 	}
 }
