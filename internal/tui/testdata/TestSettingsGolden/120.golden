@@ -26,5 +26,5 @@
                  │ Warm                 [ − ] 1 [ + ] (default)  applies in all mode                                   │
                  │ Labels               darkcloud-linux ✕  + add  added to this repo's runners                         │
   ? Help         │ Cleanup prefixes     dc-e2e- ✕  + add  container name prefixes removed after each job               │
-  q Quit         ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  q Quit         │                      [ Pause ]   [ Remove ]                                                         │
  tab next  shift+tab previous  ctrl+s save  ? help  q quit

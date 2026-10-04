@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -51,6 +52,7 @@ type settingsPage struct {
 	alert  []string // the daemon's messages from a rejected save
 
 	save, discard *ui.Button
+	buttons       map[string]*ui.Button // the repo cards' action buttons, by ID
 }
 
 func newSettingsPage() *settingsPage {
@@ -199,6 +201,48 @@ func (m *Model) loadConfig(seq int, c *config.Config) {
 }
 
 func (s *settingsPage) input(key string) ui.Input { return s.form.Field(key).Input }
+
+// button returns the action button id, creating it on first use.
+func (s *settingsPage) button(id, label string, kind ui.ButtonKind) *ui.Button {
+	if s.buttons == nil {
+		s.buttons = map[string]*ui.Button{}
+	}
+	b := s.buttons[id]
+	if b == nil {
+		b = ui.NewButton(id, label, kind)
+		s.buttons[id] = b
+	}
+	b.Label = label
+	return b
+}
+
+// repoAction runs a repo card's Pause, Resume or Remove button. Pause and
+// Resume act at once; Remove asks first. They are actions, not form fields.
+func (m Model) repoAction(id string) (tea.Model, tea.Cmd) {
+	rest := strings.TrimPrefix(id, "settings/repo/")
+	name, act, _ := strings.Cut(rest, "/")
+	var repo *config.Repo
+	for i := range m.settings.repos {
+		if m.settings.repos[i].Name == name {
+			repo = &m.settings.repos[i]
+		}
+	}
+	if repo == nil {
+		return m, nil
+	}
+	switch act {
+	case "pause":
+		if repo.Paused {
+			return m, m.action("resumed "+name, func(c context.Context) error { return m.c.Resume(c, name) })
+		}
+		return m, m.action("paused "+name, func(c context.Context) error { return m.c.Pause(c, name) })
+	case "remove":
+		return m.openConfirm(fmt.Sprintf("Remove repo %s? Its running jobs finish first.", name), func() tea.Cmd {
+			return m.action("removing "+name, func(c context.Context) error { return m.c.RemoveRepo(c, name) })
+		})
+	}
+	return m, nil
+}
 
 func (s *settingsPage) row(label, key, desc string) ui.Row {
 	f := s.form.Field(key)
@@ -480,12 +524,22 @@ func (m Model) settingsSections() []ui.Section {
 		if !queue {
 			mx.Default, mx.DefaultText = 0, "∞"
 		}
+		pauseLabel := "Pause"
+		if r.Paused {
+			pauseLabel = "Resume"
+		}
+		pause := s.button(repoKey(r.Name, "pause"), pauseLabel, ui.Primary)
+		remove := s.button(repoKey(r.Name, "remove"), "Remove", ui.Danger)
+		for _, b := range []*ui.Button{pause, remove} {
+			b.SetDisabled(!m.connected || r.Removing)
+		}
 		title := clean(r.Name)
 		card := ui.Section{Title: title, Rows: []ui.Row{
 			s.row("Max", repoKey(r.Name, "max"), "once set, it stays explicit"),
 			s.warmRow(r.Name, errs),
 			s.row("Labels", repoKey(r.Name, "labels"), "added to this repo's runners"),
 			s.row("Cleanup prefixes", repoKey(r.Name, "cleanup"), "container name prefixes removed after each job"),
+			{Items: []ui.Widget{pause, remove}},
 		}}
 		switch {
 		case r.Removing:

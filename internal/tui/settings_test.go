@@ -208,11 +208,11 @@ func TestSettingsFocusOrderScrollsIntoView(t *testing.T) {
 		t.Fatalf("after up, shift+tab, k: %q", got)
 	}
 	m = feed(m, key("shift+tab")) // wraps to the last control
-	if got := m.settings.group.FocusedID(); got != repoKey("darkagents", "cleanup") {
+	if got := m.settings.group.FocusedID(); got != repoKey("darkagents", "remove") {
 		t.Fatalf("wrap: %q", got)
 	}
 	v := m.View()
-	if !strings.Contains(v, "Cleanup prefixes   › + add") || lipgloss.Height(v) > 22 || m.settings.scroll == 0 {
+	if !strings.Contains(v, "[ Resume ] › [ Remove ]") || lipgloss.Height(v) > 22 || m.settings.scroll == 0 {
 		t.Fatalf("last control not scrolled into view (scroll %d):\n%s", m.settings.scroll, v)
 	}
 	m = feed(m, key("tab"))
@@ -761,6 +761,42 @@ func TestNoGuardWhenCleanOrOnCtrlC(t *testing.T) {
 	m = dirtySettings(t, &fakeClient{})
 	if _, cmd := m.Update(key("ctrl+c")); !quits(cmd) {
 		t.Fatal("ctrl+c was guarded")
+	}
+}
+
+func TestSettingsRepoActions(t *testing.T) {
+	c := &fakeClient{}
+	m := onSettings(t, c, 120, 80)
+	form := strings.Join(settingsLines(m, 103), "\n")
+	if !strings.Contains(form, "[ Pause ]   [ Remove ]") || !strings.Contains(form, "[ Resume ]   [ Remove ]") {
+		t.Fatalf("repo action buttons missing:\n%s", form)
+	}
+	m = click(t, m, repoKey("darkmem", "pause"))
+	m = click(t, m, repoKey("darkagents", "pause")) // paused: the button resumes
+	m = click(t, m, repoKey("darkcloud", "remove"))
+	if m.overlay != ovConfirm || !strings.Contains(m.View(), "Remove repo darkcloud? Its running jobs finish first.") {
+		t.Fatalf("remove did not ask: overlay %v", m.overlay)
+	}
+	m = feed(m, key("enter"))
+	if got := strings.Join(c.actions(), "|"); got != "pause darkmem|resume darkagents|rm darkcloud" {
+		t.Fatalf("actions %s", got)
+	}
+	if len(c.patches) != 0 {
+		t.Fatal("a repo action went through the config patch")
+	}
+}
+
+func TestSettingsRepoActionsDisabledWhileRemoving(t *testing.T) {
+	c := &fakeClient{cfg: parseConfig(t, strings.Replace(settingsYAML, "  - name: darkmem\n", "  - name: darkmem\n    paused: true\n    removing: true\n", 1))}
+	m := feed(sampleModel(c, 120, 80), key("4"))
+	m.View()
+	for _, act := range []string{"pause", "remove"} {
+		if m.settings.buttons[repoKey("darkmem", act)].Focusable() {
+			t.Errorf("darkmem %s is enabled while removing", act)
+		}
+	}
+	if !m.settings.buttons[repoKey("darkcloud", "remove")].Focusable() {
+		t.Error("another repo's button was disabled")
 	}
 }
 
