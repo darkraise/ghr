@@ -23,6 +23,13 @@ const (
 	ModeAll   = "all"
 )
 
+// The floors below keep a one-field mistake from hammering the GitHub API
+// (poll_interval) or wiping the job history (history_retention).
+const (
+	MinPollInterval     = 5 * time.Second
+	MinHistoryRetention = 24 * time.Hour
+)
+
 // SystemLabels are the read-only labels GitHub gives every Linux x64 runner.
 var SystemLabels = []string{"self-hosted", "linux", "x64"}
 
@@ -275,6 +282,12 @@ func (c *Config) Validate() ([]string, error) {
 		if d <= 0 {
 			errs = append(errs, name+" must be > 0")
 		}
+	}
+	if c.PollInterval > 0 && c.PollInterval.D() < MinPollInterval {
+		errs = append(errs, "poll_interval must be >= 5s")
+	}
+	if c.HistoryRetention > 0 && c.HistoryRetention.D() < MinHistoryRetention {
+		errs = append(errs, "history_retention must be >= 1d")
 	}
 	if c.DiskHighWater < 1 || c.DiskHighWater > 100 {
 		errs = append(errs, "disk_high_water must be 1..100")

@@ -168,6 +168,7 @@ func TestPatchConfigJSONKeys(t *testing.T) {
 // An invalid setting is a 400 that names the problem and leaves config.yaml untouched.
 func TestPatchConfigRejectsInvalidSettings(t *testing.T) {
 	zero, size, cpu, mem, dur := 0, "lots", "fast", "6 gigs", "soon"
+	fast, brief := "1ms", "1s"
 	empty := []string{}
 	cases := []struct {
 		name string
@@ -183,6 +184,8 @@ func TestPatchConfigRejectsInvalidSettings(t *testing.T) {
 		{"idle", model.ConfigPatch{IdleTimeout: &dur}, `idle_timeout: invalid duration "soon"`},
 		{"retention", model.ConfigPatch{HistoryRetention: &dur}, `history_retention: invalid duration "soon"`},
 		{"labels", model.ConfigPatch{Labels: &empty}, "needs at least one label"},
+		{"poll floor", model.ConfigPatch{PollInterval: &fast}, "poll_interval must be >= 5s"},
+		{"retention floor", model.ConfigPatch{HistoryRetention: &brief}, "history_retention must be >= 1d"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -203,6 +206,31 @@ func TestPatchConfigRejectsInvalidSettings(t *testing.T) {
 				t.Fatalf("config.yaml changed:\n%s", after)
 			}
 		})
+	}
+}
+
+// With several bad durations, the first in the order poll_interval,
+// start_timeout, idle_timeout, history_retention is the one reported.
+func TestPatchConfigReportsFirstBadDuration(t *testing.T) {
+	bad := "x"
+	cases := []struct {
+		p    model.ConfigPatch
+		want string
+	}{
+		{model.ConfigPatch{PollInterval: &bad, StartTimeout: &bad, IdleTimeout: &bad, HistoryRetention: &bad}, "poll_interval: "},
+		{model.ConfigPatch{StartTimeout: &bad, IdleTimeout: &bad, HistoryRetention: &bad}, "start_timeout: "},
+		{model.ConfigPatch{IdleTimeout: &bad, HistoryRetention: &bad}, "idle_timeout: "},
+		{model.ConfigPatch{HistoryRetention: &bad, StartTimeout: &bad}, "start_timeout: "},
+	}
+	b, _, _ := newBackend(t)
+	for _, tc := range cases {
+		// Repeated, because a map-ordered loop would pass a single run by luck.
+		for i := 0; i < 20; i++ {
+			err := b.PatchConfig(tc.p)
+			if apiStatus(err) != 400 || !strings.HasPrefix(err.Error(), tc.want) {
+				t.Fatalf("err %v, want 400 starting %q", err, tc.want)
+			}
+		}
 	}
 }
 

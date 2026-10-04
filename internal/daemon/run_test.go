@@ -149,7 +149,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 func TestRunServesTicksReloadsAndKeepsRunners(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
-	cfg := strings.Replace(cfgYAML, "global_max: 2", "global_max: 2\npoll_interval: 100ms", 1)
+	cfg := strings.Replace(cfgYAML, "global_max: 2", "global_max: 2\npoll_interval: 5s", 1)
 	os.WriteFile(cfgPath, []byte(cfg), 0o600)
 	os.WriteFile(filepath.Join(dir, "token"), []byte("tok\n"), 0o600)
 	dist := filepath.Join(dir, "dist", "2.330.0")

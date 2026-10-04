@@ -99,6 +99,8 @@ func TestValidateErrors(t *testing.T) {
 		"darkmem: a repo being removed must stay paused": func(c *Config) { c.Repos[1].Removing = true },
 		"runner_limits.memory_max":                       func(c *Config) { c.RunnerLimits.MemoryMax = "6 gigs" },
 		"runner_limits.cpu_quota":                        func(c *Config) { c.RunnerLimits.CPUQuota = "2" },
+		"poll_interval must be >= 5s":                    func(c *Config) { c.PollInterval = Duration(time.Millisecond) },
+		"history_retention must be >= 1d":                func(c *Config) { c.HistoryRetention = Duration(time.Second) },
 	}
 	for want, mutate := range cases {
 		c, _, err := Parse([]byte(sample))
@@ -109,6 +111,18 @@ func TestValidateErrors(t *testing.T) {
 		if _, err := c.Validate(); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("want error containing %q, got %v", want, err)
 		}
+	}
+}
+
+// The floors themselves are valid; only values below them are rejected.
+func TestDurationFloorsAreInclusive(t *testing.T) {
+	c, _, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.PollInterval, c.HistoryRetention = Duration(MinPollInterval), Duration(MinHistoryRetention)
+	if _, err := c.Validate(); err != nil {
+		t.Fatalf("floor values rejected: %v", err)
 	}
 }
 
