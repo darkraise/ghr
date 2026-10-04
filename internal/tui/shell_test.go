@@ -139,7 +139,7 @@ func TestFooterFollowsPageAndClicksRunKeys(t *testing.T) {
 		t.Fatal("x on the Repos card opened something")
 	}
 	m.page = pageSettings
-	if v := m.View(); !strings.Contains(v, "ctrl+s save") || strings.Contains(v, "x kill") {
+	if v := m.View(); !strings.Contains(v, "ctrl+s save") || strings.Contains(v, "x stop") {
 		t.Fatalf("Settings footer:\n%s", v)
 	}
 	m.page = pageDashboard

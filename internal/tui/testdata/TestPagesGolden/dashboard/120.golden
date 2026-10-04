@@ -27,4 +27,4 @@
                  │                                                                                                     │
   ? Help         │                                                                                                     │
   q Quit         ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
- p pause  + repo cap  -  [ global cap  ]  m mode  x kill  l logs  enter details  ? help  q quit
+ p pause  + repo cap  -  [ global cap  ]  m mode  x stop  l logs  enter details  ? help  q quit

@@ -253,9 +253,9 @@ type footerKey struct{ key, label string }
 func (m Model) footerKeys() []footerKey {
 	switch m.page {
 	case pageDetail:
-		return []footerKey{{"esc", "back"}, {"left", "prev tab"}, {"right", "next tab"}, {"x", "stop"}, {"?", "help"}, {"q", "quit"}}
+		return []footerKey{{"esc", "back"}, {"left", "prev tab"}, {"right", "next tab"}, {"tab", "next"}, {"x", "stop"}, {"?", "help"}, {"q", "quit"}}
 	case pageRunners:
-		return []footerKey{{"x", "kill"}, {"l", "logs"}, {"enter", "details"}, {"?", "help"}, {"q", "quit"}}
+		return []footerKey{{"x", "stop"}, {"l", "logs"}, {"enter", "details"}, {"?", "help"}, {"q", "quit"}}
 	case pageHistory:
 		return m.histFooterKeys()
 	case pageSettings:
@@ -266,7 +266,7 @@ func (m Model) footerKeys() []footerKey {
 	}
 	return []footerKey{
 		{"p", "pause"}, {"+", "repo cap"}, {"-", ""}, {"[", "global cap"}, {"]", ""}, {"m", "mode"},
-		{"x", "kill"}, {"l", "logs"}, {"enter", "details"}, {"?", "help"}, {"q", "quit"},
+		{"x", "stop"}, {"l", "logs"}, {"enter", "details"}, {"?", "help"}, {"q", "quit"},
 	}
 }
 

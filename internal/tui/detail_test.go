@@ -76,6 +76,9 @@ func TestDetailWithoutURL(t *testing.T) {
 // is sanitized.
 func TestDetailFooterAndCleanText(t *testing.T) {
 	m := detailModel(t, &fakeClient{})
+	if v := m.View(); !strings.Contains(v, "tab next") || !strings.Contains(v, "x stop") {
+		t.Fatalf("detail footer:\n%s", v)
+	}
 	if m = click(t, m, "key-x"); m.overlay != ovConfirm { // a3f9c1 is busy
 		t.Fatal("the footer's x did not ask to stop the runner")
 	}

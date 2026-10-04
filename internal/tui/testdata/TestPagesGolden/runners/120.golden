@@ -27,4 +27,4 @@
                  │                                                                                                     │
   ? Help         │                                                                                                     │
   q Quit         ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
- x kill  l logs  enter details  ? help  q quit
+ x stop  l logs  enter details  ? help  q quit

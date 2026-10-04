@@ -372,8 +372,9 @@ type helpGroup struct {
 var helpGroups = []helpGroup{
 	{"Global", [][2]string{{"1-4", "switch page"}, {"tab", "move focus"}, {"↑↓ j k", "move selection"}, {"? / q", "help / quit"}}},
 	{"Dashboard", [][2]string{{"h / →", "repos / runners"}, {"p / P", "pause repo/all"}, {"+ - [ ]", "repo/global cap"}, {"m", "queue/all mode"}, {"a / d", "add/remove repo"}}},
-	{"Runners", [][2]string{{"enter", "open details"}, {"l / x", "log / stop"}, {"pgup/dn", "scroll the log"}}},
-	{"Detail", [][2]string{{"← / →", "switch tab"}, {"x / esc", "stop / back"}}},
+	// The Runners page and the Dashboard's Runners card share these keys.
+	{"Runner rows", [][2]string{{"enter", "open details"}, {"l / x", "log / stop"}, {"pgup/dn", "scroll the log"}}},
+	{"Detail", [][2]string{{"← / →", "switch tab"}, {"x / esc", "stop / back"}, {"pgup/dn", "scroll the list"}}},
 	{"History", [][2]string{{"r / c", "repo / result"}, {"enter", "copy run URL"}}},
 	{"Settings", [][2]string{{"ctrl+s", "save"}, {"← / →", "choose / step"}, {"enter", "open / edit"}, {"esc", "close / stop"}}},
 }
