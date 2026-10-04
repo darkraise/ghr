@@ -103,8 +103,11 @@ type (
 		ctrs []model.Container
 		err  error
 	}
-	configMsg *config.Config
-	doneMsg   struct {
+	configMsg struct {
+		seq int // orders config responses; see settingsPage.nextSeq
+		cfg *config.Config
+	}
+	doneMsg struct {
 		text string
 		err  error
 	}
@@ -276,6 +279,7 @@ func (m Model) fetchContainers() tea.Cmd {
 }
 
 func (m Model) fetchConfig() tea.Cmd {
+	seq := m.settings.nextSeq()
 	return func() tea.Msg {
 		c, cancel := ctx()
 		defer cancel()
@@ -283,7 +287,7 @@ func (m Model) fetchConfig() tea.Cmd {
 		if err := m.c.Config(c, &cfg); err != nil {
 			return nil
 		}
-		return configMsg(&cfg)
+		return configMsg{seq, &cfg}
 	}
 }
 
@@ -314,7 +318,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.overlay == ovDetail && m.frame%slowPoll == 0 && m.instance(m.detailID) != nil {
 			cmds = append(cmds, m.fetchSteps(), m.fetchContainers())
 		}
-		if m.page == pageSettings && m.cfg == nil {
+		if m.frame%slowPoll == 0 || (m.page == pageSettings && m.cfg == nil) {
 			cmds = append(cmds, m.fetchConfig())
 		}
 		return m, tea.Batch(cmds...)
@@ -329,9 +333,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clampSelections()
 		var cmds []tea.Cmd
 		if msg.st.Epoch != m.epoch {
-			// The daemon restarted and its event sequence numbers started over.
+			// The daemon restarted: its event sequence numbers started over, and
+			// it may have reloaded a hand-edited config.yaml.
 			m.epoch, m.lastSeq, m.events, m.eventScroll = msg.st.Epoch, 0, nil, 0
-			cmds = append(cmds, m.fetchEvents())
+			cmds = append(cmds, m.fetchEvents(), m.fetchConfig())
 		}
 		cmds = append(cmds, m.follow())
 		return m, tea.Batch(cmds...)
@@ -398,8 +403,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case configMsg:
-		m.cfg = msg
-		m.settings.load(msg)
+		m.loadConfig(msg.seq, msg.cfg)
 		return m, nil
 	case savedMsg:
 		return m.saved(msg)

@@ -684,7 +684,7 @@ func TestShortTerminalKeepsSelectionVisible(t *testing.T) {
 		check(t, run(t, newModel(&fakeClient{}, 120, h, st), down("2", 9)...), "▸ run09")
 	})
 	t.Run("settings", func(t *testing.T) {
-		upd, _ := newModel(&fakeClient{}, 120, h, st).Update(configMsg(sampleConfig(t, repos[:6]...)))
+		upd, _ := newModel(&fakeClient{}, 120, h, st).Update(configMsg{cfg: sampleConfig(t, repos[:6]...)})
 		check(t, run(t, upd.(Model), "4"), "[ queue ▾ ]")
 	})
 }

@@ -45,6 +45,8 @@ type settingsPage struct {
 	group  ui.Group
 	scroll int
 	repos  []config.Repo // the repos of the last loaded config, in order
+	seq    int           // the last config request number issued
+	shown  int           // the request number of the config the form shows
 	saving bool
 	alert  []string // the daemon's messages from a rejected save
 
@@ -65,6 +67,7 @@ type (
 		err  error
 	}
 	refetchedMsg struct {
+		seq  int
 		cfg  *config.Config
 		sent map[string]ui.Value
 		err  error
@@ -151,10 +154,48 @@ func settingsSpecs(c *config.Config) []ui.Spec {
 	return specs
 }
 
-// load merges a freshly fetched config into the form.
-func (s *settingsPage) load(c *config.Config) {
+// load merges a freshly fetched config into the form: clean fields take the
+// new values, dirty ones keep their edits, a repo now being removed loses its
+// edits, and a new repo starts at its config values. It returns the repos that
+// no longer exist, whose cards and edits are dropped.
+func (s *settingsPage) load(c *config.Config) []string {
+	var gone []string
+	for _, r := range s.repos {
+		if c.Repo(r.Name) == nil {
+			gone = append(gone, r.Name)
+		}
+	}
 	s.form.Merge(settingsSpecs(c))
 	s.repos = append([]config.Repo{}, c.Repos...)
+	return gone
+}
+
+// nextSeq numbers a config request. Responses can arrive out of order, so
+// one answering an older request than the config already shown is dropped.
+func (s *settingsPage) nextSeq() int {
+	s.seq++
+	return s.seq
+}
+
+// loadConfig takes the config fetched by request seq, unless a newer one is
+// already shown, and says which repos disappeared. A refresh can move focus
+// (its control vanished or became disabled), so focus is scrolled into view.
+func (m *Model) loadConfig(seq int, c *config.Config) {
+	s := m.settings
+	if seq < s.shown {
+		return
+	}
+	s.shown = seq
+	m.cfg = c
+	focus := s.group.FocusedID()
+	if gone := s.load(c); len(gone) > 0 {
+		m.toast.Show("repository "+strings.Join(gone, ", ")+" was removed", false, m.now())
+	}
+	if m.page == pageSettings && m.overlay == ovNone {
+		if m.settingsSections(); s.group.FocusedID() != focus {
+			m.scrollToFocus()
+		}
+	}
 }
 
 func (s *settingsPage) input(key string) ui.Input { return s.form.Field(key).Input }
@@ -300,15 +341,15 @@ func (m Model) saved(msg savedMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.toast.Show("Settings saved", false, m.now())
-	c := m.c
+	c, seq := m.c, s.nextSeq()
 	return m, func() tea.Msg {
 		cx, cancel := ctx()
 		defer cancel()
 		var cfg config.Config
 		if err := c.Config(cx, &cfg); err != nil {
-			return refetchedMsg{sent: msg.sent, err: err}
+			return refetchedMsg{seq: seq, sent: msg.sent, err: err}
 		}
-		return refetchedMsg{cfg: &cfg, sent: msg.sent}
+		return refetchedMsg{seq: seq, cfg: &cfg, sent: msg.sent}
 	}
 }
 
@@ -326,8 +367,9 @@ func (m Model) refetched(msg refetchedMsg) (tea.Model, tea.Cmd) {
 		m.toast.Show("saved, but re-reading the config failed: "+clean(msg.err.Error()), true, m.now())
 		return m, nil
 	}
-	m.cfg = msg.cfg
-	s.load(msg.cfg)
+	// A newer refresh may already be shown; the reset and the check below
+	// then run against it, which reflects the save just as well.
+	m.loadConfig(msg.seq, msg.cfg)
 	var keys []string
 	for k := range msg.sent {
 		keys = append(keys, k)

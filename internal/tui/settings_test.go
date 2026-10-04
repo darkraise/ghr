@@ -524,3 +524,112 @@ func TestSettingsAlertIsBounded(t *testing.T) {
 		t.Fatalf("alert not bounded (%d lines):\n%s", lipgloss.Height(v), v)
 	}
 }
+
+func TestConfigRefreshesEveryFiveTicksOnEveryPage(t *testing.T) {
+	c := &fakeClient{cfg: parseConfig(t, settingsYAML)}
+	m := sampleModel(c, 120, 30) // on the Dashboard, no config loaded yet
+	if m = ticks(m, slowPoll-1); m.cfg != nil {
+		t.Fatal("config fetched before the fifth tick")
+	}
+	if m = ticks(m, 1); m.cfg == nil || m.cfg.Owner != "darkraise" {
+		t.Fatal("config not fetched on the fifth tick")
+	}
+	c.cfg = parseConfig(t, strings.Replace(settingsYAML, "global_max: 3", "global_max: 4", 1))
+	st := sampleStatus()
+	st.Epoch = "e2" // the daemon restarted
+	m = feed(m, statusMsg{st: st})
+	if m.cfg.GlobalMax != 4 {
+		t.Fatalf("config not re-fetched after a daemon restart: global max %d", m.cfg.GlobalMax)
+	}
+}
+
+func TestSettingsRefreshMergesRepoChanges(t *testing.T) {
+	c := &fakeClient{}
+	m := onSettings(t, c, 120, 30)
+	set(m, setPollInterval, ui.Value{Text: "30s"})
+	set(m, repoKey("darkagents", "labels"), ui.Value{List: []string{"x"}})
+	set(m, repoKey("darkmem", "max"), ui.Value{Num: 4, Set: true})
+	// Meanwhile: idle_timeout changed by hand, darkmem removed, darkagents being removed, newrepo added.
+	c.cfg = parseConfig(t, `owner: darkraise
+mode: queue
+global_max: 3
+idle_timeout: 9m
+labels: [homelab]
+repos:
+  - name: darkcloud
+    max: 2
+    labels: [darkcloud-linux]
+    cleanup_name_prefixes: [dc-e2e-]
+  - name: darkagents
+    paused: true
+    removing: true
+  - name: newrepo
+    max: 3
+`)
+	m = ticks(m, slowPoll)
+	s := m.settings
+	if got := s.input(setPollInterval).Value().Text; got != "30s" {
+		t.Errorf("dirty field lost its edit: %q", got)
+	}
+	if got := s.input(setIdleTimeout).Value().Text; got != "9m0s" {
+		t.Errorf("clean field not refreshed: %q", got)
+	}
+	if s.form.Field(repoKey("darkmem", "max")) != nil {
+		t.Error("removed repo kept its fields")
+	}
+	if s.form.Field(repoKey("darkagents", "labels")).Dirty() {
+		t.Error("repo being removed kept its edit")
+	}
+	if got := s.input(repoKey("newrepo", "max")).Value(); got.Num != 3 || !got.Set {
+		t.Errorf("new repo max %+v", got)
+	}
+	if !strings.Contains(m.View(), "repository darkmem was removed") {
+		t.Error("no toast for the removed repo")
+	}
+	form := strings.Join(settingsLines(m, 103), "\n")
+	for _, want := range []string{"darkagents (removing…)", "─ newrepo "} {
+		if !strings.Contains(form, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(form, "─ darkmem ") {
+		t.Error("removed repo still has a card")
+	}
+	p, _ := s.buildPatch()
+	if p.PollInterval == nil || len(p.Repos) != 0 {
+		t.Errorf("patch after refresh: %+v", p)
+	}
+}
+
+// A config response to an older request never replaces a newer one.
+func TestStaleConfigResponseIsDropped(t *testing.T) {
+	c := &fakeClient{}
+	m := onSettings(t, c, 120, 30)
+	older, newer := m.fetchConfig(), m.fetchConfig()
+	c.cfg = parseConfig(t, strings.Replace(settingsYAML, "global_max: 3", "global_max: 7", 1))
+	fresh := newer()
+	c.cfg = parseConfig(t, strings.Replace(settingsYAML, "global_max: 3", "global_max: 5", 1))
+	stale := older()
+	m = feed(m, fresh, stale)
+	if m.cfg.GlobalMax != 7 || m.settings.input(setGlobalMax).Value().Num != 7 {
+		t.Fatalf("stale response applied: global max %d", m.cfg.GlobalMax)
+	}
+}
+
+// When a refresh disables the focused control, focus moves on and the new
+// focus is scrolled into view.
+func TestSettingsRefreshScrollsMovedFocusIntoView(t *testing.T) {
+	c := &fakeClient{}
+	m := onSettings(t, c, 120, 22)
+	m.View()
+	m.settings.group.Focus(repoKey("darkcloud", "labels"))
+	m.scrollToFocus()
+	c.cfg = parseConfig(t, strings.Replace(settingsYAML, "  - name: darkcloud\n", "  - name: darkcloud\n    paused: true\n    removing: true\n", 1))
+	m = ticks(m, slowPoll)
+	if got := m.settings.group.FocusedID(); got != repoKey("darkmem", "max") {
+		t.Fatalf("focus %q", got)
+	}
+	if v := m.View(); !strings.Contains(v, "Max                › [ − ]") {
+		t.Fatalf("new focus not in view (scroll %d):\n%s", m.settings.scroll, v)
+	}
+}
