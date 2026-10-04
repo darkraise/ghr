@@ -352,7 +352,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.connected = true
+		var runner, repo string
+		if r := m.selectedRunner(); r != nil {
+			runner = r.ID
+		}
+		if r := m.selectedRepo(); r != nil {
+			repo = r.Name
+		}
 		m.st = cleanStatus(msg.st)
+		m.reselect(runner, repo)
 		m.clampSelections()
 		if inst := m.instance(m.detailID); inst != nil {
 			m.detailSnap = *inst
@@ -496,6 +504,22 @@ func (m *Model) clampSelections() {
 	m.repoSel = clamp(m.repoSel, len(m.st.Repos))
 	m.runnerSel = clamp(m.runnerSel, len(m.st.Instances))
 	m.histSel = clamp(m.histSel, len(m.hist))
+}
+
+// reselect points the selections at the runner and repo that were selected
+// before a refresh, which may have moved them. Row buttons act on the
+// selection, so it must follow the row, not its position.
+func (m *Model) reselect(runner, repo string) {
+	for i := range m.st.Instances {
+		if m.st.Instances[i].ID == runner {
+			m.runnerSel = i
+		}
+	}
+	for i := range m.st.Repos {
+		if m.st.Repos[i].Name == repo {
+			m.repoSel = i
+		}
+	}
 }
 
 func (m Model) selectedRepo() *model.RepoStatus {

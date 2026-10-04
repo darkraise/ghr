@@ -1020,3 +1020,26 @@ func TestStatusTextIsCleanedOnArrival(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
+
+// A refresh that removes an earlier row keeps the selection on the same
+// runner and repo, so a row button never acts on the row that moved up.
+func TestSelectionFollowsRunnerAndRepoAcrossRefresh(t *testing.T) {
+	m := sampleModel(&fakeClient{}, 120, 30)
+	m.runnerSel, m.repoSel = 1, 1 // 7be210, darkmem
+	st := sampleStatus()
+	st.Instances = append(st.Instances[1:], model.InstanceStatus{ID: "c0ffee", Repo: "darkmem", State: "idle", Since: now})
+	st.Repos = st.Repos[1:]
+	m = feed(m, statusMsg{st: st})
+	if r := m.selectedRunner(); r == nil || r.ID != "7be210" {
+		t.Fatalf("runner selection moved: %+v", r)
+	}
+	if r := m.selectedRepo(); r == nil || r.Name != "darkmem" {
+		t.Fatalf("repo selection moved: %+v", r)
+	}
+	st = sampleStatus()
+	st.Instances = st.Instances[:1]
+	m = feed(m, statusMsg{st: st}) // the selected runner has gone: the selection clamps
+	if r := m.selectedRunner(); r == nil || r.ID != "a3f9c1" {
+		t.Fatalf("runner selection after its runner left: %+v", r)
+	}
+}
