@@ -276,6 +276,14 @@ func TestReloadAndPrune(t *testing.T) {
 	if err := c.Prune(context.Background()); !errors.As(err, &ae) || ae.Status != 409 {
 		t.Fatalf("overlap: %v", err)
 	}
+	b.pruneErr = &Error{Status: http.StatusServiceUnavailable, Msg: "runner manager closed"}
+	if err := c.Prune(context.Background()); !errors.As(err, &ae) || ae.Status != 503 || ae.Msg != "runner manager closed" {
+		t.Fatalf("shutting down: %v", err)
+	}
+	b.pruneErr = errors.New("disk on fire")
+	if err := c.Prune(context.Background()); !errors.As(err, &ae) || ae.Status != 500 || ae.Msg != "disk on fire" {
+		t.Fatalf("unmapped error: %v", err)
+	}
 }
 
 func TestTokenStatus(t *testing.T) {

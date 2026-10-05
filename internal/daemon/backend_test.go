@@ -63,6 +63,7 @@ type fakeGH struct {
 	meta    github.TokenMeta
 	runners map[int64]github.Runner
 	getErr  error
+	delErr  error
 	deleted []int64
 
 	recent    []github.Run
@@ -160,6 +161,9 @@ func (f *fakeGH) GetRunner(ctx context.Context, repo string, id int64) (*github.
 	return &r, nil
 }
 func (f *fakeGH) DeleteRunner(ctx context.Context, repo string, id int64) error {
+	if f.delErr != nil {
+		return f.delErr
+	}
 	f.deleted = append(f.deleted, id)
 	return nil
 }
@@ -526,6 +530,10 @@ func TestPruneStartsOrConflicts(t *testing.T) {
 	if err := b.Prune(); apiStatus(err) != 409 {
 		t.Fatalf("overlap: %v", err)
 	}
+	m.pruneErr = runner.ErrClosed
+	if err := b.Prune(); apiStatus(err) != 503 {
+		t.Fatalf("after Close: %v", err)
+	}
 }
 
 func TestTokenStates(t *testing.T) {
@@ -572,6 +580,62 @@ func TestRegistrationsListed(t *testing.T) {
 	}
 	if _, err := b.Registrations(context.Background(), "nope"); apiStatus(err) != 404 {
 		t.Fatalf("unknown repo: %v", err)
+	}
+}
+
+// A successful delete posts an event; a failed one returns GitHub's error and
+// posts nothing.
+func TestDeleteRegistrationEventAndFailure(t *testing.T) {
+	b, _, gh := newBackend(t)
+	registrationGH(gh)
+	ctx := context.Background()
+	gh.delErr = &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible"}
+	if err := b.DeleteRegistration(ctx, "darkcloud", 1); !errors.Is(err, gh.delErr) {
+		t.Fatalf("delete failure: %v", err)
+	}
+	if evs := b.Events.After(0); len(evs) != 0 {
+		t.Fatalf("a failed delete posted %+v", evs)
+	}
+	gh.delErr = nil
+	if err := b.DeleteRegistration(ctx, "DarkCloud", 1); err != nil {
+		t.Fatal(err)
+	}
+	evs := b.Events.After(0)
+	if len(evs) != 1 || evs[0].Repo != "darkcloud" || evs[0].Msg != "deleted runner registration linux-1" {
+		t.Fatalf("events %+v", evs)
+	}
+}
+
+// ghr's namespace is matched case-insensitively, and only a name that is
+// exactly ghr-<repo>-<6 hex> belongs to ghr.
+func TestGHROwned(t *testing.T) {
+	for _, tc := range []struct {
+		repo, name string
+		want       bool
+	}{
+		{"darkcloud", "ghr-darkcloud-a3f9c1", true},
+		{"DarkCloud", "GHR-darkcloud-A3F9C1", true},
+		{"darkcloud", "ghr-darkcloud-a3f9c", false},
+		{"darkcloud", "ghr-darkcloud-a3f9c1x", false},
+		{"darkcloud", "ghr-darkcloud-a3f9g1", false},
+		{"darkcloud", "ghr-darkcloud-x-a3f9c1", false},
+		{"darkcloud", "ghr-darkcloudx-a3f9c1", false},
+		{"dark", "ghr-darkcloud-a3f9c1", false},
+		{"darkcloud", "my-ghr-darkcloud-a3f9c1", false},
+	} {
+		if got := ghrOwned(tc.repo, tc.name); got != tc.want {
+			t.Errorf("ghrOwned(%q, %q) = %v", tc.repo, tc.name, got)
+		}
+	}
+}
+
+// A mixed-case ghr name is still refused, so a runner that is starting cannot
+// be deleted under it.
+func TestDeleteRegistrationRefusesMixedCaseGHRName(t *testing.T) {
+	b, _, gh := newBackend(t)
+	gh.runners = map[int64]github.Runner{7: {ID: 7, Name: "GHR-DarkCloud-A3F9C1", Status: "offline"}}
+	if err := b.DeleteRegistration(context.Background(), "DARKCLOUD", 7); apiStatus(err) != 409 || len(gh.deleted) != 0 {
+		t.Fatalf("%v %v", err, gh.deleted)
 	}
 }
 
