@@ -243,3 +243,14 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, rel Release, p
 	}
 	return nil
 }
+
+// runAs runs script, relative to dir, as the runner user with env added and
+// AGENT_TOOLSDIRECTORY removed (python-versions' setup.sh prefers it over
+// RUNNER_TOOL_CACHE).
+func (e *Env) runAs(ctx context.Context, dir string, env []string, script string, args ...string) ([]byte, error) {
+	a := []string{"-u", e.User, "--", "env", "-u", "AGENT_TOOLSDIRECTORY"}
+	a = append(a, env...)
+	a = append(a, "bash", "-c", `cd -- "$0" && exec bash "$@"`, dir, script)
+	a = append(a, args...)
+	return e.Run(ctx, "runuser", a...)
+}
