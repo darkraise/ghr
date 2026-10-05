@@ -21,7 +21,7 @@ func historyModel(t *testing.T) (Model, *fakeClient) {
 		{Repo: "darkmem", RunNumber: "87", JobName: "build / test", Conclusion: "failure",
 			StartedAt: now.Add(-70 * time.Minute), FinishedAt: now.Add(-time.Hour)},
 	}}
-	return feed(sampleModel(c, 120, 30), key("3")), c
+	return feed(sampleModel(c, 120, 30), key("4")), c
 }
 
 func lastReq(c *fakeClient) string { return c.histReqs[len(c.histReqs)-1] }
@@ -105,7 +105,7 @@ func TestHistoryLongRepoName(t *testing.T) {
 	st := sampleStatus()
 	long := strings.Repeat("very-long-repository-name-", 4)
 	st.Repos = append(st.Repos, model.RepoStatus{Name: long})
-	m := feed(newModel(&fakeClient{}, 80, 30, st), key("3"))
+	m := feed(newModel(&fakeClient{}, 80, 30, st), key("4"))
 	m.histRepo = long
 	for i, line := range strings.Split(m.View(), "\n") {
 		if lipgloss.Width(line) > 80 {

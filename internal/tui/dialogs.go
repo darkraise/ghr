@@ -321,6 +321,10 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		return m, m.togglePauseAll()
 	case detailCopy, detailStop, detailBack:
 		return m.detailPressed(id)
+	case reposAdd:
+		return m.openAddRepo()
+	case reposPause, reposRemove:
+		return m.reposAction(id)
 	case setSave:
 		return m.saveSettings()
 	case setDiscard:
@@ -370,7 +374,7 @@ type helpGroup struct {
 // Global over Detail, Dashboard over History and Runners over Settings, so
 // the dialog fits the 22-row minimum screen.
 var helpGroups = []helpGroup{
-	{"Global", [][2]string{{"1-4", "switch page"}, {"tab", "move focus"}, {"↑↓ j k", "move selection"}, {"? / q", "help / quit"}}},
+	{"Global", [][2]string{{"1-5", "switch page"}, {"tab", "move focus"}, {"↑↓ j k", "move selection"}, {"? / q", "help / quit"}}},
 	{"Dashboard", [][2]string{{"h / →", "repos / runners"}, {"p / P", "pause repo/all"}, {"+ - [ ]", "repo/global cap"}, {"m", "queue/all mode"}, {"a / d", "add/remove repo"}}},
 	// The Runners page and the Dashboard's Runners card share these keys.
 	{"Runner rows", [][2]string{{"enter", "open details"}, {"l / x", "log / stop"}, {"pgup/dn", "scroll the log"}}},
@@ -416,7 +420,7 @@ func helpText(inner int) string {
 		}
 	}
 	return strings.Join(append(lines, "",
-		"A focused stepper takes digits: 1-4 type into it instead of switching.",
+		"A focused stepper takes digits: 1-5 type into it instead of switching.",
 		"Mouse: click anything; double-click a runner; the wheel scrolls.",
 		"Shift-drag selects text (Option-drag in iTerm2). tmux: set -g mouse on",
 	), "\n")

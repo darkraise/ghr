@@ -39,13 +39,14 @@ type page int
 
 const (
 	pageDashboard page = iota
+	pageRepos
 	pageRunners
 	pageHistory
 	pageSettings
 	pageDetail // a runner's detail page; not in the sidebar
 )
 
-var pageNames = []string{"Dashboard", "Runners", "History", "Settings"}
+var pageNames = []string{"Dashboard", "Repositories", "Runners", "History", "Settings"}
 
 type pane int
 
@@ -132,6 +133,7 @@ type Model struct {
 	st       model.Status
 	epoch    string
 	settings *settingsPage
+	repos    *reposPage
 	groups   *pageGroups
 	events   []model.Event
 	lastSeq  int64
@@ -178,7 +180,7 @@ type Model struct {
 
 func New(c Client) Model {
 	return Model{
-		c: c, now: time.Now, width: 120, height: 40, settings: newSettingsPage(), groups: newPageGroups(),
+		c: c, now: time.Now, width: 120, height: 40, settings: newSettingsPage(), repos: newReposPage(), groups: newPageGroups(),
 		order: &cfgOrder{},
 		copyFn: func(s string) {
 			fmt.Fprintf(os.Stdout, "\x1b]52;c;%s\a", base64.StdEncoding.EncodeToString([]byte(s)))

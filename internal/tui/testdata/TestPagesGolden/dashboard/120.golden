@@ -1,9 +1,9 @@
  ghr   mode ● QUEUE   runners ▕██░▏ 2/3   api ▕█████████░▏ 4800   disk ▕██████░░░░▏ 61%   ● connected
 ▌ 1 Dashboard    Dashboard                                                                    [ + Add ]    ( Pause all )
-  2 Runners      ╭─ Running ─────────────╮ ╭─ Queued jobs ─────────╮ ╭─ Repositories ────────╮ ╭─ Disk ────────────────╮
-  3 History      │ 2 / 3                 │ │ 3                     │ │ 2 active · 1 paused   │ │ 61%                   │
-  4 Settings     ╰───────────────────────╯ ╰───────────────────────╯ ╰───────────────────────╯ ╰───────────────────────╯
-                 ╭─ › Repositories ────────────────────────────────────────────────────────────────────────────────────╮
+  2 Repositories ╭─ Running ─────────────╮ ╭─ Queued jobs ─────────╮ ╭─ Repositories ────────╮ ╭─ Disk ────────────────╮
+  3 Runners      │ 2 / 3                 │ │ 3                     │ │ 2 active · 1 paused   │ │ 61%                   │
+  4 History      ╰───────────────────────╯ ╰───────────────────────╯ ╰───────────────────────╯ ╰───────────────────────╯
+  5 Settings     ╭─ › Repositories ────────────────────────────────────────────────────────────────────────────────────╮
                  │   REPO           STATE      RUN   QUEUE  LAST JOB                                                   │
                  │ ▸ darkcloud      [ACTIVE]   1/1   ⧗ 2    ✔ #411 lint  2m ago                  ( Pause )  [ Remove ] │
                  │   darkmem        [ACTIVE]   1/1   –      ✖ #87 build / test  1h ago                                 │

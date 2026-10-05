@@ -185,7 +185,7 @@ func (m Model) sidebar(h int) string {
 // tabRow replaces the sidebar under wideMin columns.
 // The labels shrink to short names, then to numbers, until the row fits.
 func (m Model) tabRow(w int) string {
-	short := []string{"Dash", "Run", "Hist", "Set"}
+	short := []string{"Dash", "Repo", "Run", "Hist", "Set"}
 	var row string
 	for form := 0; form < 3; form++ {
 		var tabs []string
@@ -234,6 +234,8 @@ func (m Model) pageHeader(w int) string {
 		title, right = sBold.Render("Runners › "+clean(m.detailID)), m.detailButtons()
 	case m.page == pageSettings && !m.connected:
 		title, right = sBold.Render(pageNames[m.page]), sRed.Render("reconnecting")
+	case m.page == pageRepos:
+		title, right = sBold.Render(pageNames[m.page]), m.repos.add.View(m.repos.group.FocusedID() == reposAdd, 0)
 	case m.page == pageDashboard:
 		title, right = sBold.Render(pageNames[m.page]), m.dashButtons()
 	default:
@@ -260,6 +262,8 @@ func (m Model) footerKeys() []footerKey {
 		return m.histFooterKeys()
 	case pageSettings:
 		return m.settingsFooterKeys()
+	case pageRepos:
+		return m.reposFooterKeys()
 	}
 	if !m.onCard() {
 		return []footerKey{{"enter", "press"}, {"tab", "next"}, {"?", "help"}, {"q", "quit"}}
@@ -293,6 +297,16 @@ func (m Model) footerPress(k string) (tea.Model, tea.Cmd) {
 	}
 	if m.page == pageDetail {
 		return m.handleKey(keyMsg(k))
+	}
+	if m.page == pageRepos {
+		switch k {
+		case "a":
+			return m.openAddRepo()
+		case "p":
+			return m.reposAction(reposPause)
+		case "d":
+			return m.reposAction(reposRemove)
+		}
 	}
 	return m.press(k)
 }

@@ -17,7 +17,7 @@ func detailModel(t *testing.T, c *fakeClient) Model {
 	st.Instances[0].Job.HTMLURL = "https://github.com/darkraise/darkcloud/actions/runs/1"
 	c.st = &st
 	m := newModel(c, 120, 40, st)
-	return feed(m, keys("2", "enter")...)
+	return feed(m, keys("3", "enter")...)
 }
 
 func TestDetailPage(t *testing.T) {
@@ -27,7 +27,7 @@ func TestDetailPage(t *testing.T) {
 	}
 	v := m.View()
 	for _, want := range []string{"Runners › a3f9c1", "( Copy run URL )", "[ Stop runner ]", "[BUSY]", "darkcloud",
-		"CI / e2e-journeys  #412", "12m04s", "started 2026-10-03 13:52:56", "▌ 2 Runners", "esc back"} {
+		"CI / e2e-journeys  #412", "12m04s", "started 2026-10-03 13:52:56", "▌ 3 Runners", "esc back"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("detail page missing %q", want)
 		}
@@ -124,7 +124,7 @@ func TestDetailTabs(t *testing.T) {
 // l on a runner row opens its detail page on the Log tab; Tab reaches the
 // tab strip after the header buttons.
 func TestLogKeyOpensDetailLog(t *testing.T) {
-	m := feed(sampleModel(&fakeClient{}, 120, 40), keys("2", "l")...)
+	m := feed(sampleModel(&fakeClient{}, 120, 40), keys("3", "l")...)
 	if m.page != pageDetail || m.groups.tabs.active != tabLog || m.logID != "a3f9c1" {
 		t.Fatalf("page %v tab %d log %q", m.page, m.groups.tabs.active, m.logID)
 	}
@@ -187,7 +187,7 @@ func TestPagingScrollsOnlyAShownLog(t *testing.T) {
 // Clicking the Log tab follows this runner's log at once, not the log of
 // the runner followed before.
 func TestDetailLogTabClickFollows(t *testing.T) {
-	m := feed(sampleModel(&fakeClient{}, 120, 40), key("2")) // follows a3f9c1
+	m := feed(sampleModel(&fakeClient{}, 120, 40), key("3")) // follows a3f9c1
 	m = feed(m, keys("1", "right", "down")...)               // Dashboard, Runners card, 7be210
 	if m = feed(m, key("enter")); m.detailID != "7be210" || m.logID != "a3f9c1" {
 		t.Fatalf("detail %q log %q", m.detailID, m.logID)

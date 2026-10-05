@@ -56,6 +56,8 @@ func (m Model) View() string {
 // pageBody renders the current page's content in w columns and h lines.
 func (m Model) pageBody(w, h int) string {
 	switch m.page {
+	case pageRepos:
+		return m.reposView(w, h)
 	case pageRunners:
 		return m.runnersPage(w, h)
 	case pageHistory:

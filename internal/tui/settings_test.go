@@ -184,7 +184,7 @@ func TestSettingsViewClampsScroll(t *testing.T) {
 func onSettings(t *testing.T, c *fakeClient, w, h int) Model {
 	t.Helper()
 	c.cfg = parseConfig(t, settingsYAML)
-	return feed(sampleModel(c, w, h), key("4"))
+	return feed(sampleModel(c, w, h), key("5"))
 }
 
 func quits(cmd tea.Cmd) bool {
@@ -441,7 +441,7 @@ func TestSettingsSaveFailureIsNotARejection(t *testing.T) {
 		&api.Error{Status: 500, Msg: "write config.yaml: disk full"},
 	} {
 		c := &fakeClient{patchErr: err}
-		m := feed(dirtySettings(t, c), keys("2", "enter")...)
+		m := feed(dirtySettings(t, c), keys("3", "enter")...)
 		v := m.View()
 		if strings.Contains(v, "Save rejected") || !strings.Contains(v, "settings not saved: "+err.Error()) {
 			t.Errorf("%v:\n%s", err, v)
@@ -739,7 +739,7 @@ func TestLeaveGuardAsksOnQDigitsAndSidebar(t *testing.T) {
 func TestLeaveGuardSaveThenNavigate(t *testing.T) {
 	c := &fakeClient{}
 	applyPoll(c)
-	m := feed(dirtySettings(t, c), keys("2", "enter")...) // enter presses Save, the primary
+	m := feed(dirtySettings(t, c), keys("3", "enter")...) // enter presses Save, the primary
 	if m.page != pageRunners || len(c.patches) != 1 || *c.patches[0].PollInterval != "30s" {
 		t.Fatalf("page %v patches %d", m.page, len(c.patches))
 	}
@@ -747,7 +747,7 @@ func TestLeaveGuardSaveThenNavigate(t *testing.T) {
 
 func TestLeaveGuardRejectedSaveStays(t *testing.T) {
 	c := &fakeClient{patchErr: rejected("poll_interval must be >= 5s")}
-	m := feed(dirtySettings(t, c), keys("3", "enter")...)
+	m := feed(dirtySettings(t, c), keys("4", "enter")...)
 	if m.page != pageSettings || !strings.Contains(m.View(), "✖ poll_interval must be >= 5s") || m.leaving {
 		t.Fatalf("page %v leaving %v", m.page, m.leaving)
 	}
@@ -857,7 +857,7 @@ func TestSettingsRepoActions(t *testing.T) {
 
 func TestSettingsRepoActionsDisabledWhileRemoving(t *testing.T) {
 	c := &fakeClient{cfg: parseConfig(t, strings.Replace(settingsYAML, "  - name: darkmem\n", "  - name: darkmem\n    paused: true\n    removing: true\n", 1))}
-	m := feed(sampleModel(c, 120, 80), key("4"))
+	m := feed(sampleModel(c, 120, 80), key("5"))
 	m.View()
 	for _, act := range []string{"pause", "remove"} {
 		if m.settings.buttons[repoKey("darkmem", act)].Focusable() {
@@ -927,7 +927,7 @@ func TestSettingsPageSwitchScrollsMovedFocusIntoView(t *testing.T) {
 func TestUnsavedDialogClosesWhenNothingIsLeft(t *testing.T) {
 	c := &fakeClient{}
 	m := dirtySettings(t, c)
-	if m = feed(m, key("2")); m.overlay != ovUnsaved {
+	if m = feed(m, key("3")); m.overlay != ovUnsaved {
 		t.Fatalf("2: overlay %v", m.overlay)
 	}
 	cfg := parseConfig(t, settingsYAML)
@@ -944,7 +944,7 @@ func TestLeaveSaveStaysWhenEditedDuringSave(t *testing.T) {
 	c := &fakeClient{}
 	applyPoll(c)
 	m := dirtySettings(t, c)
-	if m = feed(m, key("2")); m.overlay != ovUnsaved {
+	if m = feed(m, key("3")); m.overlay != ovUnsaved {
 		t.Fatalf("2: overlay %v", m.overlay)
 	}
 	upd, cmd := m.Update(key("enter")) // Save, the primary

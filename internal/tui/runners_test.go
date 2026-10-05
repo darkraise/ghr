@@ -12,7 +12,7 @@ import (
 )
 
 func TestRunnersPage(t *testing.T) {
-	m := feed(sampleModel(&fakeClient{}, 120, 40), key("2"))
+	m := feed(sampleModel(&fakeClient{}, 120, 40), key("3"))
 	v := m.View()
 	for _, want := range []string{"╭─ › Runners ", "▸ a3f9c1", "( Logs )", "[ Stop ]", "⧗ waiting", "Log preview — a3f9c1 (following)", `a3f9c1 after ""`} {
 		if !strings.Contains(v, want) {
@@ -29,7 +29,7 @@ func TestRunnersPageShortScreen(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		st.Instances = append(st.Instances, model.InstanceStatus{ID: fmt.Sprintf("run%02d", i), Repo: "darkmem", State: "idle", Since: now})
 	}
-	m := feed(newModel(&fakeClient{}, 120, 22, st), key("2"))
+	m := feed(newModel(&fakeClient{}, 120, 22, st), key("3"))
 	for i := 0; i < 19; i++ {
 		m = feed(m, key("down"))
 	}
@@ -42,7 +42,7 @@ func TestRunnersPageShortScreen(t *testing.T) {
 }
 
 func TestRunnersPageLogScrolls(t *testing.T) {
-	m := feed(sampleModel(&fakeClient{}, 120, 40), key("2"))
+	m := feed(sampleModel(&fakeClient{}, 120, 40), key("3"))
 	for i := 0; i < 60; i++ {
 		m.logText += fmt.Sprintf("line %02d\n", i)
 	}
@@ -58,7 +58,7 @@ func TestRunnersPageLogScrolls(t *testing.T) {
 
 // Once every runner has gone, the preview no longer claims to follow one.
 func TestRunnersPageWithoutRunners(t *testing.T) {
-	m := feed(sampleModel(&fakeClient{}, 120, 40), key("2"))
+	m := feed(sampleModel(&fakeClient{}, 120, 40), key("3"))
 	st := sampleStatus()
 	st.Instances = nil
 	v := feed(m, statusMsg{st: st}).View()

@@ -198,7 +198,7 @@ func stripTimes(s string) string {
 // columns wide.
 var pageModels = map[string]func(w int) Model{
 	"dashboard": func(w int) Model { return sampleModel(&fakeClient{}, w, 30) },
-	"runners":   func(w int) Model { return feed(sampleModel(&fakeClient{}, w, 30), key("2")) },
+	"runners":   func(w int) Model { return feed(sampleModel(&fakeClient{}, w, 30), key("3")) },
 	"detail": func(w int) Model {
 		c := &fakeClient{steps: []model.Step{
 			{Number: 1, Name: "Set up job", Status: "completed", Conclusion: "success"},
@@ -207,10 +207,10 @@ var pageModels = map[string]func(w int) Model{
 		st := sampleStatus()
 		st.Instances[0].Job.HTMLURL = "https://github.com/darkraise/darkcloud/actions/runs/1"
 		c.st = &st
-		return feed(newModel(c, w, 30, st), keys("2", "enter")...)
+		return feed(newModel(c, w, 30, st), keys("3", "enter")...)
 	},
 	"history": func(w int) Model {
-		m := feed(sampleModel(&fakeClient{}, w, 30), key("3"))
+		m := feed(sampleModel(&fakeClient{}, w, 30), key("4"))
 		m.hist = []model.HistoryEntry{
 			{Repo: "darkcloud", RunNumber: "411", JobName: "lint", Conclusion: "success",
 				StartedAt: now.Add(-4 * time.Minute), FinishedAt: now.Add(-2 * time.Minute)},
@@ -276,7 +276,7 @@ func TestHistoryDropdownFitsShortScreen(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		st.Repos = append(st.Repos, model.RepoStatus{Name: fmt.Sprintf("repository-number-%02d", i)})
 	}
-	m := feed(newModel(&fakeClient{}, 80, 22, st), keys("3", "tab", "enter")...)
+	m := feed(newModel(&fakeClient{}, 80, 22, st), keys("4", "tab", "enter")...)
 	if !m.groups.histRepo.Open() {
 		t.Fatal("the Repo filter did not open")
 	}
@@ -500,7 +500,7 @@ func TestTabMovesFocusNotPage(t *testing.T) {
 	if m.focus != paneRepos || m.groups.dash.FocusedID() != dashRepos {
 		t.Fatalf("tab cycle: focus %v on %q", m.focus, m.groups.dash.FocusedID())
 	}
-	if m = run(t, m, "2", "tab"); m.page != pageRunners {
+	if m = run(t, m, "3", "tab"); m.page != pageRunners {
 		t.Fatalf("tab on Runners switched to page %v", m.page)
 	}
 }
@@ -530,11 +530,11 @@ func TestHiddenSelectionKeysDoNothing(t *testing.T) {
 	if len(c.actions()) != 0 || m.overlay != ovNone {
 		t.Fatalf("x on the Repos pane: overlay %v actions %v", m.overlay, c.actions())
 	}
-	m = run(t, m, "2", "p", "+", "d")
+	m = run(t, m, "3", "p", "+", "d")
 	if len(c.actions()) != 0 || m.overlay != ovNone {
 		t.Fatalf("repo keys on the Runners page: overlay %v actions %v", m.overlay, c.actions())
 	}
-	run(t, m, "4", "x")
+	run(t, m, "5", "x")
 	if len(c.actions()) != 0 {
 		t.Fatalf("x on the Settings page: actions %v", c.actions())
 	}
@@ -737,7 +737,7 @@ func TestStaleAsyncResponsesAreDropped(t *testing.T) {
 	}
 	m = feed(m, key("esc"))
 
-	m = feed(m, keys("2", "up")...) // follow a3f9c1
+	m = feed(m, keys("3", "up")...) // follow a3f9c1
 	if m.logText != "a3f9c1 after \"\"\n" || m.logCursor != "+" {
 		t.Fatalf("log %q cursor %q", m.logText, m.logCursor)
 	}
@@ -759,7 +759,7 @@ func TestStaleAsyncResponsesAreDropped(t *testing.T) {
 		t.Fatalf("log polled while a request was in flight: %v", c.calls[before:])
 	}
 
-	m = feed(m, key("3"))
+	m = feed(m, key("4"))
 	m = feed(m, key("r")) // filter repo darkcloud
 	m = feed(m, historyMsg{hist: []model.HistoryEntry{{Repo: "unfiltered", JobName: "stale"}}})
 	if len(m.hist) != 0 {
@@ -769,7 +769,7 @@ func TestStaleAsyncResponsesAreDropped(t *testing.T) {
 
 func TestRunnersTabFollowsSelection(t *testing.T) {
 	c := &fakeClient{}
-	m := feed(sampleModel(c, 120, 30), key("2"))
+	m := feed(sampleModel(c, 120, 30), key("3"))
 	if v := m.View(); m.logID != "a3f9c1" || !strings.Contains(v, `a3f9c1 after ""`) {
 		t.Fatalf("entering Runners did not follow the selection: %q\n%s", m.logID, v)
 	}
@@ -837,7 +837,7 @@ func TestSettingsGolden(t *testing.T) {
 	for _, w := range []int{120, 80} {
 		t.Run(fmt.Sprint(w), func(t *testing.T) {
 			c := &fakeClient{cfg: parseConfig(t, settingsYAML)}
-			m := feed(sampleModel(c, w, 30), key("4"))
+			m := feed(sampleModel(c, w, 30), key("5"))
 			golden.RequireEqual(t, []byte(m.View()))
 		})
 	}
@@ -875,11 +875,11 @@ func TestShortTerminalKeepsSelectionVisible(t *testing.T) {
 		check(t, run(t, m, down("right", 9)...), "▸ run09")
 	})
 	t.Run("runners", func(t *testing.T) {
-		check(t, run(t, newModel(&fakeClient{}, 120, h, st), down("2", 9)...), "▸ run09")
+		check(t, run(t, newModel(&fakeClient{}, 120, h, st), down("3", 9)...), "▸ run09")
 	})
 	t.Run("settings", func(t *testing.T) {
 		upd, _ := newModel(&fakeClient{}, 120, h, st).Update(configMsg{cfg: sampleConfig(t, repos[:6]...)})
-		check(t, run(t, upd.(Model), "4"), "[ queue ▾ ]")
+		check(t, run(t, upd.(Model), "5"), "[ queue ▾ ]")
 	})
 }
 
@@ -988,7 +988,7 @@ func TestHelpMentionsMouseNotes(t *testing.T) {
 }
 
 func TestUntrustedTextIsSanitized(t *testing.T) {
-	m := feed(sampleModel(&fakeClient{}, 120, 30), key("2"))
+	m := feed(sampleModel(&fakeClient{}, 120, 30), key("3"))
 	m.logText, m.logBusy = "", false
 	m = feed(m, logMsg{gen: m.logGen, cursor: m.logCursor, chunk: model.LogChunk{Data: "ok\x1b]52;c;ZXZpbA==\a\x1b[2Jdone\r\n", Next: "+"}})
 	if !strings.HasSuffix(m.logText, "okdone\n") {

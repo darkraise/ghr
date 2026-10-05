@@ -36,6 +36,11 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return mm, cmd
 		}
 	}
+	if m.page == pageRepos {
+		if ok, mm, cmd := m.reposHandleKey(k); ok {
+			return mm, cmd
+		}
+	}
 	if m.page == pageDashboard {
 		if ok, mm, cmd := m.dashKey(k); ok {
 			return mm, cmd
@@ -56,7 +61,7 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 		return m.leave(leaveTarget{quit: true})
 	case "?":
 		return m.openHelp()
-	case "1", "2", "3", "4":
+	case "1", "2", "3", "4", "5":
 		return m.leave(leaveTarget{page: page(key[0] - '1')})
 	case "left", "h":
 		m.focusCard(paneRepos)
@@ -318,6 +323,11 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.overlay == ovNone && m.page == pageSettings {
 		// First, so an open dropdown can swallow a click anywhere, the sidebar included.
 		if ok, mm, cmd := m.settingsMouse(msg); ok {
+			return mm, cmd
+		}
+	}
+	if m.overlay == ovNone && m.page == pageRepos {
+		if ok, mm, cmd := m.reposMouse(msg); ok {
 			return mm, cmd
 		}
 	}
