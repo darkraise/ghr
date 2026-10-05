@@ -1,11 +1,26 @@
 package toolchain
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/darkraise/ghr/internal/system"
 )
 
 // mkInstall creates <root>/<toolDir>/<folder>/x64 holding one file, with the
@@ -167,4 +182,209 @@ func dotnetFind(dotnetDir, spec string) string {
 		}
 	}
 	return ""
+}
+
+// host fakes the commands an Env runs: chown is recorded, runuser runs the
+// fake registered for the script it names.
+type host struct {
+	mu          sync.Mutex
+	calls       []string
+	scripts     map[string]func(dir string, env map[string]string, args []string) error
+	failExtract error
+}
+
+func (h *host) run(_ context.Context, name string, args ...string) ([]byte, error) {
+	h.mu.Lock()
+	h.calls = append(h.calls, name+" "+strings.Join(args, " "))
+	h.mu.Unlock()
+	switch name {
+	case "chown":
+		return nil, nil
+	case "runuser":
+		return nil, h.runAs(args)
+	}
+	return nil, fmt.Errorf("unexpected command %s", name)
+}
+
+// runAs reads the command line Env.runAs builds:
+// runuser -u USER -- env -u AGENT_TOOLSDIRECTORY K=V... bash -c CMD DIR SCRIPT ARGS...
+func (h *host) runAs(args []string) error {
+	e, b := slices.Index(args, "env"), slices.Index(args, "bash")
+	if e < 0 || b < e+3 || len(args) < b+5 {
+		return fmt.Errorf("unexpected runuser arguments %q", args)
+	}
+	env := map[string]string{}
+	for _, kv := range args[e+3 : b] {
+		k, v, _ := strings.Cut(kv, "=")
+		env[k] = v
+	}
+	f, ok := h.scripts[args[b+4]]
+	if !ok {
+		return fmt.Errorf("no fake for %s", args[b+4])
+	}
+	return f(args[b+3], env, args[b+5:])
+}
+
+func (h *host) commands() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.calls)
+}
+
+// fixture is an Env whose sources point at a local HTTP server and whose
+// commands go to a fake host.
+type fixture struct {
+	*Env
+	host  *host
+	url   string
+	mu    sync.Mutex
+	files map[string][]byte // by request URI
+	hits  map[string]int
+}
+
+func newFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := &fixture{host: &host{scripts: map[string]func(string, map[string]string, []string) error{}},
+		files: map[string][]byte{}, hits: map[string]int{}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		b, ok := f.files[r.URL.RequestURI()]
+		f.hits[r.URL.RequestURI()]++
+		f.mu.Unlock()
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(b)
+	}))
+	t.Cleanup(srv.Close)
+	f.url = srv.URL
+	n := 0
+	f.Env = &Env{
+		Root: t.TempDir(),
+		Home: "/home/ghrunner",
+		User: "ghrunner",
+		Sources: Sources{
+			NodeManifest:   srv.URL + "/node.json",
+			GoManifest:     srv.URL + "/go.json",
+			PythonManifest: srv.URL + "/python.json",
+			GoReleases:     srv.URL + "/godl.json",
+			GoDownload:     srv.URL + "/dl/",
+			Adoptium:       srv.URL,
+			DotnetIndex:    srv.URL + "/dotnet-index.json",
+			DotnetScript:   srv.URL + "/dotnet-install.sh",
+		},
+		Get:   testGet,
+		Fetch: system.Download,
+		Run:   f.host.run,
+		Extract: func(_ context.Context, archive, dir string) error {
+			if f.host.failExtract != nil {
+				return f.host.failExtract
+			}
+			return extractTarGz(archive, dir)
+		},
+		OpID: func() string { n++; return fmt.Sprintf("op%d", n) },
+	}
+	return f
+}
+
+func (f *fixture) serve(uri string, body []byte) {
+	f.mu.Lock()
+	f.files[uri] = body
+	f.mu.Unlock()
+}
+
+func (f *fixture) hitCount(uri string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.hits[uri]
+}
+
+func testGet(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// tarGz builds a .tar.gz holding files (path → content), parents implied.
+func tarGz(files map[string]string) []byte {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	names := make([]string, 0, len(files))
+	for n := range files {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		tw.WriteHeader(&tar.Header{Name: n, Mode: 0o755, Size: int64(len(files[n])), Typeflag: tar.TypeReg})
+		tw.Write([]byte(files[n]))
+	}
+	tw.Close()
+	gz.Close()
+	return buf.Bytes()
+}
+
+func extractTarGz(archive, dir string) error {
+	f, err := os.Open(archive)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	tr := tar.NewReader(gz)
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		p := filepath.Join(dir, filepath.FromSlash(h.Name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return err
+		}
+		b, err := io.ReadAll(tr)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(p, b, 0o755); err != nil {
+			return err
+		}
+	}
+}
+
+func sum256(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
+}
+
+func tmpEntries(t *testing.T, root string) []string {
+	t.Helper()
+	es, err := os.ReadDir(filepath.Join(root, ".tmp"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, e := range es {
+		out = append(out, e.Name())
+	}
+	return out
 }
