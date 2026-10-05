@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -10,6 +11,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/config"
+	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
@@ -93,10 +95,40 @@ func (m Model) onCard() bool {
 	return id != dashAdd && id != dashPauseAll
 }
 
-// statTiles renders the Dashboard's four stat tiles across w columns: boxed
-// side by side, or on one line when compact.
+// series turns samples into chart values; a gap of more than 90 seconds
+// between samples (the daemon was down) draws a space.
+func series(samples []model.MetricSample, pick func(model.MetricSample) *float64) []*float64 {
+	var out []*float64
+	for i, s := range samples {
+		if i > 0 && s.At.Sub(samples[i-1].At) > 90*time.Second {
+			out = append(out, nil)
+		}
+		out = append(out, pick(s))
+	}
+	return out
+}
+
+func seriesMax(vals []*float64) float64 {
+	top := 0.0
+	for _, v := range vals {
+		if v != nil && *v > top {
+			top = *v
+		}
+	}
+	return top
+}
+
+func fmtMem(b int64) string {
+	if b >= 1<<30 {
+		return fmt.Sprintf("%.1fG", float64(b)/(1<<30))
+	}
+	return fmt.Sprintf("%dM", b>>20)
+}
+
+// statTiles renders the Dashboard's five stat tiles across w columns: boxed
+// side by side with a chart after each value, or on one line when compact.
 func (m Model) statTiles(w int, compact bool) string {
-	running, queued, active, paused := 0, 0, 0, 0
+	running, queued := 0, 0
 	for _, i := range m.st.Instances {
 		if i.State != "cleaning" {
 			running++
@@ -104,15 +136,23 @@ func (m Model) statTiles(w int, compact bool) string {
 	}
 	for _, r := range m.st.Repos {
 		queued += r.Queued
-		if r.Paused || r.Removing {
-			paused++ // a repo being removed stays paused
-		} else {
-			active++
-		}
 	}
-	limit := fmt.Sprint(m.st.GlobalMax)
+	mt := m.mg.metrics
+	num := func(n int) *float64 { v := float64(n); return &v }
+	live := series(mt.Samples, func(s model.MetricSample) *float64 { return num(s.Live) })
+	queue := series(mt.Samples, func(s model.MetricSample) *float64 { return num(s.Queued) })
+	cpus := series(mt.Samples, func(s model.MetricSample) *float64 { return s.CPU })
+	limit, scale := fmt.Sprint(m.st.GlobalMax), float64(m.st.GlobalMax)
 	if m.st.Mode == config.ModeAll {
-		limit = "∞"
+		limit, scale = "∞", seriesMax(live)
+	}
+	cpu, mem := "–", "–"
+	failed := m.mg.metricsErr != ""
+	if mt.CPU != nil && !failed {
+		cpu = fmt.Sprintf("%.0f%%", *mt.CPU)
+	}
+	if mt.MemUsed != nil && mt.MemTotal != nil && !failed {
+		mem = fmtMem(*mt.MemUsed) + " / " + fmtMem(*mt.MemTotal)
 	}
 	diskStyle := sDim
 	switch m.diskState() {
@@ -121,30 +161,74 @@ func (m Model) statTiles(w int, compact bool) string {
 	case "critical":
 		diskStyle = sRed
 	}
-	tiles := []struct{ title, value string }{
-		{"Running", fmt.Sprintf("%d / %s", running, limit)},
-		{"Queued jobs", fmt.Sprint(queued)},
-		{"Repositories", fmt.Sprintf("%d active · %d paused", active, paused)},
-		{"Disk", diskStyle.Render(fmt.Sprintf("%d%%", m.st.DiskPct))},
+	gauge := func(used, total int, n int) string {
+		if total <= 0 || n < 3 {
+			return ""
+		}
+		return ui.Gauge(used, total, n-2)
+	}
+	errLine := func(n int) string { return sRed.Render(cell("✖ "+m.mg.metricsErr, n)) }
+	// Each tile has a value line (value, then an inline chart in the room
+	// left) and a chart line under it.
+	tiles := []struct {
+		title, value string
+		inline       func(n int) string
+		below        func(n int) string
+	}{
+		{"Running", fmt.Sprintf("%d / %s", running, limit), nil,
+			func(n int) string { return sAccent.Render(ui.Sparkline(live, scale, n)) }},
+		{"Queued jobs", fmt.Sprint(queued), nil,
+			func(n int) string { return sAmber.Render(ui.Sparkline(queue, max(seriesMax(queue), 1), n)) }},
+		{"CPU", cpu, func(n int) string {
+			if mt.CPU == nil || failed {
+				return ""
+			}
+			return gauge(int(*mt.CPU+0.5), 100, n)
+		}, func(n int) string {
+			if failed {
+				return errLine(n)
+			}
+			return sAccent.Render(ui.Sparkline(cpus, 100, n))
+		}},
+		{"Memory", mem, nil, func(n int) string {
+			if failed {
+				return errLine(n)
+			}
+			if mt.MemUsed == nil || mt.MemTotal == nil {
+				return ""
+			}
+			return gauge(int(*mt.MemUsed>>20), int(*mt.MemTotal>>20), n)
+		}},
+		{"Disk", diskStyle.Render(fmt.Sprintf("%d%%", m.st.DiskPct)), nil, func(n int) string {
+			return diskStyle.Render(gauge(m.st.DiskPct, 100, n))
+		}},
 	}
 	if compact {
 		var parts []string
 		for _, t := range tiles {
 			parts = append(parts, sDim.Render(t.title)+" "+sBold.Render(t.value))
 		}
-		return cell(" "+strings.Join(parts, "   "), w)
+		line := " " + strings.Join(parts, "   ")
+		if failed {
+			line += "   " + sRed.Render("metrics ✖ "+m.mg.metricsErr)
+		}
+		return cell(line, w)
 	}
-	tw := (w - 3) / 4 // three one-column gaps
+	tw := (w - 4) / 5 // four one-column gaps
 	var boxes []string
 	for i, t := range tiles {
 		bw := tw
 		if i == len(tiles)-1 {
-			bw = w - 3*tw - 3 // the last tile takes the remainder
+			bw = w - 4*tw - 4 // the last tile takes the remainder
 		}
 		if i > 0 {
 			boxes = append(boxes, " ")
 		}
-		boxes = append(boxes, box(t.title, bw, []string{sBold.Render(t.value)}))
+		line := sBold.Render(t.value)
+		if room := bw - 4 - ansi.StringWidth(t.value) - 1; t.inline != nil && room >= 3 {
+			line += " " + t.inline(room)
+		}
+		boxes = append(boxes, box(t.title, bw, []string{line, t.below(bw - 4)}))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, boxes...)
 }
@@ -237,7 +321,7 @@ func (m Model) dashboard(w, h int) string {
 	repoLines, runnerLines := m.reposLines(w), m.runnersLines(w)
 	// When rows run short, the Activity card shrinks first (to 3 lines), then
 	// the tiles collapse to one line; under 100 columns they are one line anyway.
-	tilesH := 3
+	tilesH := 4
 	if m.width < wideMin || tilesH+len(repoLines)+len(runnerLines)+4+5 > h {
 		tilesH = 1
 	}

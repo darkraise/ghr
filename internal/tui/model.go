@@ -209,7 +209,7 @@ func Run(c Client) error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.fetchStatus(), m.fetchEvents(), m.fetchConfig(), tick())
+	return tea.Batch(m.fetchStatus(), m.fetchEvents(), m.fetchConfig(), m.fetchMetrics(), tick())
 }
 
 func tick() tea.Cmd {
@@ -366,6 +366,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.frame%slowPoll == 0 || (m.page == pageSettings && m.cfg == nil) {
 			cmds = append(cmds, m.fetchConfig())
 		}
+		if m.frame%slowPoll == 0 {
+			cmds = append(cmds, m.fetchMetrics())
+		}
 		return m, tea.Batch(cmds...)
 	case statusMsg:
 		if msg.err != nil {
@@ -471,6 +474,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case lcStartedMsg:
 		return m.labelCheckStarted(msg)
+	case metricsMsg:
+		// The tiles have no controls; a failed read shows in them and the
+		// next slowPoll fetch is the retry.
+		if msg.seq == m.mg.metricsSeq {
+			if msg.err != nil {
+				m.mg.metricsErr = errText(msg.err)
+			} else {
+				m.mg.metrics, m.mg.metricsErr = msg.mt, ""
+			}
+		}
+		return m, nil
 	case regDeletedMsg:
 		return m.regDeleted(msg)
 	case configMsg:

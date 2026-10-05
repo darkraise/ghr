@@ -60,6 +60,10 @@ type manageState struct {
 	lcInFlight bool // a label-check read is outstanding; polls wait for it
 	lcCheck    *ui.Button
 	lcAdd      map[string]*ui.Button // by raw label
+
+	metrics    model.Metrics
+	metricsErr string
+	metricsSeq int
 }
 
 func newManageState() *manageState {
@@ -506,6 +510,23 @@ func (m Model) repoActionable() bool {
 // osArchLabels name a machine's platform; adding one to a Linux x64 runner
 // would only misroute jobs, so the quick fix never offers them.
 var osArchLabels = map[string]bool{"linux": true, "windows": true, "macos": true, "x64": true, "x86": true, "arm": true, "arm64": true}
+
+type metricsMsg struct {
+	seq int
+	mt  model.Metrics
+	err error
+}
+
+func (m Model) fetchMetrics() tea.Cmd {
+	m.mg.metricsSeq++
+	seq, c := m.mg.metricsSeq, m.c
+	return func() tea.Msg {
+		cx, cancel := ctx()
+		defer cancel()
+		mt, err := c.Metrics(cx)
+		return metricsMsg{seq, mt, err}
+	}
+}
 
 type (
 	lcMsg struct {

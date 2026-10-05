@@ -4,28 +4,95 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/ghr/internal/config"
+	"github.com/darkraise/ghr/internal/model"
 )
+
+func sampleMetrics() model.Metrics {
+	f := func(v float64) *float64 { return &v }
+	cpu, used, total := 12.0, int64(180<<20), int64(8<<30)
+	return model.Metrics{CPU: &cpu, MemUsed: &used, MemTotal: &total, DiskPct: 61, Samples: []model.MetricSample{
+		{At: now.Add(-2 * time.Minute), Live: 1, Queued: 3, CPU: f(10)},
+		{At: now.Add(-time.Minute), Live: 2, Queued: 1, CPU: f(30)},
+	}}
+}
 
 func TestStatTiles(t *testing.T) {
 	m := sampleModel(&fakeClient{}, 120, 40)
+	m.mg.metrics = sampleMetrics()
 	v := m.View()
-	for _, want := range []string{"╭─ Running ", "2 / 3", "╭─ Queued jobs ", "╭─ Repositories ", "2 active · 1 paused", "╭─ Disk ", "61%"} {
+	for _, want := range []string{"╭─ Running ", "2 / 3", "▃▆", "╭─ Queued jobs ", "╭─ CPU ", "12%", "╭─ Memory ", "180M / 8.0G", "╭─ Disk ", "61%"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("tiles missing %q", want)
 		}
 	}
-	if got := m.statTiles(100, true); !strings.Contains(got, "Queued jobs 3") {
-		t.Fatalf("queued is the sum over repos: %q", got)
-	}
-	m.st.Mode = config.ModeAll
-	m.st.Repos[0].Removing, m.st.Repos[0].Paused = true, true
 	got := m.statTiles(100, true)
-	for _, want := range []string{"Running 2 / ∞", "Repositories 1 active · 2 paused"} {
+	for _, want := range []string{"Queued jobs 3", "CPU 12%", "Memory 180M / 8.0G"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("compact tiles %q missing %q", got, want)
 		}
+	}
+	m.st.Mode = config.ModeAll
+	if got := m.statTiles(100, true); !strings.Contains(got, "Running 2 / ∞") {
+		t.Errorf("all mode: %q", got)
+	}
+	m.mg.metrics = model.Metrics{}
+	if v := m.View(); !strings.Contains(v, "╭─ CPU ") || !strings.Contains(v, "–") {
+		t.Fatalf("no metrics yet:\n%s", v)
+	}
+}
+
+// Every tile keeps its graphics at 100 and 120 columns: a value line, then
+// a chart line; CPU has both a gauge and a sparkline.
+func TestStatTilesKeepGraphics(t *testing.T) {
+	m := sampleModel(&fakeClient{}, 120, 40)
+	m.mg.metrics = sampleMetrics()
+	for _, w := range []int{84, 104} { // the content width at 100 and 120 columns
+		lines := strings.Split(m.statTiles(w, false), "\n")
+		if len(lines) != 4 {
+			t.Fatalf("%d: tiles are %d lines, want 4", w, len(lines))
+		}
+		if n := strings.Count(lines[1], "▕") + strings.Count(lines[2], "▕"); n < 3 {
+			t.Errorf("%d: %d gauges, want CPU, Memory and Disk:\n%s", w, n, strings.Join(lines, "\n"))
+		}
+		if !strings.ContainsAny(lines[2], "▁▂▃▄▅▆▇█") || !strings.Contains(lines[1], "12%") || !strings.Contains(lines[1], "180M / 8.0G") {
+			t.Errorf("%d: tiles:\n%s", w, strings.Join(lines, "\n"))
+		}
+	}
+}
+
+// A failed metrics read shows in the CPU and Memory tiles and clears on the
+// next good poll; a stale reply changes nothing.
+func TestStatTilesMetricsError(t *testing.T) {
+	m := sampleModel(&fakeClient{}, 120, 40)
+	m.mg.metricsSeq = 3
+	m = feed(m, metricsMsg{seq: 3, mt: sampleMetrics()})
+	m = feed(m, metricsMsg{seq: 2, err: errors.New("stale")})
+	if v := m.View(); strings.Contains(v, "stale") || !strings.Contains(v, "12%") {
+		t.Fatalf("stale reply applied:\n%s", v)
+	}
+	m.mg.metricsSeq = 4
+	m = feed(m, metricsMsg{seq: 4, err: errors.New("daemon busy")})
+	if v := m.View(); !strings.Contains(v, "✖ daemon busy") || strings.Contains(v, "12%") {
+		t.Fatalf("error not shown:\n%s", v)
+	}
+	if got := m.statTiles(100, true); !strings.Contains(got, "metrics ✖ daemon busy") {
+		t.Fatalf("compact: %q", got)
+	}
+	m.mg.metricsSeq = 5
+	m = feed(m, metricsMsg{seq: 5, mt: sampleMetrics()})
+	if v := m.View(); strings.Contains(v, "daemon busy") || !strings.Contains(v, "12%") {
+		t.Fatalf("not recovered:\n%s", v)
+	}
+}
+
+func TestSeriesMarksGaps(t *testing.T) {
+	s := []model.MetricSample{{At: now, Live: 1}, {At: now.Add(time.Minute), Live: 2}, {At: now.Add(4 * time.Minute), Live: 3}}
+	got := series(s, func(x model.MetricSample) *float64 { v := float64(x.Live); return &v })
+	if len(got) != 4 || got[2] != nil || *got[3] != 3 {
+		t.Fatalf("series %v", got)
 	}
 }
 
@@ -34,15 +101,15 @@ func TestStatTilesCollapse(t *testing.T) {
 	if v := sampleModel(&fakeClient{}, 80, 40).View(); strings.Contains(v, "╭─ Running ") || !strings.Contains(v, "Running 2 / 3") {
 		t.Fatalf("tiles not compact under 100 columns:\n%s", v)
 	}
-	// The Activity card gives way first: at 23 rows the tiles are still boxed
+	// The Activity card gives way first: at 24 rows the tiles are still boxed
 	// and Activity is down to its 3 lines; one row fewer collapses the tiles.
-	v := sampleModel(&fakeClient{}, 120, 23).View()
+	v := sampleModel(&fakeClient{}, 120, 24).View()
 	lines := strings.Split(v, "\n")
 	top := lineWith(lines, "╭─ Activity ")
 	if !strings.Contains(v, "╭─ Running ") || top < 0 || !strings.Contains(lines[top+4], "╰") {
-		t.Fatalf("at 23 rows the tiles should stay boxed with a 3-line Activity card:\n%s", v)
+		t.Fatalf("at 24 rows the tiles should stay boxed with a 3-line Activity card:\n%s", v)
 	}
-	if v := sampleModel(&fakeClient{}, 120, 22).View(); strings.Contains(v, "╭─ Running ") || !strings.Contains(v, "Running 2 / 3") {
+	if v := sampleModel(&fakeClient{}, 120, 23).View(); strings.Contains(v, "╭─ Running ") || !strings.Contains(v, "Running 2 / 3") {
 		t.Fatalf("tiles not compact on a short screen:\n%s", v)
 	}
 }
