@@ -259,6 +259,21 @@ func TestAddRepoDialogFitsShortScreen(t *testing.T) {
 	}
 }
 
+// At the narrowest and shortest supported screen the list gives up all but a
+// row or two, so the dialog and its buttons still fit.
+func TestAddRepoDialogFitsMinimumScreen(t *testing.T) {
+	var many []model.AvailableRepo
+	for i := range 20 {
+		many = append(many, model.AvailableRepo{Name: fmt.Sprintf("repo%02d", i), Private: true})
+	}
+	m := feed(sampleModel(&fakeClient{avail: many}, 40, 22), key("a"))
+	v := m.View()
+	fits(t, "add repository", v, 40, 22)
+	if !strings.Contains(v, "[ Add ]") {
+		t.Fatalf("buttons missing:\n%s", v)
+	}
+}
+
 // On a narrow, short screen, with an error and many repositories, the list
 // gives up rows so the dialog and its buttons still fit.
 func TestAddRepoDialogFitsNarrowShortScreenWithAnError(t *testing.T) {

@@ -246,7 +246,7 @@ func (m Model) addRepoView(w int) string {
 	d.sync(m.connected)
 	// The rows stay inside the modal's inner width (w-6) down to 40 columns.
 	rw := max(min(72, w-14), 26)
-	// The list gives up rows, keeping three, until the dialog fits the screen.
+	// The list gives up rows, keeping one, until the dialog fits the screen.
 	// Each trial starts from the window the user left, because rendering
 	// clamps it to the trial's Rows.
 	cursor, top := d.picker.Window()
@@ -257,7 +257,7 @@ func (m Model) addRepoView(w int) string {
 	}
 	rows := pickerRows
 	view := render(rows)
-	for rows > 3 && lipgloss.Height(view) > m.height {
+	for rows > 1 && lipgloss.Height(view) > m.height {
 		rows--
 		view = render(rows)
 	}
