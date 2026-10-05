@@ -71,7 +71,7 @@ func (s *Sampler) Sample() {
 	smp := model.MetricSample{At: now, Live: counts.Live, Queued: counts.Queued}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if usageOK && cpusOK && s.haveCPU && usage >= s.lastCPU && now.After(s.lastAt) {
+	if usageOK && cpusOK && s.haveCPU && usage >= s.lastCPU && now.Sub(s.lastAt) >= time.Microsecond {
 		pct := float64(usage-s.lastCPU) / (float64(now.Sub(s.lastAt).Microseconds()) * cpus) * 100
 		pct = min(max(pct, 0), 100)
 		smp.CPU = &pct

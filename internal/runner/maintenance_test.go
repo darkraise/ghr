@@ -36,6 +36,18 @@ func waitOrFail(t *testing.T, ch <-chan struct{}, what string) {
 	}
 }
 
+func TestStartPruneRefusedAfterClose(t *testing.T) {
+	h := newHarness(t)
+	h.m.Close()
+	if err := h.m.StartPrune(); !errors.Is(err, ErrClosed) {
+		t.Fatalf("StartPrune after Close: %v", err)
+	}
+	h.m.Wait()
+	if got := h.docker.pruneList(); got != "" {
+		t.Fatalf("a refused prune still ran: %s", got)
+	}
+}
+
 func TestStartPruneRunsForcedSequence(t *testing.T) {
 	h := newHarness(t)
 	h.docker.usage = []int{40} // below the high-water mark: a forced prune runs anyway

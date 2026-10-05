@@ -100,12 +100,12 @@ func (b *Backend) StartLabelCheck(repo string) error {
 	if err := b.degradedErr(); err != nil {
 		return err
 	}
-	gen := b.GH.TokenMeta().Generation
 	key := strings.ToLower(name)
 	now := b.now()
 	c := &b.checks
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	gen := b.GH.TokenMeta().Generation
 	if c.closed {
 		return &api.Error{Status: http.StatusServiceUnavailable, Msg: "the daemon is shutting down"}
 	}
@@ -162,10 +162,10 @@ func (b *Backend) LabelCheck(repo string) (model.LabelCheck, error) {
 	if err := b.degradedErr(); err != nil {
 		return model.LabelCheck{}, err
 	}
-	gen := b.GH.TokenMeta().Generation
 	c := &b.checks
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	gen := b.GH.TokenMeta().Generation
 	c.refresh(gen, b.Store.Config())
 	res := model.LabelCheck{State: "not_checked", Groups: []model.LabelGroup{}}
 	e := c.entries[strings.ToLower(name)]

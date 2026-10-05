@@ -146,6 +146,7 @@ type Manager struct {
 	ticks          int
 	lastPrune      time.Time
 	pruning        bool                    // a manual or automatic prune holds the reservation; guarded by mu
+	closed         bool                    // set by Close; StartPrune refuses afterwards so it cannot race Wait; guarded by mu
 	maint          model.MaintenanceStatus // manual prunes; guarded by mu
 	maintCtx       context.Context         // cancelled by Close
 	maintCancel    context.CancelFunc
@@ -184,16 +185,24 @@ func (m *Manager) recordLastJob(e model.HistoryEntry) {
 	}
 }
 
-// Wait blocks until background finishes return; each is bounded by finishTimeout.
+// Wait blocks until background finishes and prunes return; a finish is
+// bounded by finishTimeout, a prune by Close.
 func (m *Manager) Wait() { m.wg.Wait() }
 
 // ErrPruneRunning is returned by StartPrune while a prune runs.
 var ErrPruneRunning = errors.New("a prune is already running")
 
+// ErrClosed is returned by StartPrune once Close has been called.
+var ErrClosed = errors.New("ghr is shutting down")
+
 // StartPrune starts a forced maintenance prune in the background. The caller
 // returns before it finishes; Wait waits for it and Close interrupts it.
 func (m *Manager) StartPrune() error {
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return ErrClosed
+	}
 	if m.pruning {
 		m.mu.Unlock()
 		return ErrPruneRunning
@@ -219,8 +228,12 @@ func (m *Manager) Maintenance() model.MaintenanceStatus {
 	return m.maint
 }
 
-// Close interrupts a running prune; the daemon calls it on shutdown before Wait.
+// Close interrupts a running prune and refuses new ones; the daemon calls it
+// on shutdown before Wait.
 func (m *Manager) Close() {
+	m.mu.Lock()
+	m.closed = true
+	m.mu.Unlock()
 	if m.maintCancel != nil {
 		m.maintCancel()
 	}

@@ -23,6 +23,7 @@ type fakeBackend struct {
 	killed       []string
 	killErr      error
 	pruneErr     error
+	reloadErr    error
 	tokenStatus  model.TokenStatus
 	tokenCalls   int
 	regs         []model.Registration
@@ -43,8 +44,10 @@ func (f *fakeBackend) Metrics() model.Metrics {
 	return f.metrics
 }
 
-func (f *fakeBackend) Reload() ([]string, error) { return []string{"labels: duplicate"}, nil }
-func (f *fakeBackend) Prune() error              { return f.pruneErr }
+func (f *fakeBackend) Reload() ([]string, error) {
+	return []string{"labels: duplicate"}, f.reloadErr
+}
+func (f *fakeBackend) Prune() error { return f.pruneErr }
 
 func (f *fakeBackend) Registrations(ctx context.Context, repo string) ([]model.Registration, error) {
 	f.regRepos = append(f.regRepos, repo)
@@ -259,6 +262,11 @@ func TestReloadAndPrune(t *testing.T) {
 	ws, err := c.Reload(context.Background())
 	if err != nil || len(ws) != 1 || ws[0] != "labels: duplicate" {
 		t.Fatalf("reload: %v %v", ws, err)
+	}
+	b.reloadErr = BadRequest("config.yaml: bad max")
+	var re *Error
+	if _, err := c.Reload(context.Background()); !errors.As(err, &re) || re.Status != 400 {
+		t.Fatalf("reload error: %v", err)
 	}
 	if err := c.Prune(context.Background()); err != nil {
 		t.Fatal(err)

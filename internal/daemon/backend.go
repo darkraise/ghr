@@ -404,6 +404,9 @@ func (b *Backend) Prune() error {
 	if errors.Is(err, runner.ErrPruneRunning) {
 		return api.Conflict(err.Error())
 	}
+	if errors.Is(err, runner.ErrClosed) {
+		return &api.Error{Status: http.StatusServiceUnavailable, Msg: err.Error()}
+	}
 	return err
 }
 
@@ -502,8 +505,8 @@ func (b *Backend) DeleteRegistration(ctx context.Context, repo string, id int64)
 		return api.Conflict(r.Name + " belongs to ghr, which removes its own registrations")
 	case r.Busy:
 		return api.Conflict(r.Name + " is running a job")
-	case r.Status == "online":
-		return api.Conflict(r.Name + " is online; only offline runners can be deleted")
+	case r.Status != "offline":
+		return api.Conflict(r.Name + " is " + r.Status + "; only offline runners can be deleted")
 	}
 	if err := b.GH.DeleteRunner(ctx, name, id); err != nil {
 		return err

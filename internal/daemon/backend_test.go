@@ -578,8 +578,9 @@ func TestRegistrationsListed(t *testing.T) {
 func TestDeleteRegistrationRefusals(t *testing.T) {
 	b, m, gh := newBackend(t)
 	registrationGH(gh)
+	gh.runners[5] = github.Runner{ID: 5, Name: "odd-box", Status: "weird"}
 	ctx := context.Background()
-	for id, want := range map[int64]int{2: 409, 3: 409, 4: 409} {
+	for id, want := range map[int64]int{2: 409, 3: 409, 4: 409, 5: 409} {
 		if err := b.DeleteRegistration(ctx, "darkcloud", id); apiStatus(err) != want {
 			t.Errorf("id %d: %v", id, err)
 		}
