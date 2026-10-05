@@ -69,6 +69,7 @@ type Backend interface {
 	KillRunner(ctx context.Context, id string) error
 	Reload() ([]string, error)
 	Prune() error
+	Token() model.TokenStatus
 }
 
 func NewServer(b Backend) http.Handler {
@@ -153,6 +154,7 @@ func NewServer(b Backend) http.Handler {
 		}
 		respond(w, nil, b.SetToken(r.Context(), tok))
 	})
+	mux.HandleFunc("GET /token", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.Token()) })
 	mux.HandleFunc("POST /reload", func(w http.ResponseWriter, r *http.Request) {
 		ws, err := b.Reload()
 		respond(w, ws, err)

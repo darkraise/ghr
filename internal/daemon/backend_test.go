@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/config"
@@ -26,6 +27,7 @@ type fakeManager struct {
 	killed   []string
 	pruneErr error
 	prunes   int
+	degraded string
 }
 
 func (f *fakeManager) StartPrune() error {
@@ -33,7 +35,9 @@ func (f *fakeManager) StartPrune() error {
 	return f.pruneErr
 }
 
-func (f *fakeManager) Status() model.Status { return model.Status{Instances: f.insts} }
+func (f *fakeManager) Status() model.Status {
+	return model.Status{Instances: f.insts, Degraded: f.degraded != "", DegradedReason: f.degraded}
+}
 func (f *fakeManager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 	return model.LogChunk{}, runner.ErrUnknownRunner(id)
 }
@@ -55,7 +59,10 @@ func (f *fakeManager) ClearDegraded() { f.cleared = true }
 type fakeGH struct {
 	repos  map[string]*github.Repository
 	forgot bool
+	meta   github.TokenMeta
 }
+
+func (f *fakeGH) TokenMeta() github.TokenMeta { return f.meta }
 
 func (f *fakeGH) GetRepo(ctx context.Context, repo string) (*github.Repository, error) {
 	r, ok := f.repos[repo]
@@ -433,5 +440,28 @@ func TestPruneStartsOrConflicts(t *testing.T) {
 	m.pruneErr = runner.ErrPruneRunning
 	if err := b.Prune(); apiStatus(err) != 409 {
 		t.Fatalf("overlap: %v", err)
+	}
+}
+
+func TestTokenStates(t *testing.T) {
+	b, m, gh := newBackend(t)
+	if ts := b.Token(); ts.State != "unverified" || ts.CheckedAt != nil {
+		t.Fatalf("fresh: %+v", ts)
+	}
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	exp := now.Add(80 * 24 * time.Hour)
+	rem := 4800
+	gh.meta = github.TokenMeta{CheckedAt: now, OK: true, RateRemaining: &rem, ExpiresAt: &exp}
+	if ts := b.Token(); ts.State != "ok" || !ts.CheckedAt.Equal(now) || *ts.RateRemaining != 4800 || !ts.ExpiresAt.Equal(exp) {
+		t.Fatalf("ok: %+v", ts)
+	}
+	m.degraded = "GitHub rejected the token"
+	if ts := b.Token(); ts.State != "rejected" || ts.Reason != "GitHub rejected the token" {
+		t.Fatalf("degraded: %+v", ts)
+	}
+	m.degraded = ""
+	gh.meta.OK = false
+	if ts := b.Token(); ts.State != "rejected" {
+		t.Fatalf("last call rejected: %+v", ts)
 	}
 }

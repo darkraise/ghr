@@ -162,3 +162,10 @@ func (c *Client) Reload(ctx context.Context) ([]string, error) {
 func (c *Client) Prune(ctx context.Context) error {
 	return c.call(ctx, http.MethodPost, "/prune", nil, nil)
 }
+
+// Token reports the daemon's view of its GitHub token.
+func (c *Client) Token(ctx context.Context) (model.TokenStatus, error) {
+	var ts model.TokenStatus
+	err := c.call(ctx, http.MethodGet, "/token", nil, &ts)
+	return ts, err
+}

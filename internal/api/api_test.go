@@ -13,18 +13,25 @@ import (
 )
 
 type fakeBackend struct {
-	patches  []model.ConfigPatch
-	added    []model.AddRepoRequest
-	removed  []string
-	pauseAll []bool
-	token    string
-	killed   []string
-	killErr  error
-	pruneErr error
+	patches     []model.ConfigPatch
+	added       []model.AddRepoRequest
+	removed     []string
+	pauseAll    []bool
+	token       string
+	killed      []string
+	killErr     error
+	pruneErr    error
+	tokenStatus model.TokenStatus
+	tokenCalls  int
 }
 
 func (f *fakeBackend) Reload() ([]string, error) { return []string{"labels: duplicate"}, nil }
 func (f *fakeBackend) Prune() error              { return f.pruneErr }
+
+func (f *fakeBackend) Token() model.TokenStatus {
+	f.tokenCalls++
+	return f.tokenStatus
+}
 
 func (f *fakeBackend) Status() model.Status {
 	return model.Status{Mode: "queue", GlobalMax: 2, Repos: []model.RepoStatus{{Name: "darkcloud", Max: 1, Queued: 2}}}
@@ -233,5 +240,21 @@ func TestReloadAndPrune(t *testing.T) {
 	var ae *Error
 	if err := c.Prune(context.Background()); !errors.As(err, &ae) || ae.Status != 409 {
 		t.Fatalf("overlap: %v", err)
+	}
+}
+
+func TestTokenStatus(t *testing.T) {
+	c, b := setup(t)
+	exp := time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC)
+	rem := 4800
+	b.tokenStatus = model.TokenStatus{State: "ok", ExpiresAt: &exp, RateRemaining: &rem}
+	ts, err := c.Token(context.Background())
+	if err != nil || b.tokenCalls != 1 || ts.State != "ok" || ts.ExpiresAt == nil || !ts.ExpiresAt.Equal(exp) || *ts.RateRemaining != 4800 {
+		t.Fatalf("%+v %v calls %d", ts, err, b.tokenCalls)
+	}
+	b.tokenStatus = model.TokenStatus{State: "rejected", Reason: "GitHub rejected the token"}
+	ts, err = c.Token(context.Background())
+	if err != nil || b.tokenCalls != 2 || ts.State != "rejected" || ts.Reason != "GitHub rejected the token" || ts.ExpiresAt != nil || ts.RateRemaining != nil || ts.CheckedAt != nil {
+		t.Fatalf("second call %+v %v calls %d", ts, err, b.tokenCalls)
 	}
 }

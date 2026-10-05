@@ -31,6 +31,7 @@ type GitHub interface {
 	GetRepo(ctx context.Context, repo string) (*github.Repository, error)
 	ListJobs(ctx context.Context, repo string, runID int64) ([]github.Job, error)
 	ForgetCache()
+	TokenMeta() github.TokenMeta
 }
 
 type Backend struct {
@@ -373,4 +374,23 @@ func (b *Backend) Prune() error {
 		return api.Conflict(err.Error())
 	}
 	return err
+}
+
+// Token reports what GitHub's responses said about the token; never the token.
+func (b *Backend) Token() model.TokenStatus {
+	meta := b.GH.TokenMeta()
+	ts := model.TokenStatus{State: "unverified", RateRemaining: meta.RateRemaining, RateLimit: meta.RateLimit,
+		RateReset: meta.RateReset, ExpiresAt: meta.ExpiresAt}
+	if !meta.CheckedAt.IsZero() {
+		at := meta.CheckedAt
+		ts.CheckedAt = &at
+		ts.State = "ok"
+		if !meta.OK {
+			ts.State = "rejected"
+		}
+	}
+	if st := b.M.Status(); st.Degraded {
+		ts.State, ts.Reason = "rejected", st.DegradedReason
+	}
+	return ts
 }
