@@ -221,3 +221,25 @@ func TestLogsReportsWriteError(t *testing.T) {
 		t.Fatal("a failed write must be an error")
 	}
 }
+
+func TestWebResetPassword(t *testing.T) {
+	reqs := fakeDaemon(t)
+	code, out, errOut := runCLI(t, "", "web", "reset-password")
+	if code != 0 || !strings.Contains(out, "web password removed; the next visitor to the web UI sets a new one") {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+	last := (*reqs)[len(*reqs)-1]
+	if last.method != "POST" || last.path != "/web/reset-password" {
+		t.Fatalf("request %+v", last)
+	}
+	for _, args := range [][]string{{"web"}, {"web", "reset"}, {"web", "reset-password", "now"}} {
+		code, _, errOut := runCLI(t, "", args...)
+		if code != 2 || !strings.Contains(errOut, "usage: ghr web reset-password") {
+			t.Errorf("%v: exit %d err %q", args, code, errOut)
+		}
+	}
+	_, out, _ = runCLI(t, "", "help")
+	if !strings.Contains(out, "web reset-password") {
+		t.Fatalf("usage lacks the command:\n%s", out)
+	}
+}

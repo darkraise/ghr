@@ -113,5 +113,6 @@ const usage = `usage: ghr [command]
   logs <id> [-f]                  runner diagnostic log
   history [--repo r] [--conclusion c] [--limit n]
   runner-update [--cancel]        queue (or cancel) a runner update
+  web reset-password              forget the web UI password
   version
 `

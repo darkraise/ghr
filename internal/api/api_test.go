@@ -436,3 +436,16 @@ func TestOlderDaemonAsksForARestart(t *testing.T) {
 		t.Fatalf("404: %v", err)
 	}
 }
+
+func TestResetWebPasswordPostsToTheSocketRoute(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	c := &Client{Base: srv.URL, HTTP: &http.Client{Timeout: 5 * time.Second}}
+	if err := c.ResetWebPassword(context.Background()); err != nil || got != "POST /web/reset-password" {
+		t.Fatalf("err %v request %q", err, got)
+	}
+}

@@ -100,6 +100,15 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 			return c.CancelRunnerUpdate(ctx)
 		}
 		return usageError("usage: ghr runner-update [--cancel]")
+	case "web":
+		if len(args) != 2 || args[1] != "reset-password" {
+			return usageError("usage: ghr web reset-password")
+		}
+		if err := c.ResetWebPassword(ctx); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "web password removed; the next visitor to the web UI sets a new one")
+		return nil
 	}
 	return usageError("unknown command " + args[0])
 }

@@ -224,3 +224,9 @@ func (c *Client) AvailableRepos(ctx context.Context) ([]model.AvailableRepo, err
 	err := c.call(ctx, http.MethodGet, "/repos/available", nil, &rs)
 	return rs, err
 }
+
+// ResetWebPassword forgets the web UI password and ends its sessions. The
+// route exists on the Unix socket only.
+func (c *Client) ResetWebPassword(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/web/reset-password", nil, nil)
+}
