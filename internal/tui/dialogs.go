@@ -199,20 +199,25 @@ func (m Model) openConfirm(text string, action func() tea.Cmd) (tea.Model, tea.C
 	return m, nil
 }
 
-// leave goes to t. Leaving Settings with unsaved changes first asks whether
-// to save them, discard them or stay; ctrl+c never comes here.
+// leave goes to t. Leaving a config page (Settings or Repositories) with
+// unsaved changes first asks whether to save them, discard them or stay;
+// ctrl+c never comes here.
 func (m Model) leave(t leaveTarget) (tea.Model, tea.Cmd) {
-	staying := !t.quit && t.page == pageSettings
-	if m.page == pageSettings && !staying && m.settings.saving {
-		// The save decides: its result leaves or stays (see refetched).
-		m.toast.Show("wait for the save to finish", true, m.now())
-		return m, nil
-	}
-	if m.page == pageSettings && !staying && len(m.settings.form.Dirty()) > 0 {
-		m.leaveTo, m.leaveFrom = t, m.page
-		m.openDialog(ovUnsaved, btnLeaveStay, ui.NewButton(btnLeaveStay, "Stay", ui.Secondary),
-			ui.NewButton(btnLeaveDiscard, "Discard", ui.Secondary), ui.NewButton(btnLeaveSave, "Save", ui.Primary))
-		return m, nil
+	onConfig := m.page == pageSettings || m.page == pageRepos
+	staying := !t.quit && t.page == m.page
+	if onConfig && !staying {
+		cp := m.configPage(m.page)
+		if cp.saving {
+			// The save decides: its result leaves or stays (see refetched).
+			m.toast.Show("wait for the save to finish", true, m.now())
+			return m, nil
+		}
+		if len(cp.form.Dirty()) > 0 {
+			m.leaveTo, m.leaveFrom = t, m.page
+			m.openDialog(ovUnsaved, btnLeaveStay, ui.NewButton(btnLeaveStay, "Stay", ui.Secondary),
+				ui.NewButton(btnLeaveDiscard, "Discard", ui.Secondary), ui.NewButton(btnLeaveSave, "Save", ui.Primary))
+			return m, nil
+		}
 	}
 	return m.goTo(t)
 }
@@ -301,13 +306,14 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		m.overlay = ovNone
 	case btnLeaveDiscard:
 		m.overlay = ovNone
-		m.settings.form.Discard()
-		m.settings.alert = nil
+		cp := m.configPage(m.leaveFrom)
+		cp.form.Discard()
+		cp.alert = nil
 		return m.goTo(m.leaveTo)
 	case btnLeaveSave:
-		// Leave only once the save succeeds; saved() does the navigation.
+		// Leave only once the save succeeds; refetched does the navigation.
 		m.overlay = ovNone
-		upd, cmd := m.saveSettings()
+		upd, cmd := m.saveConfig(m.leaveFrom)
 		m = upd.(Model)
 		m.leaving = cmd != nil
 		return m, cmd
@@ -470,10 +476,11 @@ func (m Model) withOverlay(base string, w int) string {
 	case ovHelp:
 		dialog = modal("Keys", m.helpBody(w), m.dlgButtons, m.dlg.FocusedID(), w)
 	case ovUnsaved:
-		n := len(m.settings.form.Dirty())
-		body := fmt.Sprintf("You have %d unsaved changes on the Settings page.", n)
+		n := len(m.configPage(m.leaveFrom).form.Dirty())
+		where := pageNames[m.leaveFrom]
+		body := fmt.Sprintf("You have %d unsaved changes on the %s page.", n, where)
 		if n == 1 {
-			body = "You have 1 unsaved change on the Settings page."
+			body = fmt.Sprintf("You have 1 unsaved change on the %s page.", where)
 		}
 		dialog = modal("Unsaved changes", body, m.dlgButtons, m.dlg.FocusedID(), w)
 	case ovAddRepo:

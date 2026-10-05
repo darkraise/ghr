@@ -232,6 +232,14 @@ func (m Model) saveRepos() (tea.Model, tea.Cmd) {
 	}
 }
 
+// saveConfig saves the config page p.
+func (m Model) saveConfig(p page) (tea.Model, tea.Cmd) {
+	if p == pageRepos {
+		return m.saveRepos()
+	}
+	return m.saveSettings()
+}
+
 // runnersGet lists the labels a newly started runner for repo name carries
 // once the edits are saved: the fixed system labels, the saved global labels
 // (marked global) and the draft repo labels, normalised as the daemon does.

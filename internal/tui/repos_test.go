@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/darkraise/ghr/internal/config"
+	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
@@ -294,5 +295,36 @@ func TestRepositoriesRemovingAndRefreshMerge(t *testing.T) {
 	m.View()
 	if repoInput(m, "darkagents", "labels").Focusable() {
 		t.Fatal("a repo being removed must be read-only")
+	}
+}
+
+func TestRepositoriesLeaveGuard(t *testing.T) {
+	c := &fakeClient{}
+	m := onRepos(t, c, 120, 40)
+	repoInput(m, "darkmem", "max").SetValue(ui.Value{Num: 2, Set: true})
+	if m = feed(m, key("1")); m.overlay != ovUnsaved || m.leaveFrom != pageRepos {
+		t.Fatalf("1: overlay %v from %v", m.overlay, m.leaveFrom)
+	}
+	if v := m.View(); !strings.Contains(v, "You have 1 unsaved change on the Repositories page.") {
+		t.Fatalf("dialog:\n%s", v)
+	}
+	m = click(t, m, btnLeaveDiscard)
+	if m.page != pageDashboard || len(m.repos.form.Dirty()) != 0 {
+		t.Fatalf("discard: page %v dirty %d", m.page, len(m.repos.form.Dirty()))
+	}
+	m = feed(m, key("2"))
+	repoInput(m, "darkmem", "max").SetValue(ui.Value{Num: 2, Set: true})
+	c.onPatch = func(p model.ConfigPatch) { // the fake daemon applies the max, so the refetch check passes
+		if rp, ok := p.Repos["darkmem"]; ok && rp.Max != nil {
+			n := *rp.Max
+			c.cfg.Repo("darkmem").Max = &n
+		}
+	}
+	m = feed(m, keys("4", "enter")...) // Save, the primary
+	if len(c.patches) != 1 || *c.patches[0].Repos["darkmem"].Max != 2 {
+		t.Fatalf("patches %+v", c.patches)
+	}
+	if m.page != pageHistory {
+		t.Fatalf("after save: page %v", m.page)
 	}
 }
