@@ -932,8 +932,32 @@ func TestUnsavedDialogClosesWhenNothingIsLeft(t *testing.T) {
 	}
 	cfg := parseConfig(t, settingsYAML)
 	cfg.PollInterval, _ = config.ParseDuration("30s")
-	m = feed(m, configMsg{seq: m.settings.seq + 1, cfg: cfg})
+	m = feed(m, configMsg{seq: m.order.seq + 1, cfg: cfg})
 	if m.overlay != ovNone || m.page != pageRunners {
 		t.Fatalf("overlay %v page %v", m.overlay, m.page)
+	}
+}
+
+// An edit made while a save from the unsaved-changes dialog is in flight
+// keeps the page: leaving now would lose it.
+func TestLeaveSaveStaysWhenEditedDuringSave(t *testing.T) {
+	c := &fakeClient{}
+	applyPoll(c)
+	m := dirtySettings(t, c)
+	if m = feed(m, key("2")); m.overlay != ovUnsaved {
+		t.Fatalf("2: overlay %v", m.overlay)
+	}
+	upd, cmd := m.Update(key("enter")) // Save, the primary
+	m = upd.(Model)
+	set(m, setIdleTimeout, ui.Value{Text: "9m"})
+	m, _ = pump(m, collect(cmd)...)
+	if m.page != pageSettings || m.overlay != ovUnsaved {
+		t.Fatalf("page %v overlay %v", m.page, m.overlay)
+	}
+	if f := m.settings.form.Field(setPollInterval); f.Dirty() {
+		t.Fatal("the saved field should be reset")
+	}
+	if f := m.settings.form.Field(setIdleTimeout); !f.Dirty() {
+		t.Fatal("the edit made during the save should stay")
 	}
 }

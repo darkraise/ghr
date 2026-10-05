@@ -209,7 +209,7 @@ func (m Model) leave(t leaveTarget) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.page == pageSettings && !staying && len(m.settings.form.Dirty()) > 0 {
-		m.leaveTo = t
+		m.leaveTo, m.leaveFrom = t, m.page
 		m.openDialog(ovUnsaved, btnLeaveStay, ui.NewButton(btnLeaveStay, "Stay", ui.Secondary),
 			ui.NewButton(btnLeaveDiscard, "Discard", ui.Secondary), ui.NewButton(btnLeaveSave, "Save", ui.Primary))
 		return m, nil

@@ -47,33 +47,24 @@ var modeOptions = []ui.Option{
 // settingsPage is the Settings form. The Model holds it by pointer, so its
 // controls keep their state while Bubble Tea copies the Model.
 type settingsPage struct {
-	form   ui.Form
-	group  ui.Group
-	scroll int
-	repos  []config.Repo // the repos of the last loaded config, in order
-	seq    int           // the last config request number issued
-	shown  int           // the request number of the config the form shows
-	saving bool
-	alert  []string // the daemon's messages from a rejected save
-
-	save, discard *ui.Button
-	buttons       map[string]*ui.Button // the repo cards' action buttons, by ID
+	configPage
+	repos   []config.Repo         // the repos of the last loaded config, in order
+	buttons map[string]*ui.Button // the repo cards' action buttons, by ID
 }
 
 func newSettingsPage() *settingsPage {
-	return &settingsPage{
-		save:    ui.NewButton(setSave, "Save changes", ui.Primary),
-		discard: ui.NewButton(setDiscard, "Discard", ui.Secondary),
-	}
+	return &settingsPage{configPage: newConfigPage(setSave, setDiscard)}
 }
 
 // Results of a save: the patch's outcome, then the config fetched after it.
 type (
 	savedMsg struct {
+		page page
 		sent map[string]ui.Value
 		err  error
 	}
 	refetchedMsg struct {
+		page page
 		seq  int
 		cfg  *config.Config
 		sent map[string]ui.Value
@@ -191,22 +182,15 @@ func (s *settingsPage) load(c *config.Config) []string {
 	return gone
 }
 
-// nextSeq numbers a config request. Responses can arrive out of order, so
-// one answering an older request than the config already shown is dropped.
-func (s *settingsPage) nextSeq() int {
-	s.seq++
-	return s.seq
-}
-
 // loadConfig takes the config fetched by request seq, unless a newer one is
 // already shown, and says which repos disappeared. A refresh can move focus
 // (its control vanished or became disabled), so focus is scrolled into view.
 func (m *Model) loadConfig(seq int, c *config.Config) {
 	s := m.settings
-	if seq < s.shown {
+	if seq < m.order.shown {
 		return
 	}
-	s.shown = seq
+	m.order.shown = seq
 	m.cfg = c
 	focus := s.group.FocusedID()
 	if gone := s.load(c); len(gone) > 0 {
@@ -387,19 +371,22 @@ func (m Model) saveSettings() (tea.Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		cx, cancel := ctx()
 		defer cancel()
-		return savedMsg{sent, c.PatchConfig(cx, p)}
+		return savedMsg{pageSettings, sent, c.PatchConfig(cx, p)}
 	}
 }
 
 // saved handles the patch's outcome. A rejection (a 4xx answer) keeps the
 // edits and lists the daemon's messages; any other failure keeps them and
-// says what went wrong in a toast. A success fetches the config to reset the saved
-// fields; the save stays busy until that refetch is handled, so a second
-// save cannot overlap it.
+// says what went wrong in a toast. A success fetches the config to reset the
+// saved fields; the save stays busy until that refetch is handled, so a
+// second save cannot overlap it.
 func (m Model) saved(msg savedMsg) (tea.Model, tea.Cmd) {
-	s := m.settings
+	s := m.configPage(msg.page)
 	if msg.err != nil {
-		s.saving, m.leaving = false, false // a failed save stays on Settings
+		s.saving = false
+		if m.leaveFrom == msg.page {
+			m.leaving = false // a failed save stays on the page
+		}
 		var ae *api.Error
 		if !errors.As(msg.err, &ae) || ae.Status < 400 || ae.Status >= 500 {
 			m.toast.Show("settings not saved: "+clean(msg.err.Error()), true, m.now())
@@ -410,34 +397,37 @@ func (m Model) saved(msg savedMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.toast.Show("Settings saved", false, m.now())
-	c, seq := m.c, s.nextSeq()
+	c, seq, p := m.c, m.nextCfgSeq(), msg.page
 	return m, func() tea.Msg {
 		cx, cancel := ctx()
 		defer cancel()
 		var cfg config.Config
 		if err := c.Config(cx, &cfg); err != nil {
-			return refetchedMsg{seq: seq, sent: msg.sent, err: err}
+			return refetchedMsg{page: p, seq: seq, sent: msg.sent, err: err}
 		}
-		return refetchedMsg{seq: seq, cfg: &cfg, sent: msg.sent}
+		return refetchedMsg{page: p, seq: seq, cfg: &cfg, sent: msg.sent}
 	}
 }
 
-// refetched merges the config fetched after a save. Every saved field resets
-// to its new base (a reset, not a merge), and a field whose new base differs
-// from what was sent means the daemon ignored it.
+// refetched merges the config fetched after a save on msg.page. Every
+// saved field of that page resets to its new base (a reset, not a merge),
+// and a field whose new base differs from what was sent means the daemon
+// ignored it.
 //
 // If the refetch fails, the save stands but cannot be checked: the edits stay
 // as typed, a toast says so, and the next periodic refresh brings the form
 // up to date.
 //
 // A save started from the unsaved-changes dialog leaves only from here, once
-// the check has run: a failed refetch or an ignored field stays on Settings
-// so the warning is seen.
+// the check has run, and only when nothing on the page is still unsaved: an
+// edit made while the save was in flight asks again.
 func (m Model) refetched(msg refetchedMsg) (tea.Model, tea.Cmd) {
-	s := m.settings
+	s := m.configPage(msg.page)
 	s.saving = false
-	leaving := m.leaving
-	m.leaving = false
+	leaving := m.leaving && m.leaveFrom == msg.page
+	if leaving {
+		m.leaving = false
+	}
 	if msg.err != nil {
 		m.toast.Show("saved, but re-reading the config failed: "+clean(msg.err.Error()), true, m.now())
 		return m, nil
@@ -461,6 +451,9 @@ func (m Model) refetched(msg refetchedMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if leaving {
+		if len(s.form.Dirty()) > 0 {
+			return m.leave(m.leaveTo)
+		}
 		return m.goTo(m.leaveTo)
 	}
 	return m, nil

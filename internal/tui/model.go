@@ -109,7 +109,7 @@ type (
 		err  error
 	}
 	configMsg struct {
-		seq int // orders config responses; see settingsPage.nextSeq
+		seq int // orders config responses; see cfgOrder
 		cfg *config.Config
 	}
 	doneMsg struct {
@@ -165,6 +165,8 @@ type Model struct {
 	dlgButtons    []*ui.Button   // the open dialog's buttons, in display order
 	dlgCancel     string         // the button esc presses
 	leaveTo       leaveTarget    // where to go once unsaved Settings changes are handled
+	leaveFrom     page           // the config page the unsaved-changes dialog is for
+	order         *cfgOrder      // config request numbering, shared by both config pages
 	leaving       bool           // a save started from the unsaved-changes dialog is in flight
 	add           *addRepoDialog // the open Add repository dialog
 
@@ -177,6 +179,7 @@ type Model struct {
 func New(c Client) Model {
 	return Model{
 		c: c, now: time.Now, width: 120, height: 40, settings: newSettingsPage(), groups: newPageGroups(),
+		order: &cfgOrder{},
 		copyFn: func(s string) {
 			fmt.Fprintf(os.Stdout, "\x1b]52;c;%s\a", base64.StdEncoding.EncodeToString([]byte(s)))
 		},
@@ -302,7 +305,7 @@ func (m Model) fetchContainers() tea.Cmd {
 }
 
 func (m Model) fetchConfig() tea.Cmd {
-	seq := m.settings.nextSeq()
+	seq := m.nextCfgSeq()
 	return func() tea.Msg {
 		c, cancel := ctx()
 		defer cancel()
@@ -440,7 +443,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case configMsg:
 		m.loadConfig(msg.seq, msg.cfg)
-		if m.overlay == ovUnsaved && len(m.settings.form.Dirty()) == 0 {
+		if m.overlay == ovUnsaved && len(m.configPage(m.leaveFrom).form.Dirty()) == 0 {
 			// The refresh left nothing to save or discard: carry on leaving.
 			m.overlay = ovNone
 			return m.goTo(m.leaveTo)
