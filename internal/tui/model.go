@@ -369,6 +369,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.frame%slowPoll == 0 {
 			cmds = append(cmds, m.fetchMetrics())
 		}
+		if m.page == pageRepos && m.frame%slowPoll == 0 {
+			cmds = append(cmds, m.fetchActivity())
+		}
 		return m, tea.Batch(cmds...)
 	case statusMsg:
 		if msg.err != nil {
@@ -474,6 +477,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case lcStartedMsg:
 		return m.labelCheckStarted(msg)
+	case actMsg:
+		m.gotActivity(msg)
+		return m, nil
 	case metricsMsg:
 		// The tiles have no controls; a failed read shows in them and the
 		// next slowPoll fetch is the retry.

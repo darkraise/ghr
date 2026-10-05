@@ -81,7 +81,9 @@ func (m Model) moveRepo(d int) {
 }
 
 // repoSelected fetches the selected repo's management cards.
-func (m Model) repoSelected() tea.Cmd { return tea.Batch(m.fetchRegs(), m.fetchLabelCheck()) }
+func (m Model) repoSelected() tea.Cmd {
+	return tea.Batch(m.fetchRegs(), m.fetchLabelCheck(), m.fetchActivity())
+}
 
 // refreshRepoCards refetches the management cards when the selection no
 // longer names the repo they were loaded for, or GitHub started or stopped
@@ -347,6 +349,10 @@ func (m Model) syncRepoControls() {
 			in.SetDisabled(off)
 			items = append(items, in)
 		}
+		if m.mg.actErr != "" {
+			m.mg.actRetry.SetDisabled(!m.connected)
+			items = append(items, m.mg.actRetry)
+		}
 		items = append(items, m.lcWidgets(r.Name)...)
 		items = append(items, m.regWidgets()...)
 	}
@@ -426,6 +432,7 @@ func (m Model) reposPanelLines(r model.RepoStatus, w int) ([]string, map[string]
 	} else {
 		add(ui.Render(m.repoSections(r, w), m.repos.group.FocusedID(), w, w >= 70))
 	}
+	add(m.activityCard(w))
 	add(m.lcCard(r.Name, w))
 	add(m.regCard(w))
 	return out, ranges

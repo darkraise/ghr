@@ -30,6 +30,7 @@ const (
 	tokCancel       = "token/cancel"
 	reposRegRefresh = "repos/reg/refresh"
 	reposLCCheck    = "repos/lc/check"
+	reposActRetry   = "repos/act/retry"
 )
 
 // manageState holds the management cards' daemon data and buttons. The
@@ -64,6 +65,13 @@ type manageState struct {
 	metrics    model.Metrics
 	metricsErr string
 	metricsSeq int
+
+	actRepo   string
+	act       []model.HistoryEntry
+	actErr    string
+	actSeq    int
+	actLoaded bool
+	actRetry  *ui.Button
 }
 
 func newManageState() *manageState {
@@ -76,6 +84,7 @@ func newManageState() *manageState {
 		regDel:     map[int64]*ui.Button{},
 		lcCheck:    ui.NewButton(reposLCCheck, "Check now", ui.Secondary),
 		lcAdd:      map[string]*ui.Button{},
+		actRetry:   ui.NewButton(reposActRetry, "Retry", ui.Secondary),
 	}
 }
 
@@ -812,4 +821,132 @@ func (m Model) addLabel(label string) {
 	}
 	v.List = append(append([]string{}, v.List...), label)
 	f.Input.SetValue(v)
+}
+
+// actLimit bounds the Activity card's history request; the stats say "≥"
+// when it is reached.
+const actLimit = 500
+
+type actMsg struct {
+	repo string
+	seq  int
+	hist []model.HistoryEntry
+	err  error
+}
+
+func (m Model) fetchActivity() tea.Cmd {
+	r := m.selectedRepoStatus()
+	if r == nil {
+		return nil
+	}
+	m.mg.actSeq++
+	seq, repo, c := m.mg.actSeq, r.Name, m.c
+	if !strings.EqualFold(m.mg.actRepo, repo) {
+		m.mg.actRepo, m.mg.act, m.mg.actErr, m.mg.actLoaded = repo, nil, "", false
+	}
+	return func() tea.Msg {
+		cx, cancel := ctx()
+		defer cancel()
+		h, err := c.History(cx, repo, "", actLimit)
+		return actMsg{repo, seq, h, err}
+	}
+}
+
+func (m Model) gotActivity(msg actMsg) {
+	r := m.selectedRepoStatus()
+	if msg.seq != m.mg.actSeq || !strings.EqualFold(msg.repo, m.mg.actRepo) || r == nil || !strings.EqualFold(msg.repo, r.Name) {
+		return
+	}
+	m.mg.actLoaded = true
+	if msg.err != nil {
+		m.mg.actErr = errText(msg.err)
+		return
+	}
+	for i := range msg.hist {
+		cleanEntry(&msg.hist[i])
+	}
+	m.mg.act, m.mg.actErr = msg.hist, ""
+}
+
+// resultStrip draws the newest n results oldest first; the symbols differ
+// even without colour.
+func resultStrip(hist []model.HistoryEntry, n int) string {
+	if len(hist) > n {
+		hist = hist[:n]
+	}
+	var b strings.Builder
+	for i := len(hist) - 1; i >= 0; i-- {
+		switch hist[i].Conclusion {
+		case "success":
+			b.WriteString(sGreen.Render("■"))
+		case "failure":
+			b.WriteString(sRed.Render("✖"))
+		case "cancelled":
+			b.WriteString(sDim.Render("○"))
+		default:
+			b.WriteString(sDim.Render("?"))
+		}
+	}
+	if b.Len() == 0 {
+		return sDim.Render("no finished jobs yet")
+	}
+	return b.String()
+}
+
+// activityCard renders the selected repo's recent jobs w columns wide: count,
+// success rate over jobs with a known conclusion, average duration, and the
+// last 20 results, all over one window: 7 days, or the retention when shorter.
+func (m Model) activityCard(w int) ([]string, map[string]ui.Range) {
+	window, label := 7*24*time.Hour, "last 7 days"
+	if m.cfg != nil {
+		if ret := m.cfg.HistoryRetention.D(); ret > 0 && ret < window {
+			window, label = ret, "last "+m.cfg.HistoryRetention.String()
+		}
+	}
+	ranges := map[string]ui.Range{}
+	var lines []string
+	switch {
+	case m.mg.actErr != "":
+		lines = append(lines, sRed.Render("✖ "+m.mg.actErr))
+		ranges[reposActRetry] = ui.Range{Start: len(lines) + 1, End: len(lines) + 2}
+		m.mg.actRetry.SetDisabled(!m.connected)
+		lines = append(lines, m.mg.actRetry.View(m.repos.group.FocusedID() == reposActRetry, 0))
+	case !m.mg.actLoaded:
+		lines = append(lines, sDim.Render("loading…"))
+	default:
+		cut := m.now().Add(-window)
+		var recent []model.HistoryEntry
+		for _, e := range m.mg.act {
+			if !e.FinishedAt.Before(cut) {
+				recent = append(recent, e)
+			}
+		}
+		jobs, ok, known := len(recent), 0, 0
+		var total time.Duration
+		for _, e := range recent {
+			total += e.FinishedAt.Sub(e.StartedAt)
+			// Every conclusion GitHub reports is known (success, failure,
+			// cancelled, timed_out, neutral, action_required, skipped, …);
+			// only a missing one is not.
+			if e.Conclusion != "" && e.Conclusion != "unknown" {
+				known++
+				if e.Conclusion == "success" {
+					ok++
+				}
+			}
+		}
+		rate, avg, more := "–", "–", ""
+		if known > 0 {
+			rate = fmt.Sprintf("%d%%", ok*100/known)
+		}
+		if jobs > 0 {
+			avg = dur(total / time.Duration(jobs))
+		}
+		if len(m.mg.act) >= actLimit {
+			more = "≥"
+		}
+		lines = append(lines, fmt.Sprintf("%s%d jobs · %s success · avg %s", more, jobs, rate, avg)+sDim.Render(" · "+label),
+			resultStrip(recent, 20))
+	}
+	return strings.Split(box("Activity", w, lines), "\n"), ranges
 }

@@ -362,6 +362,8 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		return m, m.fetchRegs()
 	case reposLCCheck:
 		return m.startLabelCheck()
+	case reposActRetry:
+		return m, m.fetchActivity()
 	default:
 		if label, ok := lcAddLabel(id); ok {
 			if !m.offline() {

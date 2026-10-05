@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/api"
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/tui/ui"
 )
@@ -469,5 +471,69 @@ func TestLabelCheckSanitisesAndWraps(t *testing.T) {
 	m = click(t, m, lcAddID("gpu\x1b]0;x\a"))
 	if got := repoInput(m, "darkcloud", "labels").Value().List; !reflect.DeepEqual(got, []string{"darkcloud-linux", "gpu\x1b]0;x\a"}) {
 		t.Fatalf("the raw label is what gets added: %q", got)
+	}
+}
+
+func TestActivityCard(t *testing.T) {
+	e := func(concl string, ago, d time.Duration) model.HistoryEntry {
+		return model.HistoryEntry{Repo: "darkcloud", Conclusion: concl, FinishedAt: now.Add(-ago), StartedAt: now.Add(-ago - d)}
+	}
+	c := &fakeClient{hist: []model.HistoryEntry{ // newest first, as the daemon returns them
+		e("success", time.Hour, 2*time.Minute), e("failure", 2*time.Hour, 4*time.Minute), e("cancelled", 3*time.Hour, time.Minute),
+		e("unknown", 4*time.Hour, time.Minute), e("success", 9*24*time.Hour, time.Minute),
+	}}
+	m := onRepos(t, c, 160, 120)
+	v := m.View()
+	// The 9-day-old success is outside the window: neither counted nor drawn.
+	for _, want := range []string{"Activity", "4 jobs · 33% success · avg 2m00s", "last 7 days", "?○✖■"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(v, "■?○✖■") {
+		t.Error("the result strip draws a job outside the window")
+	}
+	if got := c.histReqs[len(c.histReqs)-1]; got != "darkcloud|" {
+		t.Fatalf("history request %q", got)
+	}
+	m = feed(m, actMsg{repo: "darkcloud", seq: m.mg.actSeq - 1})
+	if !strings.Contains(m.View(), "4 jobs") {
+		t.Fatal("a stale reply replaced the card")
+	}
+	short := parseConfig(t, settingsYAML)
+	short.HistoryRetention, _ = config.ParseDuration("3d")
+	m = feed(m, configMsg{seq: m.order.seq + 1, cfg: short})
+	if !strings.Contains(m.View(), "last 3d") {
+		t.Fatal("the window follows a shorter retention")
+	}
+}
+
+// Every conclusion GitHub reports counts toward the success rate; only a
+// missing conclusion does not.
+func TestActivityRateCountsEveryKnownConclusion(t *testing.T) {
+	e := func(concl string, ago time.Duration) model.HistoryEntry {
+		return model.HistoryEntry{Repo: "darkcloud", Conclusion: concl, FinishedAt: now.Add(-ago), StartedAt: now.Add(-ago - time.Minute)}
+	}
+	c := &fakeClient{hist: []model.HistoryEntry{
+		e("success", time.Hour), e("neutral", 2*time.Hour), e("action_required", 3*time.Hour), e("unknown", 4*time.Hour), e("", 5*time.Hour),
+	}}
+	if v := onRepos(t, c, 160, 120).View(); !strings.Contains(v, "5 jobs · 33% success") {
+		t.Fatalf("rate:\n%s", v)
+	}
+}
+
+// A failed fetch stays visible in the card with a Retry button; retrying
+// recovers the card alone.
+func TestActivityErrorRetries(t *testing.T) {
+	c := &fakeClient{histErr: errors.New("daemon busy")}
+	m := onRepos(t, c, 160, 120)
+	if v := m.View(); !strings.Contains(v, "✖ daemon busy") || !strings.Contains(v, "( Retry )") || !strings.Contains(v, "Workflow labels") {
+		t.Fatalf("error:\n%s", v)
+	}
+	c.histErr = nil
+	c.hist = []model.HistoryEntry{{Repo: "darkcloud", Conclusion: "success", FinishedAt: now.Add(-time.Hour), StartedAt: now.Add(-time.Hour - time.Minute)}}
+	m = click(t, m, reposActRetry)
+	if v := m.View(); !strings.Contains(v, "1 jobs · 100% success") || strings.Contains(v, "daemon busy") {
+		t.Fatalf("after retry:\n%s", v)
 	}
 }

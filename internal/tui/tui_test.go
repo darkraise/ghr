@@ -45,6 +45,7 @@ type fakeClient struct {
 	onPatch     func(model.ConfigPatch) // applies a patch to cfg, as a daemon would
 	hist        []model.HistoryEntry    // History returns the entries matching its filters
 	histReqs    []string                // each History request as "repo|conclusion"
+	histErr     error                   // returned by History when set
 	token       model.TokenStatus
 	tokenErr    error // returned by Token
 	setTokenErr error
@@ -104,6 +105,9 @@ func (f *fakeClient) Config(_ context.Context, out any) error {
 }
 func (f *fakeClient) History(_ context.Context, repo, concl string, _ int) ([]model.HistoryEntry, error) {
 	f.histReqs = append(f.histReqs, repo+"|"+concl)
+	if f.histErr != nil {
+		return nil, f.histErr
+	}
 	var out []model.HistoryEntry
 	for _, e := range f.hist {
 		if (repo == "" || e.Repo == repo) && (concl == "" || e.Conclusion == concl) {

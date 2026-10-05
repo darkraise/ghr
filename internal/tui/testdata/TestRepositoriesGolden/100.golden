@@ -27,14 +27,14 @@
                                                 │                      container name prefixes     │
                                                 │                      removed after each job      │
                                                 ╰──────────────────────────────────────────────────╯
+                                                ╭─ Activity ───────────────────────────────────────╮
+                                                │ 0 jobs · – success · avg – · last 7 days         │
+                                                │ no finished jobs yet                             │
+                                                ╰──────────────────────────────────────────────────╯
                                                 ╭─ Workflow labels ────────────────────────────────╮
                                                 │ Not checked yet                                  │
                                                 │   ( Check now )                                  │
                                                 ╰──────────────────────────────────────────────────╯
-                                                ╭─ GitHub registrations ───────────────────────────╮
-                                                │ No runners registered. ghr starts single-use ru… │
-                                                │   ( Refresh )                                    │
-                                                ╰──────────────────────────────────────────────────╯
-  ? Help                                                                                            
+  ? Help                                        ╭─ GitHub registrations ───────────────────────────╮
   q Quit         ● 1 unsaved change (darkcloud)    ( Discard )    [ Save changes ]                  
  up select  tab next  a add  p pause  d remove  ? help  q quit
