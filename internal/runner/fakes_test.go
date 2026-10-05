@@ -374,10 +374,11 @@ func (f *fakeDocker) pruneList() string {
 // Its links are regular files holding the target path, because Windows lets
 // only privileged users create symlinks.
 type fakeHost struct {
-	mu      sync.Mutex
-	chowned []string
-	calls   []string         // Extract and RunScript calls, as "<method> <dir>"
-	errs    map[string]error // by method name
+	mu       sync.Mutex
+	chowned  []string
+	calls    []string         // Extract and RunScript calls, as "<method> <dir>"
+	errs     map[string]error // by method name
+	onScript func()           // runs inside RunScript
 }
 
 func (f *fakeHost) err(method string) error {
@@ -418,6 +419,12 @@ func (f *fakeHost) Extract(_ context.Context, _, dir string) error {
 
 func (f *fakeHost) RunScript(_ context.Context, dir, _ string) error {
 	f.record("RunScript", dir)
+	f.mu.Lock()
+	hook := f.onScript
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return f.err("RunScript")
 }
 
