@@ -2,14 +2,17 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +23,8 @@ import (
 	"github.com/darkraise/ghr/internal/metrics"
 	"github.com/darkraise/ghr/internal/runner"
 	"github.com/darkraise/ghr/internal/system"
+	"github.com/darkraise/ghr/internal/webui"
+	"github.com/darkraise/ghr/web"
 )
 
 type Options struct {
@@ -27,7 +32,9 @@ type Options struct {
 	TokenPath   string
 	Socket      string
 	HistoryPath string
-	Paths       runner.Paths
+	// WebPasswordPath holds the web UI's password hash.
+	WebPasswordPath string
+	Paths           runner.Paths
 	// ShutdownWait bounds how long shutdown waits for in-flight cleanups; an
 	// unfinished cleanup resumes at the next start.
 	ShutdownWait time.Duration
@@ -44,11 +51,12 @@ type Options struct {
 
 func DefaultOptions() Options {
 	return Options{
-		ConfigPath:   "/etc/ghr/config.yaml",
-		TokenPath:    "/etc/ghr/token",
-		Socket:       api.DefaultSocket,
-		HistoryPath:  "/var/lib/ghr/history.jsonl",
-		ShutdownWait: 30 * time.Second,
+		ConfigPath:      "/etc/ghr/config.yaml",
+		TokenPath:       "/etc/ghr/token",
+		Socket:          api.DefaultSocket,
+		HistoryPath:     "/var/lib/ghr/history.jsonl",
+		WebPasswordPath: "/etc/ghr/web-password",
+		ShutdownWait:    30 * time.Second,
 		Paths: runner.Paths{
 			Dist:        "/opt/ghr/dist/current",
 			Instances:   "/var/lib/ghr/instances",
@@ -112,16 +120,35 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second}
+	webSrv := &http.Server{
+		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+		WriteTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second,
+		MaxHeaderBytes: 64 << 10,
+	}
+	var webLn net.Listener
 	served := false
 	defer func() {
 		if !served {
 			ln.Close()
+			if webLn != nil {
+				webLn.Close()
+			}
 		}
 	}()
+	webCfg := store.Config().Web
+	if webCfg.Listen != "" {
+		if webLn, err = net.Listen("tcp", webCfg.Listen); err != nil {
+			return fmt.Errorf("web listener: %w", err)
+		}
+	}
+	auth := webui.NewAuth(o.WebPasswordPath, time.Now, rand.Reader)
 
 	ev := events.New()
 	for _, w := range warnings {
 		ev.Add("warn", "", "config: %s", w)
+	}
+	if err := auth.Check(); err != nil {
+		ev.Add("warn", "", "web: %v", err)
 	}
 	owner := store.Config().Owner
 	gh := github.New(owner, store.Token)
@@ -177,7 +204,8 @@ func Run(ctx context.Context, o Options) error {
 			c.BaseURL = gh.BaseURL
 			return checkToken(ctx, c, repo)
 		},
-		Sampler: sampler,
+		Sampler:    sampler,
+		WebApplied: webCfg,
 		Wake: func() {
 			select {
 			case wake <- struct{}{}:
@@ -185,13 +213,29 @@ func Run(ctx context.Context, o Options) error {
 			}
 		},
 	}
-	srv.Handler = api.NewServer(b)
+	apiHandler := api.NewServer(b)
+	srv.Handler = socketHandler(apiHandler, auth, ev)
+	if webLn != nil {
+		static, err := fs.Sub(web.Dist, "dist")
+		if err != nil {
+			return err
+		}
+		webSrv.Handler = webui.Handler(auth, apiHandler, static, webCfg.Hosts)
+	}
 	served = true
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("api server: %v", err)
 		}
 	}()
+	if webLn != nil {
+		go func() {
+			if err := webSrv.Serve(webLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("web server: %v", err)
+			}
+		}()
+		ev.Add("info", "", "web UI listening on %s", webLn.Addr())
+	}
 	ev.Add("info", "", "ghr daemon started (owner %s, mode %s)", owner, store.Config().Mode)
 
 	reload := o.Reload
@@ -211,9 +255,20 @@ func Run(ctx context.Context, o Options) error {
 	for {
 		select {
 		case <-ctx.Done():
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			srv.Shutdown(shutdownCtx)
-			cancel()
+			var wg sync.WaitGroup
+			for _, s := range []*http.Server{srv, webSrv} {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					if err := s.Shutdown(shutdownCtx); err != nil {
+						// Shutdown leaves connections open when its deadline passes.
+						s.Close()
+					}
+				}()
+			}
+			wg.Wait()
 			m.Close()
 			b.Close()
 			<-sampled
