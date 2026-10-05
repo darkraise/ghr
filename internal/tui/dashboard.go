@@ -201,7 +201,7 @@ func (m Model) reposLines(w int) []string {
 				pause.Label = "Resume"
 			}
 			lines = append(lines, m.selectedRow(fmt.Sprintf("repo-%d", i), before, badge, after,
-				rowButtons(pause, ui.NewButton(rowRemove, "Remove", ui.Danger)), "", inner))
+				rowButtons(ui.NewButton(rowEdit, "Edit", ui.Secondary), pause, ui.NewButton(rowRemove, "Remove", ui.Danger)), "", inner))
 			continue
 		}
 		lines = append(lines, zone.Mark(fmt.Sprintf("repo-%d", i), ui.BadgeRow(sSel, false, before, badge, after, inner)))

@@ -78,7 +78,7 @@ func TestDashboardTabOrder(t *testing.T) {
 		t.Fatalf("tab: focus %v\n%s", m.focus, v)
 	}
 	m = feed(m, key("tab"))
-	if v := m.View(); !strings.Contains(v, "› [ + Add ]") {
+	if v := m.View(); !strings.Contains(v, "› [ + Add repository ]") {
 		t.Fatalf("tab did not reach + Add:\n%s", v)
 	}
 	if m = feed(m, keys("p", "x")...); len(c.actions()) != 0 || m.overlay != ovNone {
@@ -114,7 +114,7 @@ func TestDashboardHeaderFocus(t *testing.T) {
 func TestDashboardHeaderButtons(t *testing.T) {
 	c := &fakeClient{}
 	m := sampleModel(c, 120, 40)
-	if v := m.View(); !strings.Contains(v, "[ + Add ]") || !strings.Contains(v, "( Pause all )") {
+	if v := m.View(); !strings.Contains(v, "[ + Add repository ]") || !strings.Contains(v, "( Pause all )") {
 		t.Fatalf("header buttons missing:\n%s", v)
 	}
 	if m = click(t, m, dashAdd); m.overlay != ovAddRepo {
@@ -174,5 +174,19 @@ func TestRowButtons(t *testing.T) {
 	m = feed(m, key("enter"))
 	if got := strings.Join(c.actions(), "|"); got != "pause darkcloud|kill a3f9c1" {
 		t.Fatalf("actions %q", got)
+	}
+}
+
+func TestDashboardEditOpensTheRepository(t *testing.T) {
+	m := feed(sampleModel(&fakeClient{}, 120, 30), key("down")) // the Repositories card: darkmem
+	if v := m.View(); !strings.Contains(v, "( Edit )") || !strings.Contains(v, "[ + Add repository ]") {
+		t.Fatalf("dashboard:\n%s", v)
+	}
+	if m = feed(m, key("e")); m.page != pageRepos || m.repos.selected != "darkmem" {
+		t.Fatalf("e: page %v selected %q", m.page, m.repos.selected)
+	}
+	m = feed(m, key("1"))
+	if m = click(t, m, rowEdit); m.page != pageRepos || m.repos.selected != "darkmem" {
+		t.Fatalf("click: page %v selected %q", m.page, m.repos.selected)
 	}
 }

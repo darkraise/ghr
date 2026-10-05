@@ -56,7 +56,7 @@ const (
 
 func newPageGroups() *pageGroups {
 	g := &pageGroups{
-		add:        ui.NewButton(dashAdd, "+ Add", ui.Primary),
+		add:        ui.NewButton(dashAdd, "+ Add repository", ui.Primary),
 		pauseAll:   ui.NewButton(dashPauseAll, "Pause all", ui.Secondary),
 		copyURL:    ui.NewButton(detailCopy, "Copy run URL", ui.Secondary),
 		stopRunner: ui.NewButton(detailStop, "Stop runner", ui.Danger),
@@ -269,7 +269,7 @@ func (m Model) footerKeys() []footerKey {
 		return []footerKey{{"enter", "press"}, {"tab", "next"}, {"?", "help"}, {"q", "quit"}}
 	}
 	return []footerKey{
-		{"p", "pause"}, {"+", "repo cap"}, {"-", ""}, {"[", "global cap"}, {"]", ""}, {"m", "mode"},
+		{"p", "pause"}, {"e", "edit"}, {"+", "repo cap"}, {"-", ""}, {"[", "global cap"}, {"]", ""}, {"m", "mode"},
 		{"x", "stop"}, {"l", "logs"}, {"enter", "details"}, {"?", "help"}, {"q", "quit"},
 	}
 }

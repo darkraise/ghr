@@ -131,6 +131,12 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 		return m, m.action("mode "+mode, func(c context.Context) error {
 			return m.c.PatchConfig(c, model.ConfigPatch{Mode: &mode})
 		})
+	case "e":
+		if r := m.selectedRepo(); r != nil && m.repoFocus() {
+			m.repos.selected = r.Name
+			m.repos.group.Focus(reposList)
+			return m.leave(leaveTarget{page: pageRepos})
+		}
 	case "a":
 		return m.openAddRepo()
 	case "d":
@@ -406,7 +412,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	// A row button runs its key, so the row keys and the buttons stay one path.
-	for id, k := range map[string]string{rowPause: "p", rowRemove: "d", rowLogs: "l", rowStop: "x", rowCopy: "enter"} {
+	for id, k := range map[string]string{rowEdit: "e", rowPause: "p", rowRemove: "d", rowLogs: "l", rowStop: "x", rowCopy: "enter"} {
 		if zone.Get(id).InBounds(msg) {
 			return m.press(k)
 		}

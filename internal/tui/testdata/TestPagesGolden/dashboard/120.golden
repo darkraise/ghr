@@ -1,11 +1,11 @@
  ghr   mode ● QUEUE   runners ▕██░▏ 2/3   api ▕█████████░▏ 4800   disk ▕██████░░░░▏ 61%   ● connected
-▌ 1 Dashboard    Dashboard                                                                    [ + Add ]    ( Pause all )
+▌ 1 Dashboard    Dashboard                                                         [ + Add repository ]    ( Pause all )
   2 Repositories ╭─ Running ─────────────╮ ╭─ Queued jobs ─────────╮ ╭─ Repositories ────────╮ ╭─ Disk ────────────────╮
   3 Runners      │ 2 / 3                 │ │ 3                     │ │ 2 active · 1 paused   │ │ 61%                   │
   4 History      ╰───────────────────────╯ ╰───────────────────────╯ ╰───────────────────────╯ ╰───────────────────────╯
   5 Settings     ╭─ › Repositories ────────────────────────────────────────────────────────────────────────────────────╮
                  │   REPO           STATE      RUN   QUEUE  LAST JOB                                                   │
-                 │ ▸ darkcloud      [ACTIVE]   1/1   ⧗ 2    ✔ #411 lint  2m ago                  ( Pause )  [ Remove ] │
+                 │ ▸ darkcloud      [ACTIVE]   1/1   ⧗ 2    ✔ #411 lint  2m ago        ( Edit )  ( Pause )  [ Remove ] │
                  │   darkmem        [ACTIVE]   1/1   –      ✖ #87 build / test  1h ago                                 │
                  │   darkagents     [PAUSED]   0/1   ⧗ 1    –                                                          │
                  ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
@@ -27,4 +27,4 @@
                  │                                                                                                     │
   ? Help         │                                                                                                     │
   q Quit         ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
- p pause  + repo cap  -  [ global cap  ]  m mode  x stop  l logs  enter details  ? help  q quit
+ p pause  e edit  + repo cap  -  [ global cap  ]  m mode  x stop  l logs  enter details  ? help  q quit

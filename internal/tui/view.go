@@ -92,6 +92,7 @@ func (m Model) row(id string, selected bool, s string, w int) string {
 const (
 	rowPause  = "row/pause"
 	rowRemove = "row/remove"
+	rowEdit   = "row/edit"
 	rowLogs   = "row/logs"
 	rowStop   = "row/stop"
 )
