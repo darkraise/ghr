@@ -38,14 +38,15 @@ type manageState struct {
 	reload   *ui.Button
 	prune    *ui.Button
 
-	cardsRepo  string // the repo the panel's cards were last fetched for
-	regRepo    string // the repo regs belong to
-	regs       []model.Registration
-	regErr     string
-	regSeq     int
-	regLoaded  bool
-	regRefresh *ui.Button
-	regDel     map[int64]*ui.Button
+	cardsRepo     string // the repo the panel's cards were last fetched for
+	cardsDegraded bool   // m.st.Degraded when the cards were last fetched
+	regRepo       string // the repo regs belong to
+	regs          []model.Registration
+	regErr        string
+	regSeq        int
+	regLoaded     bool
+	regRefresh    *ui.Button
+	regDel        map[int64]*ui.Button
 }
 
 func newManageState() *manageState {

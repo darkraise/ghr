@@ -84,15 +84,20 @@ func (m Model) moveRepo(d int) {
 func (m Model) repoSelected() tea.Cmd { return m.fetchRegs() }
 
 // refreshRepoCards refetches the management cards when the selection no
-// longer names the repo they were loaded for, and returns nil otherwise.
-// Every path that can change the selection calls it: list keys and clicks,
-// a status refresh that removed the selected repo, and entering the page.
+// longer names the repo they were loaded for, or GitHub started or stopped
+// rejecting the token since, and returns nil otherwise. Every path that can
+// change the selection calls it: list keys and clicks, a status refresh, and
+// entering the page. A fetch skipped while degraded still drops the old
+// repo's rows, so they never show under the new heading.
 func (m Model) refreshRepoCards() tea.Cmd {
 	r := m.selectedRepoStatus()
-	if r == nil || strings.EqualFold(r.Name, m.mg.cardsRepo) {
+	if r == nil || (strings.EqualFold(r.Name, m.mg.cardsRepo) && m.mg.cardsDegraded == m.st.Degraded) {
 		return nil
 	}
-	m.mg.cardsRepo = r.Name
+	if !strings.EqualFold(m.mg.regRepo, r.Name) {
+		m.mg.regRepo, m.mg.regs, m.mg.regErr, m.mg.regLoaded = r.Name, nil, "", false
+	}
+	m.mg.cardsRepo, m.mg.cardsDegraded = r.Name, m.st.Degraded
 	return m.repoSelected()
 }
 

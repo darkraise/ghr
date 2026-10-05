@@ -280,3 +280,33 @@ func TestRegistrationsErrorShowsRetry(t *testing.T) {
 		t.Fatalf("retry time missing:\n%s", v)
 	}
 }
+
+// A selection change while GitHub rejects the token drops the old rows, and
+// the cards load for the new selection once the token is accepted again.
+func TestRegistrationsReloadAfterDegradedSelection(t *testing.T) {
+	c := &fakeClient{regsByRepo: map[string][]model.Registration{
+		"darkcloud": {{ID: 1, Name: "linux-1", Status: "offline"}},
+		"darkmem":   {{ID: 5, Name: "mem-box", Status: "online"}},
+	}}
+	m := onRepos(t, c, 140, 80)
+	st := sampleStatus()
+	st.Degraded, st.DegradedReason = true, "GitHub rejected the token"
+	m = feed(m, statusMsg{st: st})
+	m = feed(m, key("down"))
+	if !strings.EqualFold(m.mg.regRepo, "darkmem") || len(m.mg.regs) != 0 {
+		t.Fatalf("old rows kept while degraded: %q %v", m.mg.regRepo, m.mg.regs)
+	}
+	m = feed(m, statusMsg{st: sampleStatus()})
+	if v := m.View(); strings.Contains(v, "linux-1") || !strings.Contains(v, "mem-box") {
+		t.Fatalf("cards did not reload after recovery:\n%s", v)
+	}
+	last := ""
+	for _, r := range c.reads {
+		if strings.HasPrefix(r, "regs ") {
+			last = r
+		}
+	}
+	if last != "regs darkmem" {
+		t.Fatalf("last registration read %q", last)
+	}
+}
