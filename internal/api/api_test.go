@@ -39,6 +39,12 @@ type fakeBackend struct {
 	metricsCalls int
 	updates      []string
 	updateErr    error
+	avail        []model.AvailableRepo
+	availErr     error
+}
+
+func (f *fakeBackend) AvailableRepos(context.Context) ([]model.AvailableRepo, error) {
+	return f.avail, f.availErr
 }
 
 func (f *fakeBackend) QueueRunnerUpdate(context.Context) error {

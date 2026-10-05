@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -43,6 +44,7 @@ type GitHub interface {
 	DeleteRunner(ctx context.Context, repo string, id int64) error
 	ListRuns(ctx context.Context, repo, status string) ([]github.Run, error)
 	ListRecentRuns(ctx context.Context, repo string, n int) ([]github.Run, error)
+	ListUserRepos(ctx context.Context) ([]github.UserRepo, error)
 }
 
 type Backend struct {
@@ -548,4 +550,26 @@ func (b *Backend) CancelRunnerUpdate() error {
 		return api.Conflict(err.Error())
 	}
 	return err
+}
+
+// AvailableRepos lists the configured owner's repositories the token can
+// access, by name ignoring case, marking those already configured. The token
+// may also reach other owners' repositories; ghr cannot manage those.
+func (b *Backend) AvailableRepos(ctx context.Context) ([]model.AvailableRepo, error) {
+	if err := b.degradedErr(); err != nil {
+		return nil, err
+	}
+	rs, err := b.GH.ListUserRepos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cfg := b.Store.Config()
+	out := []model.AvailableRepo{}
+	for _, r := range rs {
+		if strings.EqualFold(r.Owner.Login, cfg.Owner) {
+			out = append(out, model.AvailableRepo{Name: r.Name, Private: r.Private, Configured: cfg.Repo(r.Name) != nil})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
+	return out, nil
 }

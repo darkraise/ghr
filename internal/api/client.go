@@ -211,3 +211,10 @@ func (c *Client) QueueRunnerUpdate(ctx context.Context) error {
 func (c *Client) CancelRunnerUpdate(ctx context.Context) error {
 	return c.call(ctx, http.MethodDelete, "/runner-update", nil, nil)
 }
+
+// AvailableRepos lists the owner's repositories the token can access.
+func (c *Client) AvailableRepos(ctx context.Context) ([]model.AvailableRepo, error) {
+	var rs []model.AvailableRepo
+	err := c.call(ctx, http.MethodGet, "/repos/available", nil, &rs)
+	return rs, err
+}

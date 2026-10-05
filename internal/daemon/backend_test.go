@@ -78,6 +78,8 @@ type fakeGH struct {
 	delErr  error
 	deleted []int64
 
+	userRepos []github.UserRepo
+	repoErr   error // returned by ListUserRepos
 	recent    []github.Run
 	runs      map[string][]github.Run
 	jobs      map[int64][]github.Job
@@ -91,6 +93,10 @@ type fakeGH struct {
 }
 
 func (f *fakeGH) TokenMeta() github.TokenMeta { return f.meta }
+
+func (f *fakeGH) ListUserRepos(context.Context) ([]github.UserRepo, error) {
+	return f.userRepos, f.repoErr
+}
 
 func (f *fakeGH) GetRepo(ctx context.Context, repo string) (*github.Repository, error) {
 	r, ok := f.repos[repo]

@@ -208,3 +208,11 @@ type Metrics struct {
 	MemTotal *int64         `json:"mem_total,omitempty"`
 	DiskPct  int            `json:"disk_pct"`
 }
+
+// AvailableRepo is a repository of the configured owner that the token can
+// access, served by GET /repos/available.
+type AvailableRepo struct {
+	Name       string `json:"name"`
+	Private    bool   `json:"private"`
+	Configured bool   `json:"configured"`
+}

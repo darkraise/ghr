@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/darkraise/ghr/internal/github"
+	"github.com/darkraise/ghr/internal/model"
 )
 
 func TestRunnerUpdateRoutes(t *testing.T) {
@@ -72,5 +74,23 @@ func TestRunnerUpdateStatusCodes(t *testing.T) {
 		if got := do(s.method); got != s.want {
 			t.Errorf("%s with %v: %d, want %d", s.method, s.err, got, s.want)
 		}
+	}
+}
+
+func TestAvailableReposRoute(t *testing.T) {
+	c, b := setup(t)
+	b.avail = []model.AvailableRepo{{Name: "booklore"}, {Name: "darkcloud", Private: true, Configured: true}}
+	got, err := c.AvailableRepos(context.Background())
+	if err != nil || !reflect.DeepEqual(got, b.avail) {
+		t.Fatalf("got %+v %v", got, err)
+	}
+	b.avail = nil
+	if got, err := c.AvailableRepos(context.Background()); err != nil || got == nil || len(got) != 0 {
+		t.Fatalf("empty list must decode as []: %#v %v", got, err)
+	}
+	b.availErr = &Error{Status: 503, Msg: "GitHub is rejecting the token"}
+	var ae *Error
+	if _, err := c.AvailableRepos(context.Background()); !errors.As(err, &ae) || ae.Status != 503 {
+		t.Fatalf("degraded: %v", err)
 	}
 }

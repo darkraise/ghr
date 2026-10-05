@@ -77,6 +77,7 @@ type Backend interface {
 	DeleteRegistration(ctx context.Context, repo string, id int64) error
 	QueueRunnerUpdate(ctx context.Context) error
 	CancelRunnerUpdate() error
+	AvailableRepos(ctx context.Context) ([]model.AvailableRepo, error)
 }
 
 func NewServer(b Backend) http.Handler {
@@ -137,6 +138,13 @@ func NewServer(b Backend) http.Handler {
 			return
 		}
 		respond(w, nil, b.AddRepo(r.Context(), req))
+	})
+	mux.HandleFunc("GET /repos/available", func(w http.ResponseWriter, r *http.Request) {
+		rs, err := b.AvailableRepos(r.Context())
+		if rs == nil {
+			rs = []model.AvailableRepo{}
+		}
+		respond(w, rs, err)
 	})
 	mux.HandleFunc("DELETE /repos/{name}", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, b.RemoveRepo(r.PathValue("name")))
