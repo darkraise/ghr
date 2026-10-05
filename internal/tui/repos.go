@@ -80,6 +80,22 @@ func (m Model) moveRepo(d int) {
 	}
 }
 
+// repoSelected fetches the selected repo's management cards.
+func (m Model) repoSelected() tea.Cmd { return m.fetchRegs() }
+
+// refreshRepoCards refetches the management cards when the selection no
+// longer names the repo they were loaded for, and returns nil otherwise.
+// Every path that can change the selection calls it: list keys and clicks,
+// a status refresh that removed the selected repo, and entering the page.
+func (m Model) refreshRepoCards() tea.Cmd {
+	r := m.selectedRepoStatus()
+	if r == nil || strings.EqualFold(r.Name, m.mg.cardsRepo) {
+		return nil
+	}
+	m.mg.cardsRepo = r.Name
+	return m.repoSelected()
+}
+
 // repoState is the state a repo's badge shows.
 func repoState(r model.RepoStatus) string {
 	switch {
@@ -326,6 +342,7 @@ func (m Model) syncRepoControls() {
 			in.SetDisabled(off)
 			items = append(items, in)
 		}
+		items = append(items, m.regWidgets()...)
 	}
 	rp.save.Label = "Save changes"
 	if rp.saving {
@@ -388,15 +405,23 @@ func (m Model) repoSummary(r model.RepoStatus) []string {
 // reposPanelLines renders the panel w columns wide with the line range of
 // every control, for scrolling the focused one into view.
 func (m Model) reposPanelLines(r model.RepoStatus, w int) ([]string, map[string]ui.Range) {
-	top := strings.Split(box(clean(r.Name), w, m.repoSummary(r)), "\n")
+	out := strings.Split(box(clean(r.Name), w, m.repoSummary(r)), "\n")
+	// The summary box's last inside line holds Pause and Remove.
+	act := ui.Range{Start: len(out) - 2, End: len(out) - 1}
+	ranges := map[string]ui.Range{reposPause: act, reposRemove: act}
+	add := func(lines []string, rs map[string]ui.Range) {
+		for k, rg := range rs {
+			ranges[k] = ui.Range{Start: rg.Start + len(out), End: rg.End + len(out)}
+		}
+		out = append(out, lines...)
+	}
 	if m.cfg == nil || m.repoInputs(r.Name) == nil {
-		return append(top, sDim.Render("loading…")), nil
+		add([]string{sDim.Render("loading…")}, nil)
+	} else {
+		add(ui.Render(m.repoSections(r, w), m.repos.group.FocusedID(), w, w >= 70))
 	}
-	lines, ranges := ui.Render(m.repoSections(r, w), m.repos.group.FocusedID(), w, w >= 70)
-	for k, rg := range ranges {
-		ranges[k] = ui.Range{Start: rg.Start + len(top), End: rg.End + len(top)}
-	}
-	return append(top, lines...), ranges
+	add(m.regCard(w))
+	return out, ranges
 }
 
 // reposNames is the unsaved bar's list of repos with edits.
@@ -492,6 +517,7 @@ func (m Model) reposHandleKey(k tea.KeyMsg) (bool, tea.Model, tea.Cmd) {
 				d = -1
 			}
 			m.moveRepo(d)
+			return true, m, m.refreshRepoCards()
 		}
 	case "ctrl+s":
 		mm, cmd := m.saveRepos()
@@ -548,7 +574,7 @@ func (m Model) reposMouse(msg tea.MouseMsg) (bool, tea.Model, tea.Cmd) {
 					d = -1
 				}
 				m.moveRepo(d)
-				return true, m, nil
+				return true, m, m.refreshRepoCards()
 			}
 		}
 		if zone.Get("repos/panel").InBounds(msg) {
@@ -566,7 +592,7 @@ func (m Model) reposMouse(msg tea.MouseMsg) (bool, tea.Model, tea.Cmd) {
 			if zone.Get(fmt.Sprintf("repos/row/%d", i)).InBounds(msg) {
 				rp.selected, rp.idx = r.Name, i
 				rp.group.Focus(reposList)
-				return true, m, nil
+				return true, m, m.refreshRepoCards()
 			}
 		}
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -22,6 +24,7 @@ const (
 	tokField        = "token/field"
 	tokOK           = "token/ok"
 	tokCancel       = "token/cancel"
+	reposRegRefresh = "repos/reg/refresh"
 )
 
 // manageState holds the management cards' daemon data and buttons. The
@@ -34,14 +37,25 @@ type manageState struct {
 	tokRetry *ui.Button
 	reload   *ui.Button
 	prune    *ui.Button
+
+	cardsRepo  string // the repo the panel's cards were last fetched for
+	regRepo    string // the repo regs belong to
+	regs       []model.Registration
+	regErr     string
+	regSeq     int
+	regLoaded  bool
+	regRefresh *ui.Button
+	regDel     map[int64]*ui.Button
 }
 
 func newManageState() *manageState {
 	return &manageState{
-		replace:  ui.NewButton(setReplaceToken, "Replace token", ui.Primary),
-		tokRetry: ui.NewButton(setTokenRetry, "Retry", ui.Secondary),
-		reload:   ui.NewButton(setReload, "Reload config.yaml", ui.Primary),
-		prune:    ui.NewButton(setPrune, "Prune now", ui.Primary),
+		replace:    ui.NewButton(setReplaceToken, "Replace token", ui.Primary),
+		tokRetry:   ui.NewButton(setTokenRetry, "Retry", ui.Secondary),
+		reload:     ui.NewButton(setReload, "Reload config.yaml", ui.Primary),
+		prune:      ui.NewButton(setPrune, "Prune now", ui.Primary),
+		regRefresh: ui.NewButton(reposRegRefresh, "Refresh", ui.Secondary),
+		regDel:     map[int64]*ui.Button{},
 	}
 }
 
@@ -306,4 +320,148 @@ func (m Model) maintenanceSection() ui.Section {
 		{Label: "Prune", Text: last},
 		{Items: []ui.Widget{m.mg.reload, m.mg.prune}},
 	}}
+}
+
+func regDelID(id int64) string { return fmt.Sprintf("repos/reg/del/%d", id) }
+
+type (
+	regsMsg struct {
+		repo string
+		seq  int
+		regs []model.Registration
+		err  error
+	}
+	regDeletedMsg struct {
+		repo, name string
+		err        error
+	}
+)
+
+// deletable reports whether the daemon would delete g: offline, idle, and
+// outside ghr's namespace.
+func deletable(g model.Registration) bool { return !g.GHR && !g.Busy && g.Status == "offline" }
+
+// fetchRegs lists the selected repo's registrations. A reply for an older
+// request or another repo is dropped.
+func (m Model) fetchRegs() tea.Cmd {
+	r := m.selectedRepoStatus()
+	if r == nil || m.st.Degraded {
+		return nil
+	}
+	m.mg.regSeq++
+	seq, repo, c := m.mg.regSeq, r.Name, m.c
+	if !strings.EqualFold(m.mg.regRepo, repo) {
+		m.mg.regRepo, m.mg.regs, m.mg.regErr, m.mg.regLoaded = repo, nil, "", false
+	}
+	return func() tea.Msg {
+		cx, cancel := ctx()
+		defer cancel()
+		rs, err := c.Registrations(cx, repo)
+		return regsMsg{repo, seq, rs, err}
+	}
+}
+
+func (m Model) gotRegs(msg regsMsg) {
+	r := m.selectedRepoStatus()
+	if msg.seq != m.mg.regSeq || !strings.EqualFold(msg.repo, m.mg.regRepo) || r == nil || !strings.EqualFold(msg.repo, r.Name) {
+		return
+	}
+	m.mg.regLoaded = true
+	if msg.err != nil {
+		m.mg.regErr = errText(msg.err)
+		return
+	}
+	m.mg.regs, m.mg.regErr = msg.regs, ""
+}
+
+// regWidgets are the card's focusable buttons, in order.
+func (m Model) regWidgets() []ui.Widget {
+	off := !m.connected || m.st.Degraded
+	m.mg.regRefresh.SetDisabled(off)
+	ws := []ui.Widget{m.mg.regRefresh}
+	for _, g := range m.mg.regs {
+		if !deletable(g) {
+			continue
+		}
+		b := m.mg.regDel[g.ID]
+		if b == nil {
+			b = ui.NewButton(regDelID(g.ID), "Delete", ui.Danger)
+			m.mg.regDel[g.ID] = b
+		}
+		b.SetDisabled(off)
+		ws = append(ws, b)
+	}
+	return ws
+}
+
+// regCard renders the GitHub registrations card w columns wide, with the
+// line range of each of its buttons (counted from the card's top border).
+func (m Model) regCard(w int) ([]string, map[string]ui.Range) {
+	f := m.repos.group.FocusedID()
+	ranges := map[string]ui.Range{}
+	var lines []string
+	mark := func(id string) { ranges[id] = ui.Range{Start: len(lines) + 1, End: len(lines) + 2} }
+	switch {
+	case m.st.Degraded:
+		lines = append(lines, sRed.Render("GitHub is rejecting the token: "+clean(m.st.DegradedReason)))
+	case m.mg.regErr != "":
+		lines = append(lines, sRed.Render("✖ "+m.mg.regErr))
+	case !m.mg.regLoaded:
+		lines = append(lines, sDim.Render("loading…"))
+	case len(m.mg.regs) == 0:
+		lines = append(lines, sDim.Render("No runners registered. ghr starts single-use runners on demand (and keeps warm ones in all mode)."))
+	}
+	if !m.st.Degraded {
+		for _, g := range m.mg.regs {
+			state := g.Status
+			if g.Busy {
+				state = "busy"
+			}
+			line := stateBadge(state)
+			if g.GHR {
+				line += " " + ui.Badge("ghr", ui.BadgeMuted)
+			}
+			if b := m.mg.regDel[g.ID]; b != nil && deletable(g) {
+				line += " " + b.View(f == b.ID(), 0)
+				mark(b.ID())
+			}
+			line += " " + clean(g.Name) + "  " + sDim.Render(clean(strings.Join(g.Labels, " ")))
+			lines = append(lines, line)
+		}
+	}
+	mark(reposRegRefresh)
+	lines = append(lines, m.mg.regRefresh.View(f == reposRegRefresh, 0))
+	return strings.Split(box("GitHub registrations", w, lines), "\n"), ranges
+}
+
+// confirmDeleteReg asks before deleting the registration a Delete button
+// names, capturing the repo and runner now.
+func (m Model) confirmDeleteReg(id string) (tea.Model, tea.Cmd) {
+	n, err := strconv.ParseInt(strings.TrimPrefix(id, "repos/reg/del/"), 10, 64)
+	if err != nil || m.offline() {
+		return m, nil
+	}
+	name := ""
+	for _, g := range m.mg.regs {
+		if g.ID == n {
+			name = g.Name
+		}
+	}
+	repo, c := m.mg.regRepo, m.c
+	return m.openConfirm(fmt.Sprintf("Delete the runner registration %s from %s?", clean(name), clean(repo)), func() tea.Cmd {
+		return func() tea.Msg {
+			cx, cancel := ctx()
+			defer cancel()
+			return regDeletedMsg{repo, name, c.DeleteRegistration(cx, repo, n)}
+		}
+	})
+}
+
+func (m Model) regDeleted(msg regDeletedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.toast.Show("delete failed: "+clean(msg.err.Error()), true, m.now())
+	} else {
+		m.toast.Show("deleted "+clean(msg.name), false, m.now())
+	}
+	return m, m.fetchRegs() // a new request number drops any listing sent before the delete
 }

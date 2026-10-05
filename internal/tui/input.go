@@ -193,7 +193,8 @@ func (m Model) switchPage(p page) (tea.Model, tea.Cmd) {
 	case pageSettings:
 		return m, tea.Batch(m.fetchConfig(), m.fetchToken())
 	case pageRepos:
-		return m, m.fetchConfig()
+		m.mg.cardsRepo = ""
+		return m, tea.Batch(m.fetchConfig(), m.refreshRepoCards())
 	}
 	return m, nil
 }

@@ -389,6 +389,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detailDone = m.now()
 		}
 		var cmds []tea.Cmd
+		if m.page == pageRepos {
+			cmds = append(cmds, m.refreshRepoCards())
+		}
 		if msg.st.Epoch != m.epoch {
 			// The daemon restarted: its event sequence numbers started over, and
 			// it may have reloaded a hand-edited config.yaml.
@@ -459,6 +462,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case regsMsg:
+		m.gotRegs(msg)
+		return m, nil
+	case regDeletedMsg:
+		return m.regDeleted(msg)
 	case configMsg:
 		m.loadConfig(msg.seq, msg.cfg)
 		if m.overlay == ovUnsaved && len(m.configPage(m.leaveFrom).form.Dirty()) == 0 {

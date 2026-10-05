@@ -176,3 +176,107 @@ func TestMaintenanceSection(t *testing.T) {
 		t.Fatalf("rejected reload:\n%s", v)
 	}
 }
+
+func TestRegistrationsCard(t *testing.T) {
+	c := &fakeClient{regs: []model.Registration{
+		{ID: 1, Name: "linux-1", Status: "offline", Labels: []string{"self-hosted", "X64"}},
+		{ID: 2, Name: "ghr-darkcloud-aaaaaa", Status: "online", Busy: true, GHR: true},
+		{ID: 3, Name: "laptop", Status: "online"},
+	}}
+	m := onRepos(t, c, 140, 80)
+	v := m.View()
+	for _, want := range []string{"GitHub registrations", "[OFFLINE]", "linux-1", "[BUSY] [GHR]", "ghr-darkcloud-aaaaaa", "[ONLINE]", "laptop", "( Refresh )"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if n := strings.Count(v, "[ Delete ]"); n != 1 {
+		t.Fatalf("%d Delete buttons; only the offline foreign runner may have one", n)
+	}
+	m = click(t, m, regDelID(1))
+	if m.overlay != ovConfirm || !strings.Contains(m.confirmText, "linux-1 from darkcloud") {
+		t.Fatalf("confirm: %v %q", m.overlay, m.confirmText)
+	}
+	m = feed(m, key("enter")) // Yes
+	if got := strings.Join(c.actions(), "|"); got != "del-reg darkcloud 1" || !strings.Contains(m.View(), "deleted linux-1") {
+		t.Fatalf("actions %q", got)
+	}
+	m = feed(m, regsMsg{repo: "darkcloud", seq: m.mg.regSeq - 1})
+	if !strings.Contains(m.View(), "linux-1") {
+		t.Fatal("a stale listing replaced the current one")
+	}
+	c.regs = nil
+	if v := click(t, m, reposRegRefresh).View(); !strings.Contains(v, "No runners registered") {
+		t.Fatalf("empty:\n%s", v)
+	}
+	st := sampleStatus()
+	st.Degraded, st.DegradedReason = true, "GitHub rejected the token"
+	m = feed(m, statusMsg{st: st})
+	if v := m.View(); !strings.Contains(v, "GitHub is rejecting the token") || m.mg.regRefresh.Focusable() {
+		t.Fatalf("degraded:\n%s", v)
+	}
+}
+
+// When a status refresh removes the selected repo, the selection falls back
+// to its neighbour and the cards reload for it; the old rows never show
+// under the new heading, and a late reply for the old repo is dropped.
+func TestRegistrationsFollowSelectionChanges(t *testing.T) {
+	c := &fakeClient{regsByRepo: map[string][]model.Registration{
+		"darkcloud": {{ID: 1, Name: "linux-1", Status: "offline"}},
+		"darkmem":   {{ID: 5, Name: "mem-box", Status: "online"}},
+	}}
+	m := onRepos(t, c, 140, 80)
+	if v := m.View(); !strings.Contains(v, "linux-1") {
+		t.Fatalf("darkcloud rows missing:\n%s", v)
+	}
+	st := sampleStatus()
+	st.Repos = st.Repos[1:] // darkcloud removed: darkmem takes its place
+	m = feed(m, statusMsg{st: st})
+	v := m.View()
+	if strings.Contains(v, "linux-1") || !strings.Contains(v, "mem-box") {
+		t.Fatalf("cards did not follow the selection:\n%s", v)
+	}
+	// Later tasks add other card reads to the same batch; look at the
+	// registration reads only.
+	regReads := func() []string {
+		var out []string
+		for _, r := range c.reads {
+			if strings.HasPrefix(r, "regs ") {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	if got := strings.Join(regReads(), "|"); !strings.Contains(got, "regs darkcloud") || !strings.HasSuffix(got, "regs darkmem") {
+		t.Fatalf("reads %q", got)
+	}
+	m = feed(m, regsMsg{repo: "darkcloud", seq: m.mg.regSeq, regs: []model.Registration{{ID: 9, Name: "stale"}}})
+	if strings.Contains(m.View(), "stale") {
+		t.Fatal("a reply for another repo was shown")
+	}
+	m = feed(m, key("down"))
+	if rs := regReads(); rs[len(rs)-1] != "regs darkagents" {
+		t.Fatalf("down did not fetch the new selection: %q", rs)
+	}
+}
+
+// Every panel control has a line range, so focus on a short screen scrolls
+// to the summary buttons and the registration buttons too.
+func TestRegistrationButtonsScrollIntoView(t *testing.T) {
+	c := &fakeClient{regs: []model.Registration{{ID: 1, Name: "linux-1", Status: "offline"}}}
+	m := onRepos(t, c, 120, 16)
+	for _, id := range []string{reposRegRefresh, regDelID(1), reposPause, reposRemove, reposRegRefresh} {
+		m.repos.group.Focus(id)
+		focusInView(t, m)
+	}
+}
+
+// A throttled or failed listing shows when it may be retried.
+func TestRegistrationsErrorShowsRetry(t *testing.T) {
+	retry := now.Add(2 * time.Minute)
+	c := &fakeClient{regErr: &api.Error{Status: 429, Msg: "GitHub rate limit", RetryAt: retry}}
+	m := onRepos(t, c, 140, 80)
+	if v := m.View(); !strings.Contains(v, "GitHub rate limit") || !strings.Contains(v, "try again after "+retry.Local().Format("15:04")) {
+		t.Fatalf("retry time missing:\n%s", v)
+	}
+}

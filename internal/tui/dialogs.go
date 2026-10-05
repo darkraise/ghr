@@ -358,6 +358,12 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 			m.tok.field.SetValue(ui.Value{})
 		}
 		m.overlay, m.tok = ovNone, nil
+	case reposRegRefresh:
+		return m, m.fetchRegs()
+	default:
+		if strings.HasPrefix(id, "repos/reg/del/") {
+			return m.confirmDeleteReg(id)
+		}
 	}
 	return m, nil
 }
