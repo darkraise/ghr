@@ -3,10 +3,12 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -357,5 +359,215 @@ func TestConcurrentMutationsAreSerialAndSpaced(t *testing.T) {
 		if gap := starts[i].Sub(starts[i-1]); gap < time.Second {
 			t.Fatalf("calls %d and %d only %v apart", i-1, i, gap)
 		}
+	}
+}
+
+func TestTokenMetaRecorded(t *testing.T) {
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "4999")
+		w.Header().Set("X-RateLimit-Limit", "5000")
+		w.Header().Set("X-RateLimit-Reset", "1798761600")
+		w.Header().Set("GitHub-Authentication-Token-Expiration", "2026-12-31 23:59:59 UTC")
+		fmt.Fprint(w, `{"full_name":"darkraise/darkcloud","private":true}`)
+	})
+	if m := c.TokenMeta(); !m.CheckedAt.IsZero() || m.RateLimit != nil {
+		t.Fatalf("meta before any call: %+v", m)
+	}
+	if _, err := c.GetRepo(context.Background(), "darkcloud"); err != nil {
+		t.Fatal(err)
+	}
+	m := c.TokenMeta()
+	if !m.OK || m.CheckedAt.IsZero() || *m.RateRemaining != 4999 || *m.RateLimit != 5000 || m.RateReset.Unix() != 1798761600 {
+		t.Fatalf("meta %+v", m)
+	}
+	if want := time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC); m.ExpiresAt == nil || !m.ExpiresAt.Equal(want) {
+		t.Fatalf("expires %v", m.ExpiresAt)
+	}
+	gen := m.Generation
+	c.ForgetCache()
+	if m := c.TokenMeta(); m.Generation != gen+1 || !m.CheckedAt.IsZero() || m.ExpiresAt != nil || c.RateRemaining() != -1 {
+		t.Fatalf("after ForgetCache: %+v remaining %d", m, c.RateRemaining())
+	}
+}
+
+func TestTokenMetaRejectedAndUnparsedExpiry(t *testing.T) {
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("GitHub-Authentication-Token-Expiration", "soon")
+		w.WriteHeader(401)
+		fmt.Fprint(w, `{"message":"Bad credentials"}`)
+	})
+	if _, err := c.GetRepo(context.Background(), "darkcloud"); !IsKind(err, ErrAuth) {
+		t.Fatalf("err %v", err)
+	}
+	if m := c.TokenMeta(); m.OK || m.CheckedAt.IsZero() || m.ExpiresAt != nil {
+		t.Fatalf("meta %+v", m)
+	}
+}
+
+// A response to a request sent with the previous token never updates the
+// metadata of the new one.
+func TestTokenMetaIgnoresOlderGeneration(t *testing.T) {
+	release := make(chan struct{})
+	arrived := make(chan struct{})
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		close(arrived)
+		<-release
+		w.Header().Set("X-RateLimit-Remaining", "10")
+		fmt.Fprint(w, `{"full_name":"darkraise/darkcloud"}`)
+	})
+	done := make(chan error)
+	go func() { _, err := c.GetRepo(context.Background(), "darkcloud"); done <- err }()
+	<-arrived
+	c.ForgetCache()
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if m := c.TokenMeta(); !m.CheckedAt.IsZero() || m.RateRemaining != nil || c.RateRemaining() != -1 {
+		t.Fatalf("old response recorded: %+v", m)
+	}
+}
+
+func TestSecondaryRateLimitIsNotAuth(t *testing.T) {
+	msg := `{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}`
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(403)
+		fmt.Fprint(w, msg)
+	})
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	c.Now = func() time.Time { return now }
+	_, err := c.GetRepo(context.Background(), "darkcloud")
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Kind != ErrRateLimit || !ae.RetryAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("err %#v", err)
+	}
+	if m := c.TokenMeta(); !m.CheckedAt.IsZero() {
+		t.Fatalf("a rate limit says nothing about the token: %+v", m)
+	}
+	msg = `{"message":"Resource not accessible by personal access token"}`
+	c.ForgetCache()
+	if _, err := c.GetRepo(context.Background(), "darkcloud"); !IsKind(err, ErrAuth) {
+		t.Fatalf("permission error: %v", err)
+	}
+}
+
+// Only a success or an authentication failure is a verdict on the token; a
+// server error, a 404 or a rate limit leaves the last verdict in place.
+func TestTokenMetaOnlyCountsTokenVerdicts(t *testing.T) {
+	status := 200
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(4000+status))
+		w.WriteHeader(status)
+		fmt.Fprint(w, `{"full_name":"darkraise/darkcloud","message":"x"}`)
+	})
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	c.Now = func() time.Time { return now }
+	if _, err := c.GetRepo(context.Background(), "darkcloud"); err != nil {
+		t.Fatal(err)
+	}
+	first := c.TokenMeta()
+	for _, status = range []int{500, 404} {
+		now = now.Add(time.Minute)
+		if _, err := c.GetRepo(context.Background(), "darkcloud"); err == nil {
+			t.Fatalf("status %d: no error", status)
+		}
+		m := c.TokenMeta()
+		if !m.OK || !m.CheckedAt.Equal(first.CheckedAt) || *m.RateRemaining != 4000+status {
+			t.Fatalf("after %d: %+v", status, m)
+		}
+	}
+	status = 401
+	now = now.Add(time.Minute)
+	c.GetRepo(context.Background(), "darkcloud")
+	if m := c.TokenMeta(); m.OK || !m.CheckedAt.Equal(now) {
+		t.Fatalf("after 401: %+v", m)
+	}
+}
+
+// The daemon stores a new token before ForgetCache bumps the generation, so
+// a request that read the old token just before a replacement must not be
+// recorded against the new generation.
+func TestTokenReplacedDuringRequest(t *testing.T) {
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "10")
+		fmt.Fprint(w, `{"full_name":"darkraise/darkcloud"}`)
+	})
+	cur, replaced := "old", false
+	c.Token = func() string {
+		tok := cur
+		if !replaced {
+			replaced = true
+			cur = "new"
+			c.ForgetCache()
+		}
+		return tok
+	}
+	if _, err := c.GetRepo(context.Background(), "darkcloud"); err != nil {
+		t.Fatal(err)
+	}
+	if m := c.TokenMeta(); m.Generation != 1 || !m.CheckedAt.IsZero() || m.RateRemaining != nil {
+		t.Fatalf("old-token response recorded in the new generation: %+v", m)
+	}
+}
+
+// A delayed response sent with the previous token restores neither a
+// rate-limit suspension nor an ETag cache entry.
+func TestOlderGenerationLeavesCacheAndSuspension(t *testing.T) {
+	var mu sync.Mutex
+	calls, inm := 0, ""
+	release := make(chan struct{})
+	arrived := make(chan struct{})
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		n := calls
+		inm = r.Header.Get("If-None-Match")
+		mu.Unlock()
+		switch n {
+		case 1:
+			close(arrived)
+			<-release
+			w.Header().Set("ETag", `"v1"`)
+			fmt.Fprint(w, `{"full_name":"darkraise/darkcloud"}`)
+		case 2:
+			fmt.Fprint(w, `{"full_name":"darkraise/darkcloud"}`)
+		}
+	})
+	done := make(chan error)
+	go func() { _, err := c.GetRepo(context.Background(), "darkcloud"); done <- err }()
+	<-arrived
+	c.ForgetCache()
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetRepo(context.Background(), "darkcloud"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	if inm != "" {
+		t.Fatalf("old-generation ETag reused: %q", inm)
+	}
+	mu.Unlock()
+
+	release2 := make(chan struct{})
+	arrived2 := make(chan struct{})
+	c2, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		close(arrived2)
+		<-release2
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", "4102444800")
+		w.WriteHeader(403)
+		fmt.Fprint(w, `{"message":"API rate limit exceeded"}`)
+	})
+	go func() { _, err := c2.GetRepo(context.Background(), "darkcloud"); done <- err }()
+	<-arrived2
+	c2.ForgetCache()
+	close(release2)
+	if err := <-done; !IsKind(err, ErrRateLimit) {
+		t.Fatalf("err %v", err)
+	}
+	if until := c2.SuspendedUntil(); !until.IsZero() {
+		t.Fatalf("old-generation rate limit suspended the new token until %v", until)
 	}
 }

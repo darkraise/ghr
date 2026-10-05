@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -84,6 +85,18 @@ type JITConfig struct {
 	EncodedJITConfig string `json:"encoded_jit_config"`
 }
 
+// TokenMeta is what GitHub's responses said about the current token. Each
+// pointer is nil until a response carried that header.
+type TokenMeta struct {
+	Generation    uint64
+	CheckedAt     time.Time
+	OK            bool
+	RateRemaining *int
+	RateLimit     *int
+	RateReset     *time.Time
+	ExpiresAt     *time.Time
+}
+
 const maxCacheEntries = 1000
 
 type cached struct {
@@ -104,6 +117,8 @@ type Client struct {
 	cache      map[string]cached
 	remaining  int
 	retryAt    time.Time
+	gen        uint64 // bumped when the token changes; older responses are not recorded
+	meta       TokenMeta
 	mutMu      sync.Mutex
 	lastMutate time.Time
 }
@@ -123,12 +138,71 @@ func (c *Client) RateRemaining() int {
 	return c.remaining
 }
 
-// ForgetCache drops ETag state and any rate-limit suspension, used after the token changes.
+// ForgetCache drops ETag state, any rate-limit suspension and the token
+// metadata, used after the token changes.
 func (c *Client) ForgetCache() {
 	c.mu.Lock()
 	c.cache = nil
 	c.retryAt = time.Time{}
+	c.gen++
+	c.meta = TokenMeta{}
+	c.remaining = -1
 	c.mu.Unlock()
+}
+
+// TokenMeta returns the metadata recorded for the current token.
+func (c *Client) TokenMeta() TokenMeta {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	m := c.meta
+	m.Generation = c.gen
+	return m
+}
+
+// record stores the response's rate and expiry headers, unless the token
+// changed while the request was in flight. Only a success or an
+// authentication failure is a verdict on the token; other failures leave
+// CheckedAt and OK as they were.
+func (c *Client) record(gen uint64, h http.Header, apiErr *APIError) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if gen != c.gen {
+		return
+	}
+	if n, err := strconv.Atoi(h.Get("X-RateLimit-Remaining")); err == nil {
+		c.remaining = n
+		c.meta.RateRemaining = &n
+	}
+	if n, err := strconv.Atoi(h.Get("X-RateLimit-Limit")); err == nil {
+		c.meta.RateLimit = &n
+	}
+	if n, err := strconv.ParseInt(h.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+		t := time.Unix(n, 0)
+		c.meta.RateReset = &t
+	}
+	if t, ok := parseExpiry(h.Get("GitHub-Authentication-Token-Expiration")); ok {
+		c.meta.ExpiresAt = &t
+	}
+	switch {
+	case apiErr == nil:
+		c.meta.CheckedAt, c.meta.OK = c.Now(), true
+	case apiErr.Kind == ErrAuth:
+		c.meta.CheckedAt, c.meta.OK = c.Now(), false
+	}
+}
+
+// parseExpiry reads GitHub's token expiry header, "2026-12-31 23:59:59 UTC".
+func parseExpiry(v string) (time.Time, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05 MST", "2006-01-02 15:04:05 -0700", time.RFC3339} {
+		if t, err := time.Parse(layout, v); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
 }
 
 // SuspendedUntil is the time before which every request fails fast with
@@ -164,6 +238,13 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	// SetToken and Reload store the new token before ForgetCache bumps the
+	// generation, so reading the generation first means a request may carry
+	// a newer token than its generation (its response is then dropped) but
+	// never an older one.
+	c.mu.Lock()
+	gen := c.gen
+	c.mu.Unlock()
 	req.Header.Set("Authorization", "Bearer "+c.Token())
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -187,13 +268,11 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 	if err != nil {
 		return nil, "", err
 	}
-	if rem := resp.Header.Get("X-RateLimit-Remaining"); rem != "" {
-		if n, err := strconv.Atoi(rem); err == nil {
-			c.mu.Lock()
-			c.remaining = n
-			c.mu.Unlock()
-		}
+	var apiErr *APIError
+	if resp.StatusCode >= 300 && !(resp.StatusCode == http.StatusNotModified && hasPrev) {
+		apiErr = c.classify(resp, data)
 	}
+	c.record(gen, resp.Header, apiErr)
 	next := ""
 	if m := nextLinkRe.FindStringSubmatch(resp.Header.Get("Link")); m != nil {
 		next = m[1]
@@ -201,11 +280,11 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 	if resp.StatusCode == http.StatusNotModified && hasPrev {
 		return prev.body, prev.next, nil
 	}
-	if resp.StatusCode >= 300 {
-		err := c.classify(resp, data)
+	if apiErr != nil {
+		err := apiErr
 		if err.Kind == ErrRateLimit {
 			c.mu.Lock()
-			if err.RetryAt.After(c.retryAt) {
+			if gen == c.gen && err.RetryAt.After(c.retryAt) {
 				c.retryAt = err.RetryAt
 			}
 			c.mu.Unlock()
@@ -215,11 +294,13 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 	if method == http.MethodGet {
 		if etag := resp.Header.Get("ETag"); etag != "" {
 			c.mu.Lock()
-			// Run and job URLs are unbounded over time; reset rather than track LRU.
-			if c.cache == nil || len(c.cache) >= maxCacheEntries {
-				c.cache = map[string]cached{}
+			if gen == c.gen {
+				// Run and job URLs are unbounded over time; reset rather than track LRU.
+				if c.cache == nil || len(c.cache) >= maxCacheEntries {
+					c.cache = map[string]cached{}
+				}
+				c.cache[u] = cached{etag: etag, body: data, next: next}
 			}
-			c.cache[u] = cached{etag: etag, body: data, next: next}
 			c.mu.Unlock()
 		}
 	}
@@ -251,7 +332,7 @@ func (c *Client) classify(resp *http.Response, data []byte) *APIError {
 				secs = 60
 			}
 			e.RetryAt = c.Now().Add(time.Duration(secs) * time.Second)
-		} else if resp.StatusCode == 429 {
+		} else if resp.StatusCode == 429 || strings.Contains(strings.ToLower(msg.Message), "secondary rate limit") {
 			e.Kind = ErrRateLimit
 			e.RetryAt = c.Now().Add(time.Minute)
 		} else {
