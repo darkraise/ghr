@@ -524,8 +524,10 @@ const (
 	idleKept             // the check or the stop failed; it keeps running
 )
 
-// stopIdleRunner stops i only after the runners API affirms it is not busy;
-// any error leaves it running.
+// stopIdleRunner stops i only after the runners API affirms it is not busy
+// and its registration is deleted; any error leaves it running. GitHub
+// refuses to delete a busy runner (422), so a job handed to i after the check
+// is never killed by the stop.
 func (m *Manager) stopIdleRunner(ctx context.Context, i instance, now time.Time) idleStop {
 	r, err := m.GH.GetRunner(ctx, i.Repo, i.RunnerID)
 	if err != nil {
@@ -538,6 +540,15 @@ func (m *Manager) stopIdleRunner(ctx context.Context, i instance, now time.Time)
 		m.setState(i.ID, sched.Busy)
 		return idleBusy
 	}
+	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil {
+		if github.IsKind(err, github.ErrUnprocessable) {
+			m.setState(i.ID, sched.Busy)
+			return idleBusy
+		}
+		m.apiErr(i.Repo, err, now)
+		return idleKept
+	}
+	// Deregistered, the runner exits on its own even if this stop fails.
 	if err := m.SD.Stop(ctx, UnitPrefix+i.ID); err != nil {
 		m.Events.Add("warn", i.Repo, "stop idle %s: %v", i.ID, err)
 		return idleKept

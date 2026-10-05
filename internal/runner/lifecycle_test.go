@@ -479,6 +479,51 @@ func TestStopIdleLeavesRunnerOnCheckFailure(t *testing.T) {
 	}
 }
 
+// The registration goes before the unit stops, so GitHub cannot hand the
+// runner a job between the busy check and the stop.
+func TestStopIdleDeregistersBeforeStopping(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.gh.setRunner(101, "online", false)
+	h.m.refreshRunners(context.Background())
+	h.now = h.now.Add(6 * time.Minute)
+	stoppedAtDelete := -1
+	h.gh.hook = func(m string) {
+		if m == "DeleteRunner" {
+			h.sd.mu.Lock()
+			stoppedAtDelete = len(h.sd.stopped)
+			h.sd.mu.Unlock()
+		}
+	}
+	h.m.stopIdle(context.Background(), h.cfg, h.now)
+	if stoppedAtDelete != 0 || len(h.sd.stopped) != 1 || !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("stopped before delete %d, stopped %v deleted %v", stoppedAtDelete, h.sd.stopped, h.gh.deleted)
+	}
+}
+
+// GitHub refuses to delete a busy runner with 422: it took a job after the
+// check, so it keeps running and counts as busy. Any other failure keeps it idle.
+func TestStopIdleKeepsRunnerGitHubWillNotDeregister(t *testing.T) {
+	for _, c := range []struct {
+		err   error
+		state string
+	}{
+		{&github.APIError{Status: 422, Kind: github.ErrUnprocessable}, "busy"},
+		{&github.APIError{Status: 502, Kind: github.ErrServer}, "idle"},
+	} {
+		h := newHarness(t)
+		h.m.spawn(context.Background(), h.cfg, "darkmem")
+		h.gh.setRunner(101, "online", false)
+		h.m.refreshRunners(context.Background())
+		h.now = h.now.Add(6 * time.Minute)
+		h.gh.setErr("DeleteRunner darkmem", c.err)
+		h.m.stopIdle(context.Background(), h.cfg, h.now)
+		if len(h.sd.stopped) != 0 || h.state("aaaaaa") != c.state {
+			t.Fatalf("%v: stopped %v state %s", c.err, h.sd.stopped, h.state("aaaaaa"))
+		}
+	}
+}
+
 // A failed or cancelled systemd query is not an exit: the busy runner's dir stays.
 func TestUnitQueryErrorIsNotAnExit(t *testing.T) {
 	h := newHarness(t)
