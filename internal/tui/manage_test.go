@@ -1,14 +1,17 @@
 package tui
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
 func tokenStatus(days int) model.TokenStatus {
@@ -308,5 +311,163 @@ func TestRegistrationsReloadAfterDegradedSelection(t *testing.T) {
 	}
 	if last != "regs darkmem" {
 		t.Fatalf("last registration read %q", last)
+	}
+}
+
+func TestLabelCheckCard(t *testing.T) {
+	seen := now.Add(-2 * time.Hour)
+	at := now.Add(-3 * time.Minute)
+	c := &fakeClient{labels: model.LabelCheck{State: "done", CheckedAt: &at, Groups: []model.LabelGroup{
+		{Labels: []string{"darkcloud-linux", "self-hosted"}, Jobs: []string{"CI / test"}, Count: 4, LastSeen: seen},
+		{Labels: []string{"gpu", "self-hosted"}, Jobs: []string{"ML / train"}, Count: 2, LastSeen: seen},
+		{Labels: []string{"self-hosted", "windows"}, Jobs: []string{"Win / build"}, Count: 1, LastSeen: seen},
+		{Labels: []string{"ubuntu-latest"}, Jobs: []string{"CI / lint"}, More: 2, Count: 5, LastSeen: seen},
+		{Labels: []string{}, Jobs: []string{"Group / job"}, Count: 1, LastSeen: seen},
+	}}}
+	m := onRepos(t, c, 160, 120)
+	v := m.View()
+	for _, want := range []string{"Workflow labels", "Checked 3m ago", "[MATCHED]", "[UNMATCHED]", "missing gpu", "( + add gpu )",
+		"needs a different OS or architecture", "[OTHER]", "+2 more", "no labels (runner group)", "does not install anything"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(v, "( + add windows )") {
+		t.Fatal("OS and architecture labels are never offered")
+	}
+	m = click(t, m, lcAddID("gpu"))
+	if got := repoInput(m, "darkcloud", "labels").Value().List; !reflect.DeepEqual(got, []string{"darkcloud-linux", "gpu"}) {
+		t.Fatalf("quick add: %v", got)
+	}
+	if v := m.View(); strings.Count(v, "[MATCHED]") != 2 || !strings.Contains(v, "1 unsaved change (darkcloud)") {
+		t.Fatalf("after quick add:\n%s", v)
+	}
+	m = click(t, m, reposLCCheck)
+	if got := strings.Join(c.actions(), "|"); got != "label-check darkcloud" {
+		t.Fatalf("actions %q", got)
+	}
+	retry := now.Add(time.Minute)
+	c.labelErr = &api.Error{Status: 429, Msg: "this repo was checked less than a minute ago", RetryAt: retry}
+	if v := click(t, m, reposLCCheck).View(); !strings.Contains(v, "checked less than a minute ago") || !strings.Contains(v, "try again after "+retry.Local().Format("15:04")) {
+		t.Fatalf("throttled:\n%s", v)
+	}
+	c.labelErr, c.labelGetErr = nil, &api.Error{Status: 429, Msg: "GitHub rate limit", RetryAt: retry}
+	m = feed(m, lcMsg{repo: "darkcloud", seq: m.mg.lcSeq, err: c.labelGetErr})
+	if v := m.View(); !strings.Contains(v, "GitHub rate limit, try again after "+retry.Local().Format("15:04")) {
+		t.Fatalf("fetch error:\n%s", v)
+	}
+}
+
+func unmatchedGPU() model.LabelCheck {
+	at := now.Add(-time.Minute)
+	return model.LabelCheck{State: "done", CheckedAt: &at, Groups: []model.LabelGroup{
+		{Labels: []string{"gpu", "self-hosted"}, Jobs: []string{"ML / train"}, Count: 2, LastSeen: at},
+	}}
+}
+
+// Label-check data can arrive before the config; the card then lists the
+// groups without classifying them, and classifies once the config loads.
+func TestLabelCheckBeforeConfig(t *testing.T) {
+	m := sampleModel(&fakeClient{}, 140, 80)
+	m.page = pageRepos
+	m.mg.lcRepo, m.mg.lcSeq = "darkcloud", 1
+	m = feed(m, lcMsg{repo: "darkcloud", seq: 1, lc: unmatchedGPU()})
+	if v := m.View(); !strings.Contains(v, "gpu, self-hosted") || strings.Contains(v, "[UNMATCHED]") {
+		t.Fatalf("before config:\n%s", v)
+	}
+	m = feed(m, configMsg{seq: m.order.seq + 1, cfg: parseConfig(t, settingsYAML)})
+	if v := m.View(); !strings.Contains(v, "[UNMATCHED]") || !strings.Contains(v, "+ add gpu") {
+		t.Fatalf("after config:\n%s", v)
+	}
+}
+
+// While a scan runs, at most one poll is in flight; a slow reply is still
+// accepted rather than overtaken by the next tick's request.
+func TestLabelCheckPollsOneAtATime(t *testing.T) {
+	c := &fakeClient{labels: model.LabelCheck{State: "checking", Groups: []model.LabelGroup{}}}
+	m := onRepos(t, c, 140, 80)
+	first := m.pollLabelCheck()
+	if first == nil {
+		t.Fatal("no poll while checking")
+	}
+	if m.pollLabelCheck() != nil {
+		t.Fatal("a second poll started while one is in flight")
+	}
+	c.labels = unmatchedGPU()
+	m = feed(m, first())
+	if m.mg.lc.State != "done" || m.mg.lcInFlight {
+		t.Fatalf("slow reply dropped: state %q in flight %v", m.mg.lc.State, m.mg.lcInFlight)
+	}
+	// A reply carrying the latest number but another repo's data is dropped.
+	m = feed(m, lcMsg{repo: "darkmem", seq: m.mg.lcSeq, lc: model.LabelCheck{State: "checking"}})
+	if m.mg.lc.State != "done" {
+		t.Fatalf("another repo's reply was applied: %q", m.mg.lc.State)
+	}
+}
+
+// Check now, Delete, Refresh and the quick-add buttons are unavailable while
+// GitHub rejects the token or the repo is being removed, and their actions
+// refuse then too.
+func TestManagementControlsFollowAvailability(t *testing.T) {
+	c := &fakeClient{labels: unmatchedGPU(), regs: []model.Registration{{ID: 1, Name: "linux-1", Status: "offline"}}}
+	m := onRepos(t, c, 140, 80)
+	m.View()
+	if m.mg.lcAdd["gpu"] == nil || m.mg.lcAdd["gpu"].Disabled {
+		t.Fatal("quick add unavailable while everything is fine")
+	}
+	for _, mut := range []func(*model.Status){
+		func(st *model.Status) { st.Degraded, st.DegradedReason = true, "GitHub rejected the token" },
+		func(st *model.Status) { st.Repos[0].Removing = true },
+	} {
+		st := sampleStatus()
+		mut(&st)
+		mm := feed(m, statusMsg{st: st})
+		mm.View()
+		for _, b := range []*ui.Button{mm.mg.lcCheck, mm.mg.lcAdd["gpu"], mm.mg.regRefresh, mm.mg.regDel[1]} {
+			if b != nil && !b.Disabled {
+				t.Errorf("%s enabled (degraded %v)", b.ID(), st.Degraded)
+			}
+		}
+		upd, _ := mm.pressed(lcAddID("gpu"))
+		if got := repoInput(upd.(Model), "darkcloud", "labels").Value().List; len(got) != 1 {
+			t.Errorf("quick add applied anyway: %v", got)
+		}
+		upd, cmd := mm.pressed(reposLCCheck)
+		if cmd != nil || len(c.actions()) != 0 {
+			t.Errorf("check started anyway: %v", c.actions())
+		}
+		_ = upd
+	}
+}
+
+// GitHub label text never reaches the screen raw, and long label lists wrap
+// so every quick-add button and the note stay whole on every width.
+func TestLabelCheckSanitisesAndWraps(t *testing.T) {
+	at := now.Add(-time.Minute)
+	labels := []string{"self-hosted", "gpu\x1b]0;x\a", "cuda-12-runtime", "big-memory-box", "nvme-scratch-disk"}
+	c := &fakeClient{labels: model.LabelCheck{State: "done", CheckedAt: &at, Groups: []model.LabelGroup{
+		{Labels: labels, Jobs: []string{"ML / train-a-very-long-job-name"}, Count: 2, LastSeen: at},
+	}}}
+	for _, w := range []int{100, 99, 56, 40} {
+		m := onRepos(t, c, w, 200)
+		m.View() // a frame syncs the controls, which creates the quick-add buttons
+		pw, _ := m.reposPanelSize(m.contentSize())
+		r := m.selectedRepoStatus()
+		lines, _ := m.reposPanelLines(*r, pw)
+		v := zone.Scan(strings.Join(lines, "\n"))
+		if strings.ContainsAny(v, "\x1b\a") {
+			t.Fatalf("%d columns: raw control bytes: %q", w, v)
+		}
+		for _, want := range []string{"+ add gpu ", "+ add cuda-12-runtime", "+ add big-memory-box", "+ add nvme-scratch-disk", "on the runner."} {
+			if !strings.Contains(v, want) {
+				t.Errorf("%d columns: missing %q:\n%s", w, want, v)
+			}
+		}
+		fits(t, "label check", m.View(), w, 200)
+	}
+	m := onRepos(t, c, 140, 80)
+	m = click(t, m, lcAddID("gpu\x1b]0;x\a"))
+	if got := repoInput(m, "darkcloud", "labels").Value().List; !reflect.DeepEqual(got, []string{"darkcloud-linux", "gpu\x1b]0;x\a"}) {
+		t.Fatalf("the raw label is what gets added: %q", got)
 	}
 }

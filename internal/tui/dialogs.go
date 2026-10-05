@@ -360,7 +360,15 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		m.overlay, m.tok = ovNone, nil
 	case reposRegRefresh:
 		return m, m.fetchRegs()
+	case reposLCCheck:
+		return m.startLabelCheck()
 	default:
+		if label, ok := lcAddLabel(id); ok {
+			if !m.offline() {
+				m.addLabel(label)
+			}
+			return m, nil
+		}
 		if strings.HasPrefix(id, "repos/reg/del/") {
 			return m.confirmDeleteReg(id)
 		}

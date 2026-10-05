@@ -350,6 +350,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.frame++
 		m.toast.Tick(m.now())
 		cmds := []tea.Cmd{tick(), m.fetchStatus(), m.fetchEvents()}
+		cmds = append(cmds, m.pollLabelCheck())
 		if m.logTarget() != "" {
 			cmds = append(cmds, m.fetchLog())
 		}
@@ -465,6 +466,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case regsMsg:
 		m.gotRegs(msg)
 		return m, nil
+	case lcMsg:
+		m.gotLabelCheck(msg)
+		return m, nil
+	case lcStartedMsg:
+		return m.labelCheckStarted(msg)
 	case regDeletedMsg:
 		return m.regDeleted(msg)
 	case configMsg:
