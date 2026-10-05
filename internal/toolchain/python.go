@@ -60,6 +60,11 @@ func (p python) Install(ctx context.Context, rel Release, progress func(string))
 	if err := e.mkdirOwned(ctx, filepath.Join(e.Root, p.dir)); err != nil {
 		return err
 	}
+	// setup.sh replaces the version folder, so a job's setup-python that
+	// completed it meanwhile must not be overwritten.
+	if e.has(p.dir, rel.Folder) {
+		return ErrAlreadyInstalled
+	}
 	progress("running setup.sh")
 	target := e.versionDir(p.dir, rel.Folder)
 	env := []string{"RUNNER_TOOL_CACHE=" + e.Root, "LD_LIBRARY_PATH=" + filepath.Join(out, "lib"), "HOME=" + e.Home}

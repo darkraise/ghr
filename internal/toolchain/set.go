@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -79,7 +80,7 @@ func (s *Set) Available(ctx context.Context, tool string) ([]Choice, error) {
 	c, ok := s.avail[tool]
 	s.mu.Unlock()
 	if ok && s.now().Sub(c.at) < availableTTL {
-		return c.cs, nil
+		return slices.Clone(c.cs), nil
 	}
 	cs, err := i.Available(ctx)
 	if err != nil {
@@ -88,7 +89,7 @@ func (s *Set) Available(ctx context.Context, tool string) ([]Choice, error) {
 	s.mu.Lock()
 	s.avail[tool] = cachedChoices{s.now(), cs}
 	s.mu.Unlock()
-	return cs, nil
+	return slices.Clone(cs), nil
 }
 
 // Installed lists every installer's versions, tools in name order.

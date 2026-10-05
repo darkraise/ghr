@@ -78,7 +78,7 @@ func (d dotnet) Resolve(ctx context.Context, spec string) (Release, error) {
 		return Release{Tool: "dotnet", Version: v, Folder: v, URL: d.e.Sources.DotnetScript}
 	}
 	if v, ok := github.ParseVersion(spec); ok && len(v) == 3 {
-		return rel(spec), nil
+		return rel(v.String()), nil
 	}
 	cs, err := d.channels(ctx)
 	if err != nil {
@@ -169,6 +169,14 @@ func (d dotnet) Remove(version string) error {
 	if v, ok := github.ParseVersion(version); !ok || len(v) != 3 || !d.hasSDK(version) {
 		return ErrNotInstalled
 	}
+	if err := noSymlinks(d.e.Root, d.sdkDir(version)); err != nil {
+		return err
+	}
+	// dotnet.dll first: setup-dotnet counts an SDK by it, so a job scanning
+	// meanwhile no longer sees a half-deleted one.
+	if err := os.Remove(filepath.Join(d.sdkDir(version), "dotnet.dll")); err != nil {
+		return err
+	}
 	if err := os.RemoveAll(d.sdkDir(version)); err != nil {
 		return err
 	}
@@ -185,6 +193,10 @@ func (d dotnet) Remove(version string) error {
 			continue
 		}
 		for _, m := range matches {
+			if err := noSymlinks(d.e.Root, m); err != nil {
+				errs = append(errs, err)
+				continue
+			}
 			if err := os.RemoveAll(m); err != nil {
 				errs = append(errs, err)
 			}

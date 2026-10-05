@@ -72,6 +72,9 @@ func (j java) Resolve(ctx context.Context, spec string) (Release, error) {
 		return Release{}, fmt.Errorf("Adoptium lists no GA JDK %d for linux x64", major)
 	}
 	sv, pkg := rs[0].VersionData.Semver, rs[0].Binaries[0].Package
+	if pkg.Link == "" || pkg.Checksum == "" {
+		return Release{}, fmt.Errorf("Adoptium lists no download link or checksum for JDK %d", major)
+	}
 	return Release{Tool: "java", Version: sv, Folder: strings.Replace(sv, "+", "-", 1), URL: pkg.Link, SHA256: pkg.Checksum}, nil
 }
 

@@ -68,6 +68,9 @@ func (e *Env) removeLayout(toolDir, folder string) error {
 		return ErrNotInstalled
 	}
 	dir := e.versionDir(toolDir, folder)
+	if err := noSymlinks(e.Root, dir); err != nil {
+		return err
+	}
 	if err := os.Remove(marker(dir)); err != nil {
 		return err
 	}
@@ -84,6 +87,14 @@ func (e *Env) removeLayout(toolDir, folder string) error {
 // download.
 func (e *Env) opDir() (string, error) {
 	tmp := filepath.Join(e.Root, ".tmp")
+	// A job can plant a symlink or its own directory here; Chmod would follow
+	// the link as root and a foreign directory would let the job swap an
+	// operation directory for a link.
+	if fi, err := os.Lstat(tmp); err == nil && (!fi.IsDir() || !ownedByMe(fi)) {
+		if err := os.RemoveAll(tmp); err != nil {
+			return "", err
+		}
+	}
 	if err := os.MkdirAll(tmp, 0o711); err != nil {
 		return "", err
 	}
@@ -112,16 +123,26 @@ func (e *Env) chownTree(ctx context.Context, path string) error {
 // mkdirOwned creates dir, when missing, owned by the runner user, so jobs'
 // setup-* steps can still add versions beside ghr's.
 func (e *Env) mkdirOwned(ctx context.Context, dir string) error {
+	if err := noSymlinks(e.Root, dir); err != nil {
+		return err
+	}
 	if _, err := os.Stat(dir); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
 		return err
 	}
 	if err := os.Mkdir(dir, 0o755); err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
 		return err
 	}
-	_, err := e.Run(ctx, "chown", "-h", e.owner(), dir)
-	return err
+	if _, err := e.Run(ctx, "chown", "-h", e.owner(), dir); err != nil {
+		// Left root-owned, a job's setup-* step could not add to it.
+		os.Remove(dir)
+		return err
+	}
+	return nil
 }
 
 func fileSHA256(path string) (string, error) {
@@ -223,8 +244,13 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, rel Release, p
 	}
 	target := filepath.Join(verPath, arch)
 	if err := ctx.Err(); err != nil {
-		dropFailed(target)
+		// A marker-less target may be a job's own download, not ours to drop.
+		os.Remove(verPath)
 		return err
+	}
+	// A job's setup-* step may have completed this version while ghr downloaded.
+	if e.has(toolDir, rel.Folder) {
+		return ErrAlreadyInstalled
 	}
 	// A target without a marker is a killed install; replace it, as
 	// @actions/tool-cache's _createToolPath does.
@@ -233,10 +259,13 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, rel Release, p
 		dropFailed(target)
 		return err
 	}
-	if err := os.WriteFile(marker(target), nil, 0o644); err != nil {
+	// O_EXCL, so a link planted at the marker's path is never followed.
+	f, err := os.OpenFile(marker(target), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
 		dropFailed(target)
 		return err
 	}
+	f.Close()
 	if _, err := e.Run(ctx, "chown", "-h", e.owner(), marker(target)); err != nil {
 		dropFailed(target)
 		return fmt.Errorf("chown: %w", err)

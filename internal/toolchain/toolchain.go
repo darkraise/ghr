@@ -83,12 +83,14 @@ type Installer interface {
 	Remove(version string) error
 }
 
+// prefixOf compares a missing part of v as 0, so "1.20.0" matches Go's "1.20".
 func prefixOf(p, v github.Version) bool {
-	if len(p) > len(v) {
-		return false
-	}
 	for i := range p {
-		if p[i] != v[i] {
+		n := 0
+		if i < len(v) {
+			n = v[i]
+		}
+		if p[i] != n {
 			return false
 		}
 	}

@@ -74,7 +74,7 @@ func (m manifestTool) Available(ctx context.Context) ([]Choice, error) {
 	}
 	out := []Choice{}
 	for _, v := range versions(fs) {
-		out = append(out, Choice{Spec: v, Version: v})
+		out = append(out, Choice{Spec: makeSemver(v), Version: v})
 	}
 	return out, nil
 }
