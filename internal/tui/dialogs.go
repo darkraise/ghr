@@ -333,7 +333,7 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		return m, m.togglePauseAll()
 	case detailCopy, detailStop, detailBack:
 		return m.detailPressed(id)
-	case reposAdd:
+	case reposAdd, reposAddEmpty:
 		return m.openAddRepo()
 	case reposPause, reposRemove:
 		return m.reposAction(id)

@@ -440,6 +440,31 @@ func TestRepositoriesListEmptiesAndRefills(t *testing.T) {
 	}
 }
 
+// With no repos the list card only says so, and the panel offers a centred
+// Add button of its own that opens the Add repository dialog.
+func TestRepositoriesEmptyStateAddButton(t *testing.T) {
+	st := sampleStatus()
+	st.Repos = nil
+	for _, w := range []int{120, 72} {
+		m := feed(newModel(&fakeClient{st: &st}, w, 30, st), key("2"))
+		z := zoneOf(t, m, reposAddEmpty)
+		if hz := zoneOf(t, m, reposAdd); hz.StartY == z.StartY {
+			t.Fatalf("%d columns: the panel button shares the header line", w)
+		}
+		if w >= wideMin {
+			cw, _ := m.contentSize()
+			x0, pw := m.width-cw+reposListW+1, cw-reposListW-1
+			bw := z.EndX - z.StartX + 1
+			if want := x0 + (pw-bw)/2; z.StartX < want-2 || z.StartX > want+2 {
+				t.Fatalf("button at column %d, centred would be %d", z.StartX, want)
+			}
+		}
+		if m = feed(m, leftClick(z.StartX, z.StartY)); m.overlay != ovAddRepo {
+			t.Fatalf("%d columns: click opened overlay %v", w, m.overlay)
+		}
+	}
+}
+
 // A refresh while editing: a removed repo loses its fields and edit with a
 // toast, a repo being removed drops its edit, a new repo gets fields, and no
 // dropped edit reaches the next patch.

@@ -15,12 +15,15 @@ import (
 )
 
 const (
-	reposList    = "repos/list"    // the list card's tab stop
-	reposAdd     = "repos/add"     // the header's Add repository button
-	reposPause   = "repos/pause"   // the panel's Pause/Resume button
-	reposRemove  = "repos/remove"  // the panel's Remove button
-	reposSave    = "repos/save"    // the unsaved bar's Save button
-	reposDiscard = "repos/discard" // the unsaved bar's Discard button
+	reposList = "repos/list" // the list card's tab stop
+	reposAdd  = "repos/add"  // the header's Add repository button
+	// reposAddEmpty is the empty panel's own Add button; sharing the header's
+	// zone ID would leave one of the two unclickable.
+	reposAddEmpty = "repos/add/empty"
+	reposPause    = "repos/pause"   // the panel's Pause/Resume button
+	reposRemove   = "repos/remove"  // the panel's Remove button
+	reposSave     = "repos/save"    // the unsaved bar's Save button
+	reposDiscard  = "repos/discard" // the unsaved bar's Discard button
 
 	reposListW = 30 // the list card's width in the wide layout
 )
@@ -32,7 +35,7 @@ type reposPage struct {
 	selected      string // the selected repo's name; selection follows the name across refreshes
 	idx           int    // the selection's last position, used when its repo disappears
 	shownFocus    string // the focus reposView last scrolled to
-	add           *ui.Button
+	add, addEmpty *ui.Button
 	pause, remove *ui.Button
 }
 
@@ -40,6 +43,7 @@ func newReposPage() *reposPage {
 	rp := &reposPage{
 		configPage: newConfigPage(reposSave, reposDiscard),
 		add:        ui.NewButton(reposAdd, "+ Add repository", ui.Primary),
+		addEmpty:   ui.NewButton(reposAddEmpty, "+ Add repository", ui.Primary),
 		pause:      ui.NewButton(reposPause, "Pause", ui.Secondary),
 		remove:     ui.NewButton(reposRemove, "Remove", ui.Danger),
 	}
@@ -335,6 +339,10 @@ func (m Model) syncRepoControls() {
 	}
 	items := []ui.Widget{rp.add, stop{reposList}}
 	rp.add.SetDisabled(!m.connected)
+	rp.addEmpty.SetDisabled(!m.connected)
+	if len(m.st.Repos) == 0 {
+		items = append(items, rp.addEmpty)
+	}
 	if r := m.selectedRepoStatus(); r != nil {
 		rp.pause.Label = "Pause"
 		if r.Paused {
@@ -485,8 +493,7 @@ func (m Model) reposView(w, h int) string {
 	rp := m.repos
 	r := m.selectedRepoStatus()
 	if r == nil {
-		return box("Repos", min(w, reposListW), []string{sDim.Render("No repositories yet"), "",
-			rp.add.View(rp.group.FocusedID() == reposAdd, 0)})
+		return m.reposEmptyView(w, h)
 	}
 	// Focus moves by Tab, by a control's own enter-to-advance (Group.Key),
 	// by a click, or by Group.Set when a refresh disables the focused
@@ -509,6 +516,20 @@ func (m Model) reposView(w, h int) string {
 		body = fitLines(body, h-1) + "\n" + bar
 	}
 	return body
+}
+
+// reposEmptyView is the page with no repos: the list card says so and the
+// panel holds a centred Add button.
+func (m Model) reposEmptyView(w, h int) string {
+	rp := m.repos
+	pw, ph := m.reposPanelSize(w, h)
+	btn := rp.addEmpty.View(rp.group.FocusedID() == reposAddEmpty, 0)
+	panel := lipgloss.Place(pw, ph, lipgloss.Center, lipgloss.Center, btn)
+	if m.width >= wideMin {
+		list := box("Repos", reposListW, []string{sDim.Render("No repositories yet")})
+		return lipgloss.JoinHorizontal(lipgloss.Top, list, " ", panel)
+	}
+	return box("Repos", w, []string{sDim.Render("No repositories yet")}) + "\n" + panel
 }
 
 // reposHandleKey handles the page's keys. It reports false for keys that fall
