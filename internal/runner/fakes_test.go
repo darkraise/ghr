@@ -204,7 +204,8 @@ type fakeDocker struct {
 	volLabels []string
 	usage     []int // successive DataRootUsage results; last value repeats
 	prunes    []string
-	errs      map[string]error // by method name
+	errs      map[string]error                               // by method name
+	hold      func(ctx context.Context, method string) error // may block a call; set before the manager runs
 }
 
 func newFakeDocker() *fakeDocker {
@@ -225,6 +226,16 @@ func (f *fakeDocker) setErr(method string, err error) {
 		return
 	}
 	f.errs[method] = err
+}
+
+func (f *fakeDocker) wait(ctx context.Context, method string) error {
+	f.mu.Lock()
+	hold := f.hold
+	f.mu.Unlock()
+	if hold == nil {
+		return nil
+	}
+	return hold(ctx, method)
 }
 
 func (f *fakeDocker) ComposeContainers(context.Context) ([]system.ComposeContainer, error) {
@@ -295,26 +306,47 @@ func (f *fakeDocker) DataRootUsage(context.Context) (int, error) {
 	}
 	return v, nil
 }
-func (f *fakeDocker) PruneBuildCacheOlderThan(_ context.Context, h int) (string, error) {
+func (f *fakeDocker) PruneBuildCacheOlderThan(ctx context.Context, h int) (string, error) {
+	f.mu.Lock()
 	f.prunes = append(f.prunes, fmt.Sprintf("until=%dh", h))
+	f.mu.Unlock()
+	if err := f.wait(ctx, "PruneBuildCacheOlderThan"); err != nil {
+		return "", err
+	}
 	if err := f.err("PruneBuildCacheOlderThan"); err != nil {
 		return "", err
 	}
 	return "1GB", nil
 }
-func (f *fakeDocker) PruneBuildCacheTo(_ context.Context, keep string) (string, error) {
+func (f *fakeDocker) PruneBuildCacheTo(ctx context.Context, keep string) (string, error) {
+	f.mu.Lock()
 	f.prunes = append(f.prunes, "keep="+keep)
+	f.mu.Unlock()
+	if err := f.wait(ctx, "PruneBuildCacheTo"); err != nil {
+		return "", err
+	}
 	if err := f.err("PruneBuildCacheTo"); err != nil {
 		return "", err
 	}
 	return "5GB", nil
 }
-func (f *fakeDocker) PruneDanglingImages(context.Context) (string, error) {
+func (f *fakeDocker) PruneDanglingImages(ctx context.Context) (string, error) {
+	f.mu.Lock()
 	f.prunes = append(f.prunes, "images")
+	f.mu.Unlock()
+	if err := f.wait(ctx, "PruneDanglingImages"); err != nil {
+		return "", err
+	}
 	if err := f.err("PruneDanglingImages"); err != nil {
 		return "", err
 	}
 	return "200MB", nil
+}
+
+func (f *fakeDocker) pruneList() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return strings.Join(f.prunes, ",")
 }
 
 // fakeHost copies by creating the destination with a run.sh, like a real dist.

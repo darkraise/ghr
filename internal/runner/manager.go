@@ -145,6 +145,10 @@ type Manager struct {
 	diskPct        int
 	ticks          int
 	lastPrune      time.Time
+	pruning        bool                    // a manual or automatic prune holds the reservation; guarded by mu
+	maint          model.MaintenanceStatus // manual prunes; guarded by mu
+	maintCtx       context.Context         // cancelled by Close
+	maintCancel    context.CancelFunc
 	lastJob        map[string]model.HistoryEntry
 	epoch          string
 	wg             sync.WaitGroup
@@ -159,6 +163,7 @@ func (m *Manager) Init() error {
 	m.retryAt = map[string]time.Time{}
 	m.lastJob = map[string]model.HistoryEntry{}
 	m.lastPrune = m.Now()
+	m.maintCtx, m.maintCancel = context.WithCancel(context.Background())
 	m.epoch = strconv.FormatInt(m.Now().UnixNano(), 36)
 	entries, err := m.History.Query("", "", 0)
 	if err != nil {
@@ -181,6 +186,63 @@ func (m *Manager) recordLastJob(e model.HistoryEntry) {
 
 // Wait blocks until background finishes return; each is bounded by finishTimeout.
 func (m *Manager) Wait() { m.wg.Wait() }
+
+// ErrPruneRunning is returned by StartPrune while a prune runs.
+var ErrPruneRunning = errors.New("a prune is already running")
+
+// StartPrune starts a forced maintenance prune in the background. The caller
+// returns before it finishes; Wait waits for it and Close interrupts it.
+func (m *Manager) StartPrune() error {
+	m.mu.Lock()
+	if m.pruning {
+		m.mu.Unlock()
+		return ErrPruneRunning
+	}
+	now := m.Now()
+	m.pruning = true
+	m.maint.Running = true
+	m.maint.LastStarted = &now
+	ctx := m.maintCtx
+	m.wg.Add(1)
+	m.mu.Unlock()
+	go func() {
+		defer m.wg.Done()
+		m.forcedPrune(ctx)
+	}()
+	return nil
+}
+
+// Maintenance reports the manual prune state.
+func (m *Manager) Maintenance() model.MaintenanceStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.maint
+}
+
+// Close interrupts a running prune; the daemon calls it on shutdown before Wait.
+func (m *Manager) Close() {
+	if m.maintCancel != nil {
+		m.maintCancel()
+	}
+}
+
+// reservePrune takes the reservation shared by manual and automatic pruning,
+// reporting false when a prune already holds it.
+func (m *Manager) reservePrune() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.pruning {
+		return false
+	}
+	m.pruning = true
+	return true
+}
+
+func (m *Manager) releasePrune() {
+	m.mu.Lock()
+	m.pruning = false
+	m.mu.Unlock()
+}
 
 func (m *Manager) instanceDir(id string) string { return filepath.Join(m.Paths.Instances, id) }
 
@@ -265,6 +327,7 @@ func (m *Manager) Status() model.Status {
 		Degraded: m.degraded, DegradedReason: m.degradedReason,
 		RateRemaining: m.GH.RateRemaining(), DiskPct: m.diskPct,
 		Repos: []model.RepoStatus{}, Instances: []model.InstanceStatus{},
+		Maintenance: m.maint,
 	}
 	for _, r := range cfg.Repos {
 		rs := model.RepoStatus{Name: r.Name, Paused: r.Paused, Removing: r.Removing, Max: cfg.EffectiveMax(r),

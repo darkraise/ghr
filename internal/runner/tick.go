@@ -40,11 +40,23 @@ func (m *Manager) Tick(ctx context.Context) {
 	if m.apiAllowed(now) {
 		m.finalizePending(ctx)
 	}
-	if m.ticks%10 == 1 {
-		m.checkDisk(ctx, cfg)
-	}
-	if now.Sub(m.lastPrune) >= 24*time.Hour {
-		m.prune(cfg, now)
+	diskDue := m.ticks%10 == 1
+	m.mu.Lock()
+	retentionDue := now.Sub(m.lastPrune) >= 24*time.Hour
+	m.mu.Unlock()
+	// Manual and automatic pruning share one reservation, so neither runs
+	// Docker's prune commands or rewrites the history file under the other;
+	// a skipped automatic prune runs on a later tick.
+	if (diskDue || retentionDue) && m.reservePrune() {
+		func() {
+			defer m.releasePrune()
+			if diskDue {
+				m.checkDisk(ctx, cfg)
+			}
+			if retentionDue {
+				m.prune(cfg, now)
+			}
+		}()
 	}
 }
 

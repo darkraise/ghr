@@ -215,25 +215,86 @@ func (m *Manager) setDisk(pct int) {
 	m.mu.Unlock()
 }
 
-// prune drops history lines and archived logs older than history_retention.
-func (m *Manager) prune(cfg *config.Config, now time.Time) {
+// prune drops history lines and archived logs older than history_retention,
+// reporting whether every step succeeded.
+func (m *Manager) prune(cfg *config.Config, now time.Time) bool {
+	ok := true
 	cutoff := now.Add(-cfg.HistoryRetention.D())
 	if err := m.History.Prune(cutoff); err != nil {
+		ok = false
 		m.Events.Add("warn", "", "history prune: %v", err)
 	}
 	entries, err := os.ReadDir(m.Paths.Logs)
 	if err != nil && !os.IsNotExist(err) {
+		ok = false
 		m.Events.Add("warn", "", "log archive prune: %v", err)
 	}
 	for _, e := range entries {
 		info, err := e.Info()
 		if err == nil && info.ModTime().Before(cutoff) {
 			if err := os.RemoveAll(filepath.Join(m.Paths.Logs, e.Name())); err != nil {
+				ok = false
 				m.Events.Add("warn", "", "log archive prune: %v", err)
 			}
 		}
 	}
+	m.mu.Lock()
 	m.lastPrune = now
+	m.mu.Unlock()
+	return ok
+}
+
+// forcedPrune is a manual prune: build cache down to build_cache_keep,
+// dangling images, history and logs past retention, then a fresh disk
+// reading. Unlike checkDisk it ignores disk_high_water.
+func (m *Manager) forcedPrune(ctx context.Context) {
+	cfg := m.Config()
+	failed := false
+	step := func(name string, fn func() (string, error)) {
+		if ctx.Err() != nil {
+			return
+		}
+		freed, err := fn()
+		if err != nil {
+			failed = true
+			m.Events.Add("warn", "", "prune: %s failed: %v", name, err)
+			return
+		}
+		m.Events.Add("info", "", "prune: %s freed %s", name, freed)
+	}
+	step("build cache to "+cfg.BuildCacheKeep, func() (string, error) { return m.Docker.PruneBuildCacheTo(ctx, cfg.BuildCacheKeep) })
+	step("dangling images", func() (string, error) { return m.Docker.PruneDanglingImages(ctx) })
+	if ctx.Err() == nil {
+		if m.prune(cfg, m.Now()) {
+			m.Events.Add("info", "", "prune: history and logs past retention removed")
+		} else {
+			failed = true
+		}
+	}
+	if ctx.Err() == nil {
+		if pct, err := m.Docker.DataRootUsage(ctx); err != nil {
+			failed = true
+			m.Events.Add("warn", "", "prune: disk usage: %v", err)
+		} else {
+			m.setDisk(pct)
+			m.Events.Add("info", "", "prune: disk %d%% used", pct)
+		}
+	}
+	outcome, level, msg := "ok", "ok", "prune finished"
+	switch {
+	case ctx.Err() != nil:
+		outcome, level, msg = "interrupted", "warn", "prune interrupted by shutdown"
+	case failed:
+		outcome, level, msg = "errors", "warn", "prune finished with errors"
+	}
+	now := m.Now()
+	m.mu.Lock()
+	m.pruning = false
+	m.maint.Running = false
+	m.maint.LastFinished = &now
+	m.maint.LastOutcome = outcome
+	m.mu.Unlock()
+	m.Events.Add(level, "", "%s", msg)
 }
 
 // parseCursor reads "file=offset&file=offset" (URL query encoding).
