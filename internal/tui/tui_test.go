@@ -286,7 +286,7 @@ func TestHistoryDropdownFitsShortScreen(t *testing.T) {
 func TestDashboardContent(t *testing.T) {
 	v := sampleModel(&fakeClient{}, 120, 30).View()
 	for _, want := range []string{"mode ● QUEUE", "runners", "2/3", "darkcloud", "⧗ 2", "#411 lint", "2m ago",
-		"◌ paused", "a3f9c1", "CI / e2e-journeys  #412", "12m04s", "2 jobs queued (repo cap 1)", "disk 81%", "x stop"} {
+		"[PAUSED]", "a3f9c1", "CI / e2e-journeys  #412", "12m04s", "2 jobs queued (repo cap 1)", "disk 81%", "x stop"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -300,7 +300,7 @@ func TestDashboardContent(t *testing.T) {
 func TestRemovingRepoState(t *testing.T) {
 	st := sampleStatus()
 	st.Repos[2].Removing = true
-	if v := newModel(&fakeClient{}, 120, 30, st).View(); !strings.Contains(v, "◌ removing") {
+	if v := newModel(&fakeClient{}, 120, 30, st).View(); !strings.Contains(v, "[REMOVING]") {
 		t.Fatal("removing state not shown")
 	}
 }

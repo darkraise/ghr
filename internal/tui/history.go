@@ -123,7 +123,7 @@ func (m Model) historyPage(w, h int) string {
 		tail := " " + stateStyle(e.Conclusion).Render(cell(e.Conclusion, 10)) + " " + dur(e.FinishedAt.Sub(e.StartedAt))
 		id := fmt.Sprintf("hist-%d", i)
 		if i == m.histSel {
-			lines = append(lines, m.selectedRow(id, line, rowButtons(ui.NewButton(rowCopy, "Copy run URL", ui.Secondary)), tail, inner))
+			lines = append(lines, m.selectedRow(id, line, "", "", rowButtons(ui.NewButton(rowCopy, "Copy run URL", ui.Secondary)), tail, inner))
 		} else {
 			lines = append(lines, m.row(id, false, line+tail, inner))
 		}

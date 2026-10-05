@@ -26,7 +26,7 @@ func TestDetailPage(t *testing.T) {
 		t.Fatalf("page %v id %q", m.page, m.detailID)
 	}
 	v := m.View()
-	for _, want := range []string{"Runners › a3f9c1", "( Copy run URL )", "[ Stop runner ]", "● busy", "darkcloud",
+	for _, want := range []string{"Runners › a3f9c1", "( Copy run URL )", "[ Stop runner ]", "[BUSY]", "darkcloud",
 		"CI / e2e-journeys  #412", "12m04s", "started 2026-10-03 13:52:56", "▌ 2 Runners", "esc back"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("detail page missing %q", want)
@@ -207,7 +207,7 @@ func TestDetailAfterRunnerFinishes(t *testing.T) {
 	m = ticks(m, 1)
 	m.now = func() time.Time { return now.Add(10 * time.Minute) }
 	v := m.View()
-	for _, want := range []string{"⚠ This runner has finished", "Back to runners", "● busy", "17m04s", "CI / e2e-journeys  #412"} {
+	for _, want := range []string{"⚠ This runner has finished", "Back to runners", "[BUSY]", "17m04s", "CI / e2e-journeys  #412"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("finished detail page missing %q", want)
 		}

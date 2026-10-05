@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/config"
@@ -157,16 +158,15 @@ func (m Model) reposLines(w int) []string {
 	}
 	lines := []string{sDim.Render(hdr)}
 	for i, r := range m.st.Repos {
-		state, st := "active", "active"
-		dot := "●"
+		state := "active"
 		if r.Paused {
-			state, st, dot = "paused", "paused", "◌"
+			state = "paused"
 		}
 		if r.Removing {
-			state, st, dot = "removing", "removing", "◌"
+			state = "removing"
 		}
 		if r.Error != "" {
-			state, st, dot = "error", "error", "✖"
+			state = "error"
 		}
 		queue := "–"
 		if r.Queued > 0 {
@@ -177,7 +177,9 @@ func (m Model) reposLines(w int) []string {
 		if selected {
 			sel = "▸ "
 		}
-		line := sel + cell(r.Name, 14) + " " + stateStyle(st).Render(cell(dot+" "+state, 10)) + " " +
+		badge := stateBadge(state)
+		before := sel + cell(r.Name, 14) + " "
+		after := strings.Repeat(" ", max(10-ansi.StringWidth(badge), 0)) + " " +
 			cell(fmt.Sprintf("%d/%s", r.Active, maxText(r.Max)), 5) + " " + cell(queue, 6)
 		if !narrow {
 			last := sDim.Render("–")
@@ -188,20 +190,21 @@ func (m Model) reposLines(w int) []string {
 				}
 				last = style.Render(icon) + fmt.Sprintf(" #%s %s  %s", j.RunNumber, j.JobName, sDim.Render(ago(m.now().Sub(j.FinishedAt))))
 			}
-			line += " " + last
+			after += " " + last
 		}
 		if r.Error != "" && !narrow {
-			line += "  " + sRed.Render(r.Error)
+			after += "  " + sRed.Render(r.Error)
 		}
 		if selected {
 			pause := ui.NewButton(rowPause, "Pause", ui.Secondary)
 			if r.Paused {
 				pause.Label = "Resume"
 			}
-			lines = append(lines, m.selectedRow(fmt.Sprintf("repo-%d", i), line, rowButtons(pause, ui.NewButton(rowRemove, "Remove", ui.Danger)), "", inner))
+			lines = append(lines, m.selectedRow(fmt.Sprintf("repo-%d", i), before, badge, after,
+				rowButtons(pause, ui.NewButton(rowRemove, "Remove", ui.Danger)), "", inner))
 			continue
 		}
-		lines = append(lines, m.row(fmt.Sprintf("repo-%d", i), false, line, inner))
+		lines = append(lines, zone.Mark(fmt.Sprintf("repo-%d", i), ui.BadgeRow(sSel, false, before, badge, after, inner)))
 	}
 	if len(m.st.Repos) == 0 {
 		lines = append(lines, sDim.Render("  no repos configured — press a to add one"))

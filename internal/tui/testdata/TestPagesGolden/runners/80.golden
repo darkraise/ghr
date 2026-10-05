@@ -3,8 +3,8 @@
 Runners                                                                         
 ╭─ › Runners ──────────────────────────────────────────────────────────────────╮
 │   ID       REPO         STATE       JOB                        ELAPSED       │
-│ ▸ a3f9c1   darkcloud    ⣾ busy      CI / e2e-j…  ( Logs )  [ Stop ] 12m04s   │
-│   7be210   darkmem      ○ idle      –                          1m30s         │
+│ ▸ a3f9c1   darkcloud    ⣾ [BUSY]    CI / e2e-j…  ( Logs )  [ Stop ] 12m04s   │
+│   7be210   darkmem      [IDLE]      –                          1m30s         │
 │   –        darkcloud    ⧗ waiting   2 jobs queued (repo cap 1)               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Log preview — a3f9c1 (following) ───────────────────────────────────────────╮

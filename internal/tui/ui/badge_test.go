@@ -44,3 +44,26 @@ func TestSparkline(t *testing.T) {
 		t.Fatalf("gauge %q", got)
 	}
 }
+
+func TestBadgeRowKeepsBadgeColoursWhenSelected(t *testing.T) {
+	withProfile(t, termenv.ANSI256)
+	badge := Badge("busy", BadgeBusy)
+	got := BadgeRow(Sel, true, "▸ a3f9c1 ", badge, " CI / e2e", 30)
+	if !strings.Contains(got, badge) || ansi.StringWidth(got) != 30 {
+		t.Fatalf("selected row %q (width %d)", got, ansi.StringWidth(got))
+	}
+	if plain := BadgeRow(Sel, false, "  a3f9c1 ", badge, " CI", 30); !strings.Contains(plain, badge) || ansi.StringWidth(plain) != 30 {
+		t.Fatalf("plain row %q", plain)
+	}
+	// The text before the badge gives way so the badge keeps its place and colours.
+	for _, sel := range []bool{true, false} {
+		over := BadgeRow(Sel, sel, strings.Repeat("x", 28), badge, "tail", 30)
+		if ansi.StringWidth(over) != 30 || !strings.Contains(over, badge) || !strings.Contains(over, "…") {
+			t.Fatalf("overflowing row (selected %v) %q, %d wide", sel, over, ansi.StringWidth(over))
+		}
+	}
+	// Narrower than the badge itself: the badge is cut, still in colour.
+	if tiny := BadgeRow(Sel, true, "ab", badge, "", 3); ansi.StringWidth(tiny) != 3 || !strings.Contains(tiny, "\x1b[") {
+		t.Fatalf("tiny row %q", tiny)
+	}
+}

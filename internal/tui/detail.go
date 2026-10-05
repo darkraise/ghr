@@ -129,7 +129,7 @@ func (m Model) finished() bool { return !m.detailDone.IsZero() }
 func (m Model) detailSummary() string {
 	r := m.detailSnap
 	state := clean(r.State)
-	parts := []string{stateStyle(state).Render("● " + state), clean(r.Repo)}
+	parts := []string{stateBadge(state), clean(r.Repo)}
 	start := r.Since
 	if j := r.Job; j != nil {
 		job := j.Name

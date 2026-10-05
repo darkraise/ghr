@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/model"
@@ -12,14 +13,9 @@ import (
 
 func (m Model) runnerLine(i int, r model.InstanceStatus, selected bool, inner int) string {
 	state := r.State
-	icon := "○"
-	switch state {
-	case "busy":
-		icon = spinnerFrames[m.frame%len(spinnerFrames)]
-	case "starting":
-		icon = "◔"
-	case "cleaning":
-		icon = "♻"
+	badge := stateBadge(state)
+	if state == "busy" {
+		badge = spinnerFrames[m.frame%len(spinnerFrames)] + " " + badge
 	}
 	job, elapsed := sDim.Render("–"), dur(m.now().Sub(r.Since))
 	if r.Job != nil {
@@ -35,14 +31,14 @@ func (m Model) runnerLine(i int, r model.InstanceStatus, selected bool, inner in
 	if selected {
 		sel = "▸ "
 	}
-	line := sel + cell(r.ID, 8) + " " + cell(r.Repo, 12) + " " + stateStyle(state).Render(cell(icon+" "+state, 11)) + " " +
-		cell(job, inner-50)
+	before := sel + cell(r.ID, 8) + " " + cell(r.Repo, 12) + " "
+	after := strings.Repeat(" ", max(11-ansi.StringWidth(badge), 0)) + " " + cell(job, inner-50)
 	tail := " " + cell(elapsed, 8)
 	if selected {
-		return m.selectedRow(fmt.Sprintf("runner-%d", i), line,
+		return m.selectedRow(fmt.Sprintf("runner-%d", i), before, badge, after,
 			rowButtons(ui.NewButton(rowLogs, "Logs", ui.Secondary), ui.NewButton(rowStop, "Stop", ui.Danger)), tail, inner)
 	}
-	return m.row(fmt.Sprintf("runner-%d", i), false, line+tail, inner)
+	return zone.Mark(fmt.Sprintf("runner-%d", i), ui.BadgeRow(sSel, false, before, badge, after+tail, inner))
 }
 
 func (m Model) runnersLines(w int) []string {

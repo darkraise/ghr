@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 )
 
@@ -38,4 +39,24 @@ func Badge(text string, kind BadgeKind) string {
 		return "[" + text + "]"
 	}
 	return badgeStyles[kind].Render(" " + text + " ")
+}
+
+// BadgeRow renders a table row exactly w columns wide: before, the badge,
+// then after. A selected row gets sel on its text while the badge keeps its
+// own colours. When the row is too narrow, after gives way first, then
+// before is cut to leave room for the badge; only a row narrower than the
+// badge itself cuts the badge.
+func BadgeRow(sel lipgloss.Style, selected bool, before, badge, after string, w int) string {
+	bw := ansi.StringWidth(badge)
+	if bw >= w {
+		return Cell(badge, w)
+	}
+	if ansi.StringWidth(before) > w-bw {
+		before = Cell(before, w-bw)
+	}
+	after = Cell(after, w-bw-ansi.StringWidth(before))
+	if !selected {
+		return before + badge + after
+	}
+	return sel.Render(ansi.Strip(before)) + badge + sel.Render(ansi.Strip(after))
 }

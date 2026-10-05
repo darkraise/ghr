@@ -103,13 +103,30 @@ func rowButtons(buttons ...*ui.Button) string {
 	return strings.Join(parts, "")
 }
 
-// selectedRow renders a selected row of width w: the text s, the row's
-// buttons, then tail, the row's fixed right-hand columns, which keep their
-// place under the header. s gives way to the buttons, so its last column
-// should be the flexible one.
-func (m Model) selectedRow(id, s, buttons, tail string, w int) string {
+// selectedRow renders a selected row of width w: the text before the badge,
+// the badge (kept in colour), the text after it, the row's buttons, then
+// tail, the row's fixed right-hand columns, which keep their place under
+// the header. The text gives way to the buttons, so its last column should
+// be the flexible one.
+func (m Model) selectedRow(id, before, badge, after, buttons, tail string, w int) string {
 	bw, tw := ansi.StringWidth(buttons), ansi.StringWidth(tail)
-	return zone.Mark(id, sSel.Render(ansi.Strip(cell(s, w-bw-tw)))) + buttons + sSel.Render(ansi.Strip(tail))
+	return zone.Mark(id, ui.BadgeRow(sSel, true, before, badge, after, w-bw-tw)) + buttons + sSel.Render(ansi.Strip(tail))
+}
+
+// stateBadge is the badge for a repo, runner, job or registration state.
+func stateBadge(state string) string {
+	kind := ui.BadgeMuted
+	switch state {
+	case "active", "online", "success", "matched", "ok":
+		kind = ui.BadgeOK
+	case "busy":
+		kind = ui.BadgeBusy
+	case "paused", "idle", "starting", "expires soon", "unverified":
+		kind = ui.BadgeWarn
+	case "error", "failure", "offline", "unmatched", "rejected":
+		kind = ui.BadgeBad
+	}
+	return ui.Badge(state, kind)
 }
 
 // fit keeps the first hdr lines and scrolls the rest so that body line sel

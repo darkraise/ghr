@@ -1,7 +1,7 @@
  ghr   mode ● QUEUE   runners ▕██░▏ 2/3   api 4800   disk ▕██████░░░░▏ 61%   ●
   1 Dashboard  [ 2 Runners ]  3 History    4 Settings                    ? help
 Runners › a3f9c1                             ( Copy run URL )    [ Stop runner ]
-● busy  ·  darkcloud  ·  CI / e2e-journeys  #412  ·  12m04s  ·  started 2026-10…
+[BUSY]  ·  darkcloud  ·  CI / e2e-journeys  #412  ·  12m04s  ·  started 2026-10…
 
 › [ Steps ]   Log     Containers   
 

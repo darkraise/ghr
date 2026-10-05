@@ -4,14 +4,14 @@ Dashboard                                             [ + Add ]    ( Pause all )
  Running 2 / 3   Queued jobs 3   Repositories 2 active · 1 paused   Disk 61%    
 ╭─ › Repositories ─────────────────────────────────────────────────────────────╮
 │   REPO           STATE      RUN   QUEUE  LAST JOB                            │
-│ ▸ darkcloud      ● active   1/1   ⧗ 2    ✔ #411 lint…  ( Pause )  [ Remove ] │
-│   darkmem        ● active   1/1   –      ✖ #87 build / test  1h ago          │
-│   darkagents     ◌ paused   0/1   ⧗ 1    –                                   │
+│ ▸ darkcloud      [ACTIVE]   1/1   ⧗ 2    ✔ #411 lint…  ( Pause )  [ Remove ] │
+│   darkmem        [ACTIVE]   1/1   –      ✖ #87 build / test  1h ago          │
+│   darkagents     [PAUSED]   0/1   ⧗ 1    –                                   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Runners ────────────────────────────────────────────────────────────────────╮
 │   ID       REPO         STATE       JOB                        ELAPSED       │
-│   a3f9c1   darkcloud    ⣾ busy      CI / e2e-journeys  #412    12m04s        │
-│   7be210   darkmem      ○ idle      –                          1m30s         │
+│   a3f9c1   darkcloud    ⣾ [BUSY]    CI / e2e-journeys  #412    12m04s        │
+│   7be210   darkmem      [IDLE]      –                          1m30s         │
 │   –        darkcloud    ⧗ waiting   2 jobs queued (repo cap 1)               │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Activity ───────────────────────────────────────────────────────────────────╮
