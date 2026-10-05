@@ -183,11 +183,20 @@ func TestRepositoriesNarrowShowsControls(t *testing.T) {
 			}
 		}
 	}
+	// Short: every control is on screen in some frame while paging down, and
+	// each frame fits.
 	m := onRepos(t, &fakeClient{}, 40, 22)
-	fits(t, "repositories short", m.View(), 40, 22)
-	m = feed(m, key("pgdown"), key("pgdown"), key("pgdown"))
-	if v := m.View(); !strings.Contains(v, "dc-e2e-") {
-		t.Fatalf("40x22 scrolled to the end lacks the cleanup control:\n%s", v)
+	seen := ""
+	for i := 0; i < 8; i++ {
+		v := m.View()
+		fits(t, "repositories short", v, 40, 22)
+		seen += v
+		m = feed(m, key("pgdown"))
+	}
+	for _, want := range []string{"Pause", "Remove", "[ − ]", "[ + ]", "darkcloud-linux", "Runners get", "dc-e2e-", "Workflow labels", "GitHub registrations"} {
+		if !strings.Contains(seen, want) {
+			t.Errorf("40x22: %q never scrolled into view", want)
+		}
 	}
 }
 
