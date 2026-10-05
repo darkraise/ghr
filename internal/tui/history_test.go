@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/darkraise/ghr/internal/model"
 )
@@ -144,5 +145,22 @@ func TestHistoryBarsAndBadges(t *testing.T) {
 			}
 		}
 		fits(t, "history", v, w, 30)
+	}
+}
+
+// The selected row's Copy button takes room from the job cell, never from
+// the run number.
+func TestHistorySelectedRowKeepsRunNumber(t *testing.T) {
+	for _, w := range []int{80, 100, 120} {
+		v := pageModels["history"](w).View()
+		lines := strings.Split(v, "\n")
+		i := lineWith(lines, "Copy run URL")
+		if i < 0 {
+			t.Fatalf("%d columns: no selected row:\n%s", w, v)
+		}
+		fits(t, "history", v, w, 30)
+		if row := ansi.Strip(lines[i]); !strings.Contains(row, "#411 ") || strings.Contains(row, "#411…") {
+			t.Errorf("%d columns: run number cut: %q", w, row)
+		}
 	}
 }

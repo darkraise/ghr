@@ -174,7 +174,19 @@ func (m Model) historyPage(w, h int) string {
 		if showRepo {
 			line += cell(e.Repo, 12) + " "
 		}
-		line += cell("#"+e.RunNumber, 7) + " " + cell(e.JobName, jobW)
+		run, copyBtn := "#"+e.RunNumber, ""
+		runJob := cell(run, 7) + " " + cell(e.JobName, jobW)
+		if i == m.histSel {
+			// The Copy button takes its room from the job cell, then from the
+			// run cell's padding, so the run number stays whole.
+			copyBtn = rowButtons(ui.NewButton(rowCopy, "Copy run URL", ui.Secondary))
+			room := inner - tail() - ansi.StringWidth(copyBtn) - ansi.StringWidth(line)
+			runJob = cell(run, max(room, ansi.StringWidth(run)))
+			if room-8 >= 1 {
+				runJob = cell(run, 7) + " " + cell(e.JobName, room-8)
+			}
+		}
+		line += runJob
 		badge := stateBadge(e.Conclusion)
 		after := strings.Repeat(" ", max(11-ansi.StringWidth(badge), 0))
 		if showDur {
@@ -186,7 +198,7 @@ func (m Model) historyPage(w, h int) string {
 		id := fmt.Sprintf("hist-%d", i)
 		if i == m.histSel {
 			tailW := tail()
-			lines = append(lines, m.selectedRow(id, line, "", "", rowButtons(ui.NewButton(rowCopy, "Copy run URL", ui.Secondary)), "", inner-tailW)+
+			lines = append(lines, m.selectedRow(id, line, "", "", copyBtn, "", inner-tailW)+
 				ui.BadgeRow(sSel, true, " ", badge, after, tailW))
 		} else {
 			lines = append(lines, zone.Mark(id, ui.BadgeRow(sSel, false, line+" ", badge, after, inner)))
