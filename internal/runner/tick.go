@@ -74,7 +74,7 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 		ours[i.RunnerName] = i.ID
 	}
 	demand := sched.Demand{}
-	anyOK, authFailed, complete := false, false, true
+	anyOK, authFailed, allAnswered := false, false, true
 	for _, r := range cfg.Repos {
 		if r.Paused {
 			continue
@@ -83,12 +83,12 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 		wait := now.Before(m.retryAt[r.Name])
 		m.mu.Unlock()
 		if wait {
-			complete = false
+			allAnswered = false
 			continue
 		}
 		jobs, err := m.repoDemand(ctx, cfg, r, ours, now)
 		if err != nil {
-			complete = false
+			allAnswered = false
 			if github.IsKind(err, github.ErrAuth) {
 				authFailed = true
 			}
@@ -117,7 +117,7 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 	if recovered {
 		m.Events.Add("ok", "", "GitHub token accepted again")
 	}
-	return complete
+	return allAnswered
 }
 
 func (m *Manager) repoDemand(ctx context.Context, cfg *config.Config, r config.Repo, ours map[string]string, now time.Time) ([]sched.QueuedJob, error) {

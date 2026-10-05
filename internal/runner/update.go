@@ -41,7 +41,8 @@ type updateFile struct {
 }
 
 // updateState is the runner update's state; guarded by Manager.mu. Only
-// storeUpdateFile changes file.
+// storeUpdateFile changes file, besides clearQueue's reset when the file can
+// be neither rewritten nor removed.
 type updateState struct {
 	file         updateFile
 	installed    string // "" when dist/current does not resolve
