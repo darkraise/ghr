@@ -49,7 +49,13 @@ func (c *Client) call(ctx context.Context, method, path string, body io.Reader, 
 			Error   string    `json:"error"`
 			RetryAt time.Time `json:"retry_at"`
 		}
-		json.NewDecoder(resp.Body).Decode(&e)
+		derr := json.NewDecoder(resp.Body).Decode(&e)
+		// The daemon's handlers always answer JSON; a plain-text 404 or 405
+		// is the router of a daemon that predates this route.
+		if derr != nil && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
+			e.Error = "the running ghr daemon does not know " + method + " " + path +
+				"; it is older than this ghr, restart it: systemctl restart ghr"
+		}
 		if e.Error == "" {
 			e.Error = resp.Status
 		}

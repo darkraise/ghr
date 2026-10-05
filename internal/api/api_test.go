@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -416,5 +417,22 @@ func TestMetricsRoute(t *testing.T) {
 	m, err = c.Metrics(context.Background())
 	if err != nil || b.metricsCalls != 2 || m.DiskPct != 40 || m.CPU != nil || m.Samples == nil || len(m.Samples) != 0 {
 		t.Fatalf("second call %#v %v", m, err)
+	}
+}
+
+// A daemon older than the client answers a route it lacks with the router's
+// plain-text 404 or 405; the client names the cause instead.
+func TestOlderDaemonAsksForARestart(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("DELETE /repos/{name}", func(w http.ResponseWriter, r *http.Request) {})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c := &Client{Base: srv.URL, HTTP: &http.Client{Timeout: 5 * time.Second}}
+	_, err := c.AvailableRepos(context.Background()) // 405: the path matches another method
+	if err == nil || !strings.Contains(err.Error(), "systemctl restart ghr") {
+		t.Fatalf("405: %v", err)
+	}
+	if err := c.QueueRunnerUpdate(context.Background()); err == nil || !strings.Contains(err.Error(), "systemctl restart ghr") {
+		t.Fatalf("404: %v", err)
 	}
 }
