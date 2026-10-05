@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/ghr/internal/config"
@@ -76,5 +78,65 @@ func TestTextFieldClickAndDisable(t *testing.T) {
 	f.Update(key("x"))
 	if f.Value().Text != "10s" {
 		t.Fatal("a disabled field changed")
+	}
+}
+
+func TestMaskedFieldNeverShowsItsValue(t *testing.T) {
+	f := NewTextField("t/token", 20)
+	f.Mask = true
+	f.Check = func(s string) error {
+		if len(s) < 10 {
+			return fmt.Errorf("token %q is too short", s)
+		}
+		return nil
+	}
+	typeText(f, "ghp_secret")
+	views := []string{render(f.View(true, 40))}
+	f.Update(key("enter")) // commit: no longer editing
+	views = append(views, render(f.View(true, 40)), render(f.View(false, 40)))
+	f.SetDisabled(true)
+	views = append(views, render(f.View(false, 40)))
+	f.SetDisabled(false)
+	f.SetValue(Value{Text: "short"})
+	views = append(views, render(f.View(false, 40)))
+	for i, v := range views {
+		if strings.Contains(v, "secret") || strings.Contains(v, "short") || strings.Contains(v, "ghp") {
+			t.Fatalf("view %d shows the value: %q", i, v)
+		}
+	}
+	if !strings.Contains(views[2], "••••••••••") {
+		t.Fatalf("masked view %q", views[2])
+	}
+	if f.Value().Text != "short" {
+		t.Fatal("masking changes only the view")
+	}
+}
+
+// A masked field's check error never carries the value in any form: raw,
+// quoted, escaped or transformed.
+func TestMaskedFieldErrorIsGeneric(t *testing.T) {
+	f := NewTextField("t/token", 20)
+	f.Mask = true
+	f.Check = func(s string) error {
+		return fmt.Errorf("bad %s %q %s %s", s, s, strings.ToUpper(s), strings.ReplaceAll(s, "_", `\_`))
+	}
+	f.SetValue(Value{Text: "ghp_a\"b"})
+	err := f.Err()
+	if err == nil || err != ErrMaskedInvalid {
+		t.Fatalf("Err() = %v", err)
+	}
+	v := render(f.View(false, 40))
+	for _, s := range []string{err.Error(), v} {
+		low := strings.ToLower(s)
+		if strings.Contains(low, "ghp") || strings.Contains(s, `a\"b`) || strings.Contains(s, `a"b`) {
+			t.Fatalf("value leaked: %q", s)
+		}
+	}
+	if !strings.Contains(v, ErrMaskedInvalid.Error()) {
+		t.Fatalf("view %q lacks the generic error", v)
+	}
+	f.Check = func(string) error { return nil }
+	if f.Err() != nil {
+		t.Fatal("a passing check gives no error")
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func layoutSections() ([]Section, *Select, *Stepper, *Button, *Button) {
@@ -96,5 +98,57 @@ func TestScrollTo(t *testing.T) {
 		if got := ScrollTo(c.off, c.h, c.r); got != c.want {
 			t.Errorf("ScrollTo(%d, %d, %v) = %d, want %d", c.off, c.h, c.r, got, c.want)
 		}
+	}
+}
+
+func TestRowLines(t *testing.T) {
+	lines, _ := Render([]Section{{Rows: []Row{{Label: "Runners get", Lines: []string{"self-hosted linux x64", "homelab (global)"}}}}}, "", 60, true)
+	if len(lines) != 2 || !strings.Contains(lines[0], "Runners get") || !strings.Contains(lines[0], "self-hosted linux x64") ||
+		!strings.HasPrefix(lines[1], strings.Repeat(" ", LabelWidth+1)) || !strings.Contains(lines[1], "homelab (global)") {
+		t.Fatalf("lines %q", lines)
+	}
+}
+
+// Long Lines and a narrow-form description wrap to the space beside the
+// label instead of being cut at the card edge; every word stays visible.
+func TestRowLinesAndDescWrap(t *testing.T) {
+	long := "self-hosted linux x64 darkcloud-linux gpu cuda-12 homelab (global) arm64-builder"
+	desc := "container name prefixes removed after each job, matched by their start"
+	lines, _ := Render([]Section{{Title: "Labels", Rows: []Row{
+		{Label: "Runners get", Lines: []string{long, "runners already running keep their labels"}},
+		{Label: "Prefixes", Items: []Widget{NewTextField("p", 10)}, Desc: desc},
+	}}}, "", 52, false)
+	text := strings.Join(lines, "\n")
+	for _, word := range append(strings.Fields(long), strings.Fields(desc)...) {
+		if !strings.Contains(text, word) {
+			t.Errorf("word %q lost:\n%s", word, text)
+		}
+	}
+	for i, l := range lines {
+		if ansi.StringWidth(l) > 52 {
+			t.Fatalf("line %d is %d wide: %q", i, ansi.StringWidth(l), l)
+		}
+	}
+	if !strings.Contains(text, "keep their labels") {
+		t.Fatalf("final note cut:\n%s", text)
+	}
+}
+
+// Under StackBelow columns inside a card, the label takes its own line and
+// the control gets the full width, so it is never cut.
+func TestRowStacksWhenNarrow(t *testing.T) {
+	s := NewStepper("m", 0, 99, 1)
+	s.ZeroText = "∞"
+	lines, _ := Render([]Section{{Title: "Capacity", Rows: []Row{{Label: "Max", Items: []Widget{s}, Desc: "once set, it stays explicit"}}}}, "", 40, false)
+	if len(lines) < 4 || !strings.Contains(lines[1], "Max") || strings.Contains(lines[1], "[") {
+		t.Fatalf("label not on its own line: %q", lines)
+	}
+	want := ansi.Strip(render(s.View(false, 34)))
+	if !strings.Contains(ansi.Strip(render(lines[2])), strings.TrimSpace(want)) {
+		t.Fatalf("control cut: %q, want %q", lines[2], want)
+	}
+	wide, _ := Render([]Section{{Title: "Capacity", Rows: []Row{{Label: "Max", Items: []Widget{s}}}}}, "", 60, false)
+	if !strings.Contains(wide[1], "Max") || !strings.Contains(wide[1], "[") {
+		t.Fatalf("a card 56 wide inside keeps the label column: %q", wide[1])
 	}
 }

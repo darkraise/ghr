@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -17,6 +19,7 @@ type TextField struct {
 	Width    int                // columns inside the brackets
 	Check    func(string) error // inline error shown under the field while it fails
 	Disabled bool
+	Mask     bool // shows • for every character in every state; Err returns ErrMaskedInvalid
 	in       textinput.Model
 	editing  bool
 	advance  bool // enter committed; Group.Key moves focus on
@@ -54,12 +57,20 @@ func (f *TextField) Blur() {
 	f.in.Blur()
 }
 
+// ErrMaskedInvalid is a masked field's check error. Check's own error may
+// quote, escape or transform the value, so none of its text is shown.
+var ErrMaskedInvalid = errors.New("not a valid value")
+
 // Err is the inline error for the current value, or nil.
 func (f *TextField) Err() error {
 	if f.Check == nil {
 		return nil
 	}
-	return f.Check(f.Value().Text)
+	err := f.Check(f.Value().Text)
+	if err != nil && f.Mask {
+		return ErrMaskedInvalid
+	}
+	return err
 }
 
 func (f *TextField) TakesKey(k tea.KeyMsg) bool {
@@ -122,10 +133,16 @@ func (f *TextField) Update(msg tea.Msg) (Control, tea.Cmd) {
 // View renders [ 5m         ] and, while the value fails Check, a line with the error.
 func (f *TextField) View(focused bool, _ int) string {
 	var text string
-	if f.editing {
+	if f.Mask {
+		f.in.EchoMode, f.in.EchoCharacter = textinput.EchoPassword, '•'
+	}
+	switch {
+	case f.editing:
 		f.in.Width = f.Width - 1
 		text = f.in.View()
-	} else {
+	case f.Mask:
+		text = strings.Repeat("•", utf8.RuneCountInString(f.in.Value()))
+	default:
 		text = f.in.Value()
 	}
 	style := Bold
