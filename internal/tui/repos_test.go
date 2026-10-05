@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/golden"
 	zone "github.com/lrstanley/bubblezone"
 
@@ -302,7 +303,12 @@ func TestRepositoriesRemovingAndRefreshMerge(t *testing.T) {
 func TestRepositoriesLeaveGuard(t *testing.T) {
 	c := &fakeClient{}
 	m := onRepos(t, c, 120, 40)
+	c.patchErr = rejected("repos.darkmem.max must be <= global_max")
 	repoInput(m, "darkmem", "max").SetValue(ui.Value{Num: 2, Set: true})
+	if m = feed(m, key("ctrl+s")); m.repos.alert == nil {
+		t.Fatal("the rejected save showed no alert")
+	}
+	c.patchErr, c.patches = nil, nil
 	if m = feed(m, key("1")); m.overlay != ovUnsaved || m.leaveFrom != pageRepos {
 		t.Fatalf("1: overlay %v from %v", m.overlay, m.leaveFrom)
 	}
@@ -310,8 +316,8 @@ func TestRepositoriesLeaveGuard(t *testing.T) {
 		t.Fatalf("dialog:\n%s", v)
 	}
 	m = click(t, m, btnLeaveDiscard)
-	if m.page != pageDashboard || len(m.repos.form.Dirty()) != 0 {
-		t.Fatalf("discard: page %v dirty %d", m.page, len(m.repos.form.Dirty()))
+	if m.page != pageDashboard || len(m.repos.form.Dirty()) != 0 || m.overlay != ovNone || m.repos.alert != nil {
+		t.Fatalf("discard: page %v dirty %d overlay %v alert %v", m.page, len(m.repos.form.Dirty()), m.overlay, m.repos.alert)
 	}
 	m = feed(m, key("2"))
 	repoInput(m, "darkmem", "max").SetValue(ui.Value{Num: 2, Set: true})
@@ -363,5 +369,126 @@ repos:
 	v := zone.Scan(m.reposView(w, h))
 	if strings.ContainsAny(v, "\x1b\a") || !strings.Contains(v, "xy") || !strings.Contains(v, "badlabel (global)") {
 		t.Fatalf("config text not sanitised: %q", v)
+	}
+}
+
+// Clicking a list row selects it and focuses the list; the wheel over the
+// list moves the selection.
+func TestRepositoriesListMouse(t *testing.T) {
+	m := feed(sampleModel(&fakeClient{}, 120, 30), key("2"))
+	m.repos.group.Focus(reposAdd)
+	z := zoneOf(t, m, "repos/row/2")
+	m = feed(m, leftClick(z.StartX, z.StartY))
+	if r := m.selectedRepoStatus(); r == nil || r.Name != "darkagents" || m.repos.group.FocusedID() != reposList {
+		t.Fatalf("click: %+v focus %q", r, m.repos.group.FocusedID())
+	}
+	wheel := func(b tea.MouseButton) {
+		z := zoneOf(t, m, "repos/row/0")
+		m = feed(m, tea.MouseMsg{X: z.StartX, Y: z.StartY, Action: tea.MouseActionPress, Button: b})
+	}
+	if wheel(tea.MouseButtonWheelUp); m.selectedRepoStatus().Name != "darkmem" {
+		t.Fatalf("wheel up: %q", m.selectedRepoStatus().Name)
+	}
+	if wheel(tea.MouseButtonWheelDown); m.selectedRepoStatus().Name != "darkagents" {
+		t.Fatalf("wheel down: %q", m.selectedRepoStatus().Name)
+	}
+}
+
+// A repo being removed, or an unreachable daemon, disables Pause and Remove,
+// and pressing them anyway does nothing.
+func TestRepositoriesActionsGuarded(t *testing.T) {
+	st := sampleStatus()
+	st.Repos[2].Removing = true
+	c := &fakeClient{st: &st}
+	m := feed(newModel(c, 120, 30, st), keys("2", "down", "down")...)
+	m.View()
+	if !m.repos.pause.Disabled || !m.repos.remove.Disabled {
+		t.Fatal("controls enabled while the repo is being removed")
+	}
+	for _, id := range []string{reposPause, reposRemove} {
+		upd, cmd := m.reposAction(id)
+		if cmd != nil || upd.(Model).overlay != ovNone {
+			t.Fatalf("%s acted on a repo being removed", id)
+		}
+	}
+	m = feed(m, key("up"))
+	m.connected = false
+	m.View()
+	if !m.repos.pause.Disabled || !m.repos.remove.Disabled {
+		t.Fatal("controls enabled while unreachable")
+	}
+	upd, cmd := m.reposAction(reposPause)
+	if m = upd.(Model); cmd != nil || len(c.actions()) != 0 || !strings.Contains(m.View(), "the daemon is unreachable") {
+		t.Fatalf("offline pause: actions %v", c.actions())
+	}
+}
+
+// The list emptying shows the empty state; when repos return, the selection
+// comes back to the repo it named.
+func TestRepositoriesListEmptiesAndRefills(t *testing.T) {
+	m := feed(sampleModel(&fakeClient{}, 120, 30), keys("2", "down")...)
+	st := sampleStatus()
+	empty := st
+	empty.Repos = nil
+	m = feed(m, statusMsg{st: empty})
+	if m.selectedRepoStatus() != nil || !strings.Contains(m.View(), "No repositories yet") {
+		t.Fatal("empty list not shown")
+	}
+	m = feed(m, statusMsg{st: st})
+	if r := m.selectedRepoStatus(); r == nil || r.Name != "darkmem" || !strings.Contains(m.View(), "Pause") {
+		t.Fatalf("refill: %+v", r)
+	}
+}
+
+// A refresh while editing: a removed repo loses its fields and edit with a
+// toast, a repo being removed drops its edit, a new repo gets fields, and no
+// dropped edit reaches the next patch.
+func TestRepositoriesRefreshDropsGoneEditsAndAddsNewRepo(t *testing.T) {
+	c := &fakeClient{}
+	m := onRepos(t, c, 120, 40)
+	repoInput(m, "darkagents", "labels").SetValue(ui.Value{List: []string{"x"}})
+	repoInput(m, "darkmem", "max").SetValue(ui.Value{Num: 4, Set: true})
+	c.cfg = parseConfig(t, `owner: darkraise
+mode: queue
+global_max: 3
+labels: [homelab]
+repos:
+  - name: darkcloud
+    max: 2
+    labels: [darkcloud-linux]
+    cleanup_name_prefixes: [dc-e2e-]
+  - name: darkagents
+    paused: true
+    removing: true
+  - name: newrepo
+    max: 3
+`)
+	m = ticks(m, slowPoll)
+	if m.repos.form.Field(reposKey("darkmem", "max")) != nil {
+		t.Error("removed repo kept its fields")
+	}
+	if m.repos.form.Field(reposKey("darkagents", "labels")).Dirty() {
+		t.Error("repo being removed kept its edit")
+	}
+	if got := repoInput(m, "newrepo", "max").Value(); got.Num != 3 || !got.Set {
+		t.Errorf("new repo max %+v", got)
+	}
+	if v := m.View(); !strings.Contains(v, "repository darkmem was removed") || strings.Contains(v, "unsaved change") {
+		t.Errorf("toast or unsaved bar wrong:\n%s", v)
+	}
+	if p, _ := m.reposPatch(); len(p.Repos) != 0 {
+		t.Errorf("patch after refresh: %+v", p)
+	}
+}
+
+// Leaving while a save is in flight waits for it instead of asking.
+func TestRepositoriesLeaveWaitsForSaveInFlight(t *testing.T) {
+	m := onRepos(t, &fakeClient{}, 120, 40)
+	repoInput(m, "darkmem", "max").SetValue(ui.Value{Num: 2, Set: true})
+	upd, _ := m.Update(key("ctrl+s"))
+	upd, _ = upd.Update(key("1"))
+	m = upd.(Model)
+	if m.overlay != ovNone || m.page != pageRepos || !strings.Contains(m.View(), "wait for the save to finish") {
+		t.Fatalf("overlay %v page %v", m.overlay, m.page)
 	}
 }
