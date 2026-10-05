@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -126,7 +127,8 @@ func renderRow(r Row, focused string, w int, wide bool) []string {
 
 // WrapWords breaks s into lines at most w wide at spaces only. ansi.Wrap
 // always breaks after a hyphen, which would split a label such as
-// self-hosted across lines; a word wider than w is hard-broken instead.
+// self-hosted across lines; a word wider than w is hard-broken instead. A
+// colour still open at a break is closed and reopened on the next line.
 func WrapWords(s string, w int) []string {
 	var out []string
 	cur, curW := "", 0
@@ -147,7 +149,25 @@ func WrapWords(s string, w int) []string {
 		}
 		cur, curW = word, ww
 	}
-	return append(out, cur)
+	return carrySGR(append(out, cur))
+}
+
+var sgrRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// carrySGR ends each line whose last SGR sequence is not a reset with a
+// reset, and starts the next line with that sequence.
+func carrySGR(lines []string) []string {
+	open := ""
+	for i, l := range lines {
+		l, open = open+l, ""
+		if ms := sgrRe.FindAllString(l, -1); len(ms) > 0 {
+			if last := ms[len(ms)-1]; last != "\x1b[m" && last != "\x1b[0m" {
+				open, l = last, l+"\x1b[m"
+			}
+		}
+		lines[i] = l
+	}
+	return lines
 }
 
 // ScrollTo returns the scroll offset that brings r into a view of h lines,

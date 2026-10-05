@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/api"
@@ -609,5 +610,28 @@ func TestLabelCheckHeadingWhileChecking(t *testing.T) {
 	m := onRepos(t, &fakeClient{labels: model.LabelCheck{State: "checking"}}, 140, 80)
 	if v := m.View(); !strings.Contains(v, "Checking…") {
 		t.Fatalf("heading:\n%s", v)
+	}
+}
+
+// Label-check text wraps between words, never after a hyphen inside a label,
+// and an indented line keeps its indent on every wrapped line.
+func TestLabelCheckWrapKeepsLabelsWhole(t *testing.T) {
+	at := now.Add(-time.Minute)
+	long := "darkcloud-linux-arm64-large"
+	c := &fakeClient{labels: model.LabelCheck{State: "done", CheckedAt: &at, Groups: []model.LabelGroup{
+		{Labels: []string{long, "self-hosted", "build-cache-xl"}, Jobs: []string{"CI / build"}, Count: 1, LastSeen: at},
+	}}}
+	m := onRepos(t, c, 40, 200)
+	v := ansi.Strip(m.View())
+	fits(t, "repositories", m.View(), 40, 200)
+	for _, want := range []string{long, "build-cache-xl", "self-hosted"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("%q split across lines:\n%s", want, v)
+		}
+	}
+	lines := strings.Split(v, "\n")
+	i := lineWith(lines, "missing ")
+	if i < 0 || !strings.Contains(lines[i], "│   missing ") || !strings.Contains(lines[i+1], "│   ") {
+		t.Fatalf("indent lost:\n%s", strings.Join(lines[max(i, 0):max(i, 0)+3], "\n"))
 	}
 }

@@ -12,7 +12,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/config"
@@ -746,8 +745,10 @@ func (m Model) lcCard(name string, w int) ([]string, map[string]ui.Range) {
 	var lines []string
 	plain := func(s ...string) string { return strings.Join(s, "") }
 	text := func(s string, style func(...string) string) {
-		for _, l := range strings.Split(ansi.Wrap(s, inner, ""), "\n") {
-			lines = append(lines, style(l))
+		body := strings.TrimLeft(s, " ")
+		indent := s[:len(s)-len(body)]
+		for _, l := range ui.WrapWords(body, max(inner-len(indent), 1)) {
+			lines = append(lines, style(indent+l))
 		}
 	}
 	shown := map[string]bool{}

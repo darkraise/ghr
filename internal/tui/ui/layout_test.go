@@ -152,3 +152,14 @@ func TestRowStacksWhenNarrow(t *testing.T) {
 		t.Fatalf("a card 56 wide inside keeps the label column: %q", wide[1])
 	}
 }
+
+// A colour opened before a break is closed at the line's end and reopened on
+// the next line, so it never runs into what follows the line.
+func TestWrapWordsCarriesColourAcrossBreaks(t *testing.T) {
+	dim := "\x1b[2m"
+	got := WrapWords("plain "+dim+"one two three\x1b[0m end", 12)
+	want := []string{"plain " + dim + "one\x1b[m", dim + "two three\x1b[0m", "end"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %q", got)
+	}
+}
