@@ -689,7 +689,7 @@ func TestUnsavedDialogClosesWhenNothingIsLeft(t *testing.T) {
 	c := &fakeClient{}
 	m := dirtySettings(t, c)
 	if m = feed(m, key("3")); m.overlay != ovUnsaved {
-		t.Fatalf("2: overlay %v", m.overlay)
+		t.Fatalf("unexpected overlay %v", m.overlay)
 	}
 	cfg := parseConfig(t, settingsYAML)
 	cfg.PollInterval, _ = config.ParseDuration("30s")
@@ -706,7 +706,7 @@ func TestLeaveSaveStaysWhenEditedDuringSave(t *testing.T) {
 	applyPoll(c)
 	m := dirtySettings(t, c)
 	if m = feed(m, key("3")); m.overlay != ovUnsaved {
-		t.Fatalf("2: overlay %v", m.overlay)
+		t.Fatalf("unexpected overlay %v", m.overlay)
 	}
 	upd, cmd := m.Update(key("enter")) // Save, the primary
 	m = upd.(Model)
@@ -766,5 +766,56 @@ func TestSettingsInAppChecksBlockSave(t *testing.T) {
 	m = feed(m, key("ctrl+s"))
 	if v := m.View(); len(c.patches) != 0 || !strings.Contains(v, "fix the highlighted settings first") {
 		t.Fatalf("patches %d:\n%s", len(c.patches), v)
+	}
+}
+
+// A save started from the unsaved-changes dialog finishing while another
+// dialog is open must not replace it: the typed token stays in its own
+// dialog and the page stays where it is.
+func TestLeaveSaveDoesNotReplaceAnOpenDialog(t *testing.T) {
+	c := &fakeClient{}
+	applyPoll(c)
+	m := dirtySettings(t, c)
+	if m = feed(m, key("3")); m.overlay != ovUnsaved {
+		t.Fatalf("unexpected overlay %v", m.overlay)
+	}
+	upd, cmd := m.Update(key("enter")) // Save, the primary
+	m = upd.(Model)
+	set(m, setIdleTimeout, ui.Value{Text: "9m"})
+	upd, _ = m.openTokenDialog()
+	m = upd.(Model)
+	m.tok.field.SetValue(ui.Value{Text: "ghp_typed"})
+	m, _ = pump(m, collect(cmd)...)
+	if m.overlay != ovToken || m.tok == nil || m.tok.field.Value().Text != "ghp_typed" || m.page != pageSettings {
+		t.Fatalf("overlay %v page %v: the token dialog was replaced", m.overlay, m.page)
+	}
+}
+
+// Opening another dialog over the token dialog drops what was typed.
+func TestOpenDialogClearsTypedToken(t *testing.T) {
+	m := sampleModel(&fakeClient{}, 120, 30)
+	upd, _ := m.openTokenDialog()
+	m = upd.(Model)
+	d := m.tok
+	d.field.SetValue(ui.Value{Text: "ghp_typed"})
+	m.openDialog(ovHelp, btnClose, ui.NewButton(btnClose, "Close", ui.Primary))
+	if m.tok != nil || d.field.Value().Text != "" {
+		t.Fatalf("tok %v value %q", m.tok, d.field.Value().Text)
+	}
+}
+
+func TestRepositoriesSaveToastNamesThePage(t *testing.T) {
+	c := &fakeClient{}
+	m := onRepos(t, c, 120, 40)
+	repoInput(m, "darkmem", "max").SetValue(ui.Value{Num: 2, Set: true})
+	c.onPatch = func(p model.ConfigPatch) {
+		if rp, ok := p.Repos["darkmem"]; ok && rp.Max != nil {
+			n := *rp.Max
+			c.cfg.Repo("darkmem").Max = &n
+		}
+	}
+	m = feed(m, key("ctrl+s"))
+	if v := m.View(); !strings.Contains(v, "Repositories saved") || strings.Contains(v, "Settings saved") || !strings.Contains(v, "ctrl+s save") {
+		t.Fatalf("toast or footer:\n%s", v)
 	}
 }

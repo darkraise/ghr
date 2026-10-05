@@ -106,7 +106,7 @@ func TestStalePressIsIgnored(t *testing.T) {
 	applyPoll(c)
 	m = dirtySettings(t, c)
 	if m = feed(m, key("3")); m.overlay != ovUnsaved {
-		t.Fatalf("2: overlay %v", m.overlay)
+		t.Fatalf("unexpected overlay %v", m.overlay)
 	}
 	m, _ = pump(m, ui.Pressed{ID: setSave}, ui.Pressed{ID: btnLeaveSave}, ui.Pressed{ID: btnLeaveSave})
 	if m.page != pageRunners || len(c.patches) != 1 {

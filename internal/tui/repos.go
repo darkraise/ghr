@@ -615,5 +615,5 @@ func (m Model) reposMouse(msg tea.MouseMsg) (bool, tea.Model, tea.Cmd) {
 }
 
 func (m Model) reposFooterKeys() []footerKey {
-	return []footerKey{{"up", "select"}, {"tab", "next"}, {"a", "add"}, {"p", "pause"}, {"d", "remove"}, {"?", "help"}, {"q", "quit"}}
+	return []footerKey{{"up", "select"}, {"tab", "next"}, {"a", "add"}, {"p", "pause"}, {"d", "remove"}, {"ctrl+s", "save"}, {"?", "help"}, {"q", "quit"}}
 }

@@ -363,7 +363,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.page == pageDetail && m.frame%slowPoll == 0 && m.instance(m.detailID) != nil {
 			cmds = append(cmds, m.fetchSteps(), m.fetchContainers())
 		}
-		if m.frame%slowPoll == 0 || (m.page == pageSettings && m.cfg == nil) {
+		if m.frame%slowPoll == 0 || ((m.page == pageSettings || m.page == pageRepos) && m.cfg == nil) {
 			cmds = append(cmds, m.fetchConfig())
 		}
 		if m.frame%slowPoll == 0 {

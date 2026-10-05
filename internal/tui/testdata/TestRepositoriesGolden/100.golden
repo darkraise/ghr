@@ -37,4 +37,4 @@
                                                 ╰──────────────────────────────────────────────────╯
   ? Help                                        ╭─ GitHub registrations ───────────────────────────╮
   q Quit         ● 1 unsaved change (darkcloud)    ( Discard )    [ Save changes ]                  
- up select  tab next  a add  p pause  d remove  ? help  q quit
+ up select  tab next  a add  p pause  d remove  ctrl+s save  ? help  q quit

@@ -537,3 +537,44 @@ func TestActivityErrorRetries(t *testing.T) {
 		t.Fatalf("after retry:\n%s", v)
 	}
 }
+
+func TestRegistrationStatusIsSanitised(t *testing.T) {
+	c := &fakeClient{regs: []model.Registration{{ID: 1, Name: "linux-1", Status: "off\x1b]0;x\aline"}}}
+	m := onRepos(t, c, 140, 80)
+	m.View()
+	pw, _ := m.reposPanelSize(m.contentSize())
+	r := m.selectedRepoStatus()
+	lines, _ := m.reposPanelLines(*r, pw)
+	v := zone.Scan(strings.Join(lines, "\n"))
+	if strings.ContainsAny(v, "\x1b\a") || !strings.Contains(v, "[OFFLINE]") {
+		t.Fatalf("registration status not sanitised: %q", v)
+	}
+}
+
+// A Delete press for a registration the listing no longer holds, or one that
+// is no longer deletable, opens no dialog.
+func TestConfirmDeleteNeedsAListedDeletableRegistration(t *testing.T) {
+	c := &fakeClient{regs: []model.Registration{
+		{ID: 1, Name: "linux-1", Status: "offline"},
+		{ID: 2, Name: "laptop", Status: "online"},
+	}}
+	m := onRepos(t, c, 140, 80)
+	m.View()
+	for _, id := range []int64{99, 2} {
+		if upd, _ := m.pressed(regDelID(id)); upd.(Model).overlay != ovNone {
+			t.Errorf("id %d opened a dialog", id)
+		}
+	}
+	upd, _ := m.pressed(regDelID(1))
+	if mm := upd.(Model); mm.overlay != ovConfirm || !strings.Contains(mm.confirmText, "linux-1") {
+		t.Fatalf("overlay %v text %q", mm.overlay, mm.confirmText)
+	}
+}
+
+func TestTokenCardBeforeFirstReply(t *testing.T) {
+	m := onSettings(t, &fakeClient{}, 140, 80)
+	m.mg.token = model.TokenStatus{}
+	if v := m.View(); strings.Contains(v, "UNVERIFIED") || !strings.Contains(v, "not read yet") {
+		t.Fatalf("token card before the first reply:\n%s", v)
+	}
+}

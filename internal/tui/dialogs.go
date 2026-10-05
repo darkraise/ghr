@@ -183,6 +183,10 @@ func (m Model) addRepoView(w int) string {
 // openDialog shows overlay ov with buttons, right-aligned in the given order.
 // Focus starts on the last button, the primary one; esc presses cancel.
 func (m *Model) openDialog(ov overlay, cancel string, buttons ...*ui.Button) {
+	if m.overlay == ovToken && m.tok != nil {
+		m.tok.field.SetValue(ui.Value{})
+		m.tok = nil
+	}
 	m.overlay, m.dlgButtons, m.dlgCancel = ov, buttons, cancel
 	ws := make([]ui.Widget, len(buttons))
 	for i, b := range buttons {

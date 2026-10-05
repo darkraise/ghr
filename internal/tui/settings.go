@@ -194,8 +194,7 @@ func (s *settingsPage) checkErrors() map[string]string {
 }
 
 // buildPatch turns the dirty fields into one ConfigPatch and returns the
-// value sent for each key. A repo being removed has no dirty fields: the
-// merge that marked it removing dropped its edits.
+// value sent for each key.
 func (s *settingsPage) buildPatch() (model.ConfigPatch, map[string]ui.Value) {
 	var p model.ConfigPatch
 	sent := map[string]ui.Value{}
@@ -285,14 +284,14 @@ func (m Model) saved(msg savedMsg) (tea.Model, tea.Cmd) {
 		}
 		var ae *api.Error
 		if !errors.As(msg.err, &ae) || ae.Status < 400 || ae.Status >= 500 {
-			m.toast.Show("settings not saved: "+clean(msg.err.Error()), true, m.now())
+			m.toast.Show(strings.ToLower(pageNames[msg.page])+" not saved: "+clean(msg.err.Error()), true, m.now())
 			return m, nil
 		}
 		s.alert = strings.Split(clean(msg.err.Error()), "; ")
-		m.toast.Show("settings not saved", true, m.now())
+		m.toast.Show(strings.ToLower(pageNames[msg.page])+" not saved", true, m.now())
 		return m, nil
 	}
-	m.toast.Show("Settings saved", false, m.now())
+	m.toast.Show(pageNames[msg.page]+" saved", false, m.now())
 	c, seq, p := m.c, m.nextCfgSeq(), msg.page
 	return m, func() tea.Msg {
 		cx, cancel := ctx()
@@ -348,6 +347,9 @@ func (m Model) refetched(msg refetchedMsg) (tea.Model, tea.Cmd) {
 	}
 	if leaving {
 		if len(s.form.Dirty()) > 0 {
+			if m.overlay != ovNone {
+				return m, nil
+			}
 			return m.leave(m.leaveTo)
 		}
 		return m.goTo(m.leaveTo)

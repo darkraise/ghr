@@ -22,9 +22,9 @@
                  │ CPU quota            [ 200%       ]  per runner, e.g. 200%                                          │
                  ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
                  ╭─ GitHub token ──────────────────────────────────────────────────────────────────────────────────────╮
-                 │ Replacing checks read access to the first repository only; registration permissions are checked wh… │
-                 │ Status               [UNVERIFIED]  expiry unknown                                                   │
-                 │ Rate limit           –                                                                              │
-  ? Help         │                      [ Replace token ]                                                              │
-  q Quit         ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                 │ Replacing checks read access to the first repository only; registration permissions are checked     │
+                 │ when a runner is next started.                                                                      │
+                 │ Status               not read yet                                                                   │
+  ? Help         │ Rate limit           –                                                                              │
+  q Quit         │                      [ Replace token ]                                                              │
  tab next  shift+tab previous  ctrl+s save  ? help  q quit

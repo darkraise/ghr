@@ -48,7 +48,9 @@ func Render(secs []Section, focused string, w int, wide bool) ([]string, map[str
 		}
 		var body []string
 		if s.Note != "" {
-			body = append(body, Dim.Render(s.Note))
+			for _, l := range WrapWords(s.Note, max(inner, 1)) {
+				body = append(body, Dim.Render(l))
+			}
 		}
 		for _, r := range s.Rows {
 			start := len(body)
@@ -76,7 +78,7 @@ func renderRow(r Row, focused string, w int, wide bool) []string {
 		head, pad, line = []string{Cell(r.Label, w)}, "  ", "  "
 	}
 	ctlW := w - ansi.StringWidth(pad)
-	wrap := func(s string) []string { return wrapWords(s, max(ctlW-2, 1)) }
+	wrap := func(s string) []string { return WrapWords(s, max(ctlW-2, 1)) }
 	var rest []string
 	if len(r.Items) == 0 {
 		if len(r.Lines) == 0 {
@@ -122,10 +124,10 @@ func renderRow(r Row, focused string, w int, wide bool) []string {
 	return out
 }
 
-// wrapWords breaks s into lines at most w wide at spaces only. ansi.Wrap
+// WrapWords breaks s into lines at most w wide at spaces only. ansi.Wrap
 // always breaks after a hyphen, which would split a label such as
 // self-hosted across lines; a word wider than w is hard-broken instead.
-func wrapWords(s string, w int) []string {
+func WrapWords(s string, w int) []string {
 	var out []string
 	cur, curW := "", 0
 	for _, word := range strings.Fields(s) {

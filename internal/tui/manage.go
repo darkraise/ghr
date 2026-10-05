@@ -139,9 +139,6 @@ func errText(err error) string {
 func (m Model) tokenSection() ui.Section {
 	ts := m.mg.token
 	state := ts.State
-	if state == "" {
-		state = "unverified"
-	}
 	badge := state
 	exp := "expiry unknown"
 	if ts.ExpiresAt != nil {
@@ -152,6 +149,9 @@ func (m Model) tokenSection() ui.Section {
 		}
 	}
 	status := stateBadge(badge) + "  " + exp
+	if state == "" {
+		status = sDim.Render("not read yet")
+	}
 	if ts.CheckedAt != nil {
 		status += sDim.Render("  · checked " + ago(m.now().Sub(*ts.CheckedAt)))
 	}
@@ -270,7 +270,7 @@ func (m Model) tokenSet(msg tokenSetMsg) (tea.Model, tea.Cmd) {
 	}
 	m.tok.field.SetValue(ui.Value{})
 	if msg.err != nil {
-		m.tok.busy, m.tok.err = false, clean(msg.err.Error())
+		m.tok.busy, m.tok.err = false, errText(msg.err)
 		m.syncToken()
 		return m, nil
 	}
@@ -438,11 +438,13 @@ func (m Model) regCard(w int) ([]string, map[string]ui.Range) {
 	case !m.mg.regLoaded:
 		lines = append(lines, sDim.Render("loading…"))
 	case len(m.mg.regs) == 0:
-		lines = append(lines, sDim.Render("No runners registered. ghr starts single-use runners on demand (and keeps warm ones in all mode)."))
+		for _, l := range ui.WrapWords("No runners registered. ghr starts single-use runners on demand (and keeps warm ones in all mode).", max(w-4, 1)) {
+			lines = append(lines, sDim.Render(l))
+		}
 	}
 	if !m.st.Degraded {
 		for _, g := range m.mg.regs {
-			state := g.Status
+			state := clean(g.Status)
 			if g.Busy {
 				state = "busy"
 			}
@@ -470,11 +472,14 @@ func (m Model) confirmDeleteReg(id string) (tea.Model, tea.Cmd) {
 	if err != nil || m.offline() || !m.repoActionable() {
 		return m, nil
 	}
-	name := ""
+	name, listed := "", false
 	for _, g := range m.mg.regs {
-		if g.ID == n {
-			name = g.Name
+		if g.ID == n && deletable(g) {
+			name, listed = g.Name, true
 		}
+	}
+	if !listed {
+		return m, nil
 	}
 	repo, c := m.mg.regRepo, m.c
 	return m.openConfirm(fmt.Sprintf("Delete the runner registration %s from %s?", clean(name), clean(repo)), func() tea.Cmd {
