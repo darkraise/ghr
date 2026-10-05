@@ -137,7 +137,7 @@ func Run(ctx context.Context, o Options) error {
 		m.Docker = system.Docker{Run: system.Exec}
 	}
 	if m.Host == nil {
-		m.Host = system.Host{Run: system.Exec}
+		m.Host = system.Host{Run: system.Exec, Script: system.ExecGroup}
 	}
 	if err := m.Init(); err != nil {
 		return err

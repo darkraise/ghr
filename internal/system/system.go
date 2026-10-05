@@ -6,7 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,9 +27,23 @@ var CommandTimeout = 10 * time.Minute
 // Exec is the real Runner. Errors name only the command and its first argument,
 // because full argument lists can carry secrets (the JIT config).
 func Exec(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return execute(ctx, false, name, args)
+}
+
+// ExecGroup is Exec for a command that starts children of its own, such as a
+// script running apt: cancelling it kills its whole process group, not only
+// the command.
+func ExecGroup(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return execute(ctx, true, name, args)
+}
+
+func execute(ctx context.Context, group bool, name string, args []string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, CommandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
+	if group {
+		killGroup(cmd)
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	// Killing the command does not close pipes a child process inherited (a
@@ -294,7 +312,11 @@ func reclaimed(out []byte) string {
 	return "0B"
 }
 
-type Host struct{ Run Runner }
+type Host struct {
+	Run Runner
+	// Script runs scripts that start children of their own; nil uses Run.
+	Script Runner
+}
 
 // CopyTree copies src to dst (which must not exist), preserving modes and symlinks.
 func (h Host) CopyTree(ctx context.Context, src, dst string) error {
@@ -305,4 +327,68 @@ func (h Host) CopyTree(ctx context.Context, src, dst string) error {
 func (h Host) ChownR(ctx context.Context, path, user string) error {
 	_, err := h.Run(ctx, "chown", "-R", user+":"+user, path)
 	return err
+}
+
+// Extract unpacks a .tar.gz into dir.
+func (h Host) Extract(ctx context.Context, tarball, dir string) error {
+	_, err := h.Run(ctx, "tar", "-xzf", tarball, "-C", dir)
+	return err
+}
+
+// RunScript runs the script at path inside dir, as setup.sh runs
+// bin/installdependencies.sh.
+func (h Host) RunScript(ctx context.Context, dir, path string) error {
+	run := h.Script
+	if run == nil {
+		run = h.Run
+	}
+	_, err := run(ctx, filepath.Join(dir, path))
+	return err
+}
+
+// ReadLink resolves path through every symlink.
+func (Host) ReadLink(path string) (string, error) { return filepath.EvalSymlinks(path) }
+
+// SwitchLink points the symlink at path to target with one rename, so path
+// never goes missing; a leftover path+".tmp" is replaced.
+func (Host) SwitchLink(target, path string) error {
+	tmp := path + ".tmp"
+	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Symlink(target, tmp); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// DownloadTimeout bounds one Download.
+var DownloadTimeout = 10 * time.Minute
+
+// Download saves url to dst, following redirects. It sends no credentials:
+// it fetches public release assets.
+func Download(ctx context.Context, url, dst string) error {
+	ctx, cancel := context.WithTimeout(ctx, DownloadTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET %s: %s", url, resp.Status)
+	}
+	f, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
