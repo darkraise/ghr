@@ -56,7 +56,8 @@ type updateState struct {
 	lastOutcome  string
 	lastErr      string
 	lastFinished time.Time
-	gen          int // bumped when an install switches dist/current
+	gen          int       // bumped when an install switches dist/current
+	stopRetryAt  time.Time // no start before this, after an idle runner did not stop
 }
 
 // releaseFacts is what a release listing says about an installed version.
@@ -278,8 +279,14 @@ func (m *Manager) runnerUpdate() model.RunnerUpdate {
 	}
 }
 
-// updateTimeout bounds one runner update.
-const updateTimeout = 10 * time.Minute
+const (
+	// updateTimeout bounds one runner update.
+	updateTimeout = 10 * time.Minute
+	// updateStopRetry spaces start attempts after an idle runner could not be
+	// stopped, so a persistent failure does not stop the other idle runners
+	// (and respawn them) on every tick.
+	updateStopRetry = 15 * time.Minute
+)
 
 // startUpdateIfFree starts a queued runner update when ghr is free: no
 // instance starting or busy, this tick's demand poll (made with cfg, still the
@@ -295,7 +302,7 @@ func (m *Manager) startUpdateIfFree(tickCtx context.Context, cfg *config.Config,
 	}
 	m.fileMu.Lock()
 	m.mu.Lock()
-	free := m.upd.file.QueuedAt != nil && !m.upd.running && !m.closed && !m.pruning
+	free := m.upd.file.QueuedAt != nil && !m.upd.running && !m.closed && !m.pruning && !now.Before(m.upd.stopRetryAt)
 	for _, i := range m.insts {
 		if i.State == sched.Starting || i.State == sched.Busy {
 			free = false
@@ -327,7 +334,17 @@ func (m *Manager) startUpdateIfFree(tickCtx context.Context, cfg *config.Config,
 	stopAfter := context.AfterFunc(tickCtx, stopCancel)
 	stopped := true
 	for _, i := range m.snapshot() {
-		if i.State == sched.Idle && m.stopIdleRunner(stopCtx, i, now) != idleStopped {
+		if i.State != sched.Idle {
+			continue
+		}
+		res := m.stopIdleRunner(stopCtx, i, now)
+		if res == idleKept && tickCtx.Err() == nil {
+			m.mu.Lock()
+			m.upd.stopRetryAt = now.Add(updateStopRetry)
+			m.mu.Unlock()
+			m.Events.Add("warn", "", "runner update postponed %s: idle runner %s could not be stopped", updateStopRetry, i.ID)
+		}
+		if res != idleStopped {
 			stopped = false
 			break
 		}

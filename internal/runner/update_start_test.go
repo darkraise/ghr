@@ -234,6 +234,41 @@ func TestUpdateWaitsWhenAnIdleRunnerDoesNotStop(t *testing.T) {
 	}
 }
 
+// An idle runner that cannot be stopped (here: its registration is gone, so
+// it cannot be checked) holds the update off for a while instead of every
+// tick stopping the other idle runners again.
+func TestUpdateBacksOffWhenAnIdleRunnerCannotStop(t *testing.T) {
+	h := newHarness(t)
+	queuedUpdate(t, h, tarballSum())
+	idleRunner(t, h)
+	if err := h.m.spawn(context.Background(), h.cfg, "darkcloud"); err != nil {
+		t.Fatal(err)
+	}
+	h.m.setState("bbbbbb", sched.Idle)
+	h.gh.mu.Lock()
+	delete(h.gh.runners, h.m.insts["bbbbbb"].RunnerID)
+	h.gh.mu.Unlock()
+	postponed := func() int { return strings.Count(h.eventText(), "runner update postponed") }
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if postponed() != 1 || strings.Contains(h.eventText(), "runner update started") {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+	h.now = h.now.Add(time.Minute)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if postponed() != 1 || strings.Contains(h.eventText(), "runner update started") {
+		t.Fatalf("retried within the backoff:\n%s", h.eventText())
+	}
+	h.gh.setRunner(h.m.insts["bbbbbb"].RunnerID, "online", false)
+	h.now = h.now.Add(15 * time.Minute)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if current(t, h) != "2.338.0" {
+		t.Fatalf("no update after the backoff:\n%s", h.eventText())
+	}
+}
+
 // A config change during the demand poll defers the update to the next tick,
 // whose poll covers the new config.
 func TestConfigChangeDuringPollDefersTheUpdate(t *testing.T) {
