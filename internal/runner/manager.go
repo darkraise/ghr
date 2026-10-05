@@ -125,6 +125,7 @@ type instance struct {
 	finishing    bool      // a finish goroutine is running
 	retryFinish  time.Time // when a failed finish may run again
 	cleanupFails int       // consecutive failed Docker cleanups
+	deregistered bool      // stopIdleRunner deleted its registration
 }
 
 type Manager struct {

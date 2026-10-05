@@ -529,24 +529,15 @@ const (
 // refuses to delete a busy runner (422), so a job handed to i after the check
 // is never killed by the stop.
 func (m *Manager) stopIdleRunner(ctx context.Context, i instance, now time.Time) idleStop {
-	r, err := m.GH.GetRunner(ctx, i.Repo, i.RunnerID)
-	if err != nil {
-		if !github.IsKind(err, github.ErrNotFound) {
-			m.apiErr(i.Repo, err, now)
+	m.mu.Lock()
+	gone := m.insts[i.ID] != nil && m.insts[i.ID].deregistered
+	m.mu.Unlock()
+	// A runner deregistered by an earlier stop can take no job and its check
+	// now answers 404, so only the unit stop is repeated.
+	if !gone {
+		if res, ok := m.deregisterIdle(ctx, i, now); !ok {
+			return res
 		}
-		return idleKept
-	}
-	if r.Busy {
-		m.setState(i.ID, sched.Busy)
-		return idleBusy
-	}
-	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil {
-		if github.IsKind(err, github.ErrUnprocessable) {
-			m.setState(i.ID, sched.Busy)
-			return idleBusy
-		}
-		m.apiErr(i.Repo, err, now)
-		return idleKept
 	}
 	// Deregistered, the runner exits on its own even if this stop fails.
 	if err := m.SD.Stop(ctx, UnitPrefix+i.ID); err != nil {
@@ -555,6 +546,36 @@ func (m *Manager) stopIdleRunner(ctx context.Context, i instance, now time.Time)
 	}
 	m.Events.Add("info", i.Repo, "stopped idle runner %s", i.ID)
 	return idleStopped
+}
+
+// deregisterIdle deletes i's registration once the runners API affirms it is
+// not busy; ok is false, with what became of i, when it did not.
+func (m *Manager) deregisterIdle(ctx context.Context, i instance, now time.Time) (idleStop, bool) {
+	r, err := m.GH.GetRunner(ctx, i.Repo, i.RunnerID)
+	if err != nil {
+		if !github.IsKind(err, github.ErrNotFound) {
+			m.apiErr(i.Repo, err, now)
+		}
+		return idleKept, false
+	}
+	if r.Busy {
+		m.setState(i.ID, sched.Busy)
+		return idleBusy, false
+	}
+	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil {
+		if github.IsKind(err, github.ErrUnprocessable) {
+			m.setState(i.ID, sched.Busy)
+			return idleBusy, false
+		}
+		m.apiErr(i.Repo, err, now)
+		return idleKept, false
+	}
+	m.mu.Lock()
+	if p := m.insts[i.ID]; p != nil {
+		p.deregistered = true
+	}
+	m.mu.Unlock()
+	return idleStopped, true
 }
 
 // stopStartTimedOut stops runners that never came online; finish deletes their registration.

@@ -501,6 +501,29 @@ func TestStopIdleDeregistersBeforeStopping(t *testing.T) {
 	}
 }
 
+// A runner deregistered by a stop that then failed is not checked again (its
+// check would answer 404); the next stop only retries the unit.
+func TestStopIdleRetriesOnlyTheUnitAfterDeregistering(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.gh.setRunner(101, "online", false)
+	h.m.refreshRunners(context.Background())
+	h.now = h.now.Add(6 * time.Minute)
+	h.sd.stopErr["ghr-runner-aaaaaa"] = errors.New("unit busy")
+	h.m.stopIdle(context.Background(), h.cfg, h.now)
+	if len(h.sd.stopped) != 0 || !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("stopped %v deleted %v", h.sd.stopped, h.gh.deleted)
+	}
+	delete(h.sd.stopErr, "ghr-runner-aaaaaa")
+	calls := h.gh.callCount()
+	if res := h.m.stopIdleRunner(context.Background(), h.m.snapshot()[0], h.now); res != idleStopped {
+		t.Fatalf("result %v", res)
+	}
+	if h.gh.callCount() != calls || len(h.sd.stopped) != 1 {
+		t.Fatalf("GitHub calls %d→%d stopped %v", calls, h.gh.callCount(), h.sd.stopped)
+	}
+}
+
 // GitHub refuses to delete a busy runner with 422: it took a job after the
 // check, so it keeps running and counts as busy. Any other failure keeps it idle.
 func TestStopIdleKeepsRunnerGitHubWillNotDeregister(t *testing.T) {
