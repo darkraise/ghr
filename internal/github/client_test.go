@@ -451,12 +451,16 @@ func TestSecondaryRateLimitIsNotAuth(t *testing.T) {
 	}
 }
 
-// Only a success or an authentication failure is a verdict on the token; a
-// server error, a 404 or a rate limit leaves the last verdict in place.
+// Only a success or an authentication or permission failure is a verdict on
+// the token; a server error, a 404 or a rate limit leaves the last verdict in
+// place.
 func TestTokenMetaOnlyCountsTokenVerdicts(t *testing.T) {
 	status := 200
 	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(4000+status))
+		if status == 429 {
+			w.Header().Set("Retry-After", "1")
+		}
 		w.WriteHeader(status)
 		fmt.Fprint(w, `{"full_name":"darkraise/darkcloud","message":"x"}`)
 	})
@@ -466,11 +470,14 @@ func TestTokenMetaOnlyCountsTokenVerdicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := c.TokenMeta()
-	for _, status = range []int{500, 404} {
+	for _, status = range []int{500, 404, 429} {
 		now = now.Add(time.Minute)
 		if _, err := c.GetRepo(context.Background(), "darkcloud"); err == nil {
 			t.Fatalf("status %d: no error", status)
 		}
+		c.mu.Lock()
+		c.retryAt = time.Time{} // the next status must reach the server
+		c.mu.Unlock()
 		m := c.TokenMeta()
 		if !m.OK || !m.CheckedAt.Equal(first.CheckedAt) || *m.RateRemaining != 4000+status {
 			t.Fatalf("after %d: %+v", status, m)
@@ -478,7 +485,9 @@ func TestTokenMetaOnlyCountsTokenVerdicts(t *testing.T) {
 	}
 	status = 401
 	now = now.Add(time.Minute)
-	c.GetRepo(context.Background(), "darkcloud")
+	if _, err := c.GetRepo(context.Background(), "darkcloud"); !IsKind(err, ErrAuth) {
+		t.Fatalf("401: %v", err)
+	}
 	if m := c.TokenMeta(); m.OK || !m.CheckedAt.Equal(now) {
 		t.Fatalf("after 401: %+v", m)
 	}

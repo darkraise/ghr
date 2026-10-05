@@ -166,8 +166,8 @@ func (c *Client) TokenMeta() TokenMeta {
 
 // record stores the response's rate and expiry headers, unless the token
 // changed while the request was in flight. Only a success or an
-// authentication failure is a verdict on the token; other failures leave
-// CheckedAt and OK as they were.
+// authentication or permission failure (ErrAuth) is a verdict on the token;
+// other failures leave CheckedAt and OK as they were.
 func (c *Client) record(gen uint64, h http.Header, apiErr *APIError) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
