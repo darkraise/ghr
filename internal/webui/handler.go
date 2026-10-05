@@ -184,7 +184,7 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &b) {
 		return
 	}
-	id, err := h.auth.Login(ClientKey(r.RemoteAddr), b.Password)
+	id, err := h.auth.login(r.Context(), ClientKey(r.RemoteAddr), b.Password)
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -227,8 +227,15 @@ func setSession(w http.ResponseWriter, r *http.Request, id string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
 		Name: cookieName, Value: id, Path: "/", MaxAge: maxAge,
 		HttpOnly: true, SameSite: http.SameSiteStrictMode,
-		Secure: r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"),
+		Secure: r.TLS != nil || forwardedHTTPS(r),
 	})
+}
+
+// forwardedHTTPS reads the first X-Forwarded-Proto entry: chained proxies
+// append theirs, and the first is the scheme the browser used.
+func forwardedHTTPS(r *http.Request) bool {
+	proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+	return strings.EqualFold(strings.TrimSpace(proto), "https")
 }
 
 func (h *handler) fail(w http.ResponseWriter, err error) {

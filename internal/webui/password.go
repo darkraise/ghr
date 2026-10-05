@@ -116,5 +116,15 @@ func writeHash(path string, h passwordHash) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	// Syncing the directory makes the rename survive a power loss. Some
+	// platforms, Windows among them, cannot sync a directory, so it is best
+	// effort.
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		d.Sync()
+		d.Close()
+	}
+	return nil
 }

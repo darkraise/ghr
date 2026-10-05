@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -124,6 +125,12 @@ func (a *Auth) Setup(password string) (string, error) {
 // Login checks password for the client named by key (see ClientKey) and
 // starts a session.
 func (a *Auth) Login(key, password string) (string, error) {
+	return a.login(context.Background(), key, password)
+}
+
+// login stops waiting for a derivation slot once ctx is done, so logins whose
+// clients have gone do not keep the slots from the ones still waiting.
+func (a *Auth) login(ctx context.Context, key, password string) (string, error) {
 	a.mu.Lock()
 	err := a.admitLocked(key, a.now())
 	gen := a.gen
@@ -138,7 +145,11 @@ func (a *Auth) Login(key, password string) (string, error) {
 	if !ok {
 		return "", ErrSetupRequired
 	}
-	a.sem <- struct{}{}
+	select {
+	case a.sem <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 	defer func() { <-a.sem }()
 	a.mu.Lock()
 	err = a.admitLocked(key, a.now())

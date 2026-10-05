@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -142,6 +143,35 @@ func TestSecureCookie(t *testing.T) {
 	rec = do(h, http.MethodPost, "https://ghr.lan/auth/login", body(pw), nil)
 	if c := sessionCookie(t, rec); !c.Secure {
 		t.Fatal("cookie not Secure over TLS")
+	}
+	for proto, secure := range map[string]bool{"https, http": true, " HTTPS ,http": true, "http, https": false} {
+		rec = do(h, http.MethodPost, "/auth/login", body(pw), func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", proto) })
+		if c := sessionCookie(t, rec); c.Secure != secure {
+			t.Fatalf("X-Forwarded-Proto %q: Secure %v", proto, c.Secure)
+		}
+	}
+}
+
+func TestLoginEndsWithTheRequest(t *testing.T) {
+	h, a, _ := newTestHandler(t)
+	if _, err := a.Setup(pw); err != nil {
+		t.Fatal(err)
+	}
+	fillSlots(a)
+	defer func() { <-a.sem; <-a.sem }()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- do(h, http.MethodPost, "/auth/login", body(pw), func(r *http.Request) { *r = *r.WithContext(ctx) })
+	}()
+	select {
+	case rec := <-done:
+		if len(rec.Result().Cookies()) != 0 {
+			t.Fatalf("a login whose client left got a session: %v", rec.Result().Cookies())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the login handler ignored the request context")
 	}
 }
 

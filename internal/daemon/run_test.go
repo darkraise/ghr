@@ -405,7 +405,7 @@ func TestRunWithoutTheWebListener(t *testing.T) {
 	}
 	warned, listening := false, false
 	for _, e := range evs {
-		if e.Level == "warn" && strings.Contains(e.Msg, "web password file is unreadable") {
+		if e.Level == "warn" && strings.HasPrefix(e.Msg, "web password file is unreadable") {
 			warned = true
 		}
 		if strings.Contains(e.Msg, "web UI listening") {

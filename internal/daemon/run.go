@@ -148,7 +148,7 @@ func Run(ctx context.Context, o Options) error {
 		ev.Add("warn", "", "config: %s", w)
 	}
 	if err := auth.Check(); err != nil {
-		ev.Add("warn", "", "web: %v", err)
+		ev.Add("warn", "", "%v", err)
 	}
 	owner := store.Config().Owner
 	gh := github.New(owner, store.Token)

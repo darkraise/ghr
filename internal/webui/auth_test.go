@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"os"
@@ -410,6 +411,35 @@ func TestDerivationsAreBounded(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
+	<-a.sem
+}
+
+func TestLoginStopsWaitingWhenTheClientLeaves(t *testing.T) {
+	a, _ := newTestAuth(t)
+	if _, err := a.Setup(pw); err != nil {
+		t.Fatal(err)
+	}
+	fillSlots(a)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.login(ctx, "10.0.0.1", "wrong password!")
+		done <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("login: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a login kept waiting for a slot after its client left")
+	}
+	if len(a.sem) != maxDerivations || len(a.fails) != 0 {
+		t.Fatalf("slots taken %d, failures %v", len(a.sem), a.fails)
+	}
+	<-a.sem
 	<-a.sem
 }
 
