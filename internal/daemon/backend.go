@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/darkraise/ghr/internal/api"
@@ -64,6 +65,10 @@ type Backend struct {
 	// Sampler supplies the metrics series; nil serves an empty one.
 	Sampler *metrics.Sampler
 	checks  labelChecks
+
+	stepsMu    sync.Mutex
+	steps      map[string]stepsEntry
+	stepsCalls map[string]*stepsCall
 }
 
 var _ api.Backend = (*Backend)(nil)
@@ -112,7 +117,74 @@ func (b *Backend) RunnerContainers(ctx context.Context, id string) ([]model.Cont
 	return cs, notFoundIfUnknown(err)
 }
 
+// stepsTTL bounds how often one runner's steps are fetched from GitHub,
+// however many browser tabs and TUIs poll its detail view.
+const stepsTTL = 5 * time.Second
+
+type stepsEntry struct {
+	at    time.Time
+	steps []model.Step
+}
+
+// stepsCall is one GitHub fetch that concurrent callers for a runner share.
+type stepsCall struct {
+	done  chan struct{}
+	steps []model.Step
+	err   error
+}
+
 func (b *Backend) RunnerSteps(ctx context.Context, id string) ([]model.Step, error) {
+	live := map[string]bool{}
+	for _, in := range b.M.Status().Instances {
+		live[in.ID] = true
+	}
+	now := b.now()
+	b.stepsMu.Lock()
+	for k, e := range b.steps {
+		if !live[k] || now.Sub(e.at) >= stepsTTL {
+			delete(b.steps, k)
+		}
+	}
+	if e, ok := b.steps[id]; ok {
+		b.stepsMu.Unlock()
+		return e.steps, nil
+	}
+	if c, ok := b.stepsCalls[id]; ok {
+		b.stepsMu.Unlock()
+		select {
+		case <-c.done:
+			return c.steps, c.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	c := &stepsCall{done: make(chan struct{})}
+	if b.stepsCalls == nil {
+		b.stepsCalls = map[string]*stepsCall{}
+	}
+	b.stepsCalls[id] = c
+	b.stepsMu.Unlock()
+
+	// Joined callers share this fetch, so one caller closing its tab must
+	// not cancel it for the others.
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	c.steps, c.err = b.fetchSteps(fctx, id)
+	cancel()
+
+	b.stepsMu.Lock()
+	delete(b.stepsCalls, id)
+	if c.err == nil && live[id] {
+		if b.steps == nil {
+			b.steps = map[string]stepsEntry{}
+		}
+		b.steps[id] = stepsEntry{at: b.now(), steps: c.steps}
+	}
+	b.stepsMu.Unlock()
+	close(c.done)
+	return c.steps, c.err
+}
+
+func (b *Backend) fetchSteps(ctx context.Context, id string) ([]model.Step, error) {
 	repo, runID, runnerName, err := b.M.RunnerRepoAndRun(id)
 	if err != nil {
 		return nil, notFoundIfUnknown(err)

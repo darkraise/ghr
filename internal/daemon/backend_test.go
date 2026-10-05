@@ -89,6 +89,8 @@ type fakeGH struct {
 	jobErr    map[int64]error // returned with that run's jobs
 	block     bool            // ListJobs waits for the context to end
 	listErr   error           // returned by ListRecentRuns
+	gate      chan struct{}   // when set, ListJobs waits for it after recording the call
+	onJobs    func()          // when set, ListJobs calls it after recording the call
 	lmu       sync.Mutex      // guards the fields below, written by scan goroutines
 	jobCalls  []int64
 	inFlight  int // ListJobs calls currently blocked
@@ -125,6 +127,12 @@ func (f *fakeGH) ListJobs(ctx context.Context, repo string, runID int64) ([]gith
 	f.lmu.Lock()
 	f.jobCalls = append(f.jobCalls, runID)
 	f.lmu.Unlock()
+	if f.onJobs != nil {
+		f.onJobs()
+	}
+	if f.gate != nil {
+		<-f.gate
+	}
 	if f.jobs != nil {
 		return f.jobs[runID], f.jobErr[runID]
 	}
@@ -695,5 +703,109 @@ func TestDeleteRegistrationRefusals(t *testing.T) {
 	m.degraded = "GitHub rejected the token"
 	if err := b.DeleteRegistration(ctx, "darkcloud", 1); apiStatus(err) != 503 {
 		t.Fatalf("degraded: %v", err)
+	}
+}
+
+func jobCallCount(gh *fakeGH) int {
+	gh.lmu.Lock()
+	defer gh.lmu.Unlock()
+	return len(gh.jobCalls)
+}
+
+func TestRunnerStepsAreCached(t *testing.T) {
+	b, m, gh := newBackend(t)
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa"}}
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	b.Now = func() time.Time { return now }
+	ctx := context.Background()
+	for range 3 {
+		if s, err := b.RunnerSteps(ctx, "aaaaaa"); err != nil || len(s) != 1 || s[0].Name != "checkout" {
+			t.Fatalf("steps %+v err %v", s, err)
+		}
+	}
+	if n := jobCallCount(gh); n != 1 {
+		t.Fatalf("%d GitHub calls inside the TTL, want 1", n)
+	}
+	now = now.Add(stepsTTL)
+	if _, err := b.RunnerSteps(ctx, "aaaaaa"); err != nil {
+		t.Fatal(err)
+	}
+	if n := jobCallCount(gh); n != 2 {
+		t.Fatalf("%d GitHub calls after the TTL, want 2", n)
+	}
+}
+
+func TestRunnerStepsAgeFromStorage(t *testing.T) {
+	b, m, gh := newBackend(t)
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa"}}
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	b.Now = func() time.Time { return now }
+	gh.onJobs = func() { now = now.Add(stepsTTL) }
+	ctx := context.Background()
+	for range 2 {
+		if _, err := b.RunnerSteps(ctx, "aaaaaa"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := jobCallCount(gh); n != 1 {
+		t.Fatalf("%d GitHub calls: a slow fetch stored an already expired entry", n)
+	}
+}
+
+func TestRunnerStepsDropAGoneRunner(t *testing.T) {
+	b, m, gh := newBackend(t)
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa"}}
+	ctx := context.Background()
+	if _, err := b.RunnerSteps(ctx, "aaaaaa"); err != nil {
+		t.Fatal(err)
+	}
+	m.insts = nil
+	b.RunnerSteps(ctx, "aaaaaa")
+	if n := jobCallCount(gh); n != 2 {
+		t.Fatalf("%d GitHub calls: a runner that left Status kept its cached steps", n)
+	}
+}
+
+func TestRunnerStepsErrorsAreNotCached(t *testing.T) {
+	b, m, gh := newBackend(t)
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa"}}
+	gh.jobs = map[int64][]github.Job{}
+	gh.jobErr = map[int64]error{55: errors.New("boom")}
+	for range 2 {
+		if _, err := b.RunnerSteps(context.Background(), "aaaaaa"); err == nil {
+			t.Fatal("error swallowed")
+		}
+	}
+	if n := jobCallCount(gh); n != 2 {
+		t.Fatalf("%d GitHub calls, want 2: an error was cached", n)
+	}
+}
+
+func TestRunnerStepsShareOneFetch(t *testing.T) {
+	b, m, gh := newBackend(t)
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa"}}
+	gh.gate = make(chan struct{})
+	type result struct {
+		steps []model.Step
+		err   error
+	}
+	results := make(chan result, 8)
+	for range 8 {
+		go func() {
+			s, err := b.RunnerSteps(context.Background(), "aaaaaa")
+			results <- result{s, err}
+		}()
+	}
+	waitFor(t, "the first fetch", func() bool { return jobCallCount(gh) == 1 })
+	time.Sleep(50 * time.Millisecond)
+	close(gh.gate)
+	for range 8 {
+		r := <-results
+		if r.err != nil || len(r.steps) != 1 || r.steps[0].Name != "checkout" {
+			t.Fatalf("steps %+v err %v", r.steps, r.err)
+		}
+	}
+	if n := jobCallCount(gh); n != 1 {
+		t.Fatalf("%d GitHub calls for 8 concurrent callers, want 1", n)
 	}
 }
