@@ -9,17 +9,44 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 )
 
-// Error carries an HTTP status to the client.
+// Error carries an HTTP status to the client; RetryAt is set on 429.
 type Error struct {
-	Status int
-	Msg    string
+	Status  int
+	Msg     string
+	RetryAt time.Time
 }
 
 func (e *Error) Error() string { return e.Msg }
+
+// FromGitHub gives a GitHub API error the status the daemon answers with.
+// Other errors are returned unchanged.
+func FromGitHub(err error) error {
+	var ae *Error
+	if errors.As(err, &ae) {
+		return err
+	}
+	var ge *github.APIError
+	if !errors.As(err, &ge) {
+		return err
+	}
+	switch ge.Kind {
+	case github.ErrRateLimit:
+		return &Error{Status: http.StatusTooManyRequests, Msg: err.Error(), RetryAt: ge.RetryAt}
+	case github.ErrAuth:
+		return &Error{Status: http.StatusForbidden, Msg: err.Error()}
+	case github.ErrNotFound:
+		return &Error{Status: http.StatusNotFound, Msg: err.Error()}
+	case github.ErrUnprocessable:
+		return &Error{Status: http.StatusConflict, Msg: err.Error()}
+	}
+	return &Error{Status: http.StatusBadGateway, Msg: err.Error()}
+}
 
 func BadRequest(msg string) error { return &Error{Status: http.StatusBadRequest, Msg: msg} }
 func NotFound(msg string) error   { return &Error{Status: http.StatusNotFound, Msg: msg} }
@@ -145,14 +172,19 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 func respond(w http.ResponseWriter, v any, err error) {
 	if err != nil {
+		err = FromGitHub(err)
 		status := http.StatusInternalServerError
+		body := map[string]string{"error": err.Error()}
 		var ae *Error
 		if errors.As(err, &ae) {
 			status = ae.Status
+			if !ae.RetryAt.IsZero() {
+				body["retry_at"] = ae.RetryAt.UTC().Format(time.RFC3339)
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		json.NewEncoder(w).Encode(body)
 		return
 	}
 	if v == nil {

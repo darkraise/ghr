@@ -6,15 +6,16 @@ import "time"
 type Status struct {
 	Now time.Time `json:"now"`
 	// Epoch changes on every daemon start; event sequence numbers restart with it.
-	Epoch          string           `json:"epoch"`
-	Mode           string           `json:"mode"`
-	GlobalMax      int              `json:"global_max"`
-	Degraded       bool             `json:"degraded"`
-	DegradedReason string           `json:"degraded_reason,omitempty"`
-	RateRemaining  int              `json:"rate_remaining"`
-	DiskPct        int              `json:"disk_pct"`
-	Repos          []RepoStatus     `json:"repos"`
-	Instances      []InstanceStatus `json:"instances"`
+	Epoch          string            `json:"epoch"`
+	Mode           string            `json:"mode"`
+	GlobalMax      int               `json:"global_max"`
+	Degraded       bool              `json:"degraded"`
+	DegradedReason string            `json:"degraded_reason,omitempty"`
+	RateRemaining  int               `json:"rate_remaining"`
+	DiskPct        int               `json:"disk_pct"`
+	Repos          []RepoStatus      `json:"repos"`
+	Instances      []InstanceStatus  `json:"instances"`
+	Maintenance    MaintenanceStatus `json:"maintenance"`
 }
 
 type RepoStatus struct {
@@ -122,4 +123,69 @@ type AddRepoRequest struct {
 	Max         *int     `json:"max,omitempty"`
 	Labels      []string `json:"labels,omitempty"`
 	AllowPublic bool     `json:"allow_public"`
+}
+
+// MaintenanceStatus is the daemon's prune state, served inside GET /status.
+type MaintenanceStatus struct {
+	Running      bool       `json:"running"`
+	LastStarted  *time.Time `json:"last_started,omitempty"`
+	LastFinished *time.Time `json:"last_finished,omitempty"`
+	LastOutcome  string     `json:"last_outcome,omitempty"` // "ok", "errors", "interrupted"
+}
+
+// TokenStatus is the GitHub token's state, served by GET /token.
+type TokenStatus struct {
+	State         string     `json:"state"` // "ok", "rejected", "unverified"
+	CheckedAt     *time.Time `json:"checked_at,omitempty"`
+	Reason        string     `json:"reason,omitempty"`
+	RateRemaining *int       `json:"rate_remaining,omitempty"`
+	RateLimit     *int       `json:"rate_limit,omitempty"`
+	RateReset     *time.Time `json:"rate_reset,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+}
+
+// Registration is one runner registered on a repo, served by GET /repos/{name}/registrations.
+type Registration struct {
+	ID     int64    `json:"id"`
+	Name   string   `json:"name"`
+	Status string   `json:"status"` // "online", "offline"
+	Busy   bool     `json:"busy"`
+	Labels []string `json:"labels"`
+	GHR    bool     `json:"ghr"`
+}
+
+// LabelGroup is one distinct runs-on label set seen in a repo's runs, part of LabelCheck.
+type LabelGroup struct {
+	Labels   []string  `json:"labels"` // lower-cased, sorted
+	Jobs     []string  `json:"jobs"`   // up to three "workflow / job" names
+	More     int       `json:"more"`   // further distinct names not listed
+	Count    int       `json:"count"`
+	LastSeen time.Time `json:"last_seen"`
+}
+
+// LabelCheck is a repo's workflow label observations, served by GET /repos/{name}/label-check.
+type LabelCheck struct {
+	State     string       `json:"state"` // "not_checked", "checking", "done"
+	CheckedAt *time.Time   `json:"checked_at,omitempty"`
+	Partial   bool         `json:"partial"`
+	Error     string       `json:"error,omitempty"` // why the last scan stopped early, other than its deadline
+	Groups    []LabelGroup `json:"groups"`
+}
+
+// MetricSample is one point of the daemon's load history, part of Metrics.
+type MetricSample struct {
+	At     time.Time `json:"at"`
+	Live   int       `json:"live"`
+	Queued int       `json:"queued"`
+	CPU    *float64  `json:"cpu,omitempty"`
+	Mem    *int64    `json:"mem,omitempty"`
+}
+
+// Metrics is the host load history and gauges, served by GET /metrics.
+type Metrics struct {
+	Samples  []MetricSample `json:"samples"`
+	CPU      *float64       `json:"cpu,omitempty"`
+	MemUsed  *int64         `json:"mem_used,omitempty"`
+	MemTotal *int64         `json:"mem_total,omitempty"`
+	DiskPct  int            `json:"disk_pct"`
 }

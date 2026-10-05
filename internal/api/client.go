@@ -46,13 +46,14 @@ func (c *Client) call(ctx context.Context, method, path string, body io.Reader, 
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		var e struct {
-			Error string `json:"error"`
+			Error   string    `json:"error"`
+			RetryAt time.Time `json:"retry_at"`
 		}
 		json.NewDecoder(resp.Body).Decode(&e)
 		if e.Error == "" {
 			e.Error = resp.Status
 		}
-		return &Error{Status: resp.StatusCode, Msg: e.Error}
+		return &Error{Status: resp.StatusCode, Msg: e.Error, RetryAt: e.RetryAt}
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
 		return nil

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 )
 
@@ -18,6 +19,7 @@ type fakeBackend struct {
 	pauseAll []bool
 	token    string
 	killed   []string
+	killErr  error
 }
 
 func (f *fakeBackend) Status() model.Status {
@@ -70,7 +72,7 @@ func (f *fakeBackend) SetToken(ctx context.Context, t string) error {
 }
 func (f *fakeBackend) KillRunner(ctx context.Context, id string) error {
 	f.killed = append(f.killed, id)
-	return nil
+	return f.killErr
 }
 
 func setup(t *testing.T) (*Client, *fakeBackend) {
@@ -186,5 +188,30 @@ func TestUnreachableDaemon(t *testing.T) {
 	c := NewUnixClient("/nonexistent/ghr.sock")
 	if _, err := c.Status(context.Background()); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestGitHubErrorsMapToStatuses(t *testing.T) {
+	c, b := setup(t)
+	retry := time.Date(2026, 10, 5, 12, 1, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		err    error
+		status int
+		retry  bool
+	}{
+		{&github.APIError{Status: 403, Kind: github.ErrRateLimit, Message: "rate", RetryAt: retry}, 429, true},
+		{&github.APIError{Status: 401, Kind: github.ErrAuth, Message: "Bad credentials"}, 403, false},
+		{&github.APIError{Status: 404, Kind: github.ErrNotFound, Message: "Not Found"}, 404, false},
+		{&github.APIError{Status: 422, Kind: github.ErrUnprocessable, Message: "busy"}, 409, false},
+		{&github.APIError{Status: 503, Kind: github.ErrServer, Message: "down"}, 502, false},
+		{errors.New("plain"), 500, false},
+		{Conflict("already"), 409, false},
+	} {
+		b.killErr = tc.err
+		err := c.Kill(context.Background(), "aaaaaa")
+		var ae *Error
+		if !errors.As(err, &ae) || ae.Status != tc.status || ae.RetryAt.Equal(retry) != tc.retry {
+			t.Errorf("%v: got %#v", tc.err, err)
+		}
 	}
 }
