@@ -4,21 +4,27 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-// holdOn blocks the named fake Docker method until release is closed or the
-// call's context ends, signalling entered when it starts.
-func holdOn(h *harness, method string) (entered, release chan struct{}) {
-	entered, release = make(chan struct{}), make(chan struct{})
+// holdOn blocks the named fake Docker method until release is called or the
+// call's context ends, signalling entered when it starts. Cleanup releases
+// it too, so a test that fails while holding cannot strand the goroutine.
+func holdOn(t *testing.T, h *harness, method string) (entered chan struct{}, release func()) {
+	entered = make(chan struct{})
+	released := make(chan struct{})
+	var once sync.Once
+	release = func() { once.Do(func() { close(released) }) }
+	t.Cleanup(release)
 	h.docker.hold = func(ctx context.Context, m string) error {
 		if m != method {
 			return nil
 		}
 		close(entered)
 		select {
-		case <-release:
+		case <-released:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -89,7 +95,7 @@ func TestTickSkipsPruningDuringManualPrune(t *testing.T) {
 	h.m.mu.Lock()
 	h.m.lastPrune = h.now.Add(-48 * time.Hour)
 	h.m.mu.Unlock()
-	entered, release := holdOn(h, "PruneBuildCacheTo")
+	entered, release := holdOn(t, h, "PruneBuildCacheTo")
 	if err := h.m.StartPrune(); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +117,7 @@ func TestTickSkipsPruningDuringManualPrune(t *testing.T) {
 	if !last.Equal(h.now.Add(-48 * time.Hour)) {
 		t.Fatal("the retention prune ran during a manual prune")
 	}
-	close(release)
+	release()
 	h.m.Wait()
 	if ms := h.m.Maintenance(); ms.Running || ms.LastOutcome != "ok" {
 		t.Fatalf("maintenance %+v", ms)
@@ -123,7 +129,7 @@ func TestTickSkipsPruningDuringManualPrune(t *testing.T) {
 func TestStartPruneRefusedDuringAutomaticPrune(t *testing.T) {
 	h := newHarness(t)
 	h.docker.usage = []int{99, 99, 50}
-	entered, release := holdOn(h, "PruneBuildCacheOlderThan")
+	entered, release := holdOn(t, h, "PruneBuildCacheOlderThan")
 	h.m.ticks = 0
 	ticked := make(chan struct{})
 	go func() {
@@ -137,7 +143,7 @@ func TestStartPruneRefusedDuringAutomaticPrune(t *testing.T) {
 	if ms := h.m.Maintenance(); ms.Running || ms.LastStarted != nil {
 		t.Fatalf("a refused StartPrune changed the state: %+v", ms)
 	}
-	close(release)
+	release()
 	waitOrFail(t, ticked, "the tick")
 	if err := h.m.StartPrune(); err != nil {
 		t.Fatalf("StartPrune after the tick: %v", err)
@@ -163,7 +169,7 @@ func TestPruneErrors(t *testing.T) {
 // interrupted, runs no further step, and Wait returns.
 func TestCloseInterruptsRunningPrune(t *testing.T) {
 	h := newHarness(t)
-	entered, _ := holdOn(h, "PruneDanglingImages")
+	entered, _ := holdOn(t, h, "PruneDanglingImages")
 	if err := h.m.StartPrune(); err != nil {
 		t.Fatal(err)
 	}
