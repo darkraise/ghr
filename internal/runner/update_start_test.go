@@ -260,3 +260,32 @@ func TestConfigChangeDuringPollDefersTheUpdate(t *testing.T) {
 		t.Fatalf("the next tick did not update:\n%s", h.eventText())
 	}
 }
+
+// A shutdown that arrives while the idle runners stop leaves the update
+// queued and not started: the stops run under the tick's context too.
+func TestShutdownDuringIdleStopsKeepsTheQueue(t *testing.T) {
+	h := newHarness(t)
+	_, fetched := queuedUpdate(t, h, tarballSum())
+	idleRunner(t, h)
+	tickCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.gh.hook = func(m string) {
+		if strings.HasPrefix(m, "GetRunner") {
+			cancel()
+		}
+	}
+	h.m.Tick(tickCtx)
+	h.m.Wait()
+	if strings.Contains(h.eventText(), "runner update started") {
+		t.Fatalf("the update started after the shutdown:\n%s", h.eventText())
+	}
+	h.m.mu.Lock()
+	queued, running, pruning := h.m.upd.file.QueuedAt != nil, h.m.upd.running, h.m.pruning
+	h.m.mu.Unlock()
+	if !queued || running || pruning {
+		t.Fatalf("queued %v running %v pruning %v", queued, running, pruning)
+	}
+	if len(*fetched) != 0 || current(t, h) != "2.337.0" {
+		t.Fatalf("an install ran: fetched %v current %s", *fetched, current(t, h))
+	}
+}

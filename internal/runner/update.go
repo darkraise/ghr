@@ -286,8 +286,9 @@ const updateTimeout = 10 * time.Minute
 // allowed and not degraded, and the maintenance reservation free. Every idle
 // runner is stopped first and comes back on the new version; one that took a
 // job, or could not be checked or stopped, means ghr is not free after all.
-// Spawning waits until the update ends.
-func (m *Manager) startUpdateIfFree(cfg *config.Config, now time.Time, demandOK bool) {
+// Spawning waits until the update ends. A shutdown during the stops leaves the
+// update queued and not started.
+func (m *Manager) startUpdateIfFree(tickCtx context.Context, cfg *config.Config, now time.Time, demandOK bool) {
 	if !demandOK || m.Config() != cfg || !m.apiAllowed(now) || m.isDegraded() {
 		return
 	}
@@ -321,11 +322,20 @@ func (m *Manager) startUpdateIfFree(cfg *config.Config, now time.Time, demandOK 
 		cancel()
 		m.wg.Done()
 	}
+	stopCtx, stopCancel := context.WithCancel(ctx)
+	stopAfter := context.AfterFunc(tickCtx, stopCancel)
+	stopped := true
 	for _, i := range m.snapshot() {
-		if i.State == sched.Idle && m.stopIdleRunner(ctx, i, now) != idleStopped {
-			finish()
-			return
+		if i.State == sched.Idle && m.stopIdleRunner(stopCtx, i, now) != idleStopped {
+			stopped = false
+			break
 		}
+	}
+	stopAfter()
+	stopCancel()
+	if !stopped || tickCtx.Err() != nil {
+		finish()
+		return
 	}
 	m.Events.Add("info", "", "runner update started")
 	go func() {

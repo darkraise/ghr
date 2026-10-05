@@ -35,7 +35,7 @@ func (m *Manager) Tick(ctx context.Context) {
 		m.stopIdle(ctx, cfg, now)
 	}
 	m.stopStartTimedOut(ctx, cfg, now)
-	m.startUpdateIfFree(cfg, now, demandOK)
+	m.startUpdateIfFree(ctx, cfg, now, demandOK)
 	if m.apiAllowed(now) && !m.isDegraded() {
 		m.spawnPlanned(ctx, cfg, now)
 	}
