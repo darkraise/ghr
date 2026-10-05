@@ -23,6 +23,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.overlay {
 	case ovAddRepo:
 		return m.addRepoKey(k)
+	case ovToken:
+		return m.tokenKey(k)
 	case ovConfirm, ovHelp, ovUnsaved:
 		return m.dialogKey(k)
 	}
@@ -189,7 +191,7 @@ func (m Model) switchPage(p page) (tea.Model, tea.Cmd) {
 	case pageHistory:
 		return m, m.fetchHistory()
 	case pageSettings:
-		return m, m.fetchConfig()
+		return m, tea.Batch(m.fetchConfig(), m.fetchToken())
 	case pageRepos:
 		return m, m.fetchConfig()
 	}
@@ -326,6 +328,11 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.overlay == ovAddRepo {
 		_, cmd := m.add.group.Mouse(msg)
+		return m, cmd
+	}
+	if m.overlay == ovToken {
+		m.syncToken()
+		_, cmd := m.tok.group.Mouse(msg)
 		return m, cmd
 	}
 	if m.overlay == ovNone && m.page == pageSettings {

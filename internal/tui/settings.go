@@ -437,6 +437,7 @@ func (m Model) settingsSections() []ui.Section {
 			s.row("CPU quota", setCPUQuota, "per runner, e.g. 200%"),
 		}},
 	}
+	secs = append(secs, m.tokenSection())
 
 	var ws []ui.Widget
 	for _, sec := range secs {

@@ -23,8 +23,8 @@
                  │ Memory max           [ 6G         ]  per runner, e.g. 6G, 50% or infinity                           │
                  │ CPU quota            [ 200%       ]  per runner, e.g. 200%                                          │
                  ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
-                                                                                                                        
-                                                                                                                        
-  ? Help                                                                                                                
-  q Quit                                                                                                                
+                 ╭─ GitHub token ──────────────────────────────────────────────────────────────────────────────────────╮
+                 │ Replacing checks read access to the first repository only; registration permissions are checked wh… │
+  ? Help         │ Status               [UNVERIFIED]  expiry unknown                                                   │
+  q Quit         │ Rate limit           –                                                                              │
  up move  enter pick  esc close

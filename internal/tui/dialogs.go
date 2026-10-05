@@ -285,6 +285,8 @@ func buttonOverlay(id string) overlay {
 		return ovUnsaved
 	case addOK, addCancel:
 		return ovAddRepo
+	case tokOK, tokCancel:
+		return ovToken
 	}
 	return ovNone
 }
@@ -341,6 +343,17 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 	case reposDiscard:
 		m.repos.form.Discard()
 		m.repos.alert = nil
+	case setReplaceToken:
+		return m.openTokenDialog()
+	case setTokenRetry:
+		return m, m.fetchToken()
+	case tokOK:
+		return m.submitToken()
+	case tokCancel:
+		if m.tok != nil {
+			m.tok.field.SetValue(ui.Value{})
+		}
+		m.overlay, m.tok = ovNone, nil
 	}
 	return m, nil
 }
@@ -481,6 +494,8 @@ func (m Model) withOverlay(base string, w int) string {
 		dialog = modal("Unsaved changes", body, m.dlgButtons, m.dlg.FocusedID(), w)
 	case ovAddRepo:
 		dialog = m.addRepoView(w)
+	case ovToken:
+		dialog = m.tokenView(w)
 	}
 	return lipgloss.Place(w, lipgloss.Height(base), lipgloss.Center, lipgloss.Center, dialog,
 		lipgloss.WithWhitespaceChars(" "))

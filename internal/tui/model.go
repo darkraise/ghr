@@ -72,6 +72,7 @@ const (
 	ovHelp
 	ovUnsaved
 	ovAddRepo
+	ovToken
 )
 
 // leaveTarget is where the user was going when the unsaved-changes dialog opened.
@@ -143,6 +144,7 @@ type Model struct {
 	epoch    string
 	settings *settingsPage
 	repos    *reposPage
+	mg       *manageState
 	groups   *pageGroups
 	events   []model.Event
 	lastSeq  int64
@@ -180,6 +182,7 @@ type Model struct {
 	order         *cfgOrder      // config request numbering, shared by both config pages
 	leaving       bool           // a save started from the unsaved-changes dialog is in flight
 	add           *addRepoDialog // the open Add repository dialog
+	tok           *tokenDialog   // the open Replace token dialog
 
 	toast     ui.Toast
 	frame     int
@@ -191,6 +194,7 @@ func New(c Client) Model {
 	return Model{
 		c: c, now: time.Now, width: 120, height: 40, settings: newSettingsPage(), repos: newReposPage(), groups: newPageGroups(),
 		order: &cfgOrder{},
+		mg:    newManageState(),
 		copyFn: func(s string) {
 			fmt.Fprintf(os.Stdout, "\x1b]52;c;%s\a", base64.StdEncoding.EncodeToString([]byte(s)))
 		},
@@ -352,6 +356,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.page == pageHistory && m.frame%slowPoll == 0 {
 			cmds = append(cmds, m.fetchHistory())
 		}
+		if m.page == pageSettings && m.frame%slowPoll == 0 {
+			cmds = append(cmds, m.fetchToken())
+		}
 		if m.page == pageDetail && m.frame%slowPoll == 0 && m.instance(m.detailID) != nil {
 			cmds = append(cmds, m.fetchSteps(), m.fetchContainers())
 		}
@@ -466,6 +473,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.refetched(msg)
 	case addedMsg:
 		return m.added(msg)
+	case tokenMsg:
+		m.gotToken(msg)
+		return m, nil
+	case tokenSetMsg:
+		return m.tokenSet(msg)
 	case doneMsg:
 		if msg.err != nil {
 			m.toast.Show(clean(msg.err.Error()), true, m.now())
