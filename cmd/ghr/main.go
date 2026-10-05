@@ -112,5 +112,6 @@ const usage = `usage: ghr [command]
   kill <id>                       stop a runner
   logs <id> [-f]                  runner diagnostic log
   history [--repo r] [--conclusion c] [--limit n]
+  runner-update [--cancel]        queue (or cancel) a runner update
   version
 `

@@ -88,6 +88,18 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 		return logs(ctx, c, args[1:], out)
 	case "history":
 		return historyCmd(ctx, c, args[1:], out)
+	case "runner-update":
+		switch {
+		case len(args) == 1:
+			if err := c.QueueRunnerUpdate(ctx); err != nil {
+				return err
+			}
+			fmt.Fprintln(out, "runner update queued; it runs when no job is running or queued")
+			return nil
+		case len(args) == 2 && args[1] == "--cancel":
+			return c.CancelRunnerUpdate(ctx)
+		}
+		return usageError("usage: ghr runner-update [--cancel]")
 	}
 	return usageError("unknown command " + args[0])
 }
@@ -247,6 +259,7 @@ func printStatus(out io.Writer, st model.Status) {
 		global = fmt.Sprintf("%d/∞", running)
 	}
 	fmt.Fprintf(out, "mode %s  global %s  api %d  disk %d%%\n", st.Mode, global, st.RateRemaining, st.DiskPct)
+	fmt.Fprintln(out, runnerLine(st))
 	if st.Degraded {
 		fmt.Fprintf(out, "DEGRADED: %s\n", st.DegradedReason)
 	}
@@ -283,4 +296,44 @@ func printStatus(out io.Writer, st model.Status) {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", i.ID, i.Repo, i.State, job, st.Now.Sub(i.Since).Round(time.Second))
 	}
 	w.Flush()
+}
+
+// runnerLine is the status line about the GitHub Actions runner version.
+func runnerLine(st model.Status) string {
+	u := st.RunnerUpdate
+	if u.Installed == "" {
+		s := "runner version unknown (no dist/current)"
+		if u.CheckError != "" {
+			s += "  last check failed: " + u.CheckError
+		}
+		return s
+	}
+	s := "runner " + u.Installed
+	switch {
+	case u.Deadline != nil:
+		s += fmt.Sprintf(" → %s  update available, update by %s (%s)", u.Latest, u.Deadline.Local().Format(time.DateOnly), daysLeft(*u.Deadline, st.Now))
+	case u.CheckedAt != nil:
+		s += fmt.Sprintf("  up to date (checked %s ago)", st.Now.Sub(*u.CheckedAt).Round(time.Minute))
+	case u.CheckError == "":
+		s += "  checking…"
+	}
+	switch {
+	case u.Running:
+		s += "  updating"
+	case u.Queued:
+		s += "  queued: runs when no job is running or queued"
+	}
+	if u.CheckError != "" {
+		s += "  last check failed: " + u.CheckError
+	}
+	return s
+}
+
+// daysLeft is the time to deadline in whole days, or "overdue".
+func daysLeft(deadline, now time.Time) string {
+	left := deadline.Sub(now)
+	if left < 0 {
+		return "overdue"
+	}
+	return fmt.Sprintf("%d days", int(left.Hours()/24))
 }
