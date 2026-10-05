@@ -29,7 +29,7 @@ func lastReq(c *fakeClient) string { return c.histReqs[len(c.histReqs)-1] }
 func TestHistoryFilterBar(t *testing.T) {
 	m, c := historyModel(t)
 	v := m.View()
-	for _, want := range []string{"Repo   [ all ▾ ]", "Result   [ all ▾ ]", "› History", "( Copy run URL ) success    2m00s", "#87", "tab next"} {
+	for _, want := range []string{"Repo   [ all ▾ ]", "Result   [ all ▾ ]", "› History", "( Copy run URL ) [SUCCESS]   2m00s", "#87", "tab next"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("History page missing %q", want)
 		}
@@ -111,5 +111,38 @@ func TestHistoryLongRepoName(t *testing.T) {
 		if lipgloss.Width(line) > 80 {
 			t.Fatalf("line %d is %d wide: %q", i, lipgloss.Width(line), line)
 		}
+	}
+}
+
+func TestHistoryBarsAndBadges(t *testing.T) {
+	h := func(concl string, d time.Duration) model.HistoryEntry {
+		return model.HistoryEntry{Repo: "darkcloud", JobName: "e2e", RunNumber: "7", Conclusion: concl,
+			StartedAt: now.Add(-time.Hour - d), FinishedAt: now.Add(-time.Hour)}
+	}
+	c := &fakeClient{hist: []model.HistoryEntry{h("success", 10*time.Minute), h("failure", 5*time.Minute), h("cancelled", 0)}}
+	v := feed(sampleModel(c, 120, 30), key("4")).View()
+	for _, want := range []string{"[SUCCESS]", "[FAILURE]", "[CANCELLED]", "████████████", "██████░░░░░░", "░░░░░░░░░░░░"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("120 columns: missing %q", want)
+		}
+	}
+	v = feed(sampleModel(c, 80, 30), key("4")).View()
+	// The status line's disk gauge draws ░ too, so only the card is checked.
+	lines := strings.Split(v, "\n")
+	card := lineWith(lines, "› History")
+	if card < 0 || !strings.Contains(v, "[FAILURE]") || strings.Contains(strings.Join(lines[card:], "\n"), "░") {
+		t.Fatalf("80 columns keep the badge and drop the bar:\n%s", v)
+	}
+	fits(t, "history", v, 80, 30)
+	// Narrower, the leading columns give way; the badges of the selected
+	// and the other rows, and the job names, stay.
+	for _, w := range []int{56, 40} {
+		v = feed(sampleModel(c, w, 30), key("4")).View()
+		for _, want := range []string{"[SUCCESS]", "[FAILURE]", "[CANCELLED]", "e2e", "#7"} {
+			if !strings.Contains(v, want) {
+				t.Errorf("%d columns: missing %q:\n%s", w, want, v)
+			}
+		}
+		fits(t, "history", v, w, 30)
 	}
 }

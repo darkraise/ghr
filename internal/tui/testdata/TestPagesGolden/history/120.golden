@@ -3,9 +3,9 @@
   2 Repositories Repo   [ all ▾ ]    Result   [ all ▾ ]                                                                 
   3 Runners                                                                                                             
 ▌ 4 History      ╭─ › History ─────────────────────────────────────────────────────────────────────────────────────────╮
-  5 Settings     │   FINISHED         REPO         RUN     JOB                                   RESULT     DURATION   │
-                 │   2026-10-03 14:03 darkcloud    #411    lint                   …  ( Copy run URL ) success    2m00s │
-                 │   2026-10-03 13:05 darkmem      #87     build / test                          failure    10m00s     │
+  5 Settings     │   FINISHED         REPO         RUN     JOB                       RESULT      DURATION              │
+                 │   2026-10-03 14:03 darkcloud    #411    lint  …  ( Copy run URL ) [SUCCESS]   2m00s    ██░░░░░░░░░░ │
+                 │   2026-10-03 13:05 darkmem      #87     build / test              [FAILURE]   10m00s   ████████████ │
                  ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
                                                                                                                         
                                                                                                                         

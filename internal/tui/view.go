@@ -142,3 +142,13 @@ func fit(lines []string, hdr, sel, n int) []string {
 	start := min(max(sel-vis+1, 0), len(body)-vis)
 	return append(lines[:hdr:hdr], body[start:start+vis]...)
 }
+
+// durBar draws d against the longest duration shown as a w-cell bar.
+func durBar(d, longest time.Duration, w int) string {
+	filled := 0
+	if longest > 0 {
+		filled = int(float64(w)*float64(d)/float64(longest) + 0.5)
+	}
+	filled = min(max(filled, 0), w)
+	return strings.Repeat("█", filled) + strings.Repeat("░", w-filled)
+}

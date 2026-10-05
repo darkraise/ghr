@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
+	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/tui/ui"
 )
@@ -110,22 +112,84 @@ func (m Model) historyPage(w, h int) string {
 	bar = append(bar, "")
 
 	inner := w - 4
-	lines := []string{sDim.Render(fmt.Sprintf("  %-16s %-12s %-7s %-*s %-10s %s", "FINISHED", "REPO", "RUN", inner-62, "JOB", "RESULT", "DURATION"))}
+	showFinished, showRepo, showDur, barW := true, true, true, 12
+	lead := func() int { // "  ", FINISHED, REPO, "RUN "
+		n := 2 + 8
+		if showFinished {
+			n += 17
+		}
+		if showRepo {
+			n += 13
+		}
+		return n
+	}
+	tail := func() int { // " RESULT", " DURATION", " BAR"
+		n := 12
+		if showDur {
+			n += 9
+		}
+		if barW > 0 {
+			n += barW + 1
+		}
+		return n
+	}
+	for _, giveWay := range []func(){
+		func() { barW = 6 }, func() { barW = 0 }, func() { showRepo = false },
+		func() { showFinished = false }, func() { showDur = false },
+	} {
+		if inner-lead()-tail() >= 14 {
+			break
+		}
+		giveWay()
+	}
+	jobW := max(inner-lead()-tail(), 1)
+	hdr := "  "
+	if showFinished {
+		hdr += fmt.Sprintf("%-16s ", "FINISHED")
+	}
+	if showRepo {
+		hdr += fmt.Sprintf("%-12s ", "REPO")
+	}
+	hdr += fmt.Sprintf("%-7s %-*s %-11s", "RUN", jobW, "JOB", "RESULT")
+	if showDur {
+		hdr += " DURATION"
+	}
+	lines := []string{sDim.Render(hdr)}
 	visible := max(h-len(bar)-3, 1)
 	start := 0
 	if m.histSel >= visible {
 		start = m.histSel - visible + 1
 	}
+	var longest time.Duration
+	for i := start; i < len(m.hist) && i < start+visible; i++ {
+		longest = max(longest, m.hist[i].FinishedAt.Sub(m.hist[i].StartedAt))
+	}
 	for i := start; i < len(m.hist) && i < start+visible; i++ {
 		e := m.hist[i]
-		line := "  " + cell(e.FinishedAt.Local().Format("2006-01-02 15:04"), 16) + " " + cell(e.Repo, 12) + " " +
-			cell("#"+e.RunNumber, 7) + " " + cell(e.JobName, inner-62)
-		tail := " " + stateStyle(e.Conclusion).Render(cell(e.Conclusion, 10)) + " " + dur(e.FinishedAt.Sub(e.StartedAt))
+		d := e.FinishedAt.Sub(e.StartedAt)
+		line := "  "
+		if showFinished {
+			line += cell(e.FinishedAt.Local().Format("2006-01-02 15:04"), 16) + " "
+		}
+		if showRepo {
+			line += cell(e.Repo, 12) + " "
+		}
+		line += cell("#"+e.RunNumber, 7) + " " + cell(e.JobName, jobW)
+		badge := stateBadge(e.Conclusion)
+		after := strings.Repeat(" ", max(11-ansi.StringWidth(badge), 0))
+		if showDur {
+			after += " " + cell(dur(d), 8)
+		}
+		if barW > 0 {
+			after += " " + durBar(d, longest, barW)
+		}
 		id := fmt.Sprintf("hist-%d", i)
 		if i == m.histSel {
-			lines = append(lines, m.selectedRow(id, line, "", "", rowButtons(ui.NewButton(rowCopy, "Copy run URL", ui.Secondary)), tail, inner))
+			tailW := tail()
+			lines = append(lines, m.selectedRow(id, line, "", "", rowButtons(ui.NewButton(rowCopy, "Copy run URL", ui.Secondary)), "", inner-tailW)+
+				ui.BadgeRow(sSel, true, " ", badge, after, tailW))
 		} else {
-			lines = append(lines, m.row(id, false, line+tail, inner))
+			lines = append(lines, zone.Mark(id, ui.BadgeRow(sSel, false, line+" ", badge, after, inner)))
 		}
 	}
 	if len(m.hist) == 0 {
