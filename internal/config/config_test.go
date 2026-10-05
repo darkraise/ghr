@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -274,6 +275,101 @@ func TestParseDurationDayBounds(t *testing.T) {
 	for _, s := range []string{"106752d", "213504d", "-106752d", "xd"} {
 		if _, err := ParseDuration(s); err == nil {
 			t.Errorf("%s accepted", s)
+		}
+	}
+}
+
+func TestWebBlockRoundTrips(t *testing.T) {
+	c, _, err := Parse([]byte(sample + "web:\n  listen: 0.0.0.0:8080\n  hosts: [ghr.lan]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Web.Listen != "0.0.0.0:8080" || len(c.Web.Hosts) != 1 || c.Web.Hosts[0] != "ghr.lan" {
+		t.Fatalf("web %+v", c.Web)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	back, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Web.Listen != "0.0.0.0:8080" || len(back.Web.Hosts) != 1 || back.Web.Hosts[0] != "ghr.lan" {
+		t.Fatalf("round trip lost web: %+v", back.Web)
+	}
+	clone := c.Clone()
+	if clone.Web.Listen != "0.0.0.0:8080" || len(clone.Web.Hosts) != 1 {
+		t.Fatalf("clone lost web: %+v", clone.Web)
+	}
+}
+
+func TestEmptyWebIsOmitted(t *testing.T) {
+	c, _, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	js, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(js), `"web"`) {
+		t.Fatalf("empty web serialised to JSON: %s", js)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "web:") {
+		t.Fatalf("empty web saved to YAML:\n%s", data)
+	}
+}
+
+func TestWebValidation(t *testing.T) {
+	bad := []Web{
+		{Listen: "0.0.0.0:http"},
+		{Listen: "8080"},
+		{Listen: "0.0.0.0:0"},
+		{Listen: "0.0.0.0:70000"},
+		{Listen: "0.0.0.0:8080", Hosts: []string{"ghr.lan:8080"}},
+		{Listen: "0.0.0.0:8080", Hosts: []string{""}},
+		{Listen: "0.0.0.0:8080", Hosts: []string{"https://ghr.lan"}},
+		{Listen: "0.0.0.0:8080", Hosts: []string{"ghr lan"}},
+		{Listen: "0.0.0.0:8080", Hosts: []string{"ghr.lan\t"}},
+		{Listen: "0.0.0.0:8080", Hosts: []string{"user@ghr.lan"}},
+		{Listen: "0.0.0.0:8080", Hosts: []string{"-bad.lan"}},
+		{Listen: "0.0.0.0:8080", Hosts: []string{"bad_name.lan"}},
+		{Listen: "0.0.0.0:8080", Hosts: []string{"ghr..lan"}},
+		{Listen: "0.0.0.0:8080", Hosts: []string{strings.Repeat("a.", 127) + "lan"}},
+	}
+	for _, w := range bad {
+		c, _, err := Parse([]byte(sample))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Web = w
+		if _, err := c.Validate(); err == nil || !strings.Contains(err.Error(), "web.") {
+			t.Errorf("%+v: want a web error, got %v", w, err)
+		}
+	}
+	good := []Web{
+		{},
+		{Listen: ":8080"},
+		{Listen: "[::]:8080"},
+		{Listen: "0.0.0.0:8080", Hosts: []string{"ghr.lan", "GHR.example.com", "ghr-1", "localhost"}},
+	}
+	for _, w := range good {
+		c, _, err := Parse([]byte(sample))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Web = w
+		if _, err := c.Validate(); err != nil {
+			t.Errorf("%+v rejected: %v", w, err)
 		}
 	}
 }

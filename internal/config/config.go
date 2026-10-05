@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -46,11 +47,20 @@ type Config struct {
 	Labels           []string     `yaml:"labels" json:"labels"`
 	RunnerLimits     RunnerLimits `yaml:"runner_limits" json:"runner_limits"`
 	Repos            []Repo       `yaml:"repos" json:"repos"`
+	// Web is read at daemon start only; changing it needs a restart.
+	Web Web `yaml:"web,omitempty" json:"web,omitzero"`
 }
 
 type RunnerLimits struct {
 	MemoryMax string `yaml:"memory_max" json:"memory_max"`
 	CPUQuota  string `yaml:"cpu_quota" json:"cpu_quota"`
+}
+
+// Web is the browser UI's TCP listener. Hosts names the hostnames, besides IP
+// literals and localhost, that a request's Host header may carry.
+type Web struct {
+	Listen string   `yaml:"listen,omitempty" json:"listen,omitempty"`
+	Hosts  []string `yaml:"hosts,omitempty" json:"hosts,omitempty"`
 }
 
 type Repo struct {
@@ -126,6 +136,9 @@ var (
 	sizeRe     = regexp.MustCompile(`^[0-9]+(B|KB|MB|GB|TB)$`)
 	memoryRe   = regexp.MustCompile(`^([1-9][0-9]*[KMGT]?|[1-9][0-9]?%|100%|infinity)$`)
 	cpuQuotaRe = regexp.MustCompile(`^[1-9][0-9]*%$`)
+	// hostnameRe is RFC 1123: dot-separated labels of letters, digits and
+	// inner hyphens, each 1 to 63 characters.
+	hostnameRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
 )
 
 func defaults() *Config {
@@ -336,6 +349,18 @@ func (c *Config) Validate() ([]string, error) {
 		}
 		if len(r.CleanupNamePrefixes) > 0 && c.EffectiveMax(r) != 1 {
 			warnings = append(warnings, r.Name+": cleanup_name_prefixes can remove a concurrent job's containers when max is not 1")
+		}
+	}
+	if c.Web.Listen != "" {
+		_, port, err := net.SplitHostPort(c.Web.Listen)
+		n, perr := strconv.Atoi(port)
+		if err != nil || perr != nil || n < 1 || n > 65535 {
+			errs = append(errs, "web.listen must be host:port with a port from 1 to 65535, such as 0.0.0.0:8080")
+		}
+	}
+	for _, h := range c.Web.Hosts {
+		if len(h) > 253 || !hostnameRe.MatchString(h) {
+			errs = append(errs, "web.hosts entries must be bare hostnames such as ghr.lan")
 		}
 	}
 	if len(errs) > 0 {
