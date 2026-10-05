@@ -20,7 +20,11 @@ type fakeBackend struct {
 	token    string
 	killed   []string
 	killErr  error
+	pruneErr error
 }
+
+func (f *fakeBackend) Reload() ([]string, error) { return []string{"labels: duplicate"}, nil }
+func (f *fakeBackend) Prune() error              { return f.pruneErr }
 
 func (f *fakeBackend) Status() model.Status {
 	return model.Status{Mode: "queue", GlobalMax: 2, Repos: []model.RepoStatus{{Name: "darkcloud", Max: 1, Queued: 2}}}
@@ -213,5 +217,21 @@ func TestGitHubErrorsMapToStatuses(t *testing.T) {
 		if !errors.As(err, &ae) || ae.Status != tc.status || ae.RetryAt.Equal(retry) != tc.retry {
 			t.Errorf("%v: got %#v", tc.err, err)
 		}
+	}
+}
+
+func TestReloadAndPrune(t *testing.T) {
+	c, b := setup(t)
+	ws, err := c.Reload(context.Background())
+	if err != nil || len(ws) != 1 || ws[0] != "labels: duplicate" {
+		t.Fatalf("reload: %v %v", ws, err)
+	}
+	if err := c.Prune(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	b.pruneErr = Conflict("a prune is already running")
+	var ae *Error
+	if err := c.Prune(context.Background()); !errors.As(err, &ae) || ae.Status != 409 {
+		t.Fatalf("overlap: %v", err)
 	}
 }

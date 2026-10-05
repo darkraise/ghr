@@ -23,6 +23,7 @@ type Manager interface {
 	RunnerRepoAndRun(id string) (repo string, runID int64, runnerName string, err error)
 	Kill(ctx context.Context, id string) error
 	ClearDegraded()
+	StartPrune() error
 }
 
 // GitHub is the part of the GitHub client the backend uses.
@@ -339,4 +340,37 @@ func (b *Backend) SetToken(ctx context.Context, token string) error {
 	b.M.ClearDegraded()
 	b.Events.Add("ok", "", "GitHub token replaced")
 	return nil
+}
+
+// Reload re-reads config.yaml and the token file, as SIGHUP does. On any
+// error the previous values stay active. It wakes the run loop, which ticks;
+// it never ticks itself.
+func (b *Backend) Reload() ([]string, error) {
+	warnings, err := b.Store.Reload()
+	if err != nil {
+		b.Events.Add("error", "", "reload rejected, keeping previous config: %v", err)
+		return nil, api.BadRequest(err.Error())
+	}
+	for _, w := range warnings {
+		b.Events.Add("warn", "", "config: %s", w)
+	}
+	b.GH.ForgetCache()
+	b.M.ClearDegraded()
+	b.Events.Add("info", "", "config and token reloaded")
+	if b.Wake != nil {
+		b.Wake()
+	}
+	if warnings == nil {
+		warnings = []string{}
+	}
+	return warnings, nil
+}
+
+// Prune starts a forced maintenance prune; its progress goes to the events.
+func (b *Backend) Prune() error {
+	err := b.M.StartPrune()
+	if errors.Is(err, runner.ErrPruneRunning) {
+		return api.Conflict(err.Error())
+	}
+	return err
 }

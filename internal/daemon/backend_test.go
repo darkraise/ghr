@@ -21,9 +21,16 @@ import (
 )
 
 type fakeManager struct {
-	insts   []model.InstanceStatus
-	cleared bool
-	killed  []string
+	insts    []model.InstanceStatus
+	cleared  bool
+	killed   []string
+	pruneErr error
+	prunes   int
+}
+
+func (f *fakeManager) StartPrune() error {
+	f.prunes++
+	return f.pruneErr
 }
 
 func (f *fakeManager) Status() model.Status { return model.Status{Instances: f.insts} }
@@ -392,5 +399,39 @@ func TestPauseAllStepsKillToken(t *testing.T) {
 	}
 	if b.Store.Token() != "tok2" || !gh.forgot || !m.cleared {
 		t.Fatal("token not applied")
+	}
+}
+
+func TestReloadAppliesWakesAndRejects(t *testing.T) {
+	b, m, gh := newBackend(t)
+	woke := 0
+	b.Wake = func() { woke++ }
+	ws, err := b.Reload()
+	if err != nil || ws == nil || woke != 1 || !gh.forgot || !m.cleared {
+		t.Fatalf("reload: %v %v woke=%d forgot=%v cleared=%v", ws, err, woke, gh.forgot, m.cleared)
+	}
+	if err := os.WriteFile(b.Store.TokenPath, []byte("  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Reload(); apiStatus(err) != 400 || woke != 1 {
+		t.Fatalf("empty token: %v woke=%d", err, woke)
+	}
+	var txt strings.Builder
+	for _, e := range b.Events.After(0) {
+		txt.WriteString(e.Msg + "\n")
+	}
+	if !strings.Contains(txt.String(), "config and token reloaded") || !strings.Contains(txt.String(), "reload rejected") {
+		t.Fatalf("events:\n%s", txt.String())
+	}
+}
+
+func TestPruneStartsOrConflicts(t *testing.T) {
+	b, m, _ := newBackend(t)
+	if err := b.Prune(); err != nil || m.prunes != 1 {
+		t.Fatalf("prune: %v %d", err, m.prunes)
+	}
+	m.pruneErr = runner.ErrPruneRunning
+	if err := b.Prune(); apiStatus(err) != 409 {
+		t.Fatalf("overlap: %v", err)
 	}
 }

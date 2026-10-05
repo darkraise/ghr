@@ -190,6 +190,7 @@ func Run(ctx context.Context, o Options) error {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			srv.Shutdown(shutdownCtx)
 			cancel()
+			m.Close()
 			done := make(chan struct{})
 			go func() { m.Wait(); close(done) }()
 			select {
@@ -199,18 +200,7 @@ func Run(ctx context.Context, o Options) error {
 			}
 			return nil
 		case <-reload:
-			warnings, err := store.Reload()
-			if err != nil {
-				ev.Add("error", "", "reload rejected, keeping previous config: %v", err)
-				continue
-			}
-			for _, w := range warnings {
-				ev.Add("warn", "", "config: %s", w)
-			}
-			gh.ForgetCache()
-			m.ClearDegraded()
-			ev.Add("info", "", "config and token reloaded")
-			tick()
+			b.Reload()
 		case <-wake:
 			tick()
 		case <-timer.C:

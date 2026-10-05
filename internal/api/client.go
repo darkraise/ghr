@@ -150,3 +150,15 @@ func (c *Client) SetToken(ctx context.Context, token string) error {
 func (c *Client) Kill(ctx context.Context, id string) error {
 	return c.call(ctx, http.MethodDelete, "/runners/"+url.PathEscape(id), nil, nil)
 }
+
+// Reload makes the daemon re-read config.yaml and its token; it returns the config warnings.
+func (c *Client) Reload(ctx context.Context) ([]string, error) {
+	var ws []string
+	err := c.call(ctx, http.MethodPost, "/reload", nil, &ws)
+	return ws, err
+}
+
+// Prune starts a maintenance prune; its outcome arrives as events.
+func (c *Client) Prune(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/prune", nil, nil)
+}

@@ -67,6 +67,8 @@ type Backend interface {
 	SetPausedAll(paused bool) error
 	SetToken(ctx context.Context, token string) error
 	KillRunner(ctx context.Context, id string) error
+	Reload() ([]string, error)
+	Prune() error
 }
 
 func NewServer(b Backend) http.Handler {
@@ -150,6 +152,17 @@ func NewServer(b Backend) http.Handler {
 			return
 		}
 		respond(w, nil, b.SetToken(r.Context(), tok))
+	})
+	mux.HandleFunc("POST /reload", func(w http.ResponseWriter, r *http.Request) {
+		ws, err := b.Reload()
+		respond(w, ws, err)
+	})
+	mux.HandleFunc("POST /prune", func(w http.ResponseWriter, r *http.Request) {
+		if err := b.Prune(); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
 	})
 	return mux
 }
