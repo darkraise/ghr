@@ -79,6 +79,15 @@ func (b *Backend) forgetLabelCheck(name string) {
 	c.mu.Unlock()
 }
 
+// dropLabelChecks applies a token change now, so a scan running under the
+// old token stops spending API calls instead of running to its deadline.
+func (b *Backend) dropLabelChecks() {
+	c := &b.checks
+	c.mu.Lock()
+	c.refresh(b.GH.TokenMeta().Generation, b.Store.Config())
+	c.mu.Unlock()
+}
+
 // Close cancels every running label scan; the daemon calls it on shutdown.
 func (b *Backend) Close() {
 	c := &b.checks

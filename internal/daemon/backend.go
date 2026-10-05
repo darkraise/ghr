@@ -369,6 +369,7 @@ func (b *Backend) SetToken(ctx context.Context, token string) error {
 		return err
 	}
 	b.GH.ForgetCache()
+	b.dropLabelChecks()
 	b.M.ClearDegraded()
 	b.Events.Add("ok", "", "GitHub token replaced")
 	return nil
@@ -387,6 +388,7 @@ func (b *Backend) Reload() ([]string, error) {
 		b.Events.Add("warn", "", "config: %s", w)
 	}
 	b.GH.ForgetCache()
+	b.dropLabelChecks()
 	b.M.ClearDegraded()
 	b.Events.Add("info", "", "config and token reloaded")
 	if b.Wake != nil {

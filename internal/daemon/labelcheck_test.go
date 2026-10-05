@@ -167,6 +167,32 @@ func TestLabelCheckTokenChangeCancelsScan(t *testing.T) {
 	}
 }
 
+// Replacing or reloading the token cancels a running scan at once, without
+// waiting for the next read to notice the new generation.
+func TestLabelCheckCancelledEagerlyOnTokenChange(t *testing.T) {
+	for _, change := range []string{"set", "reload"} {
+		t.Run(change, func(t *testing.T) {
+			b, _, gh := newBackend(t)
+			labelGH(gh)
+			gh.block = true
+			if err := b.StartLabelCheck("darkcloud"); err != nil {
+				t.Fatal(err)
+			}
+			gh.scanCounts(t, func(in, _ int) bool { return in == 1 })
+			var err error
+			if change == "set" {
+				err = b.SetToken(context.Background(), "tok2")
+			} else {
+				_, err = b.Reload()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			gh.scanCounts(t, func(in, c int) bool { return in == 0 && c == 1 })
+		})
+	}
+}
+
 // Removing a repo drops its observations and throttle, cancels its scan, and
 // a cancelled scan never publishes into the entry of the re-added repo.
 func TestLabelCheckForgottenOnRemoveAndAdd(t *testing.T) {

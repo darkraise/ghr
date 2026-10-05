@@ -139,7 +139,10 @@ func (f *fakeGH) scanCounts(t *testing.T, cond func(inFlight, cancelled int) boo
 		time.Sleep(10 * time.Millisecond)
 	}
 }
-func (f *fakeGH) ForgetCache() { f.forgot = true }
+func (f *fakeGH) ForgetCache() {
+	f.forgot = true
+	f.meta.Generation++
+}
 
 func (f *fakeGH) ListRunners(ctx context.Context, repo string) ([]github.Runner, error) {
 	var out []github.Runner
