@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -64,7 +65,10 @@ type Backend struct {
 	Now func() time.Time
 	// Sampler supplies the metrics series; nil serves an empty one.
 	Sampler *metrics.Sampler
-	checks  labelChecks
+	// WebApplied is the web block the running listener started with. Only a
+	// restart applies a change, so a reload that changes it warns.
+	WebApplied config.Web
+	checks     labelChecks
 
 	stepsMu    sync.Mutex
 	steps      map[string]stepsEntry
@@ -460,6 +464,9 @@ func (b *Backend) Reload() ([]string, error) {
 	if err != nil {
 		b.Events.Add("error", "", "reload rejected, keeping previous config: %v", err)
 		return nil, api.BadRequest(err.Error())
+	}
+	if w := b.Store.Config().Web; w.Listen != b.WebApplied.Listen || !slices.Equal(w.Hosts, b.WebApplied.Hosts) {
+		warnings = append(warnings, "web settings changed; restart ghr to apply")
 	}
 	for _, w := range warnings {
 		b.Events.Add("warn", "", "config: %s", w)

@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -807,5 +810,56 @@ func TestRunnerStepsShareOneFetch(t *testing.T) {
 	}
 	if n := jobCallCount(gh); n != 1 {
 		t.Fatalf("%d GitHub calls for 8 concurrent callers, want 1", n)
+	}
+}
+
+func TestReloadWarnsOnWebChange(t *testing.T) {
+	b, _, _ := newBackend(t)
+	write := func(extra string) {
+		if err := os.WriteFile(b.Store.ConfigPath, []byte(cfgYAML+extra), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const warning = "web settings changed; restart ghr to apply"
+	write("web:\n  listen: 0.0.0.0:8080\n")
+	ws, err := b.Reload()
+	if err != nil || !slices.Contains(ws, warning) {
+		t.Fatalf("changed listen: %v %v", ws, err)
+	}
+	found := false
+	for _, e := range b.Events.After(0) {
+		if e.Level == "warn" && strings.Contains(e.Msg, warning) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no warn event for the web change")
+	}
+	write("web:\n  hosts: [ghr.lan]\n")
+	if ws, err := b.Reload(); err != nil || !slices.Contains(ws, warning) {
+		t.Fatalf("changed hosts: %v %v", ws, err)
+	}
+	write("")
+	if ws, err := b.Reload(); err != nil || len(ws) != 0 {
+		t.Fatalf("reverted web still warns: %v %v", ws, err)
+	}
+}
+
+func TestPatchCannotChangeWeb(t *testing.T) {
+	b, _, _ := newBackend(t)
+	srv := httptest.NewServer(api.NewServer(b))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodPatch, srv.URL+"/config",
+		strings.NewReader(`{"global_max":3,"web":{"listen":"0.0.0.0:9000"}}`))
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("patch: %d", resp.StatusCode)
+	}
+	if c := b.Store.Config(); c.GlobalMax != 3 || c.Web.Listen != "" {
+		t.Fatalf("global_max %d web %+v", c.GlobalMax, c.Web)
 	}
 }
