@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/darkraise/ghr/internal/tui/ui"
@@ -50,14 +48,3 @@ func eventStyle(level string) (string, lipgloss.Style) {
 }
 
 var spinnerFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
-
-func gauge(used, total, width int) string {
-	if total <= 0 || width <= 0 {
-		return ""
-	}
-	filled := used * width / total
-	if filled > width {
-		filled = width
-	}
-	return "▕" + strings.Repeat("█", filled) + strings.Repeat("░", width-filled) + "▏"
-}

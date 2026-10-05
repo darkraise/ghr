@@ -95,15 +95,15 @@ func (m Model) chips(level int) string {
 	if m.st.Mode == "all" {
 		runners = fmt.Sprintf("%d/∞", running)
 	} else if level < 4 {
-		runners = gauge(running, m.st.GlobalMax, 3) + " " + runners
+		runners = ui.Gauge(running, m.st.GlobalMax, 3) + " " + runners
 	}
 	api := fmt.Sprint(m.st.RateRemaining)
 	if level < 2 {
-		api = gauge(max(m.st.RateRemaining, 0), 5000, 10) + " " + api
+		api = ui.Gauge(max(m.st.RateRemaining, 0), 5000, 10) + " " + api
 	}
 	disk := fmt.Sprintf("%d%%", m.st.DiskPct)
 	if level < 3 {
-		disk = gauge(m.st.DiskPct, 100, 10) + " " + disk
+		disk = ui.Gauge(m.st.DiskPct, 100, 10) + " " + disk
 	}
 	diskStyle := sDim
 	switch m.diskState() {
