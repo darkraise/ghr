@@ -1,0 +1,40 @@
+ ghr   mode ● QUEUE   runners ▕██░▏ 2/3   api ▕█████████░▏ 4800   disk ▕██████░░░░▏ 61%   ●
+  1 Dashboard    Repositories                                                   [ + Add repository ]
+▌ 2 Repositories ╭─ › Repos ──────────────────╮ ╭─ darkcloud ──────────────────────────────────────╮
+  3 Runners      │ › darkcloud   [ACTIVE] ●   │ │ [ACTIVE]  1/1 running · 2 queued                 │
+  4 History      │   darkmem     [ACTIVE]     │ │ ✔ #411 lint · 2m ago                             │
+  5 Settings     │   darkagents  [PAUSED]     │ │   ( Pause )    [ Remove ]                        │
+                 ╰────────────────────────────╯ ╰──────────────────────────────────────────────────╯
+                                                ╭─ Capacity ───────────────────────────────────────╮
+                                                │ Max                  [ − ] 2 [ + ]               │
+                                                │                      once set, it stays explicit │
+                                                │ Warm                 [ − ] 1 [ + ] (default)     │
+                                                │                      applies in all mode         │
+                                                ╰──────────────────────────────────────────────────╯
+                                                ╭─ Labels ─────────────────────────────────────────╮
+                                                │ Repo labels          darkcloud-linux ✕  gpu ✕ ●  │
+                                                │                      + add                       │
+                                                │                      added to this repo's        │
+                                                │                      runners                     │
+                                                │ Runners get          self-hosted linux x64       │
+                                                │                      homelab (global)            │
+                                                │                      darkcloud-linux gpu         │
+                                                │                      runners already running     │
+                                                │                      keep their labels           │
+                                                ╰──────────────────────────────────────────────────╯
+                                                ╭─ Cleanup ────────────────────────────────────────╮
+                                                │ Prefixes             dc-e2e- ✕  + add            │
+                                                │                      container name prefixes     │
+                                                │                      removed after each job      │
+                                                ╰──────────────────────────────────────────────────╯
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+  ? Help                                                                                            
+  q Quit         ● 1 unsaved change (darkcloud)    ( Discard )    [ Save changes ]                  
+ up select  tab next  a add  p pause  d remove  ? help  q quit

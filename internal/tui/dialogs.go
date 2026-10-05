@@ -330,6 +330,11 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 	case setDiscard:
 		m.settings.form.Discard()
 		m.settings.alert = nil
+	case reposSave:
+		return m.saveRepos()
+	case reposDiscard:
+		m.repos.form.Discard()
+		m.repos.alert = nil
 	default:
 		if strings.HasPrefix(id, "settings/repo/") {
 			return m.repoAction(id)

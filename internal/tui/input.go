@@ -184,6 +184,8 @@ func (m Model) switchPage(p page) (tea.Model, tea.Cmd) {
 		return m, m.fetchHistory()
 	case pageSettings:
 		return m, m.fetchConfig()
+	case pageRepos:
+		return m, m.fetchConfig()
 	}
 	return m, nil
 }

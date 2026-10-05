@@ -196,6 +196,8 @@ func (m *Model) loadConfig(seq int, c *config.Config) {
 	if gone := s.load(c); len(gone) > 0 {
 		m.toast.Show("repository "+strings.Join(gone, ", ")+" was removed", false, m.now())
 	}
+	m.repos.form.Merge(reposSpecs(c))
+	m.syncRepoControls()
 	if m.page == pageSettings && m.overlay == ovNone {
 		if m.settingsSections(); s.group.FocusedID() != focus {
 			m.scrollToFocus()
@@ -342,6 +344,13 @@ func (s *settingsPage) buildPatch() (model.ConfigPatch, map[string]ui.Value) {
 
 // fieldName is a field's name as config.yaml spells it, for messages.
 func fieldName(key string) string {
+	if strings.HasPrefix(key, "repos/") {
+		name, field := splitReposKey(key)
+		if field == "cleanup" {
+			field = "cleanup_name_prefixes"
+		}
+		return name + "." + field
+	}
 	if rest, ok := strings.CutPrefix(key, "settings/repo/"); ok {
 		name, field, _ := strings.Cut(rest, "/")
 		if field == "cleanup" {
@@ -459,11 +468,11 @@ func (m Model) refetched(msg refetchedMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// unsavedBar is the sticky line shown while anything is dirty. Its text
-// shortens to fit w columns; the buttons are never cut.
-func (m Model) unsavedBar(w int) string {
-	s := m.settings
-	n := len(s.form.Dirty())
+// unsavedBar is the sticky line shown while page cp has edits. Its text
+// names them when names is set and shortens to fit w columns; the buttons
+// are never cut.
+func (m Model) unsavedBar(cp *configPage, w int, names string) string {
+	n := len(cp.form.Dirty())
 	if n == 0 {
 		return ""
 	}
@@ -471,10 +480,14 @@ func (m Model) unsavedBar(w int) string {
 	if n == 1 {
 		full = "● 1 unsaved change"
 	}
-	focused := s.group.FocusedID()
-	buttons := "  " + s.discard.View(focused == setDiscard, 0) + "  " + s.save.View(focused == setSave, 0)
+	focused := cp.group.FocusedID()
+	buttons := "  " + cp.discard.View(focused == cp.discard.ID(), 0) + "  " + cp.save.View(focused == cp.save.ID(), 0)
+	candidates := []string{full, fmt.Sprintf("● %d unsaved", n)}
+	if names != "" {
+		candidates = append([]string{full + " (" + names + ")"}, candidates...)
+	}
 	text := fmt.Sprintf("● %d", n)
-	for _, t := range []string{full, fmt.Sprintf("● %d unsaved", n)} {
+	for _, t := range candidates {
 		if ansi.StringWidth(t+buttons) <= w {
 			text = t
 			break
@@ -483,18 +496,17 @@ func (m Model) unsavedBar(w int) string {
 	return sAmber.Render(text) + buttons
 }
 
-// alertBox lists the daemon's messages from a rejected save.
-func (m Model) alertBox(w int) []string {
-	s := m.settings
-	if len(s.alert) == 0 {
+// alertBox lists the daemon's messages from a rejected save on page cp.
+func (m Model) alertBox(cp *configPage, w int) []string {
+	if len(cp.alert) == 0 {
 		return nil
 	}
 	// At most three messages, so the form keeps room at the 22-row minimum.
 	var lines []string
-	for _, a := range s.alert[:min(len(s.alert), 3)] {
+	for _, a := range cp.alert[:min(len(cp.alert), 3)] {
 		lines = append(lines, sRed.Render("✖ "+a))
 	}
-	if n := len(s.alert) - 3; n > 0 {
+	if n := len(cp.alert) - 3; n > 0 {
 		lines = append(lines, sRed.Render(fmt.Sprintf("… and %d more", n)))
 	}
 	return strings.Split(box("Save rejected", w, lines), "\n")
@@ -695,7 +707,7 @@ func (m Model) settingsFooterKeys() []footerKey {
 // content height less the alert box and the unsaved-changes bar.
 func (m Model) settingsBodyH() int {
 	w, h := m.contentSize()
-	h -= len(m.alertBox(w))
+	h -= len(m.alertBox(&m.settings.configPage, w))
 	if len(m.settings.form.Dirty()) > 0 {
 		h--
 	}
@@ -722,7 +734,7 @@ func (m Model) settingsView(w, h int) string {
 	focus := s.group.FocusedID()
 	sections := m.settingsSections()
 	lines, ranges := ui.Render(sections, s.group.FocusedID(), w, m.width >= wideMin)
-	top, bar := m.alertBox(w), m.unsavedBar(w)
+	top, bar := m.alertBox(&m.settings.configPage, w), m.unsavedBar(&m.settings.configPage, w, "")
 	bodyH := h - len(top)
 	if bar != "" {
 		bodyH--

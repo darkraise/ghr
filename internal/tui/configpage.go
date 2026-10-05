@@ -32,5 +32,8 @@ func (m Model) nextCfgSeq() int {
 
 // configPage returns the config page p, which must be pageSettings or pageRepos.
 func (m Model) configPage(p page) *configPage {
+	if p == pageRepos {
+		return &m.repos.configPage
+	}
 	return &m.settings.configPage
 }
