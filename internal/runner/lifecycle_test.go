@@ -569,3 +569,23 @@ func TestCompletionOnlyRecordHasNoNegativeDuration(t *testing.T) {
 		t.Fatalf("history %+v", got)
 	}
 }
+
+// spawn resolves dist/current through the host, so the version it records is
+// the one current points at.
+func TestSpawnResolvesDistThroughHost(t *testing.T) {
+	h := newHarness(t)
+	h.linkDist(t, "2.337.0")
+	if err := h.m.spawn(context.Background(), h.cfg, "darkcloud"); err != nil {
+		t.Fatal(err)
+	}
+	var meta Meta
+	if err := readJSON(filepath.Join(h.m.instanceDir("aaaaaa"), MetaFile), &meta); err != nil {
+		t.Fatal(err)
+	}
+	if meta.DistVersion != "2.337.0" {
+		t.Fatalf("dist version %q", meta.DistVersion)
+	}
+	if !strings.Contains(h.eventText(), "spawned aaaaaa (2.337.0)") {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+}

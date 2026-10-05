@@ -66,7 +66,9 @@ func (nopDocker) PruneBuildCacheOlderThan(context.Context, int) (string, error) 
 func (nopDocker) PruneBuildCacheTo(context.Context, string) (string, error)     { return "0B", nil }
 func (nopDocker) PruneDanglingImages(context.Context) (string, error)           { return "0B", nil }
 
-type dirHost struct{}
+// dirHost creates instance dirs without cp; links, extraction and scripts
+// are the real host's.
+type dirHost struct{ system.Host }
 
 func (dirHost) CopyTree(_ context.Context, _, dst string) error { return os.MkdirAll(dst, 0o755) }
 func (dirHost) ChownR(context.Context, string, string) error    { return nil }

@@ -30,6 +30,7 @@ type fakeGH struct {
 	nextID    int64
 	errs      map[string]error // key "<method> <repo>"
 	remaining int
+	releases  []github.Release
 }
 
 func newFakeGH() *fakeGH {
@@ -123,6 +124,21 @@ func (f *fakeGH) GenerateJITConfig(_ context.Context, repo, name string, labels 
 	f.jitCalls = append(f.jitCalls, name+" "+strings.Join(labels, ","))
 	f.runners[f.nextID] = &github.Runner{ID: f.nextID, Name: name, Status: "offline"}
 	return &github.JITConfig{Runner: github.Runner{ID: f.nextID, Name: name}, EncodedJITConfig: "ENC-" + name}, nil
+}
+
+func (f *fakeGH) ListRunnerReleases(context.Context) ([]github.Release, error) {
+	if err := f.call("ListRunnerReleases", ""); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.releases, nil
+}
+
+func (f *fakeGH) setReleases(rels ...github.Release) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.releases = rels
 }
 
 func (f *fakeGH) RateRemaining() int { return f.remaining }
@@ -350,9 +366,90 @@ func (f *fakeDocker) pruneList() string {
 }
 
 // fakeHost copies by creating the destination with a run.sh, like a real dist.
+// Its links are regular files holding the target path, because Windows lets
+// only privileged users create symlinks.
 type fakeHost struct {
 	mu      sync.Mutex
 	chowned []string
+	calls   []string         // Extract and RunScript calls, as "<method> <dir>"
+	errs    map[string]error // by method name
+}
+
+func (f *fakeHost) err(method string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.errs[method]
+}
+
+func (f *fakeHost) setErr(method string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.errs == nil {
+		f.errs = map[string]error{}
+	}
+	f.errs[method] = err
+}
+
+func (f *fakeHost) record(method, dir string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, method+" "+filepath.Base(dir))
+}
+
+// Extract unpacks a runner: run.sh and its dependency script.
+func (f *fakeHost) Extract(_ context.Context, _, dir string) error {
+	f.record("Extract", dir)
+	if err := f.err("Extract"); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bin", "installdependencies.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "run.sh"), []byte("#!/bin/sh\n"), 0o755)
+}
+
+func (f *fakeHost) RunScript(_ context.Context, dir, _ string) error {
+	f.record("RunScript", dir)
+	return f.err("RunScript")
+}
+
+// ReadLink reads a link file; any other path resolves as on disk.
+func (f *fakeHost) ReadLink(path string) (string, error) {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if !fi.Mode().IsRegular() {
+		return filepath.EvalSymlinks(path)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	target := string(b)
+	if _, err := os.Stat(target); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
+func (f *fakeHost) SwitchLink(target, path string) error {
+	if err := f.err("SwitchLink"); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path+".tmp", []byte(target), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(path+".tmp", path)
+}
+
+func (f *fakeHost) hostCalls() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return strings.Join(f.calls, ",")
 }
 
 func (f *fakeHost) CopyTree(_ context.Context, src, dst string) error {
@@ -472,4 +569,24 @@ func (h *harness) history(t *testing.T) []string {
 		out = append(out, e.ID+" "+e.Conclusion)
 	}
 	return out
+}
+
+// linkDist gives the harness setup.sh's layout: dist/<ver> holding run.sh,
+// and dist/current a fake host link to it. It returns the dist dir.
+func (h *harness) linkDist(t *testing.T, ver string) string {
+	t.Helper()
+	dist := filepath.Join(h.root, "dist")
+	dir := filepath.Join(dist, ver)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte("#!/bin/sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cur := filepath.Join(dist, "current")
+	if err := h.host.SwitchLink(dir, cur); err != nil {
+		t.Fatal(err)
+	}
+	h.m.Paths.Dist = cur
+	return dist
 }

@@ -90,7 +90,7 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 		}
 		return err
 	}
-	dist, err := filepath.EvalSymlinks(m.Paths.Dist)
+	dist, err := m.Host.ReadLink(m.Paths.Dist)
 	if err != nil {
 		return fail(err)
 	}

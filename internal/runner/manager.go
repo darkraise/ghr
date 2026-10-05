@@ -45,6 +45,7 @@ type GitHub interface {
 	GetRunner(ctx context.Context, repo string, id int64) (*github.Runner, error)
 	DeleteRunner(ctx context.Context, repo string, id int64) error
 	GenerateJITConfig(ctx context.Context, repo, name string, labels []string) (*github.JITConfig, error)
+	ListRunnerReleases(ctx context.Context) ([]github.Release, error)
 	RateRemaining() int
 }
 
@@ -72,6 +73,10 @@ type Docker interface {
 type Host interface {
 	CopyTree(ctx context.Context, src, dst string) error
 	ChownR(ctx context.Context, path, user string) error
+	Extract(ctx context.Context, tarball, dir string) error
+	RunScript(ctx context.Context, dir, path string) error
+	ReadLink(path string) (string, error)
+	SwitchLink(target, path string) error
 }
 
 // Paths are the on-disk locations ghr uses. Dist may be a symlink to the current runner version.
@@ -83,6 +88,8 @@ type Paths struct {
 	ToolCache string
 	Hooks     string
 	Home      string
+	// UpdateState is runner-update.json; empty keeps the update queue in memory only.
+	UpdateState string
 }
 
 // Meta is written to <instance>/ghr.json at spawn and read back on re-adoption.
@@ -131,6 +138,8 @@ type Manager struct {
 	History *history.Store
 	Now     func() time.Time
 	NewID   func() string
+	// Fetch downloads url to dst; the daemon sets system.Download.
+	Fetch func(ctx context.Context, url, dst string) error
 
 	mu             sync.Mutex
 	insts          map[string]*instance
