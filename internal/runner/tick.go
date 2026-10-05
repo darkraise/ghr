@@ -24,8 +24,9 @@ func (m *Manager) Tick(ctx context.Context) {
 	if m.apiAllowed(now) {
 		m.refreshRunners(ctx)
 	}
+	demandOK := false
 	if m.apiAllowed(now) {
-		m.gatherDemand(ctx, cfg, now)
+		demandOK = m.gatherDemand(ctx, cfg, now)
 	}
 	if m.apiAllowed(now) && !m.isDegraded() && m.releaseCheckDue(now) {
 		m.checkRelease(ctx)
@@ -34,6 +35,7 @@ func (m *Manager) Tick(ctx context.Context) {
 		m.stopIdle(ctx, cfg, now)
 	}
 	m.stopStartTimedOut(ctx, cfg, now)
+	m.startUpdateIfFree(cfg, now, demandOK)
 	if m.apiAllowed(now) && !m.isDegraded() {
 		m.spawnPlanned(ctx, cfg, now)
 	}
@@ -65,14 +67,14 @@ func (m *Manager) Tick(ctx context.Context) {
 
 // gatherDemand lists matching queued jobs per repo and confirms our in-progress
 // jobs. Degraded clears only after a tick in which some repo answered and none
-// failed authentication.
-func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time.Time) {
+// failed authentication. It reports whether every unpaused repo answered.
+func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time.Time) bool {
 	ours := map[string]string{}
 	for _, i := range m.snapshot() {
 		ours[i.RunnerName] = i.ID
 	}
 	demand := sched.Demand{}
-	anyOK, authFailed := false, false
+	anyOK, authFailed, complete := false, false, true
 	for _, r := range cfg.Repos {
 		if r.Paused {
 			continue
@@ -81,10 +83,12 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 		wait := now.Before(m.retryAt[r.Name])
 		m.mu.Unlock()
 		if wait {
+			complete = false
 			continue
 		}
 		jobs, err := m.repoDemand(ctx, cfg, r, ours, now)
 		if err != nil {
+			complete = false
 			if github.IsKind(err, github.ErrAuth) {
 				authFailed = true
 			}
@@ -113,6 +117,7 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 	if recovered {
 		m.Events.Add("ok", "", "GitHub token accepted again")
 	}
+	return complete
 }
 
 func (m *Manager) repoDemand(ctx context.Context, cfg *config.Config, r config.Repo, ours map[string]string, now time.Time) ([]sched.QueuedJob, error) {
@@ -176,12 +181,17 @@ func (m *Manager) confirm(id string, j github.Job, now time.Time) {
 	i.Job = &model.JobInfo{RunID: j.RunID, RunNumber: runNumber, Workflow: j.WorkflowName, Name: j.Name, HTMLURL: j.HTMLURL, StartedAt: started}
 }
 
-// spawnPlanned spawns what sched.Plan decides. Repos in an error state are left
-// out of planning (no warm spawns into a failing repo) until a demand poll
-// succeeds. Spawning stops as soon as the live config differs from the one the
-// plan used, so a pause or cap change made during polling is never overridden.
+// spawnPlanned spawns what sched.Plan decides, nothing while a runner update
+// runs. Repos in an error state are left out of planning (no warm spawns into
+// a failing repo) until a demand poll succeeds. Spawning stops as soon as the
+// live config differs from the one the plan used, so a pause or cap change
+// made during polling is never overridden.
 func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time.Time) {
 	m.mu.Lock()
+	if m.upd.running {
+		m.mu.Unlock()
+		return
+	}
 	demand := m.demand
 	planCfg := *cfg
 	planCfg.Repos = nil

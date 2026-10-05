@@ -204,7 +204,8 @@ func (m *Manager) recordLastJob(e model.HistoryEntry) {
 // bounded by finishTimeout, a prune by Close.
 func (m *Manager) Wait() { m.wg.Wait() }
 
-// ErrPruneRunning is returned by StartPrune while a prune runs.
+// ErrPruneRunning is returned by StartPrune while a prune runs; a runner
+// update holds the same reservation and gets ErrUpdateRunning instead.
 var ErrPruneRunning = errors.New("a prune is already running")
 
 // ErrClosed is returned by StartPrune once Close has been called.
@@ -217,6 +218,10 @@ func (m *Manager) StartPrune() error {
 	if m.closed {
 		m.mu.Unlock()
 		return ErrClosed
+	}
+	if m.upd.running {
+		m.mu.Unlock()
+		return ErrUpdateRunning
 	}
 	if m.pruning {
 		m.mu.Unlock()

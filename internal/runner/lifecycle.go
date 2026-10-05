@@ -502,35 +502,48 @@ func (m *Manager) finalizePending(ctx context.Context) {
 	}
 }
 
-// stopIdle stops idle runners chosen by sched.IdleToStop. Each is stopped only
-// after the runners API affirms it is not busy; any error leaves it running.
+// stopIdle stops idle runners chosen by sched.IdleToStop.
 func (m *Manager) stopIdle(ctx context.Context, cfg *config.Config, now time.Time) {
 	byID := map[string]instance{}
 	for _, i := range m.snapshot() {
 		byID[i.ID] = i
 	}
 	for _, id := range sched.IdleToStop(cfg, m.schedInstances(cfg), now) {
-		i := byID[id]
-		r, err := m.GH.GetRunner(ctx, i.Repo, i.RunnerID)
-		if err != nil {
-			if !github.IsKind(err, github.ErrNotFound) {
-				m.apiErr(i.Repo, err, now)
-			}
-			if !m.apiAllowed(now) {
-				return
-			}
-			continue
+		if m.stopIdleRunner(ctx, byID[id], now) == idleKept && !m.apiAllowed(now) {
+			return
 		}
-		if r.Busy {
-			m.setState(id, sched.Busy)
-			continue
-		}
-		if err := m.SD.Stop(ctx, UnitPrefix+id); err != nil {
-			m.Events.Add("warn", i.Repo, "stop idle %s: %v", id, err)
-			continue
-		}
-		m.Events.Add("info", i.Repo, "stopped idle runner %s", id)
 	}
+}
+
+// idleStop is what stopIdleRunner did with an idle runner.
+type idleStop int
+
+const (
+	idleStopped idleStop = iota
+	idleBusy             // the runners API reported a job; it is busy now
+	idleKept             // the check or the stop failed; it keeps running
+)
+
+// stopIdleRunner stops i only after the runners API affirms it is not busy;
+// any error leaves it running.
+func (m *Manager) stopIdleRunner(ctx context.Context, i instance, now time.Time) idleStop {
+	r, err := m.GH.GetRunner(ctx, i.Repo, i.RunnerID)
+	if err != nil {
+		if !github.IsKind(err, github.ErrNotFound) {
+			m.apiErr(i.Repo, err, now)
+		}
+		return idleKept
+	}
+	if r.Busy {
+		m.setState(i.ID, sched.Busy)
+		return idleBusy
+	}
+	if err := m.SD.Stop(ctx, UnitPrefix+i.ID); err != nil {
+		m.Events.Add("warn", i.Repo, "stop idle %s: %v", i.ID, err)
+		return idleKept
+	}
+	m.Events.Add("info", i.Repo, "stopped idle runner %s", i.ID)
+	return idleStopped
 }
 
 // stopStartTimedOut stops runners that never came online; finish deletes their registration.

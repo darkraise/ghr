@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/sched"
 )
 
 const (
@@ -273,4 +275,61 @@ func (m *Manager) runnerUpdate() model.RunnerUpdate {
 		Queued: u.file.QueuedAt != nil, QueuedAt: u.file.QueuedAt, Running: u.running,
 		LastOutcome: u.lastOutcome, LastError: u.lastErr, LastFinished: timePtr(u.lastFinished),
 	}
+}
+
+// updateTimeout bounds one runner update.
+const updateTimeout = 10 * time.Minute
+
+// startUpdateIfFree starts a queued runner update when ghr is free: no
+// instance starting or busy, this tick's demand poll (made with cfg, still the
+// live config) answered for every unpaused repo with no queued job, the API
+// allowed and not degraded, and the maintenance reservation free. Every idle
+// runner is stopped first and comes back on the new version; one that took a
+// job, or could not be checked or stopped, means ghr is not free after all.
+// Spawning waits until the update ends.
+func (m *Manager) startUpdateIfFree(cfg *config.Config, now time.Time, demandOK bool) {
+	if !demandOK || m.Config() != cfg || !m.apiAllowed(now) || m.isDegraded() {
+		return
+	}
+	m.fileMu.Lock()
+	m.mu.Lock()
+	free := m.upd.file.QueuedAt != nil && !m.upd.running && !m.closed && !m.pruning
+	for _, i := range m.insts {
+		if i.State == sched.Starting || i.State == sched.Busy {
+			free = false
+		}
+	}
+	for _, jobs := range m.demand {
+		if len(jobs) > 0 {
+			free = false
+		}
+	}
+	if !free {
+		m.mu.Unlock()
+		m.fileMu.Unlock()
+		return
+	}
+	m.pruning, m.upd.running = true, true
+	ctx, cancel := context.WithTimeout(m.maintCtx, updateTimeout)
+	m.wg.Add(1)
+	m.mu.Unlock()
+	m.fileMu.Unlock()
+	finish := func() {
+		m.mu.Lock()
+		m.pruning, m.upd.running = false, false
+		m.mu.Unlock()
+		cancel()
+		m.wg.Done()
+	}
+	for _, i := range m.snapshot() {
+		if i.State == sched.Idle && m.stopIdleRunner(ctx, i, now) != idleStopped {
+			finish()
+			return
+		}
+	}
+	m.Events.Add("info", "", "runner update started")
+	go func() {
+		defer finish()
+		m.runUpdate(ctx)
+	}()
 }
