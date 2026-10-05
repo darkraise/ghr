@@ -578,3 +578,36 @@ func TestTokenCardBeforeFirstReply(t *testing.T) {
 		t.Fatalf("token card before the first reply:\n%s", v)
 	}
 }
+
+// The Delete and quick-add button maps keep only what the cards still list,
+// and an unreachable daemon disables Delete and refuses its press.
+func TestManagementButtonsPrunedAndDisconnected(t *testing.T) {
+	c := &fakeClient{labels: unmatchedGPU(), regs: []model.Registration{
+		{ID: 1, Name: "linux-1", Status: "offline"}, {ID: 4, Name: "linux-4", Status: "offline"}}}
+	m := onRepos(t, c, 140, 80)
+	m.View()
+	if len(m.mg.regDel) != 2 || m.mg.lcAdd["gpu"] == nil {
+		t.Fatalf("buttons %v %v", m.mg.regDel, m.mg.lcAdd)
+	}
+	m = feed(m, regsMsg{repo: m.mg.regRepo, seq: m.mg.regSeq, regs: []model.Registration{{ID: 1, Name: "linux-1", Status: "offline"}}})
+	m = feed(m, lcMsg{repo: m.mg.lcRepo, seq: m.mg.lcSeq, lc: model.LabelCheck{State: "done"}})
+	m.View()
+	if len(m.mg.regDel) != 1 || m.mg.regDel[1] == nil || len(m.mg.lcAdd) != 0 {
+		t.Fatalf("not pruned: %v %v", m.mg.regDel, m.mg.lcAdd)
+	}
+	m.connected = false
+	m.View()
+	if !m.mg.regDel[1].Disabled {
+		t.Fatal("Delete enabled while unreachable")
+	}
+	if upd, _ := m.pressed(regDelID(1)); upd.(Model).overlay != ovNone {
+		t.Fatal("Delete asked to confirm while unreachable")
+	}
+}
+
+func TestLabelCheckHeadingWhileChecking(t *testing.T) {
+	m := onRepos(t, &fakeClient{labels: model.LabelCheck{State: "checking"}}, 140, 80)
+	if v := m.View(); !strings.Contains(v, "Checking…") {
+		t.Fatalf("heading:\n%s", v)
+	}
+}

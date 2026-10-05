@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -408,6 +409,17 @@ func (m Model) regWidgets() []ui.Widget {
 	off := !m.repoActionable()
 	m.mg.regRefresh.SetDisabled(off)
 	ws := []ui.Widget{m.mg.regRefresh}
+	listed := map[int64]bool{}
+	for _, g := range m.mg.regs {
+		if deletable(g) {
+			listed[g.ID] = true
+		}
+	}
+	for id := range m.mg.regDel {
+		if !listed[id] {
+			delete(m.mg.regDel, id)
+		}
+	}
 	for _, g := range m.mg.regs {
 		if !deletable(g) {
 			continue
@@ -686,7 +698,13 @@ func (m Model) lcWidgets(name string) []ui.Widget {
 	off := !m.repoActionable()
 	m.mg.lcCheck.SetDisabled(off || m.mg.lc.State == "checking")
 	ws := []ui.Widget{m.mg.lcCheck}
-	for _, l := range m.quickAdds(name) {
+	adds := m.quickAdds(name)
+	for l := range m.mg.lcAdd {
+		if !slices.Contains(adds, l) {
+			delete(m.mg.lcAdd, l)
+		}
+	}
+	for _, l := range adds {
 		b := m.mg.lcAdd[l]
 		if b == nil {
 			b = ui.NewButton(lcAddID(l), "+ add "+clean(l), ui.Secondary)
@@ -744,7 +762,7 @@ func (m Model) lcCard(name string, w int) ([]string, map[string]ui.Range) {
 	head := "Not checked yet"
 	switch {
 	case lc.State == "checking":
-		head = "checking…"
+		head = "Checking…"
 	case lc.CheckedAt != nil:
 		head = "Checked " + ago(m.now().Sub(*lc.CheckedAt))
 		if lc.Partial {
