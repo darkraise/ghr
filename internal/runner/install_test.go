@@ -174,6 +174,37 @@ func TestUpdateRemovesLeftoverStaging(t *testing.T) {
 	}
 }
 
+func TestUpdateFailsWhenLeftoverStagingStays(t *testing.T) {
+	h := newHarness(t)
+	dist, fetched := queuedUpdate(t, h, tarballSum())
+	if err := os.MkdirAll(filepath.Join(dist, "2.338.0.tmp"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, "2.338.0.tmp", "stale"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removeAll = func(path string) error {
+		if filepath.Base(path) == "2.338.0.tmp" {
+			return errors.New("device busy")
+		}
+		return os.RemoveAll(path)
+	}
+	t.Cleanup(func() { removeAll = os.RemoveAll })
+	h.m.runUpdate(h.m.maintCtx)
+	if got := current(t, h); got != "2.337.0" {
+		t.Fatalf("current moved to %s", got)
+	}
+	if len(*fetched) != 0 {
+		t.Fatalf("fetched %v", *fetched)
+	}
+	if !strings.Contains(h.eventText(), "error  runner update failed: download: remove leftover 2.338.0.tmp: device busy") {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+	if u := h.m.Status().RunnerUpdate; u.Queued || u.LastOutcome != "failed" {
+		t.Fatalf("status %+v", u)
+	}
+}
+
 func TestUpdateShutdownKeepsQueue(t *testing.T) {
 	h := newHarness(t)
 	dist, _ := queuedUpdate(t, h, tarballSum())

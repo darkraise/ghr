@@ -97,7 +97,9 @@ func (m *Manager) installLatest(ctx context.Context) (string, string, error) {
 func (m *Manager) stage(ctx context.Context, distDir, ver, sum string) error {
 	leftovers, _ := filepath.Glob(filepath.Join(distDir, "*.tmp"))
 	for _, l := range leftovers {
-		os.RemoveAll(l)
+		if err := removeAll(l); err != nil {
+			return &stepError{"download", fmt.Errorf("remove leftover %s: %w", filepath.Base(l), err)}
+		}
 	}
 	staging := filepath.Join(distDir, ver+".tmp")
 	fail := func(step string, err error) error {
