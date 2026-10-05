@@ -14,6 +14,7 @@ import (
 	"github.com/darkraise/ghr/internal/events"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/history"
+	"github.com/darkraise/ghr/internal/metrics"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/runner"
 )
@@ -54,11 +55,21 @@ type Backend struct {
 	// pause stops idle runners at once; nil in tests.
 	Wake func()
 	// Now is the clock for label-check throttling; nil means time.Now.
-	Now    func() time.Time
-	checks labelChecks
+	Now func() time.Time
+	// Sampler supplies the metrics series; nil serves an empty one.
+	Sampler *metrics.Sampler
+	checks  labelChecks
 }
 
 var _ api.Backend = (*Backend)(nil)
+
+// Metrics returns the sampler's series and current host figures.
+func (b *Backend) Metrics() model.Metrics {
+	if b.Sampler == nil {
+		return model.Metrics{Samples: []model.MetricSample{}}
+	}
+	return b.Sampler.Metrics()
+}
 
 func (b *Backend) now() time.Time {
 	if b.Now != nil {

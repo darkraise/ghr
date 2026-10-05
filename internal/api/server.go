@@ -69,6 +69,7 @@ type Backend interface {
 	KillRunner(ctx context.Context, id string) error
 	Reload() ([]string, error)
 	Prune() error
+	Metrics() model.Metrics
 	Token() model.TokenStatus
 	StartLabelCheck(repo string) error
 	LabelCheck(repo string) (model.LabelCheck, error)
@@ -78,6 +79,7 @@ type Backend interface {
 
 func NewServer(b Backend) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.Metrics()) })
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.Status()) })
 	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
 		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)

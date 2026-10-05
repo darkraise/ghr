@@ -17,6 +17,7 @@ import (
 	"github.com/darkraise/ghr/internal/events"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/history"
+	"github.com/darkraise/ghr/internal/metrics"
 	"github.com/darkraise/ghr/internal/runner"
 	"github.com/darkraise/ghr/internal/system"
 )
@@ -146,6 +147,22 @@ func Run(ctx context.Context, o Options) error {
 	}
 	m.Reconcile(ctx, store.Config())
 
+	sampler := metrics.NewSampler(func() metrics.Snapshot {
+		st := m.Status()
+		var s metrics.Snapshot
+		for _, i := range st.Instances {
+			if i.State != "cleaning" {
+				s.Live++
+			}
+		}
+		for _, r := range st.Repos {
+			s.Queued += r.Queued
+		}
+		return s
+	}, func() int { return m.Status().DiskPct })
+	sampled := make(chan struct{})
+	go func() { sampler.Run(ctx, time.Minute); close(sampled) }()
+
 	wake := make(chan struct{}, 1)
 	b := &Backend{
 		Store: store, M: m, GH: gh, Events: ev, Hist: hist,
@@ -154,6 +171,7 @@ func Run(ctx context.Context, o Options) error {
 			c.BaseURL = gh.BaseURL
 			return checkToken(ctx, c, repo)
 		},
+		Sampler: sampler,
 		Wake: func() {
 			select {
 			case wake <- struct{}{}:
@@ -192,6 +210,7 @@ func Run(ctx context.Context, o Options) error {
 			cancel()
 			m.Close()
 			b.Close()
+			<-sampled
 			done := make(chan struct{})
 			go func() { m.Wait(); close(done) }()
 			select {

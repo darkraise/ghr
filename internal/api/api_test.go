@@ -15,25 +15,32 @@ import (
 )
 
 type fakeBackend struct {
-	patches     []model.ConfigPatch
-	added       []model.AddRepoRequest
-	removed     []string
-	pauseAll    []bool
-	token       string
-	killed      []string
-	killErr     error
-	pruneErr    error
-	tokenStatus model.TokenStatus
-	tokenCalls  int
-	regs        []model.Registration
-	regErr      error
-	regRepos    []string
-	deletedReg  []string
-	checked     []string
-	startErr    error
-	lc          model.LabelCheck
-	lcErr       error
-	lcRepos     []string
+	patches      []model.ConfigPatch
+	added        []model.AddRepoRequest
+	removed      []string
+	pauseAll     []bool
+	token        string
+	killed       []string
+	killErr      error
+	pruneErr     error
+	tokenStatus  model.TokenStatus
+	tokenCalls   int
+	regs         []model.Registration
+	regErr       error
+	regRepos     []string
+	deletedReg   []string
+	checked      []string
+	startErr     error
+	lc           model.LabelCheck
+	lcErr        error
+	lcRepos      []string
+	metrics      model.Metrics
+	metricsCalls int
+}
+
+func (f *fakeBackend) Metrics() model.Metrics {
+	f.metricsCalls++
+	return f.metrics
 }
 
 func (f *fakeBackend) Reload() ([]string, error) { return []string{"labels: duplicate"}, nil }
@@ -360,5 +367,20 @@ func TestLabelCheckRoutes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(b.lcRepos, []string{"darkcloud", "darkmem", "nope"}) {
 		t.Fatalf("backend saw %v", b.lcRepos)
+	}
+}
+
+func TestMetricsRoute(t *testing.T) {
+	c, b := setup(t)
+	cpu := 12.5
+	b.metrics = model.Metrics{DiskPct: 11, CPU: &cpu, Samples: []model.MetricSample{{Live: 1, Queued: 2}}}
+	m, err := c.Metrics(context.Background())
+	if err != nil || b.metricsCalls != 1 || m.DiskPct != 11 || m.CPU == nil || *m.CPU != 12.5 || len(m.Samples) != 1 || m.Samples[0].Queued != 2 {
+		t.Fatalf("%+v %v", m, err)
+	}
+	b.metrics = model.Metrics{DiskPct: 40, Samples: []model.MetricSample{}}
+	m, err = c.Metrics(context.Background())
+	if err != nil || b.metricsCalls != 2 || m.DiskPct != 40 || m.CPU != nil || m.Samples == nil || len(m.Samples) != 0 {
+		t.Fatalf("second call %#v %v", m, err)
 	}
 }

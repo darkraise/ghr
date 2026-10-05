@@ -163,6 +163,13 @@ func (c *Client) Prune(ctx context.Context) error {
 	return c.call(ctx, http.MethodPost, "/prune", nil, nil)
 }
 
+// Metrics returns the daemon's last hour of samples and current host figures.
+func (c *Client) Metrics(ctx context.Context) (model.Metrics, error) {
+	var m model.Metrics
+	err := c.call(ctx, http.MethodGet, "/metrics", nil, &m)
+	return m, err
+}
+
 // Token reports the daemon's view of its GitHub token.
 func (c *Client) Token(ctx context.Context) (model.TokenStatus, error) {
 	var ts model.TokenStatus
