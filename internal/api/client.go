@@ -181,3 +181,15 @@ func (c *Client) Registrations(ctx context.Context, repo string) ([]model.Regist
 func (c *Client) DeleteRegistration(ctx context.Context, repo string, id int64) error {
 	return c.call(ctx, http.MethodDelete, fmt.Sprintf("/repos/%s/registrations/%d", url.PathEscape(repo), id), nil, nil)
 }
+
+// StartLabelCheck asks the daemon to scan repo's recent jobs in the background.
+func (c *Client) StartLabelCheck(ctx context.Context, repo string) error {
+	return c.call(ctx, http.MethodPost, "/repos/"+url.PathEscape(repo)+"/label-check", nil, nil)
+}
+
+// LabelCheck returns repo's last label scan; it never starts one.
+func (c *Client) LabelCheck(ctx context.Context, repo string) (model.LabelCheck, error) {
+	var lc model.LabelCheck
+	err := c.call(ctx, http.MethodGet, "/repos/"+url.PathEscape(repo)+"/label-check", nil, &lc)
+	return lc, err
+}

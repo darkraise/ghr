@@ -70,6 +70,8 @@ type Backend interface {
 	Reload() ([]string, error)
 	Prune() error
 	Token() model.TokenStatus
+	StartLabelCheck(repo string) error
+	LabelCheck(repo string) (model.LabelCheck, error)
 	Registrations(ctx context.Context, repo string) ([]model.Registration, error)
 	DeleteRegistration(ctx context.Context, repo string, id int64) error
 }
@@ -157,6 +159,17 @@ func NewServer(b Backend) http.Handler {
 		respond(w, nil, b.SetToken(r.Context(), tok))
 	})
 	mux.HandleFunc("GET /token", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.Token()) })
+	mux.HandleFunc("POST /repos/{name}/label-check", func(w http.ResponseWriter, r *http.Request) {
+		if err := b.StartLabelCheck(r.PathValue("name")); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	})
+	mux.HandleFunc("GET /repos/{name}/label-check", func(w http.ResponseWriter, r *http.Request) {
+		lc, err := b.LabelCheck(r.PathValue("name"))
+		respond(w, lc, err)
+	})
 	mux.HandleFunc("POST /reload", func(w http.ResponseWriter, r *http.Request) {
 		ws, err := b.Reload()
 		respond(w, ws, err)

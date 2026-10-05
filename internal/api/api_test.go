@@ -29,6 +29,11 @@ type fakeBackend struct {
 	regErr      error
 	regRepos    []string
 	deletedReg  []string
+	checked     []string
+	startErr    error
+	lc          model.LabelCheck
+	lcErr       error
+	lcRepos     []string
 }
 
 func (f *fakeBackend) Reload() ([]string, error) { return []string{"labels: duplicate"}, nil }
@@ -315,5 +320,45 @@ func TestRegistrationRoutes(t *testing.T) {
 	}
 	if len(b.deletedReg) != 2 {
 		t.Fatalf("a bad id reached the backend: %v", b.deletedReg)
+	}
+}
+
+func (f *fakeBackend) StartLabelCheck(repo string) error {
+	f.checked = append(f.checked, repo)
+	return f.startErr
+}
+func (f *fakeBackend) LabelCheck(repo string) (model.LabelCheck, error) {
+	f.lcRepos = append(f.lcRepos, repo)
+	return f.lc, f.lcErr
+}
+
+func TestLabelCheckRoutes(t *testing.T) {
+	c, b := setup(t)
+	ctx := context.Background()
+	if err := c.StartLabelCheck(ctx, "dark cloud"); err != nil || !reflect.DeepEqual(b.checked, []string{"dark cloud"}) {
+		t.Fatalf("%v %v", err, b.checked)
+	}
+	retry := time.Date(2026, 10, 5, 12, 1, 0, 0, time.UTC)
+	b.startErr = &Error{Status: http.StatusTooManyRequests, Msg: "this repo was checked less than a minute ago", RetryAt: retry}
+	var ae *Error
+	if err := c.StartLabelCheck(ctx, "darkcloud"); !errors.As(err, &ae) || ae.Status != 429 || !ae.RetryAt.Equal(retry) || len(b.checked) != 2 {
+		t.Fatalf("throttled start: %v %v", err, b.checked)
+	}
+	b.lc = model.LabelCheck{State: "done", Groups: []model.LabelGroup{{Labels: []string{"self-hosted"}, Count: 2}}}
+	lc, err := c.LabelCheck(ctx, "darkcloud")
+	if err != nil || lc.State != "done" || len(lc.Groups) != 1 || lc.Groups[0].Count != 2 {
+		t.Fatalf("%+v %v", lc, err)
+	}
+	b.lc = model.LabelCheck{State: "not_checked", Groups: []model.LabelGroup{}}
+	lc, err = c.LabelCheck(ctx, "darkmem")
+	if err != nil || lc.State != "not_checked" || lc.Groups == nil || len(lc.Groups) != 0 {
+		t.Fatalf("empty: %#v %v", lc, err)
+	}
+	b.lcErr = NotFound("unknown repo nope")
+	if _, err := c.LabelCheck(ctx, "nope"); !errors.As(err, &ae) || ae.Status != 404 {
+		t.Fatalf("error: %v", err)
+	}
+	if !reflect.DeepEqual(b.lcRepos, []string{"darkcloud", "darkmem", "nope"}) {
+		t.Fatalf("backend saw %v", b.lcRepos)
 	}
 }
