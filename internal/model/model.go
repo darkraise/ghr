@@ -16,6 +16,25 @@ type Status struct {
 	Repos          []RepoStatus      `json:"repos"`
 	Instances      []InstanceStatus  `json:"instances"`
 	Maintenance    MaintenanceStatus `json:"maintenance"`
+	RunnerUpdate   RunnerUpdate      `json:"runner_update"`
+}
+
+// RunnerUpdate is the GitHub Actions runner's version state, served inside
+// GET /status. Each field is absent while unknown.
+type RunnerUpdate struct {
+	Installed       string     `json:"installed,omitempty"`
+	Latest          string     `json:"latest,omitempty"`
+	LatestPublished *time.Time `json:"latest_published,omitempty"`
+	// Deadline is set only while a newer runner than Installed exists.
+	Deadline     *time.Time `json:"deadline,omitempty"`
+	CheckedAt    *time.Time `json:"checked_at,omitempty"`
+	CheckError   string     `json:"check_error,omitempty"`
+	Queued       bool       `json:"queued,omitempty"`
+	QueuedAt     *time.Time `json:"queued_at,omitempty"`
+	Running      bool       `json:"running,omitempty"`
+	LastOutcome  string     `json:"last_outcome,omitempty"` // "ok", "failed", "current"
+	LastError    string     `json:"last_error,omitempty"`
+	LastFinished *time.Time `json:"last_finished,omitempty"`
 }
 
 type RepoStatus struct {

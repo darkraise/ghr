@@ -162,6 +162,11 @@ type Manager struct {
 	lastJob        map[string]model.HistoryEntry
 	epoch          string
 	wg             sync.WaitGroup
+	upd            updateState // guarded by mu
+	// fileMu serialises changes to the persisted update state, so a queue,
+	// a cancel, a warning and an update start never overwrite one another;
+	// take it before mu.
+	fileMu sync.Mutex
 }
 
 // Init prepares internal state and loads the last finished job per repo from history.
@@ -175,6 +180,7 @@ func (m *Manager) Init() error {
 	m.lastPrune = m.Now()
 	m.maintCtx, m.maintCancel = context.WithCancel(context.Background())
 	m.epoch = strconv.FormatInt(m.Now().UnixNano(), 36)
+	m.loadUpdate()
 	entries, err := m.History.Query("", "", 0)
 	if err != nil {
 		return err
@@ -349,7 +355,7 @@ func (m *Manager) Status() model.Status {
 		Degraded: m.degraded, DegradedReason: m.degradedReason,
 		RateRemaining: m.GH.RateRemaining(), DiskPct: m.diskPct,
 		Repos: []model.RepoStatus{}, Instances: []model.InstanceStatus{},
-		Maintenance: m.maint,
+		Maintenance: m.maint, RunnerUpdate: m.runnerUpdate(),
 	}
 	for _, r := range cfg.Repos {
 		rs := model.RepoStatus{Name: r.Name, Paused: r.Paused, Removing: r.Removing, Max: cfg.EffectiveMax(r),

@@ -31,6 +31,7 @@ type fakeGH struct {
 	errs      map[string]error // key "<method> <repo>"
 	remaining int
 	releases  []github.Release
+	hook      func(method string) // runs during every call, after it is recorded
 }
 
 func newFakeGH() *fakeGH {
@@ -41,9 +42,13 @@ func newFakeGH() *fakeGH {
 // call records the call and returns its injected error, if any.
 func (f *fakeGH) call(method, repo string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls = append(f.calls, method+" "+repo)
-	return f.errs[method+" "+repo]
+	err, hook := f.errs[method+" "+repo], f.hook
+	f.mu.Unlock()
+	if hook != nil {
+		hook(method)
+	}
+	return err
 }
 
 func (f *fakeGH) setErr(key string, err error) {
@@ -510,7 +515,7 @@ func newHarness(t *testing.T) *harness {
 		GH:     h.gh, SD: h.sd, Docker: h.docker, Host: h.host,
 		Paths: Paths{Dist: dist, Instances: filepath.Join(root, "instances"), Logs: filepath.Join(root, "logs"),
 			Pending: filepath.Join(root, "pending"), ToolCache: filepath.Join(root, "toolcache"),
-			Hooks: "/opt/ghr/hooks", Home: "/home/ghrunner"},
+			Hooks: "/opt/ghr/hooks", Home: "/home/ghrunner", UpdateState: filepath.Join(root, "runner-update.json")},
 		Events:  ev,
 		History: &history.Store{Path: filepath.Join(root, "history.jsonl")},
 		Now:     func() time.Time { return h.now },
@@ -589,4 +594,29 @@ func (h *harness) linkDist(t *testing.T, ver string) string {
 	}
 	h.m.Paths.Dist = cur
 	return dist
+}
+
+func (f *fakeGH) callsText() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return strings.Join(f.calls, ",")
+}
+
+// newEvents is a fresh event ring on the harness clock, as a restarted daemon has.
+func newEvents(h *harness) *events.Ring {
+	ev := events.New()
+	ev.Now = func() time.Time { return h.now }
+	return ev
+}
+
+// restart replaces the manager with a fresh one on the same files, as a
+// daemon restart does.
+func (h *harness) restart(t *testing.T) {
+	t.Helper()
+	old := h.m
+	h.m = &Manager{Config: old.Config, GH: old.GH, SD: old.SD, Docker: old.Docker, Host: old.Host, Paths: old.Paths,
+		Events: newEvents(h), History: old.History, Now: old.Now, NewID: old.NewID, Fetch: old.Fetch}
+	if err := h.m.Init(); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -27,6 +27,9 @@ func (m *Manager) Tick(ctx context.Context) {
 	if m.apiAllowed(now) {
 		m.gatherDemand(ctx, cfg, now)
 	}
+	if m.apiAllowed(now) && !m.isDegraded() && m.releaseCheckDue(now) {
+		m.checkRelease(ctx)
+	}
 	if m.apiAllowed(now) {
 		m.stopIdle(ctx, cfg, now)
 	}
