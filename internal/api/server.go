@@ -70,6 +70,8 @@ type Backend interface {
 	Reload() ([]string, error)
 	Prune() error
 	Token() model.TokenStatus
+	Registrations(ctx context.Context, repo string) ([]model.Registration, error)
+	DeleteRegistration(ctx context.Context, repo string, id int64) error
 }
 
 func NewServer(b Backend) http.Handler {
@@ -158,6 +160,18 @@ func NewServer(b Backend) http.Handler {
 	mux.HandleFunc("POST /reload", func(w http.ResponseWriter, r *http.Request) {
 		ws, err := b.Reload()
 		respond(w, ws, err)
+	})
+	mux.HandleFunc("GET /repos/{name}/registrations", func(w http.ResponseWriter, r *http.Request) {
+		rs, err := b.Registrations(r.Context(), r.PathValue("name"))
+		respond(w, rs, err)
+	})
+	mux.HandleFunc("DELETE /repos/{name}/registrations/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil || id <= 0 {
+			respond(w, nil, BadRequest("runner id must be a positive integer"))
+			return
+		}
+		respond(w, nil, b.DeleteRegistration(r.Context(), r.PathValue("name"), id))
 	})
 	mux.HandleFunc("POST /prune", func(w http.ResponseWriter, r *http.Request) {
 		if err := b.Prune(); err != nil {

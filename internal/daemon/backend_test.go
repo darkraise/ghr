@@ -57,9 +57,12 @@ func (f *fakeManager) Kill(ctx context.Context, id string) error {
 func (f *fakeManager) ClearDegraded() { f.cleared = true }
 
 type fakeGH struct {
-	repos  map[string]*github.Repository
-	forgot bool
-	meta   github.TokenMeta
+	repos   map[string]*github.Repository
+	forgot  bool
+	meta    github.TokenMeta
+	runners map[int64]github.Runner
+	getErr  error
+	deleted []int64
 }
 
 func (f *fakeGH) TokenMeta() github.TokenMeta { return f.meta }
@@ -78,6 +81,30 @@ func (f *fakeGH) ListJobs(ctx context.Context, repo string, runID int64) ([]gith
 	}, nil
 }
 func (f *fakeGH) ForgetCache() { f.forgot = true }
+
+func (f *fakeGH) ListRunners(ctx context.Context, repo string) ([]github.Runner, error) {
+	var out []github.Runner
+	for _, id := range []int64{1, 2, 3, 4} {
+		if r, ok := f.runners[id]; ok {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+func (f *fakeGH) GetRunner(ctx context.Context, repo string, id int64) (*github.Runner, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	r, ok := f.runners[id]
+	if !ok {
+		return nil, &github.APIError{Status: 404, Kind: github.ErrNotFound}
+	}
+	return &r, nil
+}
+func (f *fakeGH) DeleteRunner(ctx context.Context, repo string, id int64) error {
+	f.deleted = append(f.deleted, id)
+	return nil
+}
 
 func newBackend(t *testing.T) (*Backend, *fakeManager, *fakeGH) {
 	t.Helper()
@@ -463,5 +490,55 @@ func TestTokenStates(t *testing.T) {
 	gh.meta.OK = false
 	if ts := b.Token(); ts.State != "rejected" {
 		t.Fatalf("last call rejected: %+v", ts)
+	}
+}
+
+func registrationGH(gh *fakeGH) {
+	gh.runners = map[int64]github.Runner{
+		1: {ID: 1, Name: "linux-1", Status: "offline", Labels: []github.Label{{Name: "self-hosted"}, {Name: "X64"}}},
+		2: {ID: 2, Name: "ghr-darkcloud-aaaaaa", Status: "offline"},
+		3: {ID: 3, Name: "laptop", Status: "online"},
+		4: {ID: 4, Name: "build-box", Status: "offline", Busy: true},
+	}
+}
+
+func TestRegistrationsListed(t *testing.T) {
+	b, _, gh := newBackend(t)
+	registrationGH(gh)
+	rs, err := b.Registrations(context.Background(), "DarkCloud")
+	if err != nil || len(rs) != 4 {
+		t.Fatalf("%+v %v", rs, err)
+	}
+	if rs[0].GHR || !reflect.DeepEqual(rs[0].Labels, []string{"self-hosted", "X64"}) || !rs[1].GHR || rs[2].GHR {
+		t.Fatalf("%+v", rs)
+	}
+	if _, err := b.Registrations(context.Background(), "nope"); apiStatus(err) != 404 {
+		t.Fatalf("unknown repo: %v", err)
+	}
+}
+
+func TestDeleteRegistrationRefusals(t *testing.T) {
+	b, m, gh := newBackend(t)
+	registrationGH(gh)
+	ctx := context.Background()
+	for id, want := range map[int64]int{2: 409, 3: 409, 4: 409} {
+		if err := b.DeleteRegistration(ctx, "darkcloud", id); apiStatus(err) != want {
+			t.Errorf("id %d: %v", id, err)
+		}
+	}
+	if err := b.DeleteRegistration(ctx, "darkcloud", 99); err != nil {
+		t.Fatalf("a runner already gone is deleted: %v", err)
+	}
+	if err := b.DeleteRegistration(ctx, "darkcloud", 1); err != nil || !reflect.DeepEqual(gh.deleted, []int64{1}) {
+		t.Fatalf("offline foreign runner: %v %v", err, gh.deleted)
+	}
+	gh.getErr = errors.New("connection reset")
+	if err := b.DeleteRegistration(ctx, "darkcloud", 1); apiStatus(err) != 502 || len(gh.deleted) != 1 {
+		t.Fatalf("failed lookup must not delete: %v %v", err, gh.deleted)
+	}
+	gh.getErr = nil
+	m.degraded = "GitHub rejected the token"
+	if err := b.DeleteRegistration(ctx, "darkcloud", 1); apiStatus(err) != 503 {
+		t.Fatalf("degraded: %v", err)
 	}
 }

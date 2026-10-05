@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/darkraise/ghr/internal/api"
@@ -32,6 +34,9 @@ type GitHub interface {
 	ListJobs(ctx context.Context, repo string, runID int64) ([]github.Job, error)
 	ForgetCache()
 	TokenMeta() github.TokenMeta
+	ListRunners(ctx context.Context, repo string) ([]github.Runner, error)
+	GetRunner(ctx context.Context, repo string, id int64) (*github.Runner, error)
+	DeleteRunner(ctx context.Context, repo string, id int64) error
 }
 
 type Backend struct {
@@ -393,4 +398,90 @@ func (b *Backend) Token() model.TokenStatus {
 		ts.State, ts.Reason = "rejected", st.DegradedReason
 	}
 	return ts
+}
+
+var hexID = regexp.MustCompile(`^[0-9a-f]{6}$`)
+
+// ghrOwned reports whether a registration name is in ghr's namespace,
+// ghr-<repo>-<6 hex>. ghr registers a runner before it records the instance,
+// so only the name can protect a runner that is still starting.
+func ghrOwned(repo, name string) bool {
+	prefix := "ghr-" + strings.ToLower(repo) + "-"
+	n := strings.ToLower(name)
+	return strings.HasPrefix(n, prefix) && hexID.MatchString(n[len(prefix):])
+}
+
+// repoName resolves a repo name case-insensitively to its configured spelling.
+func (b *Backend) repoName(name string) (string, error) {
+	r := b.Store.Config().Repo(name)
+	if r == nil {
+		return "", api.NotFound("unknown repo " + name)
+	}
+	return r.Name, nil
+}
+
+// degradedErr refuses calls to GitHub while it rejects the token.
+func (b *Backend) degradedErr() error {
+	if st := b.M.Status(); st.Degraded {
+		return &api.Error{Status: http.StatusServiceUnavailable, Msg: "GitHub is rejecting the token: " + st.DegradedReason}
+	}
+	return nil
+}
+
+// Registrations lists the runners GitHub has registered for the repo.
+func (b *Backend) Registrations(ctx context.Context, repo string) ([]model.Registration, error) {
+	name, err := b.repoName(repo)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.degradedErr(); err != nil {
+		return nil, err
+	}
+	rs, err := b.GH.ListRunners(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	out := []model.Registration{}
+	for _, r := range rs {
+		labels := []string{}
+		for _, l := range r.Labels {
+			labels = append(labels, l.Name)
+		}
+		out = append(out, model.Registration{ID: r.ID, Name: r.Name, Status: r.Status, Busy: r.Busy,
+			Labels: labels, GHR: ghrOwned(name, r.Name)})
+	}
+	return out, nil
+}
+
+// DeleteRegistration deletes an offline registration outside ghr's
+// namespace. The runner is re-read first; GitHub's delete has no "only if
+// offline" condition, so the check is the last observed state.
+func (b *Backend) DeleteRegistration(ctx context.Context, repo string, id int64) error {
+	name, err := b.repoName(repo)
+	if err != nil {
+		return err
+	}
+	if err := b.degradedErr(); err != nil {
+		return err
+	}
+	r, err := b.GH.GetRunner(ctx, name, id)
+	if github.IsKind(err, github.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return &api.Error{Status: http.StatusBadGateway, Msg: "could not check the runner before deleting it: " + err.Error()}
+	}
+	switch {
+	case ghrOwned(name, r.Name):
+		return api.Conflict(r.Name + " belongs to ghr, which removes its own registrations")
+	case r.Busy:
+		return api.Conflict(r.Name + " is running a job")
+	case r.Status == "online":
+		return api.Conflict(r.Name + " is online; only offline runners can be deleted")
+	}
+	if err := b.GH.DeleteRunner(ctx, name, id); err != nil {
+		return err
+	}
+	b.Events.Add("info", name, "deleted runner registration %s", r.Name)
+	return nil
 }

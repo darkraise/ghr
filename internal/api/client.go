@@ -169,3 +169,15 @@ func (c *Client) Token(ctx context.Context) (model.TokenStatus, error) {
 	err := c.call(ctx, http.MethodGet, "/token", nil, &ts)
 	return ts, err
 }
+
+// Registrations lists the runners GitHub has registered for repo.
+func (c *Client) Registrations(ctx context.Context, repo string) ([]model.Registration, error) {
+	var rs []model.Registration
+	err := c.call(ctx, http.MethodGet, "/repos/"+url.PathEscape(repo)+"/registrations", nil, &rs)
+	return rs, err
+}
+
+// DeleteRegistration deletes an offline runner registration outside ghr's namespace.
+func (c *Client) DeleteRegistration(ctx context.Context, repo string, id int64) error {
+	return c.call(ctx, http.MethodDelete, fmt.Sprintf("/repos/%s/registrations/%d", url.PathEscape(repo), id), nil, nil)
+}

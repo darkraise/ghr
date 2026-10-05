@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -23,10 +25,23 @@ type fakeBackend struct {
 	pruneErr    error
 	tokenStatus model.TokenStatus
 	tokenCalls  int
+	regs        []model.Registration
+	regErr      error
+	regRepos    []string
+	deletedReg  []string
 }
 
 func (f *fakeBackend) Reload() ([]string, error) { return []string{"labels: duplicate"}, nil }
 func (f *fakeBackend) Prune() error              { return f.pruneErr }
+
+func (f *fakeBackend) Registrations(ctx context.Context, repo string) ([]model.Registration, error) {
+	f.regRepos = append(f.regRepos, repo)
+	return f.regs, f.regErr
+}
+func (f *fakeBackend) DeleteRegistration(ctx context.Context, repo string, id int64) error {
+	f.deletedReg = append(f.deletedReg, fmt.Sprintf("%s/%d", repo, id))
+	return f.regErr
+}
 
 func (f *fakeBackend) Token() model.TokenStatus {
 	f.tokenCalls++
@@ -256,5 +271,49 @@ func TestTokenStatus(t *testing.T) {
 	ts, err = c.Token(context.Background())
 	if err != nil || b.tokenCalls != 2 || ts.State != "rejected" || ts.Reason != "GitHub rejected the token" || ts.ExpiresAt != nil || ts.RateRemaining != nil || ts.CheckedAt != nil {
 		t.Fatalf("second call %+v %v calls %d", ts, err, b.tokenCalls)
+	}
+}
+
+func TestRegistrationRoutes(t *testing.T) {
+	c, b := setup(t)
+	ctx := context.Background()
+	b.regs = []model.Registration{{ID: 1, Name: "linux-1", Status: "offline", Labels: []string{"self-hosted"}}}
+	rs, err := c.Registrations(ctx, "darkcloud")
+	if err != nil || len(rs) != 1 || rs[0].Name != "linux-1" || !reflect.DeepEqual(rs[0].Labels, []string{"self-hosted"}) {
+		t.Fatalf("%+v %v", rs, err)
+	}
+	b.regs = []model.Registration{}
+	rs, err = c.Registrations(ctx, "darkmem")
+	if err != nil || rs == nil || len(rs) != 0 {
+		t.Fatalf("empty list: %#v %v", rs, err)
+	}
+	b.regErr = NotFound("unknown repo nope")
+	var ae *Error
+	if _, err := c.Registrations(ctx, "nope"); !errors.As(err, &ae) || ae.Status != 404 || ae.Msg != "unknown repo nope" {
+		t.Fatalf("error: %v", err)
+	}
+	if !reflect.DeepEqual(b.regRepos, []string{"darkcloud", "darkmem", "nope"}) {
+		t.Fatalf("backend saw %v", b.regRepos)
+	}
+	if err := c.DeleteRegistration(ctx, "darkcloud", 7); !errors.As(err, &ae) || ae.Status != 404 {
+		t.Fatalf("delete error: %v", err)
+	}
+	b.regErr = nil
+	if err := c.DeleteRegistration(ctx, "darkcloud", 1); err != nil || !reflect.DeepEqual(b.deletedReg, []string{"darkcloud/7", "darkcloud/1"}) {
+		t.Fatalf("%v %v", err, b.deletedReg)
+	}
+	for _, bad := range []string{"abc", "0", "-3", "99999999999999999999"} {
+		req, _ := http.NewRequest(http.MethodDelete, c.Base+"/repos/darkcloud/registrations/"+bad, nil)
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 400 {
+			t.Errorf("id %s: status %d", bad, resp.StatusCode)
+		}
+	}
+	if len(b.deletedReg) != 2 {
+		t.Fatalf("a bad id reached the backend: %v", b.deletedReg)
 	}
 }
