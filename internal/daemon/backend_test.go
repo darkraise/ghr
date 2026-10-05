@@ -524,6 +524,14 @@ func TestReloadAppliesWakesAndRejects(t *testing.T) {
 	}
 }
 
+// Without a sampler the series is empty, never null on the wire.
+func TestMetricsWithoutSampler(t *testing.T) {
+	b, _, _ := newBackend(t)
+	if m := b.Metrics(); m.Samples == nil || len(m.Samples) != 0 || m.CPU != nil || m.MemUsed != nil {
+		t.Fatalf("%+v", m)
+	}
+}
+
 func TestPruneStartsOrConflicts(t *testing.T) {
 	b, m, _ := newBackend(t)
 	if err := b.Prune(); err != nil || m.prunes != 1 {

@@ -1,11 +1,15 @@
 package metrics
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/darkraise/ghr/internal/model"
 )
 
 type host struct {
@@ -118,3 +122,50 @@ func TestQuotaReadFailureAndRecovery(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// Changing the series Metrics returns leaves the sampler's own untouched.
+func TestMetricsReturnsACopy(t *testing.T) {
+	h := newHost(t)
+	h.s.Sample()
+	h.now = h.now.Add(time.Minute)
+	h.s.Sample()
+	m := h.s.Metrics()
+	m.Samples[0].Live = 99
+	m.Samples[1] = model.MetricSample{}
+	_ = append(m.Samples[:1], model.MetricSample{Queued: 42})
+	again := h.s.Metrics()
+	if len(again.Samples) != 2 || again.Samples[0].Live != 2 || again.Samples[1].Queued != 3 {
+		t.Fatalf("sampler state changed: %+v", again.Samples)
+	}
+}
+
+// Run samples at once, then on every tick, and returns when ctx ends.
+func TestRunSamplesUntilCancelled(t *testing.T) {
+	h := newHost(t)
+	var calls atomic.Int32
+	h.s.Counts = func() Snapshot { calls.Add(1); return Snapshot{} }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		h.s.Run(ctx, time.Millisecond)
+		close(done)
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for calls.Load() < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d samples", calls.Load())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+	n := calls.Load()
+	time.Sleep(10 * time.Millisecond)
+	if calls.Load() != n {
+		t.Fatal("sampling continued after Run returned")
+	}
+}
