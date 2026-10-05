@@ -68,11 +68,16 @@ type Job struct {
 	Steps        []Step     `json:"steps"`
 }
 
+type Label struct {
+	Name string `json:"name"`
+}
+
 type Runner struct {
-	ID     int64  `json:"id"`
-	Name   string `json:"name"`
-	Status string `json:"status"` // online | offline
-	Busy   bool   `json:"busy"`
+	ID     int64   `json:"id"`
+	Name   string  `json:"name"`
+	Status string  `json:"status"` // online | offline
+	Busy   bool    `json:"busy"`
+	Labels []Label `json:"labels"`
 }
 
 type Repository struct {
@@ -391,6 +396,22 @@ func (c *Client) ListRuns(ctx context.Context, repo, status string) ([]Run, erro
 		return nil
 	})
 	return out, err
+}
+
+// ListRecentRuns lists the repo's n most recent workflow runs of any status,
+// one page only.
+func (c *Client) ListRecentRuns(ctx context.Context, repo string, n int) ([]Run, error) {
+	data, _, err := c.do(ctx, http.MethodGet, c.repoURL(repo, fmt.Sprintf("/actions/runs?per_page=%d", n)), nil)
+	if err != nil {
+		return nil, err
+	}
+	var page struct {
+		WorkflowRuns []Run `json:"workflow_runs"`
+	}
+	if err := json.Unmarshal(data, &page); err != nil {
+		return nil, err
+	}
+	return page.WorkflowRuns, nil
 }
 
 // ListJobs lists the latest attempt's jobs of a run.

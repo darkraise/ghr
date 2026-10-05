@@ -571,3 +571,33 @@ func TestOlderGenerationLeavesCacheAndSuspension(t *testing.T) {
 		t.Fatalf("old-generation rate limit suspended the new token until %v", until)
 	}
 }
+
+func TestListRecentRunsTakesOnePage(t *testing.T) {
+	var base string
+	c, f := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Link", fmt.Sprintf(`<%s%s&page=2>; rel="next"`, base, r.URL.RequestURI()))
+		fmt.Fprint(w, `{"workflow_runs":[{"id":7,"status":"completed"},{"id":6,"status":"completed"}]}`)
+	})
+	base = c.BaseURL
+	runs, err := c.ListRecentRuns(context.Background(), "darkcloud", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 || len(f.requests) != 1 || !strings.HasSuffix(f.requests[0], "/repos/darkraise/darkcloud/actions/runs?per_page=20") {
+		t.Fatalf("runs %+v requests %v", runs, f.requests)
+	}
+}
+
+func TestRunnerLabelsDecoded(t *testing.T) {
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"runners":[{"id":3,"name":"linux-1","status":"offline","busy":false,
+			"labels":[{"id":1,"name":"self-hosted","type":"read-only"},{"id":9,"name":"darkcloud-linux","type":"custom"}]}]}`)
+	})
+	rs, err := c.ListRunners(context.Background(), "darkcloud")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rs) != 1 || len(rs[0].Labels) != 2 || rs[0].Labels[1].Name != "darkcloud-linux" {
+		t.Fatalf("runners %+v", rs)
+	}
+}
