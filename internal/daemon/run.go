@@ -32,11 +32,13 @@ type Options struct {
 	// unfinished cleanup resumes at the next start.
 	ShutdownWait time.Duration
 
-	// Test seams: zero values use GitHub, systemd, Docker, the host and SIGHUP.
+	// Test seams: zero values use GitHub, systemd, Docker, the host, an HTTP
+	// download and SIGHUP.
 	GitHubURL string
 	Systemd   runner.Systemd
 	Docker    runner.Docker
 	Host      runner.Host
+	Fetch     func(ctx context.Context, url, dst string) error
 	Reload    <-chan os.Signal
 }
 
@@ -48,13 +50,14 @@ func DefaultOptions() Options {
 		HistoryPath:  "/var/lib/ghr/history.jsonl",
 		ShutdownWait: 30 * time.Second,
 		Paths: runner.Paths{
-			Dist:      "/opt/ghr/dist/current",
-			Instances: "/var/lib/ghr/instances",
-			Logs:      "/var/lib/ghr/logs",
-			Pending:   "/var/lib/ghr/pending",
-			ToolCache: "/var/lib/ghr/toolcache",
-			Hooks:     "/opt/ghr/hooks",
-			Home:      "/home/" + runner.RunnerUser,
+			Dist:        "/opt/ghr/dist/current",
+			Instances:   "/var/lib/ghr/instances",
+			Logs:        "/var/lib/ghr/logs",
+			Pending:     "/var/lib/ghr/pending",
+			ToolCache:   "/var/lib/ghr/toolcache",
+			Hooks:       "/opt/ghr/hooks",
+			Home:        "/home/" + runner.RunnerUser,
+			UpdateState: "/var/lib/ghr/runner-update.json",
 		},
 	}
 }
@@ -127,7 +130,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	hist := &history.Store{Path: o.HistoryPath}
 	m := &runner.Manager{
-		Config: store.Config, GH: gh, SD: o.Systemd, Docker: o.Docker, Host: o.Host,
+		Config: store.Config, GH: gh, SD: o.Systemd, Docker: o.Docker, Host: o.Host, Fetch: o.Fetch,
 		Paths: o.Paths, Events: ev, History: hist, Now: time.Now, NewID: runner.RandomID,
 	}
 	if m.SD == nil {
@@ -138,6 +141,9 @@ func Run(ctx context.Context, o Options) error {
 	}
 	if m.Host == nil {
 		m.Host = system.Host{Run: system.Exec, Script: system.ExecGroup}
+	}
+	if m.Fetch == nil {
+		m.Fetch = system.Download
 	}
 	if err := m.Init(); err != nil {
 		return err

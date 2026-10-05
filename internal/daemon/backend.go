@@ -28,6 +28,8 @@ type Manager interface {
 	Kill(ctx context.Context, id string) error
 	ClearDegraded()
 	StartPrune() error
+	QueueUpdate(ctx context.Context) error
+	CancelUpdate() error
 }
 
 // GitHub is the part of the GitHub client the backend uses.
@@ -403,7 +405,7 @@ func (b *Backend) Reload() ([]string, error) {
 // Prune starts a forced maintenance prune; its progress goes to the events.
 func (b *Backend) Prune() error {
 	err := b.M.StartPrune()
-	if errors.Is(err, runner.ErrPruneRunning) {
+	if errors.Is(err, runner.ErrPruneRunning) || errors.Is(err, runner.ErrUpdateRunning) {
 		return api.Conflict(err.Error())
 	}
 	if errors.Is(err, runner.ErrClosed) {
@@ -515,4 +517,35 @@ func (b *Backend) DeleteRegistration(ctx context.Context, repo string, id int64)
 	}
 	b.Events.Add("info", name, "deleted runner registration %s", r.Name)
 	return nil
+}
+
+// QueueRunnerUpdate checks GitHub for a newer runner and queues its install;
+// the loop is woken so a free ghr starts it at once.
+func (b *Backend) QueueRunnerUpdate(ctx context.Context) error {
+	if err := b.degradedErr(); err != nil {
+		return err
+	}
+	err := b.M.QueueUpdate(ctx)
+	var current runner.UpToDateError
+	switch {
+	case err == nil:
+		if b.Wake != nil {
+			b.Wake()
+		}
+		return nil
+	case errors.As(err, &current), errors.Is(err, runner.ErrUpdateRunning), errors.Is(err, runner.ErrNoDist):
+		return api.Conflict(err.Error())
+	case errors.Is(err, runner.ErrClosed):
+		return &api.Error{Status: http.StatusServiceUnavailable, Msg: err.Error()}
+	}
+	return err
+}
+
+// CancelRunnerUpdate drops a queued runner update.
+func (b *Backend) CancelRunnerUpdate() error {
+	err := b.M.CancelUpdate()
+	if errors.Is(err, runner.ErrUpdateRunning) {
+		return api.Conflict(err.Error())
+	}
+	return err
 }

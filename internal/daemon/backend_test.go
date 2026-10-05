@@ -23,12 +23,24 @@ import (
 )
 
 type fakeManager struct {
-	insts    []model.InstanceStatus
-	cleared  bool
-	killed   []string
-	pruneErr error
-	prunes   int
-	degraded string
+	insts     []model.InstanceStatus
+	cleared   bool
+	killed    []string
+	pruneErr  error
+	prunes    int
+	degraded  string
+	updateErr error // returned by QueueUpdate and CancelUpdate
+	updates   []string
+}
+
+func (f *fakeManager) QueueUpdate(context.Context) error {
+	f.updates = append(f.updates, "queue")
+	return f.updateErr
+}
+
+func (f *fakeManager) CancelUpdate() error {
+	f.updates = append(f.updates, "cancel")
+	return f.updateErr
 }
 
 func (f *fakeManager) StartPrune() error {

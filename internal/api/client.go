@@ -200,3 +200,14 @@ func (c *Client) LabelCheck(ctx context.Context, repo string) (model.LabelCheck,
 	err := c.call(ctx, http.MethodGet, "/repos/"+url.PathEscape(repo)+"/label-check", nil, &lc)
 	return lc, err
 }
+
+// QueueRunnerUpdate asks the daemon to install the latest runner once no job
+// is running or queued.
+func (c *Client) QueueRunnerUpdate(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/runner-update", nil, nil)
+}
+
+// CancelRunnerUpdate drops a queued runner update.
+func (c *Client) CancelRunnerUpdate(ctx context.Context) error {
+	return c.call(ctx, http.MethodDelete, "/runner-update", nil, nil)
+}

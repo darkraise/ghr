@@ -75,6 +75,8 @@ type Backend interface {
 	LabelCheck(repo string) (model.LabelCheck, error)
 	Registrations(ctx context.Context, repo string) ([]model.Registration, error)
 	DeleteRegistration(ctx context.Context, repo string, id int64) error
+	QueueRunnerUpdate(ctx context.Context) error
+	CancelRunnerUpdate() error
 }
 
 func NewServer(b Backend) http.Handler {
@@ -194,6 +196,16 @@ func NewServer(b Backend) http.Handler {
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
+	})
+	mux.HandleFunc("POST /runner-update", func(w http.ResponseWriter, r *http.Request) {
+		if err := b.QueueRunnerUpdate(r.Context()); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	})
+	mux.HandleFunc("DELETE /runner-update", func(w http.ResponseWriter, r *http.Request) {
+		respond(w, nil, b.CancelRunnerUpdate())
 	})
 	return mux
 }

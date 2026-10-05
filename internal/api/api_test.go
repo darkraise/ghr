@@ -37,6 +37,18 @@ type fakeBackend struct {
 	lcRepos      []string
 	metrics      model.Metrics
 	metricsCalls int
+	updates      []string
+	updateErr    error
+}
+
+func (f *fakeBackend) QueueRunnerUpdate(context.Context) error {
+	f.updates = append(f.updates, "queue")
+	return f.updateErr
+}
+
+func (f *fakeBackend) CancelRunnerUpdate() error {
+	f.updates = append(f.updates, "cancel")
+	return f.updateErr
 }
 
 func (f *fakeBackend) Metrics() model.Metrics {
