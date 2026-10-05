@@ -25,6 +25,8 @@ const (
 	setTokenRetry   = "settings/token/retry"
 	setReload       = "settings/reload"
 	setPrune        = "settings/prune"
+	setRunnerQueue  = "settings/runner/queue"
+	setRunnerCancel = "settings/runner/cancel"
 	tokField        = "token/field"
 	tokOK           = "token/ok"
 	tokCancel       = "token/cancel"
@@ -43,6 +45,8 @@ type manageState struct {
 	tokRetry *ui.Button
 	reload   *ui.Button
 	prune    *ui.Button
+	rnQueue  *ui.Button
+	rnCancel *ui.Button
 
 	cardsRepo     string // the repo the panel's cards were last fetched for
 	cardsDegraded bool   // m.st.Degraded when the cards were last fetched
@@ -80,6 +84,8 @@ func newManageState() *manageState {
 		tokRetry:   ui.NewButton(setTokenRetry, "Retry", ui.Secondary),
 		reload:     ui.NewButton(setReload, "Reload config.yaml", ui.Primary),
 		prune:      ui.NewButton(setPrune, "Prune now", ui.Primary),
+		rnQueue:    ui.NewButton(setRunnerQueue, "Queue update", ui.Primary),
+		rnCancel:   ui.NewButton(setRunnerCancel, "Cancel queued update", ui.Secondary),
 		regRefresh: ui.NewButton(reposRegRefresh, "Refresh", ui.Secondary),
 		regDel:     map[int64]*ui.Button{},
 		lcCheck:    ui.NewButton(reposLCCheck, "Check now", ui.Secondary),
@@ -332,7 +338,7 @@ func (m Model) startPrune() (tea.Model, tea.Cmd) {
 }
 
 // maintenanceSection is the Settings card for disk use, the last manual
-// prune, Reload and Prune now.
+// prune, the runner version, Reload and Prune now.
 func (m Model) maintenanceSection() ui.Section {
 	ms := m.st.Maintenance
 	last := "not pruned since the daemon started"
@@ -344,11 +350,83 @@ func (m Model) maintenanceSection() ui.Section {
 	}
 	m.mg.reload.SetDisabled(!m.connected)
 	m.mg.prune.SetDisabled(!m.connected || ms.Running)
-	return ui.Section{Title: "Maintenance", Rows: []ui.Row{
+	rows := []ui.Row{
 		{Label: "Disk", Text: fmt.Sprintf("%d%% used", m.st.DiskPct)},
 		{Label: "Prune", Text: last},
-		{Items: []ui.Widget{m.mg.reload, m.mg.prune}},
-	}}
+	}
+	rows = append(rows, m.runnerRows()...)
+	rows = append(rows, ui.Row{Items: []ui.Widget{m.mg.reload, m.mg.prune}})
+	return ui.Section{Title: "Maintenance", Rows: rows}
+}
+
+// updateUrgent reports whether the runner update deadline is 7 days away or past.
+func (m Model) updateUrgent() bool {
+	d := m.st.RunnerUpdate.Deadline
+	return d != nil && d.Sub(m.now()) <= 7*24*time.Hour
+}
+
+// runnerRows are the Maintenance card's Runner line, with the deadline or
+// queue note and a failed check under it, and the button that queues or
+// cancels an update.
+func (m Model) runnerRows() []ui.Row {
+	u := m.st.RunnerUpdate
+	versions := u.Installed + " → " + u.Latest + " "
+	var lines []string
+	switch {
+	case u.Installed == "":
+		lines = []string{sDim.Render("version unknown (no dist/current)")}
+	case u.Running:
+		lines = []string{versions + ui.Badge("updating", ui.BadgeBusy)}
+	case u.Queued:
+		lines = []string{versions + ui.Badge("queued", ui.BadgeWarn), "runs when no job is running or queued"}
+	case u.Deadline != nil:
+		kind := ui.BadgeWarn
+		if m.updateUrgent() {
+			kind = ui.BadgeBad
+		}
+		left := "overdue"
+		if d := u.Deadline.Sub(m.now()); d >= 0 {
+			left = fmt.Sprintf("%d days", int(d.Hours()/24))
+		}
+		lines = []string{versions + ui.Badge("update available", kind),
+			fmt.Sprintf("update by %s (%s)", u.Deadline.Local().Format("2006-01-02"), left)}
+	case u.CheckedAt != nil:
+		lines = []string{u.Installed + " " + ui.Badge("up to date", ui.BadgeOK) + " checked " + ago(m.now().Sub(*u.CheckedAt))}
+	case u.CheckError == "":
+		lines = []string{u.Installed + " " + sDim.Render("checking…")}
+	default:
+		lines = []string{u.Installed}
+	}
+	if u.CheckError != "" {
+		lines = append(lines, sDim.Render("last check failed: "+u.CheckError))
+	}
+	rows := []ui.Row{{Label: "Runner", Lines: lines}}
+	m.mg.rnQueue.SetDisabled(!m.connected)
+	m.mg.rnCancel.SetDisabled(!m.connected)
+	switch {
+	case u.Running:
+	case u.Queued:
+		rows = append(rows, ui.Row{Items: []ui.Widget{m.mg.rnCancel}})
+	case u.Deadline != nil:
+		rows = append(rows, ui.Row{Items: []ui.Widget{m.mg.rnQueue}})
+	}
+	return rows
+}
+
+func (m Model) queueRunnerUpdate() (tea.Model, tea.Cmd) {
+	if m.offline() {
+		return m, nil
+	}
+	c := m.c
+	return m, m.action("runner update queued", func(cx context.Context) error { return c.QueueRunnerUpdate(cx) })
+}
+
+func (m Model) cancelRunnerUpdate() (tea.Model, tea.Cmd) {
+	if m.offline() {
+		return m, nil
+	}
+	c := m.c
+	return m, m.action("queued runner update cancelled", func(cx context.Context) error { return c.CancelRunnerUpdate(cx) })
 }
 
 func regDelID(id int64) string { return fmt.Sprintf("repos/reg/del/%d", id) }

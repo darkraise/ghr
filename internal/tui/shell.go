@@ -120,8 +120,23 @@ func (m Model) chips(level int) string {
 	if level >= 1 {
 		conn = ansi.Truncate(conn, 1, "")
 	}
+	if b := m.runnerBadge(); b != "" {
+		disk += "   " + b
+	}
 	return " " + sAccent.Render("ghr") + "   mode " + sGreen.Render("● "+strings.ToUpper(m.st.Mode)) +
 		"   runners " + runners + "   api " + api + "   disk " + disk + "   " + conn
+}
+
+// runnerBadge is the top bar's sign that a newer runner is available: amber,
+// red once the deadline is 7 days away or past.
+func (m Model) runnerBadge() string {
+	if m.st.RunnerUpdate.Deadline == nil {
+		return ""
+	}
+	if m.updateUrgent() {
+		return ui.Badge("runner ↑", ui.BadgeBad)
+	}
+	return ui.Badge("runner ↑", ui.BadgeWarn)
 }
 
 // diskState is "critical" at 95% or more, "warn" at or above disk_high_water

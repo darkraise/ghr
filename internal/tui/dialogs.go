@@ -351,6 +351,10 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		return m.reloadConfig()
 	case setPrune:
 		return m.startPrune()
+	case setRunnerQueue:
+		return m.queueRunnerUpdate()
+	case setRunnerCancel:
+		return m.cancelRunnerUpdate()
 	case setReplaceToken:
 		return m.openTokenDialog()
 	case setTokenRetry:

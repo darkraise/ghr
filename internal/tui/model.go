@@ -42,6 +42,9 @@ type Client interface {
 	Reload(ctx context.Context) ([]string, error)
 	Prune(ctx context.Context) error
 	Metrics(ctx context.Context) (model.Metrics, error)
+	QueueRunnerUpdate(ctx context.Context) error
+	CancelRunnerUpdate(ctx context.Context) error
+	AvailableRepos(ctx context.Context) ([]model.AvailableRepo, error)
 }
 
 type page int
@@ -540,6 +543,8 @@ func cleanEntry(h *model.HistoryEntry) {
 // a freshly decoded response nobody else holds.
 func cleanStatus(st model.Status) model.Status {
 	st.Mode, st.DegradedReason = clean(st.Mode), clean(st.DegradedReason)
+	u := &st.RunnerUpdate
+	u.Installed, u.Latest, u.CheckError, u.LastError = clean(u.Installed), clean(u.Latest), clean(u.CheckError), clean(u.LastError)
 	for i := range st.Repos {
 		r := &st.Repos[i]
 		r.Name, r.Error = clean(r.Name), clean(r.Error)

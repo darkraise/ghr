@@ -62,6 +62,10 @@ type fakeClient struct {
 	pruneErr    error
 	metrics     model.Metrics
 	metricsErr  error // returned by Metrics
+	updateErr   error // returned by QueueRunnerUpdate and CancelRunnerUpdate
+	avail       []model.AvailableRepo
+	availErr    error // returned by AvailableRepos
+	availCalls  int
 }
 
 func (f *fakeClient) rec(s string, a ...any) error {
@@ -190,6 +194,18 @@ func (f *fakeClient) Prune(context.Context) error {
 	return f.pruneErr
 }
 func (f *fakeClient) Metrics(context.Context) (model.Metrics, error) { return f.metrics, f.metricsErr }
+func (f *fakeClient) QueueRunnerUpdate(context.Context) error {
+	f.rec("runner-update")
+	return f.updateErr
+}
+func (f *fakeClient) CancelRunnerUpdate(context.Context) error {
+	f.rec("runner-update cancel")
+	return f.updateErr
+}
+func (f *fakeClient) AvailableRepos(context.Context) ([]model.AvailableRepo, error) {
+	f.availCalls++
+	return f.avail, f.availErr
+}
 
 // actions drops the read calls the fake records, leaving the daemon actions.
 func (f *fakeClient) actions() []string {
