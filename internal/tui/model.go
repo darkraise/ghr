@@ -33,6 +33,15 @@ type Client interface {
 	PauseAll(ctx context.Context) error
 	ResumeAll(ctx context.Context) error
 	Kill(ctx context.Context, id string) error
+	Token(ctx context.Context) (model.TokenStatus, error)
+	SetToken(ctx context.Context, token string) error
+	Registrations(ctx context.Context, repo string) ([]model.Registration, error)
+	DeleteRegistration(ctx context.Context, repo string, id int64) error
+	StartLabelCheck(ctx context.Context, repo string) error
+	LabelCheck(ctx context.Context, repo string) (model.LabelCheck, error)
+	Reload(ctx context.Context) ([]string, error)
+	Prune(ctx context.Context) error
+	Metrics(ctx context.Context) (model.Metrics, error)
 }
 
 type page int

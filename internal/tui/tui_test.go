@@ -32,19 +32,35 @@ var now = time.Date(2026, 10, 3, 14, 5, 0, 0, time.UTC)
 // fakeClient records actions; reads return the configured fields (zero values
 // mean the sample status and empty results).
 type fakeClient struct {
-	calls    []string
-	st       *model.Status
-	events   []model.Event
-	steps    []model.Step
-	ctrs     []model.Container
-	cfg      *config.Config
-	patches  []model.ConfigPatch
-	addErr   error                   // returned by AddRepo when set
-	patchErr error                   // returned by PatchConfig when set
-	cfgErr   error                   // returned by Config when set
-	onPatch  func(model.ConfigPatch) // applies a patch to cfg, as a daemon would
-	hist     []model.HistoryEntry    // History returns the entries matching its filters
-	histReqs []string                // each History request as "repo|conclusion"
+	calls       []string
+	st          *model.Status
+	events      []model.Event
+	steps       []model.Step
+	ctrs        []model.Container
+	cfg         *config.Config
+	patches     []model.ConfigPatch
+	addErr      error                   // returned by AddRepo when set
+	patchErr    error                   // returned by PatchConfig when set
+	cfgErr      error                   // returned by Config when set
+	onPatch     func(model.ConfigPatch) // applies a patch to cfg, as a daemon would
+	hist        []model.HistoryEntry    // History returns the entries matching its filters
+	histReqs    []string                // each History request as "repo|conclusion"
+	token       model.TokenStatus
+	tokenErr    error // returned by Token
+	setTokenErr error
+	regs        []model.Registration
+	regsByRepo  map[string][]model.Registration // when set, Registrations answers per repo
+	regErr      error
+	reads       []string // each Registrations and LabelCheck request, as "regs <repo>" or "lc <repo>"
+	labels      model.LabelCheck
+	labelsBy    map[string]model.LabelCheck // when set, LabelCheck answers per repo
+	labelErr    error                       // returned by StartLabelCheck
+	labelGetErr error                       // returned by LabelCheck
+	warnings    []string
+	reloadErr   error
+	pruneErr    error
+	metrics     model.Metrics
+	metricsErr  error // returned by Metrics
 }
 
 func (f *fakeClient) rec(s string, a ...any) error {
@@ -134,6 +150,42 @@ func (f *fakeClient) Resume(_ context.Context, n string) error     { return f.re
 func (f *fakeClient) PauseAll(context.Context) error               { return f.rec("pause-all") }
 func (f *fakeClient) ResumeAll(context.Context) error              { return f.rec("resume-all") }
 func (f *fakeClient) Kill(_ context.Context, id string) error      { return f.rec("kill %s", id) }
+
+func (f *fakeClient) Token(context.Context) (model.TokenStatus, error) { return f.token, f.tokenErr }
+func (f *fakeClient) SetToken(_ context.Context, tok string) error {
+	f.rec("set-token %d chars", len(tok))
+	return f.setTokenErr
+}
+func (f *fakeClient) Registrations(_ context.Context, repo string) ([]model.Registration, error) {
+	f.reads = append(f.reads, "regs "+repo)
+	if f.regsByRepo != nil {
+		return f.regsByRepo[repo], f.regErr
+	}
+	return f.regs, f.regErr
+}
+func (f *fakeClient) DeleteRegistration(_ context.Context, repo string, id int64) error {
+	return f.rec("del-reg %s %d", repo, id)
+}
+func (f *fakeClient) StartLabelCheck(_ context.Context, repo string) error {
+	f.rec("label-check %s", repo)
+	return f.labelErr
+}
+func (f *fakeClient) LabelCheck(_ context.Context, repo string) (model.LabelCheck, error) {
+	f.reads = append(f.reads, "lc "+repo)
+	if f.labelsBy != nil {
+		return f.labelsBy[repo], f.labelGetErr
+	}
+	return f.labels, f.labelGetErr
+}
+func (f *fakeClient) Reload(context.Context) ([]string, error) {
+	f.rec("reload")
+	return f.warnings, f.reloadErr
+}
+func (f *fakeClient) Prune(context.Context) error {
+	f.rec("prune")
+	return f.pruneErr
+}
+func (f *fakeClient) Metrics(context.Context) (model.Metrics, error) { return f.metrics, f.metricsErr }
 
 // actions drops the read calls the fake records, leaving the daemon actions.
 func (f *fakeClient) actions() []string {
