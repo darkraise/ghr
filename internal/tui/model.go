@@ -510,6 +510,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.refetched(msg)
 	case addedMsg:
 		return m.added(msg)
+	case availMsg:
+		return m.gotAvailable(msg)
 	case reloadMsg:
 		return m.reloaded(msg)
 	case tokenMsg:

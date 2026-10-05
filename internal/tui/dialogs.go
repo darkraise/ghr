@@ -21,7 +21,8 @@ const (
 	btnLeaveDiscard = "unsaved/discard"
 	btnLeaveStay    = "unsaved/stay"
 
-	addName   = "add/name"
+	addRepo   = "add/repo"
+	addRetry  = "add/retry"
 	addMax    = "add/max"
 	addLabels = "add/labels"
 	addPublic = "add/public"
@@ -29,25 +30,38 @@ const (
 	addCancel = "add/cancel"
 )
 
-// addRepoDialog is the Add repository form.
+// pickerRows is how many repositories the Add dialog's picker shows at once.
+const pickerRows = 8
+
+// addRepoDialog is the Add repository form. The repository is picked from
+// the ones the daemon lists as available.
 type addRepoDialog struct {
-	name       *ui.TextField
-	max        *ui.Stepper
-	labels     *ui.TagList
-	public     *ui.Toggle
-	ok, cancel *ui.Button
-	group      ui.Group
-	err        string // the daemon's rejection, shown inside the dialog
-	busy       bool
+	picker            *ui.Picker
+	max               *ui.Stepper
+	labels            *ui.TagList
+	public            *ui.Toggle
+	ok, cancel, retry *ui.Button
+	group             ui.Group
+	loading           bool   // the repository list is being fetched
+	listErr           string // why the list could not be fetched
+	err               string // the daemon's rejection, shown inside the dialog
+	busy              bool
 }
 
-// addedMsg carries the dialog that sent the request, so a late reply never
-// changes a dialog opened after it.
-type addedMsg struct {
-	d    *addRepoDialog
-	name string
-	err  error
-}
+// addedMsg and availMsg carry the dialog that sent the request, so a late
+// reply never changes a dialog opened after it.
+type (
+	addedMsg struct {
+		d    *addRepoDialog
+		name string
+		err  error
+	}
+	availMsg struct {
+		d     *addRepoDialog
+		repos []model.AvailableRepo
+		err   error
+	}
+)
 
 func (m Model) openAddRepo() (tea.Model, tea.Cmd) {
 	if !m.connected {
@@ -55,12 +69,14 @@ func (m Model) openAddRepo() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	d := &addRepoDialog{
-		name:   ui.NewTextField(addName, 30),
-		max:    ui.NewStepper(addMax, 0, 99, 1),
-		labels: ui.NewTagList(addLabels),
-		public: ui.NewToggle(addPublic, false),
-		ok:     ui.NewButton(addOK, "Add", ui.Primary),
-		cancel: ui.NewButton(addCancel, "Cancel", ui.Secondary),
+		picker:  ui.NewPicker(addRepo, pickerRows),
+		max:     ui.NewStepper(addMax, 0, 99, 1),
+		labels:  ui.NewTagList(addLabels),
+		public:  ui.NewToggle(addPublic, false),
+		ok:      ui.NewButton(addOK, "Add", ui.Primary),
+		cancel:  ui.NewButton(addCancel, "Cancel", ui.Secondary),
+		retry:   ui.NewButton(addRetry, "Retry", ui.Secondary),
+		loading: true,
 	}
 	// Max shows the default a new repo gets until it is touched; untouched sends no max.
 	d.max.ZeroText = "∞"
@@ -71,19 +87,80 @@ func (m Model) openAddRepo() (tea.Model, tea.Cmd) {
 	}
 	d.sync(true)
 	m.add, m.overlay = d, ovAddRepo
+	return m, m.fetchAvailable(d)
+}
+
+// fetchAvailable asks the daemon which repositories d can offer.
+func (m Model) fetchAvailable(d *addRepoDialog) tea.Cmd {
+	c := m.c
+	return func() tea.Msg {
+		cx, cancel := ctx()
+		defer cancel()
+		rs, err := c.AvailableRepos(cx)
+		return availMsg{d, rs, err}
+	}
+}
+
+// gotAvailable fills the picker, or shows why the list failed. Focus moves
+// to the picker, or to Retry, unless it has left Max since the dialog opened.
+func (m Model) gotAvailable(msg availMsg) (tea.Model, tea.Cmd) {
+	d := m.add
+	if m.overlay != ovAddRepo || d != msg.d {
+		return m, nil
+	}
+	d.loading = false
+	if msg.err != nil {
+		d.listErr = errText(msg.err)
+	} else {
+		d.listErr = ""
+		opts := make([]ui.PickOption, len(msg.repos))
+		for i, r := range msg.repos {
+			vis := ui.Badge("private", ui.BadgeMuted)
+			if !r.Private {
+				vis = ui.Badge("public", ui.BadgeWarn)
+			}
+			opts[i] = ui.PickOption{Label: clean(r.Name), Badge: vis, Disabled: r.Configured, Note: "added"}
+		}
+		d.picker.SetOptions(opts)
+	}
+	first := d.group.FocusedID() == addMax
+	d.sync(m.connected)
+	if first {
+		d.group.Focus(d.group.Items()[0].ID())
+	}
 	return m, nil
 }
 
-// sync updates the Add button (disabled while a request is in flight or the
-// daemon is unreachable) and the focus order, so focus never rests on it
-// while it is disabled.
+// retryAvailable fetches the repository list again after a failure.
+func (m Model) retryAvailable() (tea.Model, tea.Cmd) {
+	d := m.add
+	if d == nil || d.loading || m.offline() {
+		return m, nil
+	}
+	d.loading, d.listErr = true, ""
+	d.sync(m.connected)
+	return m, m.fetchAvailable(d)
+}
+
+// sync updates the Add button (disabled until a repository is picked, while
+// a request is in flight or while the daemon is unreachable) and the focus
+// order, so focus never rests on a disabled control.
 func (d *addRepoDialog) sync(connected bool) {
 	d.ok.Label = "Add"
 	if d.busy {
 		d.ok.Label = "Adding…"
 	}
-	d.ok.SetDisabled(d.busy || !connected)
-	d.group.Set([]ui.Widget{d.name, d.max, d.labels, d.public, d.cancel, d.ok})
+	_, picked := d.picker.Picked()
+	d.ok.SetDisabled(d.busy || !connected || !picked)
+	d.retry.SetDisabled(!connected)
+	var ws []ui.Widget
+	switch {
+	case d.listErr != "":
+		ws = append(ws, d.retry)
+	case !d.loading:
+		ws = append(ws, d.picker)
+	}
+	d.group.Set(append(ws, d.max, d.labels, d.public, d.cancel, d.ok))
 }
 
 // addRepoKey routes a key in the Add repository dialog: the focused control
@@ -91,6 +168,9 @@ func (d *addRepoDialog) sync(connected bool) {
 // the arrows move focus, and enter adds.
 func (m Model) addRepoKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	d := m.add
+	// Keys read together arrive without a frame between them, so a pick
+	// must enable Add before the next key is routed.
+	d.sync(m.connected)
 	if _, onButton := d.group.Focused().(*ui.Button); onButton && k.String() == "enter" {
 		return m.pressed(d.group.FocusedID())
 	}
@@ -119,11 +199,12 @@ func (m Model) submitAddRepo() (tea.Model, tea.Cmd) {
 		d.err = "the daemon is unreachable"
 		return m, nil
 	}
-	name := d.name.Value().Text
-	if name == "" {
-		d.err = "name is required"
+	o, ok := d.picker.Picked()
+	if !ok {
+		d.err = "pick a repository first"
 		return m, nil
 	}
+	name := o.Label
 	req := model.AddRepoRequest{Name: name, Labels: d.labels.Value().List, AllowPublic: d.public.On}
 	if v := d.max.Value(); v.Set {
 		n := v.Num
@@ -165,14 +246,39 @@ func (m Model) addRepoView(w int) string {
 	d.sync(m.connected)
 	// The rows stay inside the modal's inner width (w-6) down to 40 columns.
 	rw := max(min(72, w-14), 26)
-	d.name.Width = max(min(30, rw-24), 8)
+	// The list gives up rows, keeping three, until the dialog fits the screen.
+	d.picker.Rows = pickerRows
+	view := m.addRepoModal(w, rw)
+	for d.picker.Rows > 3 && lipgloss.Height(view) > m.height {
+		d.picker.Rows--
+		view = m.addRepoModal(w, rw)
+	}
+	return view
+}
+
+// addRepoModal renders the Add repository dialog with the picker's Rows.
+func (m Model) addRepoModal(w, rw int) string {
+	d := m.add
 	f := d.group.FocusedID()
-	lines, _ := ui.Render([]ui.Section{{Rows: []ui.Row{
-		{Label: "Name", Items: []ui.Widget{d.name}, Desc: "a repository of the owner"},
-		{Label: "Max", Items: []ui.Widget{d.max}},
-		{Label: "Labels", Items: []ui.Widget{d.labels}},
-		{Label: "Allow public repo", Items: []ui.Widget{d.public}},
-	}}}, f, rw, false)
+	picked := sDim.Render("pick one below")
+	if o, ok := d.picker.Picked(); ok {
+		picked = sBold.Render(o.Label)
+	}
+	rows := []ui.Row{{Label: "Repository", Text: picked}}
+	switch {
+	case d.loading:
+		rows = append(rows, ui.Row{Text: sDim.Render("loading repositories…")})
+	case d.listErr != "":
+		rows = append(rows, ui.Row{Lines: []string{sRed.Render("✖ " + d.listErr)}}, ui.Row{Items: []ui.Widget{d.retry}})
+	default:
+		rows = append(rows, ui.Row{Items: []ui.Widget{d.picker}})
+	}
+	rows = append(rows,
+		ui.Row{Label: "Max", Items: []ui.Widget{d.max}},
+		ui.Row{Label: "Labels", Items: []ui.Widget{d.labels}},
+		ui.Row{Label: "Allow public repo", Items: []ui.Widget{d.public}},
+	)
+	lines, _ := ui.Render([]ui.Section{{Rows: rows}}, f, rw, false)
 	body := strings.Join(lines, "\n") + "\n" + sAmber.Render("⚠ self-hosted runners on a public repo can run anyone's code")
 	if d.err != "" {
 		body += "\n" + lipgloss.NewStyle().Width(rw).Render(sRed.Render("✖ "+d.err))
@@ -287,7 +393,7 @@ func buttonOverlay(id string) overlay {
 		return ovHelp
 	case btnLeaveSave, btnLeaveDiscard, btnLeaveStay:
 		return ovUnsaved
-	case addOK, addCancel:
+	case addOK, addCancel, addRetry:
 		return ovAddRepo
 	case tokOK, tokCancel:
 		return ovToken
@@ -327,6 +433,8 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		m.overlay, m.add = ovNone, nil
 	case addOK:
 		return m.submitAddRepo()
+	case addRetry:
+		return m.retryAvailable()
 	case dashAdd:
 		return m.openAddRepo()
 	case dashPauseAll:

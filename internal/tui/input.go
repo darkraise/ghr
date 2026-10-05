@@ -328,6 +328,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	if m.overlay == ovAddRepo {
+		m.add.sync(m.connected)
+		wheel := msg.Action == tea.MouseActionPress && (msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown)
+		if wheel && m.add.picker.Hit(msg) {
+			m.add.picker.Update(msg)
+			return m, nil
+		}
 		_, cmd := m.add.group.Mouse(msg)
 		return m, cmd
 	}

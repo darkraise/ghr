@@ -3,15 +3,17 @@
                                                                                 
                                                                                 
                                                                                 
-                                                                                
-                                                                                
     ╭──────────────────────────────────────────────────────────────────────╮    
     │                                                                      │    
     │  Add repository                                                      │    
     │                                                                      │    
     │  Repository           pick one below                                 │    
     │                     › [ type to filter                            ]  │    
-    │                       nothing to pick                                │    
+    │                       ▸ booklore  [PUBLIC]                           │    
+    │                         darkcloud  [PRIVATE]  added                  │    
+    │                         immich  [PRIVATE]                            │    
+    │                         newrepo  [PRIVATE]                           │    
+    │                         site  [PRIVATE]                              │    
     │  Max                  [ − ] 1 [ + ] (default)                        │    
     │  Labels               + add                                          │    
     │  Allow public repo    [━○] Off                                       │    
@@ -20,8 +22,6 @@
     │                                               ( Cancel )    [ Add ]  │    
     │                                                                      │    
     ╰──────────────────────────────────────────────────────────────────────╯    
-                                                                                
-                                                                                
                                                                                 
                                                                                 
                                                                                 
