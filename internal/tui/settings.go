@@ -438,6 +438,7 @@ func (m Model) settingsSections() []ui.Section {
 		}},
 	}
 	secs = append(secs, m.tokenSection())
+	secs = append(secs, m.maintenanceSection())
 
 	var ws []ui.Widget
 	for _, sec := range secs {

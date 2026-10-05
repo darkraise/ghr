@@ -343,6 +343,10 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 	case reposDiscard:
 		m.repos.form.Discard()
 		m.repos.alert = nil
+	case setReload:
+		return m.reloadConfig()
+	case setPrune:
+		return m.startPrune()
 	case setReplaceToken:
 		return m.openTokenDialog()
 	case setTokenRetry:

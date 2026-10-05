@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -16,6 +17,8 @@ import (
 const (
 	setReplaceToken = "settings/token"
 	setTokenRetry   = "settings/token/retry"
+	setReload       = "settings/reload"
+	setPrune        = "settings/prune"
 	tokField        = "token/field"
 	tokOK           = "token/ok"
 	tokCancel       = "token/cancel"
@@ -29,12 +32,16 @@ type manageState struct {
 	tokenSeq int
 	replace  *ui.Button
 	tokRetry *ui.Button
+	reload   *ui.Button
+	prune    *ui.Button
 }
 
 func newManageState() *manageState {
 	return &manageState{
 		replace:  ui.NewButton(setReplaceToken, "Replace token", ui.Primary),
 		tokRetry: ui.NewButton(setTokenRetry, "Retry", ui.Secondary),
+		reload:   ui.NewButton(setReload, "Reload config.yaml", ui.Primary),
+		prune:    ui.NewButton(setPrune, "Prune now", ui.Primary),
 	}
 }
 
@@ -239,4 +246,64 @@ func (m Model) tokenView(w int) string {
 		body += "\n" + lipgloss.NewStyle().Width(max(min(60, w-14), 20)).Render(sRed.Render("✖ "+d.err))
 	}
 	return modal("Replace GitHub token", body, []*ui.Button{d.cancel, d.ok}, f, w)
+}
+
+type reloadMsg struct {
+	warnings []string
+	err      error
+}
+
+func (m Model) reloadConfig() (tea.Model, tea.Cmd) {
+	if m.offline() {
+		return m, nil
+	}
+	c := m.c
+	return m, func() tea.Msg {
+		cx, cancel := ctx()
+		defer cancel()
+		ws, err := c.Reload(cx)
+		return reloadMsg{ws, err}
+	}
+}
+
+func (m Model) reloaded(msg reloadMsg) (tea.Model, tea.Cmd) {
+	switch n := len(msg.warnings); {
+	case msg.err != nil:
+		m.toast.Show("reload rejected: "+clean(msg.err.Error()), true, m.now())
+		return m, nil
+	case n == 0:
+		m.toast.Show("config reloaded", false, m.now())
+	case n == 1:
+		m.toast.Show("config reloaded (1 warning, see Activity)", false, m.now())
+	default:
+		m.toast.Show(fmt.Sprintf("config reloaded (%d warnings, see Activity)", n), false, m.now())
+	}
+	return m, tea.Batch(m.fetchStatus(), m.fetchEvents(), m.fetchConfig(), m.fetchToken())
+}
+
+func (m Model) startPrune() (tea.Model, tea.Cmd) {
+	if m.offline() {
+		return m, nil
+	}
+	return m, m.action("prune started — see Activity", func(c context.Context) error { return m.c.Prune(c) })
+}
+
+// maintenanceSection is the Settings card for disk use, the last manual
+// prune, Reload and Prune now.
+func (m Model) maintenanceSection() ui.Section {
+	ms := m.st.Maintenance
+	last := "not pruned since the daemon started"
+	switch {
+	case ms.Running:
+		last = "pruning…"
+	case ms.LastFinished != nil:
+		last = fmt.Sprintf("last pruned %s (%s)", ago(m.now().Sub(*ms.LastFinished)), ms.LastOutcome)
+	}
+	m.mg.reload.SetDisabled(!m.connected)
+	m.mg.prune.SetDisabled(!m.connected || ms.Running)
+	return ui.Section{Title: "Maintenance", Rows: []ui.Row{
+		{Label: "Disk", Text: fmt.Sprintf("%d%% used", m.st.DiskPct)},
+		{Label: "Prune", Text: last},
+		{Items: []ui.Widget{m.mg.reload, m.mg.prune}},
+	}}
 }

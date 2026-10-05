@@ -160,11 +160,11 @@ func TestSettingsFocusOrderScrollsIntoView(t *testing.T) {
 		t.Fatalf("after up, shift+tab, k: %q", got)
 	}
 	m = feed(m, key("shift+tab")) // wraps to the last control
-	if got := m.settings.group.FocusedID(); got != setReplaceToken {
+	if got := m.settings.group.FocusedID(); got != setPrune {
 		t.Fatalf("wrap: %q", got)
 	}
 	v := m.View()
-	if !strings.Contains(v, "› [ Replace token ]") || lipgloss.Height(v) > 22 || m.settings.scroll == 0 {
+	if !strings.Contains(v, "› [ Prune now ]") || lipgloss.Height(v) > 22 || m.settings.scroll == 0 {
 		t.Fatalf("last control not scrolled into view (scroll %d):\n%s", m.settings.scroll, v)
 	}
 	m = feed(m, key("tab"))
