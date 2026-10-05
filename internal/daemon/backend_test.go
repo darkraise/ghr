@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -63,6 +64,17 @@ type fakeGH struct {
 	runners map[int64]github.Runner
 	getErr  error
 	deleted []int64
+
+	recent    []github.Run
+	runs      map[string][]github.Run
+	jobs      map[int64][]github.Job
+	jobErr    map[int64]error // returned with that run's jobs
+	block     bool            // ListJobs waits for the context to end
+	listErr   error           // returned by ListRecentRuns
+	lmu       sync.Mutex      // guards the fields below, written by scan goroutines
+	jobCalls  []int64
+	inFlight  int // ListJobs calls currently blocked
+	cancelled int // blocked ListJobs calls ended by cancellation (not the deadline)
 }
 
 func (f *fakeGH) TokenMeta() github.TokenMeta { return f.meta }
@@ -75,10 +87,56 @@ func (f *fakeGH) GetRepo(ctx context.Context, repo string) (*github.Repository, 
 	return r, nil
 }
 func (f *fakeGH) ListJobs(ctx context.Context, repo string, runID int64) ([]github.Job, error) {
+	if f.block {
+		f.lmu.Lock()
+		f.inFlight++
+		f.lmu.Unlock()
+		<-ctx.Done()
+		f.lmu.Lock()
+		f.inFlight--
+		if errors.Is(ctx.Err(), context.Canceled) {
+			f.cancelled++
+		}
+		f.lmu.Unlock()
+		return nil, ctx.Err()
+	}
+	f.lmu.Lock()
+	f.jobCalls = append(f.jobCalls, runID)
+	f.lmu.Unlock()
+	if f.jobs != nil {
+		return f.jobs[runID], f.jobErr[runID]
+	}
 	return []github.Job{
 		{RunnerName: "someone-else", Steps: []github.Step{{Name: "x"}}},
 		{RunnerName: "ghr-darkcloud-aaaaaa", Steps: []github.Step{{Number: 1, Name: "checkout", Status: "completed", Conclusion: "success"}}},
 	}, nil
+}
+func (f *fakeGH) ListRecentRuns(ctx context.Context, repo string, n int) ([]github.Run, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.recent, nil
+}
+func (f *fakeGH) ListRuns(ctx context.Context, repo, status string) ([]github.Run, error) {
+	return f.runs[status], nil
+}
+
+// scanCounts waits up to 3 s for cond over (in flight, cancelled), failing the test otherwise.
+func (f *fakeGH) scanCounts(t *testing.T, cond func(inFlight, cancelled int) bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		f.lmu.Lock()
+		in, c := f.inFlight, f.cancelled
+		f.lmu.Unlock()
+		if cond(in, c) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("scan counts never matched: in flight %d, cancelled %d", in, c)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 func (f *fakeGH) ForgetCache() { f.forgot = true }
 

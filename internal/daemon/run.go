@@ -191,6 +191,7 @@ func Run(ctx context.Context, o Options) error {
 			srv.Shutdown(shutdownCtx)
 			cancel()
 			m.Close()
+			b.Close()
 			done := make(chan struct{})
 			go func() { m.Wait(); close(done) }()
 			select {

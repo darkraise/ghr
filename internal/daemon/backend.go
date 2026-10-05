@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/config"
@@ -37,6 +38,8 @@ type GitHub interface {
 	ListRunners(ctx context.Context, repo string) ([]github.Runner, error)
 	GetRunner(ctx context.Context, repo string, id int64) (*github.Runner, error)
 	DeleteRunner(ctx context.Context, repo string, id int64) error
+	ListRuns(ctx context.Context, repo, status string) ([]github.Run, error)
+	ListRecentRuns(ctx context.Context, repo string, n int) ([]github.Run, error)
 }
 
 type Backend struct {
@@ -50,9 +53,19 @@ type Backend struct {
 	// Wake asks the run loop for an immediate tick after a config change, so a
 	// pause stops idle runners at once; nil in tests.
 	Wake func()
+	// Now is the clock for label-check throttling; nil means time.Now.
+	Now    func() time.Time
+	checks labelChecks
 }
 
 var _ api.Backend = (*Backend)(nil)
+
+func (b *Backend) now() time.Time {
+	if b.Now != nil {
+		return b.Now()
+	}
+	return time.Now()
+}
 
 // errNotRemoving aborts a FinalizeRemovals update for a repo resumed meanwhile.
 var errNotRemoving = errors.New("repo is no longer being removed")
@@ -240,6 +253,7 @@ func (b *Backend) AddRepo(ctx context.Context, req model.AddRepoRequest) error {
 	}); err != nil {
 		return err
 	}
+	b.forgetLabelCheck(name)
 	b.Events.Add("info", name, "repo added")
 	return nil
 }
@@ -306,6 +320,7 @@ func (b *Backend) FinalizeRemovals() {
 		case err != nil:
 			b.Events.Add("warn", name, "remove repo: %v", err)
 		default:
+			b.forgetLabelCheck(name)
 			b.Events.Add("info", name, "repo removed")
 		}
 	}
