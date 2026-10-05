@@ -103,6 +103,23 @@ func TestAddRepoDialogWheelScrollsTheList(t *testing.T) {
 	}
 }
 
+// On a screen too short for the whole list, the picker shrinks; the wheel must
+// still reach the last repository.
+func TestAddRepoDialogWheelReachesTheLastRepositoryOnAShortScreen(t *testing.T) {
+	var many []model.AvailableRepo
+	for i := range 20 {
+		many = append(many, model.AvailableRepo{Name: fmt.Sprintf("repo%02d", i), Private: true})
+	}
+	m := feed(sampleModel(&fakeClient{avail: many}, 120, 22), key("a"))
+	z := zoneOf(t, m, addRepo)
+	for range 30 {
+		m = feed(m, tea.MouseMsg{X: z.StartX, Y: z.StartY, Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	}
+	if v := m.View(); !strings.Contains(v, "repo19") {
+		t.Fatalf("the wheel never reached the last repository:\n%s", v)
+	}
+}
+
 func TestAddRepoDialogLoadingAndRetry(t *testing.T) {
 	c := &fakeClient{availErr: errors.New("GitHub is rejecting the token")}
 	upd, cmd := sampleModel(c, 120, 30).Update(key("a"))

@@ -40,6 +40,14 @@ func (p *Picker) Blur()              {}
 func (p *Picker) SetDisabled(d bool) { p.Disabled = d }
 func (p *Picker) Filter() string     { return p.filter }
 
+// Window returns the highlight and the first row of the window, so a caller
+// that renders with trial Rows can put them back between renders: View clamps
+// the window to the Rows it is given.
+func (p *Picker) Window() (cursor, top int) { return p.cursor, p.top }
+
+// SetWindow restores what Window returned.
+func (p *Picker) SetWindow(cursor, top int) { p.cursor, p.top = cursor, top }
+
 // SetOptions replaces the options and resets the window. The pick survives
 // when its label is still offered and enabled.
 func (p *Picker) SetOptions(opts []PickOption) {
