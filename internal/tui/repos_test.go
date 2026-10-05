@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/exp/golden"
+	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
@@ -326,5 +327,41 @@ func TestRepositoriesLeaveGuard(t *testing.T) {
 	}
 	if m.page != pageHistory {
 		t.Fatalf("after save: page %v", m.page)
+	}
+}
+
+func TestRemovedRepoToast(t *testing.T) {
+	c := &fakeClient{}
+	m := onRepos(t, c, 120, 40)
+	cfg := parseConfig(t, settingsYAML)
+	cfg.Repos = cfg.Repos[:1] // darkmem and darkagents gone
+	m = feed(m, configMsg{seq: m.order.seq + 1, cfg: cfg})
+	if v := m.View(); !strings.Contains(v, "repository darkmem, darkagents was removed") {
+		t.Fatalf("toast missing:\n%s", v)
+	}
+	if m.repos.form.Field(reposKey("darkmem", "max")) != nil {
+		t.Fatal("a removed repo keeps its fields")
+	}
+}
+
+// Repo fields moved here from Settings, and with them the check that
+// control sequences in config text never reach the screen.
+func TestRepositoriesSanitisesConfigText(t *testing.T) {
+	c := &fakeClient{}
+	m := onRepos(t, c, 140, 60)
+	// YAML's \e and \a escapes put real ESC and BEL bytes into the parsed config.
+	cfg := parseConfig(t, `owner: darkraise
+labels: ["bad\e[2Jlabel"]
+repos:
+  - name: darkcloud
+  - name: darkmem
+    cleanup_name_prefixes: ["x\e]52;c;Zm9v\ay"]
+  - name: darkagents
+`)
+	m = feed(m, configMsg{seq: m.order.seq + 1, cfg: cfg}, key("down"))
+	w, h := m.contentSize()
+	v := zone.Scan(m.reposView(w, h))
+	if strings.ContainsAny(v, "\x1b\a") || !strings.Contains(v, "xy") || !strings.Contains(v, "badlabel (global)") {
+		t.Fatalf("config text not sanitised: %q", v)
 	}
 }

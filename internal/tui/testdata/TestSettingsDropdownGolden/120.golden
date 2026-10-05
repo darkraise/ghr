@@ -23,8 +23,8 @@
                  │ Memory max           [ 6G         ]  per runner, e.g. 6G, 50% or infinity                           │
                  │ CPU quota            [ 200%       ]  per runner, e.g. 200%                                          │
                  ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
-                 ╭─ darkcloud ─────────────────────────────────────────────────────────────────────────────────────────╮
-                 │ Max                  [ − ] 2 [ + ]  once set, it stays explicit                                     │
-  ? Help         │ Warm                 [ − ] 1 [ + ] (default)  applies in all mode                                   │
-  q Quit         │ Labels               darkcloud-linux ✕  + add  added to this repo's runners                         │
+                                                                                                                        
+                                                                                                                        
+  ? Help                                                                                                                
+  q Quit                                                                                                                
  up move  enter pick  esc close

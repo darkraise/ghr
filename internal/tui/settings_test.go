@@ -72,7 +72,6 @@ func TestSettingsShowsEverySettingButOwnerAsAControl(t *testing.T) {
 		"Owner", "darkraise", "change in config.yaml and restart the daemon",
 		"[ 10s", "[ 2m0s", "[ 5m0s", "80%", "[ 20GB", "[ 30d", "homelab ✕", "[ 6G", "[ 200%",
 		"limits apply to newly started runners",
-		"darkcloud", "darkcloud-linux ✕", "dc-e2e- ✕", "darkmem", "darkagents (paused)",
 	} {
 		if !strings.Contains(v, want) {
 			t.Errorf("missing %q", want)
@@ -81,41 +80,8 @@ func TestSettingsShowsEverySettingButOwnerAsAControl(t *testing.T) {
 	if strings.Contains(v, "› [ darkraise") || strings.Contains(v, "[ darkraise") {
 		t.Error("owner is editable")
 	}
-	lines := settingsLines(m, 123)
-	cloud, mem := lineWith(lines, "─ darkcloud "), lineWith(lines, "─ darkmem ")
-	if !strings.Contains(lines[cloud+1], "[ − ] 2 [ + ]") || strings.Contains(lines[cloud+1], "(default)") {
-		t.Errorf("explicit max: %q", lines[cloud+1])
-	}
-	if !strings.Contains(lines[mem+1], "[ − ] 1 [ + ] (default)") || !strings.Contains(lines[mem+2], "[ − ] 1 [ + ] (default)") {
-		t.Errorf("default max and warm: %q / %q", lines[mem+1], lines[mem+2])
-	}
-}
-
-func TestSettingsRepoDefaultFollowsEditedMode(t *testing.T) {
-	m := settingsModel(t, 140, 40)
-	m.settings.input(setMode).SetValue(ui.Value{Text: config.ModeAll})
-	lines := settingsLines(m, 123)
-	mem := lineWith(lines, "─ darkmem ")
-	if !strings.Contains(lines[mem+1], "[ − ] ∞ [ + ] (default)") {
-		t.Fatalf("all-mode default max: %q", lines[mem+1])
-	}
-}
-
-func TestSettingsRemovingRepoIsDisabled(t *testing.T) {
-	m := sampleModel(&fakeClient{}, 140, 40)
-	m.cfg = parseConfig(t, strings.Replace(settingsYAML, "  - name: darkmem\n", "  - name: darkmem\n    paused: true\n    removing: true\n", 1))
-	m.settings.load(m.cfg)
-	v := strings.Join(settingsLines(m, 123), "\n")
-	if !strings.Contains(v, "darkmem (removing…)") || !strings.Contains(v, "its running jobs finish first") {
-		t.Fatalf("removing repo not marked:\n%s", v)
-	}
-	for _, f := range []string{"max", "warm", "labels", "cleanup"} {
-		if m.settings.input(repoKey("darkmem", f)).Focusable() {
-			t.Errorf("darkmem %s is focusable while removing", f)
-		}
-	}
-	if !m.settings.input(repoKey("darkcloud", "max")).Focusable() {
-		t.Error("another repo was disabled")
+	if strings.Contains(v, "darkcloud") {
+		t.Error("repo cards belong to the Repositories page")
 	}
 }
 
@@ -145,23 +111,6 @@ func TestSettingsNarrowPutsDescriptionsBelow(t *testing.T) {
 	i := lineWith(lines, "[ queue ▾ ]")
 	if strings.Contains(lines[i], "start runners") || !strings.Contains(lines[i+1], "start runners only") {
 		t.Fatalf("narrow description placement:\n%s\n%s", lines[i], lines[i+1])
-	}
-}
-
-// Config text is rendered through clean, like any other daemon text.
-func TestSettingsSanitisesConfigText(t *testing.T) {
-	m := sampleModel(&fakeClient{}, 140, 40)
-	// YAML's \e and \a escapes put real ESC and BEL bytes into the parsed config.
-	m.cfg = parseConfig(t, `owner: "evil\e]0;pwned\a"
-labels: ["bad\e[2Jlabel"]
-repos:
-  - name: darkmem
-    cleanup_name_prefixes: ["x\e]52;c;Zm9v\ay"]
-`)
-	m.settings.load(m.cfg)
-	v := strings.Join(settingsLines(m, 123), "\n")
-	if strings.ContainsAny(v, "\x1b\a") || !strings.Contains(v, "evil") || !strings.Contains(v, "badlabel") || !strings.Contains(v, "xy") {
-		t.Fatalf("config text not sanitised: %q", v)
 	}
 }
 
@@ -211,11 +160,11 @@ func TestSettingsFocusOrderScrollsIntoView(t *testing.T) {
 		t.Fatalf("after up, shift+tab, k: %q", got)
 	}
 	m = feed(m, key("shift+tab")) // wraps to the last control
-	if got := m.settings.group.FocusedID(); got != setAddRepo {
+	if got := m.settings.group.FocusedID(); got != setCPUQuota {
 		t.Fatalf("wrap: %q", got)
 	}
 	v := m.View()
-	if !strings.Contains(v, "› [ + Add repository ]") || lipgloss.Height(v) > 22 || m.settings.scroll == 0 {
+	if !strings.Contains(v, "› [ 200%") || lipgloss.Height(v) > 22 || m.settings.scroll == 0 {
 		t.Fatalf("last control not scrolled into view (scroll %d):\n%s", m.settings.scroll, v)
 	}
 	m = feed(m, key("tab"))
@@ -364,32 +313,6 @@ func TestSettingsConfigKeysInactiveWhileLoading(t *testing.T) {
 
 func set(m Model, key string, v ui.Value) { m.settings.input(key).SetValue(v) }
 
-func TestSettingsSavePatchHoldsOnlyDirtyFields(t *testing.T) {
-	c := &fakeClient{}
-	m := onSettings(t, c, 120, 30)
-	set(m, setPollInterval, ui.Value{Text: "30s"})
-	set(m, setLabels, ui.Value{List: []string{"homelab", "gpu"}})
-	set(m, setMemoryMax, ui.Value{Text: "4G"})
-	set(m, repoKey("darkmem", "max"), ui.Value{Num: 2, Set: true})
-	set(m, repoKey("darkcloud", "cleanup"), ui.Value{List: []string{}})
-	if v := m.View(); !strings.Contains(v, "● 5 unsaved changes") || !strings.Contains(v, "( Discard )") || !strings.Contains(v, "[ Save changes ]") {
-		t.Fatalf("unsaved bar missing:\n%s", v)
-	}
-	m = feed(m, key("ctrl+s"))
-	if len(c.patches) != 1 {
-		t.Fatalf("patches %d", len(c.patches))
-	}
-	p := c.patches[0]
-	if *p.PollInterval != "30s" || strings.Join(*p.Labels, ",") != "homelab,gpu" || *p.RunnerLimits.MemoryMax != "4G" ||
-		p.RunnerLimits.CPUQuota != nil || *p.Repos["darkmem"].Max != 2 || len(*p.Repos["darkcloud"].CleanupNamePrefixes) != 0 {
-		t.Fatalf("patch %+v", p)
-	}
-	if p.Mode != nil || p.GlobalMax != nil || p.StartTimeout != nil || p.IdleTimeout != nil || p.HistoryRetention != nil ||
-		p.DiskHighWater != nil || p.BuildCacheKeep != nil || p.Repos["darkmem"].Warm != nil || p.Repos["darkcloud"].Max != nil || len(p.Repos) != 2 {
-		t.Fatalf("patch carries clean fields: %+v", p)
-	}
-}
-
 // A saved 120s comes back as 2m0s: the field resets to the new base and is
 // not dirty, and no mismatch is reported.
 func TestSettingsSavedDurationIsNotDirtyAfterRefetch(t *testing.T) {
@@ -477,22 +400,6 @@ func TestSettingsWarnsWhenDaemonIgnoresAField(t *testing.T) {
 	m = feed(m, key("ctrl+s"))
 	if v := m.View(); !strings.Contains(v, "daemon did not apply history_retention; is it older than this ghr?") {
 		t.Fatalf("no mismatch warning:\n%s", v)
-	}
-}
-
-func TestSettingsInAppChecksBlockSave(t *testing.T) {
-	c := &fakeClient{}
-	m := onSettings(t, c, 120, 30)
-	set(m, repoKey("darkcloud", "warm"), ui.Value{Num: 3, Set: true}) // darkcloud has max: 2
-	m = feed(m, key("ctrl+s"))
-	v := m.View()
-	if len(c.patches) != 0 || !strings.Contains(v, "✖ warm must be <= max") || !strings.Contains(v, "fix the highlighted settings first") {
-		t.Fatalf("patches %d:\n%s", len(c.patches), v)
-	}
-	set(m, repoKey("darkcloud", "warm"), ui.Value{Num: 2, Set: true})
-	set(m, setIdleTimeout, ui.Value{Text: "soon"})
-	if m = feed(m, key("ctrl+s")); len(c.patches) != 0 {
-		t.Fatal("an unparseable duration was sent")
 	}
 }
 
@@ -607,64 +514,6 @@ func TestConfigRefreshesEveryFiveTicksOnEveryPage(t *testing.T) {
 	}
 }
 
-func TestSettingsRefreshMergesRepoChanges(t *testing.T) {
-	c := &fakeClient{}
-	m := onSettings(t, c, 120, 30)
-	set(m, setPollInterval, ui.Value{Text: "30s"})
-	set(m, repoKey("darkagents", "labels"), ui.Value{List: []string{"x"}})
-	set(m, repoKey("darkmem", "max"), ui.Value{Num: 4, Set: true})
-	// Meanwhile: idle_timeout changed by hand, darkmem removed, darkagents being removed, newrepo added.
-	c.cfg = parseConfig(t, `owner: darkraise
-mode: queue
-global_max: 3
-idle_timeout: 9m
-labels: [homelab]
-repos:
-  - name: darkcloud
-    max: 2
-    labels: [darkcloud-linux]
-    cleanup_name_prefixes: [dc-e2e-]
-  - name: darkagents
-    paused: true
-    removing: true
-  - name: newrepo
-    max: 3
-`)
-	m = ticks(m, slowPoll)
-	s := m.settings
-	if got := s.input(setPollInterval).Value().Text; got != "30s" {
-		t.Errorf("dirty field lost its edit: %q", got)
-	}
-	if got := s.input(setIdleTimeout).Value().Text; got != "9m0s" {
-		t.Errorf("clean field not refreshed: %q", got)
-	}
-	if s.form.Field(repoKey("darkmem", "max")) != nil {
-		t.Error("removed repo kept its fields")
-	}
-	if s.form.Field(repoKey("darkagents", "labels")).Dirty() {
-		t.Error("repo being removed kept its edit")
-	}
-	if got := s.input(repoKey("newrepo", "max")).Value(); got.Num != 3 || !got.Set {
-		t.Errorf("new repo max %+v", got)
-	}
-	if !strings.Contains(m.View(), "repository darkmem was removed") {
-		t.Error("no toast for the removed repo")
-	}
-	form := strings.Join(settingsLines(m, 103), "\n")
-	for _, want := range []string{"darkagents (removing…)", "─ newrepo "} {
-		if !strings.Contains(form, want) {
-			t.Errorf("missing %q", want)
-		}
-	}
-	if strings.Contains(form, "─ darkmem ") {
-		t.Error("removed repo still has a card")
-	}
-	p, _ := s.buildPatch()
-	if p.PollInterval == nil || len(p.Repos) != 0 {
-		t.Errorf("patch after refresh: %+v", p)
-	}
-}
-
 // A config response to an older request never replaces a newer one.
 func TestStaleConfigResponseIsDropped(t *testing.T) {
 	c := &fakeClient{}
@@ -677,24 +526,6 @@ func TestStaleConfigResponseIsDropped(t *testing.T) {
 	m = feed(m, fresh, stale)
 	if m.cfg.GlobalMax != 7 || m.settings.input(setGlobalMax).Value().Num != 7 {
 		t.Fatalf("stale response applied: global max %d", m.cfg.GlobalMax)
-	}
-}
-
-// When a refresh disables the focused control, focus moves on and the new
-// focus is scrolled into view.
-func TestSettingsRefreshScrollsMovedFocusIntoView(t *testing.T) {
-	c := &fakeClient{}
-	m := onSettings(t, c, 120, 22)
-	m.View()
-	m.settings.group.Focus(repoKey("darkcloud", "labels"))
-	m.scrollToFocus()
-	c.cfg = parseConfig(t, strings.Replace(settingsYAML, "  - name: darkcloud\n", "  - name: darkcloud\n    paused: true\n    removing: true\n", 1))
-	m = ticks(m, slowPoll)
-	if got := m.settings.group.FocusedID(); got != repoKey("darkmem", "max") {
-		t.Fatalf("focus %q", got)
-	}
-	if v := m.View(); !strings.Contains(v, "Max                › [ − ]") {
-		t.Fatalf("new focus not in view (scroll %d):\n%s", m.settings.scroll, v)
 	}
 }
 
@@ -833,52 +664,6 @@ func TestNoGuardWhenCleanOrOnCtrlC(t *testing.T) {
 	}
 }
 
-func TestSettingsRepoActions(t *testing.T) {
-	c := &fakeClient{}
-	m := onSettings(t, c, 120, 80)
-	form := strings.Join(settingsLines(m, 103), "\n")
-	if !strings.Contains(form, "[ Pause ]   [ Remove ]") || !strings.Contains(form, "[ Resume ]   [ Remove ]") {
-		t.Fatalf("repo action buttons missing:\n%s", form)
-	}
-	m = click(t, m, repoKey("darkmem", "pause"))
-	m = click(t, m, repoKey("darkagents", "pause")) // paused: the button resumes
-	m = click(t, m, repoKey("darkcloud", "remove"))
-	if m.overlay != ovConfirm || !strings.Contains(m.View(), "Remove repo darkcloud? Its running jobs finish first.") {
-		t.Fatalf("remove did not ask: overlay %v", m.overlay)
-	}
-	m = feed(m, key("enter"))
-	if got := strings.Join(c.actions(), "|"); got != "pause darkmem|resume darkagents|rm darkcloud" {
-		t.Fatalf("actions %s", got)
-	}
-	if len(c.patches) != 0 {
-		t.Fatal("a repo action went through the config patch")
-	}
-}
-
-func TestSettingsRepoActionsDisabledWhileRemoving(t *testing.T) {
-	c := &fakeClient{cfg: parseConfig(t, strings.Replace(settingsYAML, "  - name: darkmem\n", "  - name: darkmem\n    paused: true\n    removing: true\n", 1))}
-	m := feed(sampleModel(c, 120, 80), key("5"))
-	m.View()
-	for _, act := range []string{"pause", "remove"} {
-		if m.settings.buttons[repoKey("darkmem", act)].Focusable() {
-			t.Errorf("darkmem %s is enabled while removing", act)
-		}
-	}
-	if !m.settings.buttons[repoKey("darkcloud", "remove")].Focusable() {
-		t.Error("another repo's button was disabled")
-	}
-}
-
-func TestSettingsAddRepositoryButton(t *testing.T) {
-	m := onSettings(t, &fakeClient{}, 120, 80)
-	if form := strings.Join(settingsLines(m, 103), "\n"); !strings.Contains(form, "[ + Add repository ]") {
-		t.Fatalf("no Add repository button:\n%s", form)
-	}
-	if m = click(t, m, setAddRepo); m.overlay != ovAddRepo {
-		t.Fatalf("overlay %v", m.overlay)
-	}
-}
-
 func TestSettingsDialogGolden(t *testing.T) {
 	for _, w := range []int{120, 80} {
 		t.Run(fmt.Sprint(w), func(t *testing.T) {
@@ -894,30 +679,6 @@ func TestSettingsDropdownGolden(t *testing.T) {
 			m := feed(onSettings(t, &fakeClient{}, w, 30), key("enter"))
 			golden.RequireEqual(t, []byte(m.View()))
 		})
-	}
-}
-
-// When a refresh disables the focused control while the page is hidden, the
-// first render after returning moves focus and must scroll it into view.
-func TestSettingsPageSwitchScrollsMovedFocusIntoView(t *testing.T) {
-	c := &fakeClient{}
-	m := onSettings(t, c, 120, 22)
-	m.View()
-	m.settings.group.Focus(repoKey("darkcloud", "labels"))
-	m.scrollToFocus()
-	mm, _ := m.switchPage(pageDashboard)
-	m = mm.(Model)
-	c.cfg = parseConfig(t, strings.Replace(settingsYAML, "  - name: darkcloud\n", "  - name: darkcloud\n    paused: true\n    removing: true\n", 1))
-	m = ticks(m, slowPoll)
-	mm, cmd := m.switchPage(pageSettings)
-	m = mm.(Model)
-	v := m.View()
-	m = feed(m, cmd())
-	if got := m.settings.group.FocusedID(); got != repoKey("darkmem", "max") {
-		t.Fatalf("focus %q", got)
-	}
-	if !strings.Contains(v, "Max                › [ − ]") {
-		t.Fatalf("new focus not in view (scroll %d):\n%s", m.settings.scroll, v)
 	}
 }
 
@@ -959,5 +720,51 @@ func TestLeaveSaveStaysWhenEditedDuringSave(t *testing.T) {
 	}
 	if f := m.settings.form.Field(setIdleTimeout); !f.Dirty() {
 		t.Fatal("the edit made during the save should stay")
+	}
+}
+
+func TestSettingsSanitisesConfigText(t *testing.T) {
+	m := sampleModel(&fakeClient{}, 140, 40)
+	// YAML's \e and \a escapes put real ESC and BEL bytes into the parsed config.
+	m.cfg = parseConfig(t, `owner: "evil\e]0;pwned\a"
+labels: ["bad\e[2Jlabel"]
+`)
+	m.settings.load(m.cfg)
+	v := strings.Join(settingsLines(m, 123), "\n")
+	if strings.ContainsAny(v, "\x1b\a") || !strings.Contains(v, "evil") || !strings.Contains(v, "badlabel") {
+		t.Fatalf("config text not sanitised: %q", v)
+	}
+}
+
+func TestSettingsSavePatchHoldsOnlyDirtyFields(t *testing.T) {
+	c := &fakeClient{}
+	m := onSettings(t, c, 120, 30)
+	set(m, setPollInterval, ui.Value{Text: "30s"})
+	set(m, setLabels, ui.Value{List: []string{"homelab", "gpu"}})
+	set(m, setMemoryMax, ui.Value{Text: "4G"})
+	if v := m.View(); !strings.Contains(v, "● 3 unsaved changes") || !strings.Contains(v, "( Discard )") || !strings.Contains(v, "[ Save changes ]") {
+		t.Fatalf("unsaved bar missing:\n%s", v)
+	}
+	m = feed(m, key("ctrl+s"))
+	if len(c.patches) != 1 {
+		t.Fatalf("patches %d", len(c.patches))
+	}
+	p := c.patches[0]
+	if *p.PollInterval != "30s" || strings.Join(*p.Labels, ",") != "homelab,gpu" || *p.RunnerLimits.MemoryMax != "4G" || p.RunnerLimits.CPUQuota != nil {
+		t.Fatalf("patch %+v", p)
+	}
+	if p.Mode != nil || p.GlobalMax != nil || p.StartTimeout != nil || p.IdleTimeout != nil || p.HistoryRetention != nil ||
+		p.DiskHighWater != nil || p.BuildCacheKeep != nil || len(p.Repos) != 0 {
+		t.Fatalf("patch carries clean fields: %+v", p)
+	}
+}
+
+func TestSettingsInAppChecksBlockSave(t *testing.T) {
+	c := &fakeClient{}
+	m := onSettings(t, c, 120, 30)
+	set(m, setIdleTimeout, ui.Value{Text: "soon"})
+	m = feed(m, key("ctrl+s"))
+	if v := m.View(); len(c.patches) != 0 || !strings.Contains(v, "fix the highlighted settings first") {
+		t.Fatalf("patches %d:\n%s", len(c.patches), v)
 	}
 }

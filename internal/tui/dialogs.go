@@ -321,7 +321,7 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		m.overlay, m.add = ovNone, nil
 	case addOK:
 		return m.submitAddRepo()
-	case setAddRepo, dashAdd:
+	case dashAdd:
 		return m.openAddRepo()
 	case dashPauseAll:
 		return m, m.togglePauseAll()
@@ -341,10 +341,6 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 	case reposDiscard:
 		m.repos.form.Discard()
 		m.repos.alert = nil
-	default:
-		if strings.HasPrefix(id, "settings/repo/") {
-			return m.repoAction(id)
-		}
 	}
 	return m, nil
 }

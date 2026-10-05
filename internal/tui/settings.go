@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -33,23 +32,17 @@ const (
 
 	setSave    = "settings/save"
 	setDiscard = "settings/discard"
-	setAddRepo = "settings/add_repo"
 )
-
-// repoKey is the key of a per-repo field: max, warm, labels or cleanup.
-func repoKey(name, field string) string { return ui.ZoneID("settings", "repo", name, field) }
 
 var modeOptions = []ui.Option{
 	{Value: config.ModeQueue, Label: "queue", Desc: "start runners only for queued jobs, up to the global max"},
 	{Value: config.ModeAll, Label: "all", Desc: "keep warm runners per repo, up to each repo's max"},
 }
 
-// settingsPage is the Settings form. The Model holds it by pointer, so its
-// controls keep their state while Bubble Tea copies the Model.
+// settingsPage is the Settings form of global settings. The Model holds it
+// by pointer, so its controls keep their state while Bubble Tea copies the Model.
 type settingsPage struct {
 	configPage
-	repos   []config.Repo         // the repos of the last loaded config, in order
-	buttons map[string]*ui.Button // the repo cards' action buttons, by ID
 }
 
 func newSettingsPage() *settingsPage {
@@ -142,45 +135,12 @@ func settingsSpecs(c *config.Config) []ui.Spec {
 		textSpec(setMemoryMax, clean(c.RunnerLimits.MemoryMax), ui.KindText, 10, nil),
 		textSpec(setCPUQuota, clean(c.RunnerLimits.CPUQuota), ui.KindText, 10, nil),
 	}
-	for _, r := range c.Repos {
-		maxKey, warmKey := repoKey(r.Name, "max"), repoKey(r.Name, "warm")
-		repo := []ui.Spec{
-			intSpec(maxKey, r.Max, func() *ui.Stepper {
-				s := ui.NewStepper(maxKey, 0, 99, 1)
-				s.ZeroText = "∞"
-				return s
-			}),
-			intSpec(warmKey, r.Warm, func() *ui.Stepper {
-				s := ui.NewStepper(warmKey, 0, 99, 1)
-				s.Default = 1
-				return s
-			}),
-			listSpec(repoKey(r.Name, "labels"), r.Labels),
-			listSpec(repoKey(r.Name, "cleanup"), r.CleanupNamePrefixes),
-		}
-		for i := range repo {
-			repo[i].Locked = r.Removing
-		}
-		specs = append(specs, repo...)
-	}
 	return specs
 }
 
 // load merges a freshly fetched config into the form: clean fields take the
-// new values, dirty ones keep their edits, a repo now being removed loses its
-// edits, and a new repo starts at its config values. It returns the repos that
-// no longer exist, whose cards and edits are dropped.
-func (s *settingsPage) load(c *config.Config) []string {
-	var gone []string
-	for _, r := range s.repos {
-		if c.Repo(r.Name) == nil {
-			gone = append(gone, r.Name)
-		}
-	}
-	s.form.Merge(settingsSpecs(c))
-	s.repos = append([]config.Repo{}, c.Repos...)
-	return gone
-}
+// new values and dirty ones keep their edits.
+func (s *settingsPage) load(c *config.Config) { s.form.Merge(settingsSpecs(c)) }
 
 // loadConfig takes the config fetched by request seq, unless a newer one is
 // already shown, and says which repos disappeared. A refresh can move focus
@@ -191,12 +151,21 @@ func (m *Model) loadConfig(seq int, c *config.Config) {
 		return
 	}
 	m.order.shown = seq
+	var gone []string
+	if m.cfg != nil {
+		for _, r := range m.cfg.Repos {
+			if c.Repo(r.Name) == nil {
+				gone = append(gone, r.Name)
+			}
+		}
+	}
 	m.cfg = c
 	focus := s.group.FocusedID()
-	if gone := s.load(c); len(gone) > 0 {
+	s.load(c)
+	m.repos.form.Merge(reposSpecs(c))
+	if len(gone) > 0 {
 		m.toast.Show("repository "+strings.Join(gone, ", ")+" was removed", false, m.now())
 	}
-	m.repos.form.Merge(reposSpecs(c))
 	m.syncRepoControls()
 	if m.page == pageSettings && m.overlay == ovNone {
 		if m.settingsSections(); s.group.FocusedID() != focus {
@@ -207,74 +176,18 @@ func (m *Model) loadConfig(seq int, c *config.Config) {
 
 func (s *settingsPage) input(key string) ui.Input { return s.form.Field(key).Input }
 
-// button returns the action button id, creating it on first use.
-func (s *settingsPage) button(id, label string, kind ui.ButtonKind) *ui.Button {
-	if s.buttons == nil {
-		s.buttons = map[string]*ui.Button{}
-	}
-	b := s.buttons[id]
-	if b == nil {
-		b = ui.NewButton(id, label, kind)
-		s.buttons[id] = b
-	}
-	b.Label = label
-	return b
-}
-
-// repoAction runs a repo card's Pause, Resume or Remove button. Pause and
-// Resume act at once; Remove asks first. They are actions, not form fields.
-func (m Model) repoAction(id string) (tea.Model, tea.Cmd) {
-	rest := strings.TrimPrefix(id, "settings/repo/")
-	name, act, _ := strings.Cut(rest, "/")
-	var repo *config.Repo
-	for i := range m.settings.repos {
-		if m.settings.repos[i].Name == name {
-			repo = &m.settings.repos[i]
-		}
-	}
-	if repo == nil {
-		return m, nil
-	}
-	switch act {
-	case "pause":
-		if repo.Paused {
-			return m, m.action("resumed "+name, func(c context.Context) error { return m.c.Resume(c, name) })
-		}
-		return m, m.action("paused "+name, func(c context.Context) error { return m.c.Pause(c, name) })
-	case "remove":
-		return m.openConfirm(fmt.Sprintf("Remove repo %s? Its running jobs finish first.", name), func() tea.Cmd {
-			return m.action("removing "+name, func(c context.Context) error { return m.c.RemoveRepo(c, name) })
-		})
-	}
-	return m, nil
-}
-
 func (s *settingsPage) row(label, key, desc string) ui.Row {
 	f := s.form.Field(key)
 	return ui.Row{Label: label, Items: []ui.Widget{f.Input}, Desc: desc, Dirty: f.Dirty()}
 }
 
 // checkErrors returns the in-app check failures by field key: a duration that
-// does not parse or is below its floor, and a repo's warm above its explicit max. Size, memory and
-// CPU values are left to the daemon.
+// does not parse or is below its floor.
 func (s *settingsPage) checkErrors() map[string]string {
 	errs := map[string]string{}
 	for _, f := range s.form.Fields() {
 		if tf, ok := f.Input.(*ui.TextField); ok && tf.Err() != nil {
 			errs[f.Key] = tf.Err().Error()
-		}
-	}
-	for _, r := range s.repos {
-		if r.Removing {
-			continue
-		}
-		mx, wm := s.input(repoKey(r.Name, "max")).Value(), s.input(repoKey(r.Name, "warm")).Value()
-		warm := 1
-		if wm.Set {
-			warm = wm.Num
-		}
-		if mx.Set && mx.Num > 0 && warm > mx.Num {
-			errs[repoKey(r.Name, "warm")] = "warm must be <= max"
 		}
 	}
 	return errs
@@ -290,25 +203,6 @@ func (s *settingsPage) buildPatch() (model.ConfigPatch, map[string]ui.Value) {
 		v := f.Input.Value()
 		text, num, list := v.Text, v.Num, append([]string{}, v.List...)
 		sent[f.Key] = v
-		if rest, ok := strings.CutPrefix(f.Key, "settings/repo/"); ok {
-			name, field, _ := strings.Cut(rest, "/")
-			if p.Repos == nil {
-				p.Repos = map[string]model.RepoPatch{}
-			}
-			rp := p.Repos[name]
-			switch field {
-			case "max":
-				rp.Max = &num
-			case "warm":
-				rp.Warm = &num
-			case "labels":
-				rp.Labels = &list
-			case "cleanup":
-				rp.CleanupNamePrefixes = &list
-			}
-			p.Repos[name] = rp
-			continue
-		}
 		switch f.Key {
 		case setMode:
 			p.Mode = &text
@@ -346,13 +240,6 @@ func (s *settingsPage) buildPatch() (model.ConfigPatch, map[string]ui.Value) {
 func fieldName(key string) string {
 	if strings.HasPrefix(key, "repos/") {
 		name, field := splitReposKey(key)
-		if field == "cleanup" {
-			field = "cleanup_name_prefixes"
-		}
-		return name + "." + field
-	}
-	if rest, ok := strings.CutPrefix(key, "settings/repo/"); ok {
-		name, field, _ := strings.Cut(rest, "/")
 		if field == "cleanup" {
 			field = "cleanup_name_prefixes"
 		}
@@ -518,18 +405,8 @@ func (m Model) alertBox(cp *configPage, w int) []string {
 // edited mode) and sets the focus order to the layout order.
 func (m Model) settingsSections() []ui.Section {
 	s := m.settings
-	queue := s.input(setMode).Value().Text == config.ModeQueue
-	removing := map[string]bool{}
-	for _, r := range s.repos {
-		removing[r.Name] = r.Removing
-	}
 	for _, f := range s.form.Fields() {
-		off := !m.connected
-		if rest, ok := strings.CutPrefix(f.Key, "settings/repo/"); ok {
-			name, _, _ := strings.Cut(rest, "/")
-			off = off || removing[name]
-		}
-		f.Input.SetDisabled(off)
+		f.Input.SetDisabled(!m.connected)
 	}
 	s.save.Label = "Save changes"
 	if s.saving {
@@ -537,7 +414,6 @@ func (m Model) settingsSections() []ui.Section {
 	}
 	s.save.SetDisabled(s.saving || !m.connected)
 	s.discard.SetDisabled(s.saving || !m.connected)
-	errs := s.checkErrors()
 
 	secs := []ui.Section{
 		{Title: "General", Rows: []ui.Row{
@@ -561,40 +437,6 @@ func (m Model) settingsSections() []ui.Section {
 			s.row("CPU quota", setCPUQuota, "per runner, e.g. 200%"),
 		}},
 	}
-	for _, r := range s.repos {
-		mx := s.input(repoKey(r.Name, "max")).(*ui.Stepper)
-		mx.Default, mx.DefaultText = 1, ""
-		if !queue {
-			mx.Default, mx.DefaultText = 0, "∞"
-		}
-		pauseLabel := "Pause"
-		if r.Paused {
-			pauseLabel = "Resume"
-		}
-		pause := s.button(repoKey(r.Name, "pause"), pauseLabel, ui.Primary)
-		remove := s.button(repoKey(r.Name, "remove"), "Remove", ui.Danger)
-		for _, b := range []*ui.Button{pause, remove} {
-			b.SetDisabled(!m.connected || r.Removing)
-		}
-		title := clean(r.Name)
-		card := ui.Section{Title: title, Rows: []ui.Row{
-			s.row("Max", repoKey(r.Name, "max"), "once set, it stays explicit"),
-			s.warmRow(r.Name, errs),
-			s.row("Labels", repoKey(r.Name, "labels"), "added to this repo's runners"),
-			s.row("Cleanup prefixes", repoKey(r.Name, "cleanup"), "container name prefixes removed after each job"),
-			{Items: []ui.Widget{pause, remove}},
-		}}
-		switch {
-		case r.Removing:
-			card.Title, card.Note = title+" (removing…)", "removing… its running jobs finish first"
-		case r.Paused:
-			card.Title = title + " (paused)"
-		}
-		secs = append(secs, card)
-	}
-	add := s.button(setAddRepo, "+ Add repository", ui.Primary)
-	add.SetDisabled(!m.connected)
-	secs = append(secs, ui.Section{Rows: []ui.Row{{Items: []ui.Widget{add}}}})
 
 	var ws []ui.Widget
 	for _, sec := range secs {
@@ -607,12 +449,6 @@ func (m Model) settingsSections() []ui.Section {
 	}
 	s.group.Set(ws)
 	return secs
-}
-
-func (s *settingsPage) warmRow(name string, errs map[string]string) ui.Row {
-	r := s.row("Warm", repoKey(name, "warm"), "applies in all mode")
-	r.Err = errs[repoKey(name, "warm")]
-	return r
 }
 
 // settingsKey handles a key on the Settings page in precedence order: the

@@ -828,7 +828,7 @@ func TestSettingsRetriesLoad(t *testing.T) {
 	c.cfg = sampleConfig(t, "darkcloud")
 	m = ticks(m, 1)
 	v := m.View()
-	if !strings.Contains(v, "─ darkcloud ") || strings.Contains(v, "loading…") {
+	if !strings.Contains(v, "─ General ") || strings.Contains(v, "loading…") {
 		t.Fatalf("config not loaded by the tick:\n%s", v)
 	}
 }
