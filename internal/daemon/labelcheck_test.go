@@ -94,7 +94,7 @@ func TestLabelCheckDeadlineErrorsAndDegraded(t *testing.T) {
 	labelGH(gh)
 	gh.block = true
 	old := labelScanDeadline
-	labelScanDeadline = 300 * time.Millisecond
+	labelScanDeadline = 20 * time.Millisecond
 	t.Cleanup(func() { labelScanDeadline = old })
 	if err := b.StartLabelCheck("darkcloud"); err != nil {
 		t.Fatal(err)
@@ -190,6 +190,62 @@ func TestLabelCheckCancelledEagerlyOnTokenChange(t *testing.T) {
 			}
 			gh.scanCounts(t, func(in, c int) bool { return in == 0 && c == 1 })
 		})
+	}
+}
+
+// A group names at most three distinct jobs and counts the rest in More;
+// groups come out most recently seen first, ties in the order first seen.
+func TestLabelGrouperCapsNamesAndOrdersGroups(t *testing.T) {
+	t0 := time.Date(2026, 10, 5, 10, 0, 0, 0, time.UTC)
+	g := &labelGrouper{byKey: map[string]*model.LabelGroup{}, names: map[string]map[string]bool{}}
+	job := func(name, wf string, at time.Duration, labels ...string) github.Job {
+		return github.Job{Name: name, WorkflowName: wf, Labels: labels, CreatedAt: t0.Add(at)}
+	}
+	for i, name := range []string{"a", "b", "a", "c", "d", "e"} {
+		g.add(job(name, "CI", time.Duration(i)*time.Minute, "self-hosted"))
+	}
+	g.add(job("solo", "", 3*time.Hour, "gpu"))
+	g.add(job("x", "W", 2*time.Hour, "arm"))
+	g.add(job("y", "W", 2*time.Hour, "big"))
+	got := g.groups()
+	var order []string
+	for _, grp := range got {
+		order = append(order, grp.Labels[0])
+	}
+	if !reflect.DeepEqual(order, []string{"gpu", "arm", "big", "self-hosted"}) {
+		t.Fatalf("order %v", order)
+	}
+	if sh := got[3]; sh.Count != 6 || sh.More != 2 || !reflect.DeepEqual(sh.Jobs, []string{"CI / a", "CI / b", "CI / c"}) {
+		t.Fatalf("capped group %+v", sh)
+	}
+	if !reflect.DeepEqual(got[0].Jobs, []string{"solo"}) || got[0].More != 0 {
+		t.Fatalf("job without a workflow %+v", got[0])
+	}
+}
+
+// Close racing StartLabelCheck leaves no scan running, and every start after
+// Close is refused.
+func TestLabelCheckCloseConcurrentWithStart(t *testing.T) {
+	b, _, gh := newBackend(t)
+	labelGH(gh)
+	gh.block = true
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			switch err := b.StartLabelCheck("darkcloud"); apiStatus(err) {
+			case 0, 429, 503:
+			default:
+				t.Errorf("start: %v", err)
+				return
+			}
+		}
+	}()
+	b.Close()
+	<-done
+	gh.scanCounts(t, func(in, _ int) bool { return in == 0 })
+	if err := b.StartLabelCheck("darkcloud"); apiStatus(err) != 503 {
+		t.Fatalf("start after Close: %v", err)
 	}
 }
 
