@@ -410,12 +410,13 @@ type helpGroup struct {
 	keys  [][2]string // key, what it does
 }
 
-// helpGroups in reading order. They render as three columns of two groups,
-// Global over Detail, Dashboard over History and Runners over Settings, so
-// the dialog fits the 22-row minimum screen.
+// helpGroups in reading order. They render as four columns: Global over
+// Detail, Dashboard over History, Repositories over Settings, then Runner
+// rows. No column exceeds ten rows, so the dialog fits the 22-row minimum.
 var helpGroups = []helpGroup{
 	{"Global", [][2]string{{"1-5", "switch page"}, {"tab", "move focus"}, {"↑↓ j k", "move selection"}, {"? / q", "help / quit"}}},
-	{"Dashboard", [][2]string{{"h / →", "repos / runners"}, {"p / P", "pause repo/all"}, {"+ - [ ]", "repo/global cap"}, {"m", "queue/all mode"}, {"a / d", "add/remove repo"}}},
+	{"Dashboard", [][2]string{{"h / →", "repos / runners"}, {"p / P", "pause repo/all"}, {"+ - [ ]", "repo/global cap"}, {"m", "queue/all mode"}, {"a d e", "add/remove/edit"}}},
+	{"Repositories", [][2]string{{"a / d", "add / remove"}, {"p", "pause / resume"}, {"ctrl+s", "save"}}},
 	// The Runners page and the Dashboard's Runners card share these keys.
 	{"Runner rows", [][2]string{{"enter", "open details"}, {"l / x", "log / stop"}, {"pgup/dn", "scroll the log"}}},
 	{"Detail", [][2]string{{"← / →", "switch tab"}, {"x / esc", "stop / back"}, {"pgup/dn", "scroll the list"}}},
@@ -425,8 +426,8 @@ var helpGroups = []helpGroup{
 
 const helpColW = 23 // an 8-column key and a 15-column description
 
-// helpText lists the keys by group in three columns, stacked into one when
-// inner columns cannot hold three, followed by the notes on digits, the mouse
+// helpText lists the keys by group in four columns, stacked into one when
+// inner columns cannot hold four, followed by the notes on digits, the mouse
 // and tmux.
 func helpText(inner int) string {
 	col := func(gs ...helpGroup) []string {
@@ -443,13 +444,17 @@ func helpText(inner int) string {
 		return out
 	}
 	g := helpGroups
-	cols := [][]string{col(g[0], g[3]), col(g[1], g[4]), col(g[2], g[5])}
 	var lines []string
-	if inner < 3*helpColW+4 {
+	if inner < 4*helpColW+3*2 {
 		lines = col(g...)
 	} else {
-		for i := 0; i < max(len(cols[0]), len(cols[1]), len(cols[2])); i++ {
-			row := make([]string, 3)
+		cols := [][]string{col(g[0], g[4]), col(g[1], g[5]), col(g[2], g[6]), col(g[3])}
+		rows := 0
+		for _, c := range cols {
+			rows = max(rows, len(c))
+		}
+		for i := 0; i < rows; i++ {
+			row := make([]string, len(cols))
 			for c := range cols {
 				if i < len(cols[c]) {
 					row[c] = cols[c][i]

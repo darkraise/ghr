@@ -10,32 +10,37 @@ import (
 	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
-// Help lists every group and fits a 22-row screen at 80 columns and wider.
+// Help lists every group in four columns and fits a 22-row screen from 104
+// columns; narrower, it stacks and scrolls.
 func TestHelpGroupsFit(t *testing.T) {
-	for _, w := range []int{80, 120} {
-		m := feed(sampleModel(&fakeClient{}, w, 22), key("?"))
-		v := m.View()
-		for _, want := range []string{"Global", "Dashboard", "Runner rows", "Detail", "History", "Settings", "scroll the list",
-			"switch tab", "copy run URL", "takes digits", "set -g mouse on", "[ Close ]"} {
-			if !strings.Contains(v, want) {
-				t.Errorf("width %d: help missing %q", w, want)
-			}
+	m := feed(sampleModel(&fakeClient{}, 120, 22), key("?"))
+	v := m.View()
+	for _, want := range []string{"Global", "Dashboard", "Repositories", "Runner rows", "Detail", "History", "Settings",
+		"1-5", "add/remove/edit", "switch tab", "copy run URL", "takes digits", "set -g mouse on", "[ Close ]"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("help missing %q", want)
 		}
-		lines := strings.Split(ansi.Strip(v), "\n")
-		for _, p := range [][2]string{{"Dashboard", "History"}, {"Runner rows", "Settings"}} {
-			top, below := lines[lineWith(lines, p[0])], lines[lineWith(lines, p[1])]
-			if ansi.StringWidth(top[:strings.Index(top, p[0])]) != ansi.StringWidth(below[:strings.Index(below, p[1])]) {
-				t.Errorf("width %d: %s is not under %s:\n%s", w, p[1], p[0], v)
-			}
+	}
+	lines := strings.Split(ansi.Strip(v), "\n")
+	for _, p := range [][2]string{{"Global", "Detail"}, {"Dashboard", "History"}, {"Repositories", "Settings"}} {
+		top, below := lines[lineWith(lines, p[0])], lines[lineWith(lines, p[1])]
+		if ansi.StringWidth(top[:strings.Index(top, p[0])]) != ansi.StringWidth(below[:strings.Index(below, p[1])]) {
+			t.Errorf("%s is not under %s:\n%s", p[1], p[0], v)
 		}
-		if h := lipgloss.Height(v); h > 22 {
-			t.Errorf("width %d: help is %d rows on a 22-row screen:\n%s", w, h, v)
+	}
+	for _, w := range []int{104, 120} {
+		v := feed(sampleModel(&fakeClient{}, w, 22), key("?")).View()
+		if lipgloss.Height(v) > 22 || strings.Contains(v, "↑↓ scroll") {
+			t.Errorf("width %d: help should fit 22 rows without scrolling:\n%s", w, v)
 		}
 		for i, line := range strings.Split(v, "\n") {
 			if lipgloss.Width(line) > w {
 				t.Fatalf("width %d: line %d is %d wide", w, i, lipgloss.Width(line))
 			}
 		}
+	}
+	if v := feed(sampleModel(&fakeClient{}, 103, 22), key("?")).View(); !strings.Contains(v, "↑↓ scroll") {
+		t.Fatalf("at 103 columns help stacks and scrolls:\n%s", v)
 	}
 }
 
