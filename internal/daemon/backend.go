@@ -28,6 +28,7 @@ type Manager interface {
 	RunnerRepoAndRun(id string) (repo string, runID int64, runnerName string, err error)
 	Kill(ctx context.Context, id string) error
 	ClearDegraded()
+	PausedUntil() time.Time
 	StartPrune() error
 	QueueUpdate(ctx context.Context) error
 	CancelUpdate() error
@@ -463,13 +464,25 @@ func (b *Backend) degradedErr() error {
 	return nil
 }
 
+// githubErr refuses a request that would call GitHub while the token is
+// rejected or a rate limit pauses the API, so the call is not spent.
+func (b *Backend) githubErr() error {
+	if err := b.degradedErr(); err != nil {
+		return err
+	}
+	if until := b.M.PausedUntil(); b.now().Before(until) {
+		return &api.Error{Status: http.StatusTooManyRequests, Msg: "GitHub rate limit; API calls are paused", RetryAt: until}
+	}
+	return nil
+}
+
 // Registrations lists the runners GitHub has registered for the repo.
 func (b *Backend) Registrations(ctx context.Context, repo string) ([]model.Registration, error) {
 	name, err := b.repoName(repo)
 	if err != nil {
 		return nil, err
 	}
-	if err := b.degradedErr(); err != nil {
+	if err := b.githubErr(); err != nil {
 		return nil, err
 	}
 	rs, err := b.GH.ListRunners(ctx, name)
@@ -496,7 +509,7 @@ func (b *Backend) DeleteRegistration(ctx context.Context, repo string, id int64)
 	if err != nil {
 		return err
 	}
-	if err := b.degradedErr(); err != nil {
+	if err := b.githubErr(); err != nil {
 		return err
 	}
 	r, err := b.GH.GetRunner(ctx, name, id)
@@ -524,7 +537,7 @@ func (b *Backend) DeleteRegistration(ctx context.Context, repo string, id int64)
 // QueueRunnerUpdate checks GitHub for a newer runner and queues its install;
 // the loop is woken so a free ghr starts it at once.
 func (b *Backend) QueueRunnerUpdate(ctx context.Context) error {
-	if err := b.degradedErr(); err != nil {
+	if err := b.githubErr(); err != nil {
 		return err
 	}
 	err := b.M.QueueUpdate(ctx)
@@ -556,7 +569,7 @@ func (b *Backend) CancelRunnerUpdate() error {
 // access, by name ignoring case, marking those already configured. The token
 // may also reach other owners' repositories; ghr cannot manage those.
 func (b *Backend) AvailableRepos(ctx context.Context) ([]model.AvailableRepo, error) {
-	if err := b.degradedErr(); err != nil {
+	if err := b.githubErr(); err != nil {
 		return nil, err
 	}
 	rs, err := b.GH.ListUserRepos(ctx)

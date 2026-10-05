@@ -50,6 +50,39 @@ func TestQueueRunnerUpdate(t *testing.T) {
 	}
 }
 
+// While a rate limit pauses the API, requests that would call GitHub answer
+// 429 with the pause's end instead of spending a call; cached reads still work.
+func TestGitHubRequestsWaitOutARateLimitPause(t *testing.T) {
+	b, m, gh := newBackend(t)
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	b.Now = func() time.Time { return now }
+	m.paused = now.Add(time.Minute)
+	gh.userRepos = []github.UserRepo{{Name: "zeta", Owner: github.Account{Login: "darkraise"}}}
+	paused := func(name string, err error) {
+		t.Helper()
+		var ae *api.Error
+		if !errors.As(err, &ae) || ae.Status != 429 || !ae.RetryAt.Equal(m.paused) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	paused("queue update", b.QueueRunnerUpdate(context.Background()))
+	_, err := b.AvailableRepos(context.Background())
+	paused("available repos", err)
+	_, err = b.Registrations(context.Background(), "darkcloud")
+	paused("registrations", err)
+	paused("label check", b.StartLabelCheck("darkcloud"))
+	if len(m.updates) != 0 {
+		t.Fatalf("manager called %v", m.updates)
+	}
+	if _, err := b.LabelCheck("darkcloud"); apiStatus(err) == 429 {
+		t.Fatalf("a cached read was refused: %v", err)
+	}
+	now = m.paused
+	if _, err := b.AvailableRepos(context.Background()); err != nil {
+		t.Fatalf("after the pause: %v", err)
+	}
+}
+
 func TestCancelRunnerUpdate(t *testing.T) {
 	b, m, _ := newBackend(t)
 	if err := b.CancelRunnerUpdate(); err != nil {

@@ -440,6 +440,14 @@ func (m *Manager) apiAllowed(now time.Time) bool {
 	return !m.degraded || !now.Before(m.authCheckAt)
 }
 
+// PausedUntil is when a rate limit's pause on GitHub API calls ends; zero or
+// past when none is in force.
+func (m *Manager) PausedUntil() time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.pauseUntil
+}
+
 // ClearDegraded is called after the token is replaced or reloaded.
 func (m *Manager) ClearDegraded() {
 	m.mu.Lock()

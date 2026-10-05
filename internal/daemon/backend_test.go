@@ -31,7 +31,10 @@ type fakeManager struct {
 	degraded  string
 	updateErr error // returned by QueueUpdate and CancelUpdate
 	updates   []string
+	paused    time.Time // returned by PausedUntil
 }
+
+func (f *fakeManager) PausedUntil() time.Time { return f.paused }
 
 func (f *fakeManager) QueueUpdate(context.Context) error {
 	f.updates = append(f.updates, "queue")

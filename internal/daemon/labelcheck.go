@@ -106,7 +106,7 @@ func (b *Backend) StartLabelCheck(repo string) error {
 	if err != nil {
 		return err
 	}
-	if err := b.degradedErr(); err != nil {
+	if err := b.githubErr(); err != nil {
 		return err
 	}
 	key := strings.ToLower(name)
