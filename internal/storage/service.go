@@ -25,6 +25,7 @@ type Service struct {
 	Tools  Toolchains
 	Docker Docker
 	Home   string     // the runner user's home, where the package caches live
+	User   string     // owns the directories a clear recreates; "" leaves them to the daemon
 	Busy   func() int // runners with a job; nil counts none
 	Events *events.Ring
 	Now    func() time.Time // nil means time.Now

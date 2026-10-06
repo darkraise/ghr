@@ -60,13 +60,17 @@ func (c Cache) present(home string) bool {
 
 const clearingTag = ".ghr-clearing-"
 
+// owner is who a directory a clear recreates belongs to; nil leaves it to
+// the daemon.
+type owner struct{ uid, gid int }
+
 // clearPath empties rel so a job sees either the old tree or an empty
 // directory, never a half-deleted one: rename it aside (atomic), recreate the
-// empty directory with the old owner and mode, then delete the renamed tree. The daemon
+// empty directory with the old mode and the given owner, then delete the renamed tree. The daemon
 // runs as root, so read-only files (Go's module cache) need no chmod, and
 // RemoveAll removes a symlink without following it. A path that is itself a
 // symlink is removed and not recreated.
-func clearPath(r *os.Root, rel, opID string) error {
+func clearPath(r *os.Root, rel, opID string, own *owner) error {
 	fi, err := r.Lstat(rel)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -80,7 +84,7 @@ func clearPath(r *os.Root, rel, opID string) error {
 	}
 	var recreateErr error
 	if fi.IsDir() {
-		recreateErr = recreate(r, rel, fi)
+		recreateErr = recreate(r, rel, fi.Mode().Perm(), own)
 	}
 	// The renamed tree goes whether or not the directory came back: a failed
 	// recreate must not strand it until the next daemon start.
@@ -89,8 +93,7 @@ func clearPath(r *os.Root, rel, opID string) error {
 
 // recreate makes the empty directory a clear leaves behind. A directory that
 // already exists was made by a job that ran in between, and stays untouched.
-func recreate(r *os.Root, rel string, old os.FileInfo) error {
-	perm := old.Mode().Perm()
+func recreate(r *os.Root, rel string, perm fs.FileMode, own *owner) error {
 	if err := r.Mkdir(rel, perm); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return nil
@@ -101,13 +104,13 @@ func recreate(r *os.Root, rel string, old os.FileInfo) error {
 	if err := r.Chmod(rel, perm); err != nil {
 		return err
 	}
-	return chownLike(r, rel, old)
+	return chownTo(r, rel, own)
 }
 
 // clearCache clears every existing path of c. Every step goes through a root
 // at home, so root never renames or deletes through a symlink a job planted
 // that leads out of the home, even one swapped in mid-clear.
-func clearCache(home string, c Cache, opID string) error {
+func clearCache(home string, c Cache, opID string, own *owner) error {
 	r, err := os.OpenRoot(home)
 	if err != nil {
 		return err
@@ -115,7 +118,7 @@ func clearCache(home string, c Cache, opID string) error {
 	defer r.Close()
 	var errs []error
 	for _, p := range c.Paths {
-		if err := clearPath(r, filepath.FromSlash(p), opID); err != nil {
+		if err := clearPath(r, filepath.FromSlash(p), opID, own); err != nil {
 			errs = append(errs, err)
 		}
 	}

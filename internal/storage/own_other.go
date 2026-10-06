@@ -4,7 +4,10 @@ package storage
 
 import "os"
 
-// chownLike does nothing: ownership is a Linux concern, and ghr runs on Linux.
-func chownLike(*os.Root, string, os.FileInfo) error { return nil }
+// Ownership is a Linux concern, and ghr runs on Linux.
+
+func lookupOwner(string) (*owner, error) { return nil, nil }
+
+func chownTo(*os.Root, string, *owner) error { return nil }
 
 func allocated(fi os.FileInfo) int64 { return fi.Size() }

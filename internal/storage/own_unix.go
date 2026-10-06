@@ -4,16 +4,37 @@ package storage
 
 import (
 	"os"
+	"os/user"
+	"strconv"
 	"syscall"
 )
 
-// chownLike gives rel the owner and group fi records, without following a symlink.
-func chownLike(r *os.Root, rel string, fi os.FileInfo) error {
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
+// lookupOwner finds the uid and gid of the user name; "" is no owner.
+func lookupOwner(name string) (*owner, error) {
+	if name == "" {
+		return nil, nil
+	}
+	u, err := user.Lookup(name)
+	if err != nil {
+		return nil, err
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return nil, err
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return nil, err
+	}
+	return &owner{uid: uid, gid: gid}, nil
+}
+
+// chownTo gives rel to own without following a symlink.
+func chownTo(r *os.Root, rel string, own *owner) error {
+	if own == nil {
 		return nil
 	}
-	return r.Lchown(rel, int(st.Uid), int(st.Gid))
+	return r.Lchown(rel, own.uid, own.gid)
 }
 
 // allocated is the space fi takes on disk, as du counts it.

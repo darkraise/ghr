@@ -38,7 +38,7 @@ func clearIn(t *testing.T, home, rel string) error {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	return clearPath(r, filepath.FromSlash(rel), "op1")
+	return clearPath(r, filepath.FromSlash(rel), "op1", nil)
 }
 
 func TestCacheTable(t *testing.T) {
@@ -109,16 +109,12 @@ func TestRecreateLeavesADirectoryAJobAlreadyMade(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, ".npm")
 	writeFile(t, filepath.Join(dir, "_cacache", "index"), "new")
-	fi, err := os.Stat(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
 	r, err := os.OpenRoot(home)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	if err := recreate(r, ".npm", fi); err != nil {
+	if err := recreate(r, ".npm", 0o700, nil); err != nil {
 		t.Fatalf("an existing directory is not a failure: %v", err)
 	}
 	if got := entries(t, dir); len(got) != 1 || got[0] != "_cacache" {
@@ -199,7 +195,7 @@ func TestClearCacheRefusesALinkOutOfTheHome(t *testing.T) {
 		t.Skip("no symlinks here:", err)
 	}
 	c, _ := cacheByName("pip")
-	if err := clearCache(home, c, "op1"); err == nil {
+	if err := clearCache(home, c, "op1", nil); err == nil {
 		t.Fatal("cleared through a link out of the home")
 	}
 	if _, err := os.Stat(filepath.Join(outside, "pip", "wheel")); err != nil {
@@ -221,7 +217,7 @@ func TestClearCacheFollowsALinkInsideTheHome(t *testing.T) {
 		t.Skip("no symlinks here:", err)
 	}
 	c, _ := cacheByName("pip")
-	if err := clearCache(home, c, "op1"); err != nil {
+	if err := clearCache(home, c, "op1", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := entries(t, filepath.Join(home, "elsewhere", "pip")); len(got) != 0 {
@@ -243,7 +239,7 @@ func TestClearCacheClearsEveryPath(t *testing.T) {
 	writeFile(t, filepath.Join(home, ".gradle", "caches", "modules-2", "f"), "x")
 	writeFile(t, filepath.Join(home, ".gradle", "wrapper", "dists", "gradle-8.10", "g"), "x")
 	c, _ := cacheByName("gradle")
-	if err := clearCache(home, c, "op1"); err != nil {
+	if err := clearCache(home, c, "op1", nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range c.abs(home) {

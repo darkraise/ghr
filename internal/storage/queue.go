@@ -218,9 +218,13 @@ func (s *Service) Clear(name string) error {
 			if n := s.busy(); n > 0 {
 				return "refused", fmt.Sprintf("refused: %d jobs running", n)
 			}
+			own, err := lookupOwner(s.User)
+			if err != nil {
+				return "failed", err.Error()
+			}
 			progress("clearing")
 			note := freed(s.cacheBytes(name))
-			if err := clearCache(s.Home, c, id); err != nil {
+			if err := clearCache(s.Home, c, id, own); err != nil {
 				return "failed", err.Error()
 			}
 			return "ok", "cleared " + c.Label + note

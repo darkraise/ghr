@@ -193,7 +193,8 @@ func Run(ctx context.Context, o Options) error {
 
 	tools := toolchain.New(toolchain.NewEnv(o.Paths.ToolCache, o.Paths.Home, runner.RunnerUser,
 		system.ExecGroupFor(InstallTimeout), system.DownloadFor(InstallTimeout)))
-	space := &storage.Service{Tools: tools, Docker: m.Disk, Home: o.Paths.Home, Busy: m.BusyCount, Events: ev}
+	space := &storage.Service{Tools: tools, Docker: m.Disk, Home: o.Paths.Home, User: runner.RunnerUser,
+		Busy: m.BusyCount, Events: ev}
 	space.Start()
 	m.PruneDone = space.Trigger
 
