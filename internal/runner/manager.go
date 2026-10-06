@@ -153,6 +153,9 @@ type Manager struct {
 	NewID   func() string
 	// Fetch downloads url to dst; the daemon sets system.Download.
 	Fetch func(ctx context.Context, url, dst string) error
+	// PruneDone, when set, is called after every manual prune and after an
+	// automatic prune that pruned.
+	PruneDone func()
 
 	mu             sync.Mutex
 	insts          map[string]*instance
@@ -170,6 +173,7 @@ type Manager struct {
 	pruning        bool                    // a manual or automatic prune holds the reservation; guarded by mu
 	closed         bool                    // set by Close; StartPrune refuses afterwards so it cannot race Wait; guarded by mu
 	maint          model.MaintenanceStatus // manual prunes; guarded by mu
+	lastPruneRec   *model.LastPrune        // the newest manual or automatic prune; guarded by mu
 	maintCtx       context.Context         // cancelled by Close
 	maintCancel    context.CancelFunc
 	lastJob        map[string]model.HistoryEntry
@@ -242,9 +246,28 @@ type BusyError struct{ N int }
 
 func (e BusyError) Error() string { return fmt.Sprintf("refused: %d jobs running", e.N) }
 
-// StartPrune starts a forced maintenance prune in the background. The caller
-// returns before it finishes; Wait waits for it and Close interrupts it.
-func (m *Manager) StartPrune() error {
+// StartPrune starts a standard manual prune in the background.
+func (m *Manager) StartPrune() error { return m.StartPruneScope(ScopeStandard) }
+
+// StartPruneScope starts a manual prune of one scope in the background. The
+// caller returns before it finishes; Wait waits for it and Close interrupts
+// it. unused-volumes is refused while a runner is busy: a job's unnamed
+// volume is unreferenced between the steps that mount it.
+func (m *Manager) StartPruneScope(scope string) error {
+	if !slices.Contains(Scopes, scope) {
+		return fmt.Errorf("%w %q", ErrUnknownScope, scope)
+	}
+	m.mu.Lock()
+	closed := m.closed
+	m.mu.Unlock()
+	if closed {
+		return ErrClosed
+	}
+	if scope == ScopeUnusedVolumes {
+		if n := m.BusyCount(); n > 0 {
+			return BusyError{N: n}
+		}
+	}
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -262,12 +285,13 @@ func (m *Manager) StartPrune() error {
 	m.pruning = true
 	m.maint.Running = true
 	m.maint.LastStarted = &now
+	m.lastPruneRec = &model.LastPrune{Trigger: "manual", Scope: scope, StartedAt: now, Steps: []model.PruneStep{}}
 	ctx := m.maintCtx
 	m.wg.Add(1)
 	m.mu.Unlock()
 	go func() {
 		defer m.wg.Done()
-		m.forcedPrune(ctx)
+		m.forcedPrune(ctx, scope)
 	}()
 	return nil
 }
@@ -277,6 +301,18 @@ func (m *Manager) Maintenance() model.MaintenanceStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.maint
+}
+
+// LastPrune is the newest manual or automatic prune, nil before the first.
+func (m *Manager) LastPrune() *model.LastPrune {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.lastPruneRec == nil {
+		return nil
+	}
+	lp := *m.lastPruneRec
+	lp.Steps = slices.Clone(lp.Steps)
+	return &lp
 }
 
 // BusyCount is the number of runners with a job. It reads job.json first, so

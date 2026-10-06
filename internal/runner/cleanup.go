@@ -17,6 +17,7 @@ import (
 
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/system"
 )
 
 // maxLogChunk bounds the log bytes of one RunnerLog response (file headers come
@@ -174,39 +175,90 @@ func (m *Manager) checkDisk(ctx context.Context, cfg *config.Config) {
 	if pct <= cfg.DiskHighWater {
 		return
 	}
+	started := m.Now()
+	m.mu.Lock()
+	m.lastPruneRec = &model.LastPrune{Trigger: "auto", Scope: "auto", StartedAt: started, Steps: []model.PruneStep{}}
+	m.mu.Unlock()
+	defer m.pruneDone()
 	var notes []string
 	freedOld, err := m.Docker.PruneBuildCacheOlderThan(ctx, 72)
+	m.recordStep("build cache older than 72h", freedOld, err)
 	if err != nil {
 		notes = append(notes, fmt.Sprintf("prune build cache older than 72h failed: %v", err))
 		freedOld = "0B"
 	}
 	freedKeep := "0B"
 	if mid, err := m.Docker.DataRootUsage(ctx); err != nil {
+		m.recordStep("disk usage", "", err)
 		notes = append(notes, fmt.Sprintf("disk usage after the 72h prune failed: %v", err))
 	} else if mid > cfg.DiskHighWater {
-		if freedKeep, err = m.Docker.PruneBuildCacheTo(ctx, cfg.BuildCacheKeep); err != nil {
+		freedKeep, err = m.Docker.PruneBuildCacheTo(ctx, cfg.BuildCacheKeep)
+		m.recordStep("build cache to "+cfg.BuildCacheKeep, freedKeep, err)
+		if err != nil {
 			notes = append(notes, fmt.Sprintf("prune build cache to %s failed: %v", cfg.BuildCacheKeep, err))
 			freedKeep = "0B"
 		}
 	}
 	freedImages, err := m.Docker.PruneDanglingImages(ctx)
+	m.recordStep("dangling images", freedImages, err)
 	if err != nil {
 		notes = append(notes, fmt.Sprintf("prune dangling images failed: %v", err))
 		freedImages = "0B"
 	}
-	now := "unknown"
+	nowPct := "unknown"
 	if after, err := m.Docker.DataRootUsage(ctx); err != nil {
+		m.recordStep("disk usage", "", err)
 		notes = append(notes, fmt.Sprintf("disk usage after pruning failed: %v", err))
 	} else {
 		m.setDisk(after)
-		now = strconv.Itoa(after) + "%"
+		nowPct = strconv.Itoa(after) + "%"
 	}
+	outcome := "ok"
+	switch {
+	case ctx.Err() != nil:
+		outcome = "interrupted"
+	case len(notes) > 0:
+		outcome = "errors"
+	}
+	m.finishPruneRecord(outcome)
 	msg := fmt.Sprintf("disk %d%% > high-water %d%% — pruned build cache (%s older than 72h, %s to %s) and dangling images (%s); now %s",
-		pct, cfg.DiskHighWater, freedOld, freedKeep, cfg.BuildCacheKeep, freedImages, now)
+		pct, cfg.DiskHighWater, freedOld, freedKeep, cfg.BuildCacheKeep, freedImages, nowPct)
 	if len(notes) > 0 {
 		msg += "; " + strings.Join(notes, "; ")
 	}
 	m.Events.Add("warn", "", "%s", msg)
+}
+
+// recordStep appends one step to the prune record in progress; freed is
+// Docker's "Total reclaimed space", 0 when absent or unreadable.
+func (m *Manager) recordStep(name, freed string, err error) {
+	st := model.PruneStep{Name: name}
+	if err != nil {
+		st.Error = err.Error()
+	} else if n, perr := system.ParseSize(freed); perr == nil {
+		st.Freed = n
+	}
+	m.mu.Lock()
+	if m.lastPruneRec != nil {
+		m.lastPruneRec.Steps = append(m.lastPruneRec.Steps, st)
+	}
+	m.mu.Unlock()
+}
+
+func (m *Manager) finishPruneRecord(outcome string) {
+	now := m.Now()
+	m.mu.Lock()
+	if m.lastPruneRec != nil {
+		m.lastPruneRec.FinishedAt = &now
+		m.lastPruneRec.Outcome = outcome
+	}
+	m.mu.Unlock()
+}
+
+func (m *Manager) pruneDone() {
+	if m.PruneDone != nil {
+		m.PruneDone()
+	}
 }
 
 func (m *Manager) setDisk(pct int) {
@@ -244,10 +296,11 @@ func (m *Manager) prune(cfg *config.Config, now time.Time) bool {
 	return ok
 }
 
-// forcedPrune is a manual prune: build cache down to build_cache_keep,
-// dangling images, history and logs past retention, then a fresh disk
-// reading. Unlike checkDisk it ignores disk_high_water.
-func (m *Manager) forcedPrune(ctx context.Context) {
+// forcedPrune is a manual prune of one scope. standard prunes build cache
+// down to build_cache_keep and dangling images, then history and logs past
+// retention; every scope ends with a fresh disk reading. Unlike checkDisk it
+// ignores disk_high_water.
+func (m *Manager) forcedPrune(ctx context.Context, scope string) {
 	cfg := m.Config()
 	failed := false
 	step := func(name string, fn func() (string, error)) {
@@ -255,6 +308,7 @@ func (m *Manager) forcedPrune(ctx context.Context) {
 			return
 		}
 		freed, err := fn()
+		m.recordStep(name, freed, err)
 		if err != nil {
 			failed = true
 			m.Events.Add("warn", "", "prune: %s failed: %v", name, err)
@@ -262,18 +316,34 @@ func (m *Manager) forcedPrune(ctx context.Context) {
 		}
 		m.Events.Add("info", "", "prune: %s freed %s", name, freed)
 	}
-	step("build cache to "+cfg.BuildCacheKeep, func() (string, error) { return m.Docker.PruneBuildCacheTo(ctx, cfg.BuildCacheKeep) })
-	step("dangling images", func() (string, error) { return m.Docker.PruneDanglingImages(ctx) })
-	if ctx.Err() == nil {
+	keep := func() (string, error) { return m.Docker.PruneBuildCacheTo(ctx, cfg.BuildCacheKeep) }
+	images := func() (string, error) { return m.Docker.PruneDanglingImages(ctx) }
+	switch scope {
+	case ScopeStandard:
+		step("build cache to "+cfg.BuildCacheKeep, keep)
+		step("dangling images", images)
+	case ScopeBuildCacheKeep:
+		step("build cache to "+cfg.BuildCacheKeep, keep)
+	case ScopeBuildCacheAll:
+		step("all build cache", func() (string, error) { return m.Disk.PruneAllBuildCache(ctx) })
+	case ScopeDanglingImages:
+		step("dangling images", images)
+	case ScopeUnusedVolumes:
+		step("unused volumes", func() (string, error) { return m.Disk.PruneUnusedVolumes(ctx) })
+	}
+	if scope == ScopeStandard && ctx.Err() == nil {
 		if m.prune(cfg, m.Now()) {
+			m.recordStep("history and logs past retention", "0B", nil)
 			m.Events.Add("info", "", "prune: history and logs past retention removed")
 		} else {
 			failed = true
+			m.recordStep("history and logs past retention", "", errors.New("failed; see the warnings before this event"))
 		}
 	}
 	if ctx.Err() == nil {
 		if pct, err := m.Docker.DataRootUsage(ctx); err != nil {
 			failed = true
+			m.recordStep("disk usage", "", err)
 			m.Events.Add("warn", "", "prune: disk usage: %v", err)
 		} else {
 			m.setDisk(pct)
@@ -293,8 +363,15 @@ func (m *Manager) forcedPrune(ctx context.Context) {
 	m.maint.Running = false
 	m.maint.LastFinished = &now
 	m.maint.LastOutcome = outcome
+	// Finished under the same lock that releases the reservation: once it is
+	// released, the next prune replaces lastPruneRec.
+	if m.lastPruneRec != nil {
+		m.lastPruneRec.FinishedAt = &now
+		m.lastPruneRec.Outcome = outcome
+	}
 	m.mu.Unlock()
 	m.Events.Add(level, "", "%s", msg)
+	m.pruneDone()
 }
 
 // parseCursor reads "file=offset&file=offset" (URL query encoding).
