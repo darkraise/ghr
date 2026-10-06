@@ -297,3 +297,39 @@ export interface ToolchainChoice {
   version: string
   lts?: boolean
 }
+
+export interface RunnerLimitsPatch {
+  memory_max?: string
+  cpu_quota?: string
+}
+
+export interface RepoPatch {
+  max?: number
+  warm?: number
+  labels?: string[]
+  cleanup_name_prefixes?: string[]
+  paused?: boolean
+}
+
+export interface ConfigPatch {
+  mode?: string
+  global_max?: number
+  poll_interval?: string
+  start_timeout?: string
+  idle_timeout?: string
+  history_retention?: string
+  disk_high_water?: number
+  build_cache_keep?: string
+  labels?: string[]
+  runner_limits?: RunnerLimitsPatch
+  repos?: Record<string, RepoPatch>
+}
+
+export interface AddRepoRequest {
+  name: string
+  max?: number
+  labels?: string[]
+  allow_public: boolean
+}
+
+export type PruneScope = "standard" | "build-cache-keep" | "build-cache-all" | "dangling-images" | "unused-volumes"

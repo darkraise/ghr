@@ -1,4 +1,23 @@
-import type { AuthState, Config, Container, GhrEvent, HistoryEntry, LogChunk, Metrics, Status, Step } from "./types"
+import type {
+  AddRepoRequest,
+  AuthState,
+  AvailableRepo,
+  Config,
+  ConfigPatch,
+  Container,
+  GhrEvent,
+  HistoryEntry,
+  LabelCheck,
+  LogChunk,
+  Metrics,
+  PruneScope,
+  Registration,
+  Status,
+  Step,
+  Storage,
+  TokenStatus,
+  ToolchainChoice,
+} from "./types"
 
 export class ApiError extends Error {
   readonly status: number
@@ -20,14 +39,15 @@ export function setUnauthorizedHandler(fn: () => void): void {
 
 export async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { "X-GHR": "1" }
-  if (body !== undefined) headers["Content-Type"] = "application/json"
-  const res = await fetch(path, {
-    method,
-    headers,
-    credentials: "same-origin",
-    body: body === undefined ? undefined : JSON.stringify(body),
-    signal,
-  })
+  let payload: string | undefined
+  if (typeof body === "string") {
+    headers["Content-Type"] = "text/plain"
+    payload = body
+  } else if (body !== undefined) {
+    headers["Content-Type"] = "application/json"
+    payload = JSON.stringify(body)
+  }
+  const res = await fetch(path, { method, headers, credentials: "same-origin", body: payload, signal })
   if (res.ok) {
     if (res.status === 202 || res.status === 204) return undefined as T
     return (await res.json()) as T
@@ -79,4 +99,30 @@ export const api = {
   stopRunner: (id: string) => send("DELETE", `/api/runners/${seg(id)}`),
   pauseAll: () => send("POST", "/api/pause-all"),
   resumeAll: () => send("POST", "/api/resume-all"),
+  patchConfig: (patch: ConfigPatch) => send("PATCH", "/api/config", patch),
+  reload: () => request<string[]>("POST", "/api/reload"),
+  availableRepos: (signal?: AbortSignal) => request<AvailableRepo[]>("GET", "/api/repos/available", undefined, signal),
+  addRepo: (req: AddRepoRequest) => send("POST", "/api/repos", req),
+  removeRepo: (name: string) => send("DELETE", `/api/repos/${seg(name)}`),
+  pauseRepo: (name: string) => send("POST", `/api/repos/${seg(name)}/pause`),
+  resumeRepo: (name: string) => send("POST", `/api/repos/${seg(name)}/resume`),
+  labelCheck: (name: string, signal?: AbortSignal) =>
+    request<LabelCheck>("GET", `/api/repos/${seg(name)}/label-check`, undefined, signal),
+  startLabelCheck: (name: string) => send("POST", `/api/repos/${seg(name)}/label-check`),
+  registrations: (name: string, signal?: AbortSignal) =>
+    request<Registration[]>("GET", `/api/repos/${seg(name)}/registrations`, undefined, signal),
+  deleteRegistration: (name: string, id: number) => send("DELETE", `/api/repos/${seg(name)}/registrations/${id}`),
+  token: (signal?: AbortSignal) => request<TokenStatus>("GET", "/api/token", undefined, signal),
+  replaceToken: (token: string) => send("PUT", "/api/token", token),
+  queueRunnerUpdate: () => send("POST", "/api/runner-update"),
+  cancelRunnerUpdate: () => send("DELETE", "/api/runner-update"),
+  storage: (signal?: AbortSignal) => request<Storage>("GET", "/api/storage", undefined, signal),
+  refreshStorage: () => send("POST", "/api/storage/refresh"),
+  toolchainChoices: (tool: string, signal?: AbortSignal) =>
+    request<ToolchainChoice[]>("GET", `/api/toolchains/available?${query({ tool })}`, undefined, signal),
+  installToolchain: (tool: string, version: string) => send("POST", "/api/toolchains", { tool, version }),
+  installPreset: (preset: string) => send("POST", "/api/toolchains", { preset }),
+  removeToolchain: (tool: string, version: string) => send("DELETE", `/api/toolchains/${seg(tool)}/${seg(version)}`),
+  clearCache: (name: string) => send("POST", `/api/caches/${seg(name)}/clear`),
+  prune: (scope: PruneScope) => send("POST", scope === "standard" ? "/api/prune" : `/api/prune/${seg(scope)}`),
 }
