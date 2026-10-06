@@ -92,4 +92,22 @@ describe("GitHub token card", () => {
     await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Replace" }))
     expect(await screen.findByText("✖ new token rejected: Bad credentials")).toBeInTheDocument()
   })
+
+  it("does not show an error from a replace that ended after the dialog closed", async () => {
+    let answer: (r: Response) => void = () => undefined
+    mockApi(authedRoutes({ "GET /api/token": token(), "PUT /api/token": () => new Promise<Response>((resolve) => (answer = resolve)) }))
+    const { user } = renderApp("/settings")
+    await user.click(await screen.findByRole("button", { name: "Replace token" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.type(within(dialog).getByLabelText("Token"), "github_pat_bad")
+    await user.click(within(dialog).getByRole("button", { name: "Replace" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Replace" }))
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    answer(json({ error: "new token rejected: Bad credentials" }, 400))
+    await user.click(screen.getByRole("button", { name: "Replace token" }))
+    const again = await screen.findByRole("dialog")
+    expect(within(again).getByLabelText("Token")).toHaveValue("")
+    expect(screen.queryByText(/Bad credentials/)).toBeNull()
+  })
 })

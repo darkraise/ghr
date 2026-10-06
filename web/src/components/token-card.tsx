@@ -53,46 +53,9 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 export function TokenCard() {
   const token = useToken()
   const status = useStatus()
-  const queryClient = useQueryClient()
   const now = useNow()
   const [open, setOpen] = useState(false)
-  const [text, setText] = useState("")
-  const [error, setError] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [confirm, setConfirm] = useState<Confirm | null>(null)
   const t = token.data
-
-  function close() {
-    setOpen(false)
-    setText("")
-    setError("")
-  }
-
-  async function send(value: string) {
-    setBusy(true)
-    try {
-      await api.replaceToken(value)
-      close()
-      toast.success("GitHub token replaced")
-      await queryClient.invalidateQueries({ queryKey: keys.token })
-    } catch (err) {
-      setError(`✖ ${errorText(err)}`)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  function ask() {
-    if (text.trim() === "") return setError("paste the new token first")
-    setError("")
-    const value = text
-    setConfirm({
-      title: "Replace the GitHub token? ghr uses the new one at once.",
-      action: "Replace",
-      destructive: true,
-      run: () => void send(value),
-    })
-  }
 
   return (
     <Card>
@@ -135,32 +98,72 @@ export function TokenCard() {
       <Dialog
         open={open}
         onOpenChange={(o) => {
-          if (!o) close()
+          if (!o) setOpen(false)
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Replace GitHub token</DialogTitle>
-            <DialogDescription>
-              Paste a fine-grained token with Administration: read/write and Actions: read on every configured repository.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody className="flex flex-col gap-2">
-            <Label htmlFor="new-token">Token</Label>
-            <Input id="new-token" type="password" autoComplete="off" value={text} onChange={(e) => setText(e.target.value)} />
-            {error && <p className="text-sm text-destructive">{error}</p>}
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="secondary" onClick={close}>
-              Cancel
-            </Button>
-            <Button loading={busy} onClick={ask}>
-              Replace
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        {/* Mounted only while open: each opening starts clean, and a replace
+            that ends after closing has nowhere to leave its error. */}
+        <DialogContent>{open && <ReplaceTokenForm onClose={() => setOpen(false)} />}</DialogContent>
       </Dialog>
-      <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
     </Card>
+  )
+}
+
+function ReplaceTokenForm({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const [text, setText] = useState("")
+  const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [confirm, setConfirm] = useState<Confirm | null>(null)
+
+  async function send(value: string) {
+    setBusy(true)
+    try {
+      await api.replaceToken(value)
+      onClose()
+      toast.success("GitHub token replaced")
+      await queryClient.invalidateQueries({ queryKey: keys.token })
+    } catch (err) {
+      setError(`✖ ${errorText(err)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function ask() {
+    if (text.trim() === "") return setError("paste the new token first")
+    setError("")
+    const value = text
+    setConfirm({
+      title: "Replace the GitHub token? ghr uses the new one at once.",
+      action: "Replace",
+      destructive: true,
+      run: () => void send(value),
+    })
+  }
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Replace GitHub token</DialogTitle>
+        <DialogDescription>
+          Paste a fine-grained token with Administration: read/write and Actions: read on every configured repository.
+        </DialogDescription>
+      </DialogHeader>
+      <DialogBody className="flex flex-col gap-2">
+        <Label htmlFor="new-token">Token</Label>
+        <Input id="new-token" type="password" autoComplete="off" value={text} onChange={(e) => setText(e.target.value)} />
+        {error && <p className="text-sm text-destructive">{error}</p>}
+      </DialogBody>
+      <DialogFooter>
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button loading={busy} onClick={ask}>
+          Replace
+        </Button>
+      </DialogFooter>
+      <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
+    </>
   )
 }

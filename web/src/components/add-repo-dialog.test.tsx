@@ -30,12 +30,12 @@ describe("Add repository dialog", () => {
     expect(dialog.getByText("no match")).toBeInTheDocument()
   })
 
-  it("answers Add when the daemon went unreachable after the dialog opened", { timeout: 10_000 }, async () => {
+  it("sends Add while the daemon is unreachable and shows the request's error", { timeout: 10_000 }, async () => {
     let down = false
     const { calls } = mockApi(
       routes({
         "GET /api/status": () => (down ? json({ error: "connection refused" }, 502) : fixtures.status),
-        "POST /api/repos": () => noContent(),
+        "POST /api/repos": () => json({ error: "connection refused" }, 502),
       }),
     )
     const { dialog, user } = await open()
@@ -43,8 +43,56 @@ describe("Add repository dialog", () => {
     down = true
     await waitFor(() => expect(screen.getAllByText(/daemon unreachable/).length).toBeGreaterThan(0), { timeout: 4000 })
     await user.click(dialog.getByRole("button", { name: "Add" }))
-    expect(await dialog.findByText("✖ the daemon is unreachable")).toBeInTheDocument()
-    expect(calls.some((c) => c.method === "POST")).toBe(false)
+    expect(await dialog.findByText("✖ connection refused")).toBeInTheDocument()
+    expect(calls.some((c) => c.method === "POST")).toBe(true)
+  })
+
+  it("does not show an error from a request that ended after the dialog closed", async () => {
+    let answer: (r: Response) => void = () => undefined
+    mockApi(routes({ "POST /api/repos": () => new Promise<Response>((resolve) => (answer = resolve)) }))
+    const { dialog, user } = await open()
+    await user.click(dialog.getByRole("option", { name: /new-repo/ }))
+    await user.click(dialog.getByRole("button", { name: "Add" }))
+    await user.click(dialog.getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    answer(json({ error: "repo new-repo is already configured" }, 409))
+    await user.click(screen.getAllByRole("button", { name: "+ Add repository" })[0] as HTMLElement)
+    const again = within(await screen.findByRole("dialog"))
+    await again.findByRole("option", { name: /new-repo/ })
+    expect(again.queryByText(/already configured/)).toBeNull()
+    expect(again.getByText("pick one below")).toBeInTheDocument()
+  })
+
+  it("moves between the pickable repos with the arrow keys, Home and End", async () => {
+    const repos = [
+      { name: "alpha", private: true, configured: false },
+      { name: "darkmem", private: true, configured: true },
+      { name: "gamma", private: false, configured: false },
+      { name: "new-repo", private: true, configured: false },
+    ]
+    mockApi(routes({ "GET /api/repos/available": repos }))
+    const { dialog, user } = await open()
+    const option = (name: string) => dialog.getByRole("option", { name: new RegExp(`^${name}`) })
+    option("alpha").focus()
+    await user.keyboard("{ArrowDown}")
+    expect(option("gamma")).toHaveFocus()
+    await user.keyboard("{ArrowUp}")
+    expect(option("alpha")).toHaveFocus()
+    await user.keyboard("{End}")
+    expect(option("new-repo")).toHaveFocus()
+    await user.keyboard("{Home}")
+    expect(option("alpha")).toHaveFocus()
+    await user.keyboard("{ArrowDown}{Enter}")
+    expect(option("gamma")).toHaveAttribute("aria-selected", "true")
+    expect(dialog.getByText("gamma", { selector: "strong" })).toBeInTheDocument()
+  })
+
+  it("keeps the list's status text outside the listbox", async () => {
+    mockApi(routes())
+    const { dialog, user } = await open()
+    await user.type(dialog.getByRole("textbox", { name: "Filter repositories" }), "zzz")
+    expect(dialog.getByText("no match")).toBeInTheDocument()
+    expect(dialog.queryByRole("listbox")).toBeNull()
   })
 
   it("says when the token sees no repo", async () => {
