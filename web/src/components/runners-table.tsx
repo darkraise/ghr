@@ -15,7 +15,7 @@ import { Button } from "darkraise-ui/components/button"
 import { toast } from "darkraise-ui/components/sonner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "darkraise-ui/components/table"
 import { useState } from "react"
-import { api } from "@/api/client"
+import { ApiError, api } from "@/api/client"
 import { keys, useStatus } from "@/api/hooks"
 import type { InstanceStatus, Status } from "@/api/types"
 import { StateBadge } from "@/components/state-badge"
@@ -120,15 +120,37 @@ export function StopRunnerDialog({ instance, onClose }: { instance: InstanceStat
   // state so the wording follows a runner that picks up a job meanwhile.
   const [held, setHeld] = useState<InstanceStatus | null>(instance)
   if (instance !== null && instance.id !== held?.id) setHeld(instance)
-  const live = held ? (status.data?.instances.find((i) => i.id === held.id) ?? held) : null
+  const current = held ? status.data?.instances.find((i) => i.id === held.id) : undefined
+  const live = current ?? held
+  // A runner can end while the dialog is open; there is then nothing to stop.
+  // Not while closing: a runner just stopped here leaves /status meanwhile.
+  const gone = instance !== null && status.data !== undefined && current === undefined
   const stop = useMutation({
-    mutationFn: (id: string) => api.stopRunner(id),
-    onSuccess: (_data, id) => {
-      toast.success(`stopped ${id}`)
+    mutationFn: async (id: string) => {
+      try {
+        await api.stopRunner(id)
+        return true
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) return false
+        throw err
+      }
+    },
+    onSuccess: (stopped, id) => {
+      if (stopped) toast.success(`stopped ${id}`)
+      else toast.info(`${id} had already finished`)
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.status }),
   })
   const busy = live?.state === "busy"
+  let title = `Stop runner ${live?.id}?`
+  let description = "ghr stops the runner and cleans it up."
+  if (gone) {
+    title = `Runner ${live?.id} has already finished`
+    description = "There is nothing left to stop."
+  } else if (busy) {
+    title = `Runner ${live?.id} is running a job. Stop it?`
+    description = "The job it is running fails."
+  }
   return (
     <AlertDialog
       open={instance !== null}
@@ -138,15 +160,14 @@ export function StopRunnerDialog({ instance, onClose }: { instance: InstanceStat
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{busy ? `Runner ${live?.id} is running a job. Stop it?` : `Stop runner ${live?.id}?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {busy ? "The job it is running fails." : "ghr stops the runner and cleans it up."}
-          </AlertDialogDescription>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             data-variant="destructive"
+            disabled={gone}
             onClick={() => {
               if (live) stop.mutate(live.id)
             }}

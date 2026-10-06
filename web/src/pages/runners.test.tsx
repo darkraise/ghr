@@ -99,6 +99,35 @@ describe("Runners page", () => {
     expect(await screen.findByText("Runner bbbbbb is running a job. Stop it?", {}, { timeout: 3000 })).toBeInTheDocument()
   })
 
+  it("says a runner that left while the dialog is open has finished", { timeout: 10_000 }, async () => {
+    let gone = false
+    const { calls } = mockApi(
+      authedRoutes({
+        "GET /api/status": () => ({
+          ...fixtures.status,
+          instances: fixtures.status.instances.filter((i) => !(gone && i.id === "bbbbbb")),
+        }),
+      }),
+    )
+    const { user } = renderApp("/runners")
+    await user.click((await rowOf("bbbbbb")).getByRole("button", { name: "Stop runner bbbbbb" }))
+    expect(await screen.findByText("Stop runner bbbbbb?")).toBeInTheDocument()
+    gone = true
+    const ask = within(screen.getByRole("alertdialog"))
+    expect(await ask.findByText("Runner bbbbbb has already finished", {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(ask.getByRole("button", { name: "Stop" })).toBeDisabled()
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false)
+  })
+
+  it("treats a runner the daemon no longer knows as finished", async () => {
+    mockApi(authedRoutes({ "DELETE /api/runners/aaaaaa": () => json({ error: "runner aaaaaa not found" }, 404) }))
+    const { user } = renderApp("/runners")
+    await user.click((await rowOf("aaaaaa")).getByRole("button", { name: "Stop runner aaaaaa" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Stop" }))
+    expect((await screen.findAllByText("aaaaaa had already finished")).length).toBeGreaterThan(0)
+    expect(screen.queryByText("runner aaaaaa not found")).toBeNull()
+  })
+
   it("keeps the runner's name in the dialog while it closes", async () => {
     mockApi(authedRoutes())
     const { user } = renderApp("/runners")
