@@ -65,6 +65,14 @@ type fakeClient struct {
 	avail       []model.AvailableRepo
 	availErr    error // returned by AvailableRepos
 	availCalls  int
+	storage     *model.Storage                     // Storage returns it; nil means sampleStorage()
+	storageErr  error                              // returned by Storage when set
+	storageN    int                                // Storage calls
+	choices     map[string][]model.ToolchainChoice // AvailableToolchains answers per tool
+	choicesErr  error                              // returned by AvailableToolchains when set
+	availTools  []string                           // each AvailableToolchains request's tool
+	installErr  error                              // returned by InstallToolchain and InstallPreset
+	storeErr    error                              // returned by RefreshStorage, RemoveToolchain, ClearCache and PruneScope
 }
 
 func (f *fakeClient) rec(s string, a ...any) error {
@@ -205,6 +213,62 @@ func (f *fakeClient) AvailableRepos(context.Context) ([]model.AvailableRepo, err
 	f.availCalls++
 	return f.avail, f.availErr
 }
+func (f *fakeClient) Storage(context.Context) (model.Storage, error) {
+	f.storageN++
+	if f.storageErr != nil {
+		return model.Storage{}, f.storageErr
+	}
+	if f.storage != nil {
+		return *f.storage, nil
+	}
+	return sampleStorage(), nil
+}
+func (f *fakeClient) RefreshStorage(context.Context) error {
+	f.rec("refresh-storage")
+	return f.storeErr
+}
+func (f *fakeClient) AvailableToolchains(_ context.Context, tool string) ([]model.ToolchainChoice, error) {
+	f.availTools = append(f.availTools, tool)
+	return f.choices[tool], f.choicesErr
+}
+func (f *fakeClient) InstallToolchain(_ context.Context, tool, version string) error {
+	f.rec("install %s %s", tool, version)
+	return f.installErr
+}
+func (f *fakeClient) InstallPreset(_ context.Context, preset string) error {
+	f.rec("install-preset %s", preset)
+	return f.installErr
+}
+func (f *fakeClient) RemoveToolchain(_ context.Context, tool, version string) error {
+	f.rec("rm-toolchain %s %s", tool, version)
+	return f.storeErr
+}
+func (f *fakeClient) ClearCache(_ context.Context, name string) error {
+	f.rec("clear %s", name)
+	return f.storeErr
+}
+func (f *fakeClient) PruneScope(_ context.Context, scope string) error {
+	f.rec("prune %s", scope)
+	return f.storeErr
+}
+
+func TestClientServesStorage(t *testing.T) {
+	f := &fakeClient{}
+	var c Client = f
+	s, err := c.Storage(context.Background())
+	if err != nil || len(s.Toolchains) != 4 || s.Docker.DiskPct != 61 {
+		t.Fatalf("storage %+v %v", s, err)
+	}
+	if err := c.InstallToolchain(context.Background(), "node", "22"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.PruneScope(context.Background(), "unused-volumes"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.actions(), "|"); got != "install node 22|prune unused-volumes" || f.storageN != 1 {
+		t.Fatalf("actions %q, %d storage reads", got, f.storageN)
+	}
+}
 
 // actions drops the read calls the fake records, leaving the daemon actions.
 func (f *fakeClient) actions() []string {
@@ -232,6 +296,51 @@ func sampleStatus() model.Status {
 				Job: &model.JobInfo{Name: "CI / e2e-journeys", RunNumber: "412", StartedAt: now.Add(-12*time.Minute - 4*time.Second)}},
 			{ID: "7be210", Repo: "darkmem", State: "idle", Since: now.Add(-90 * time.Second)},
 		},
+	}
+}
+
+// sampleStorage is a Storage snapshot with every card filled: two .NET
+// majors (each SDK the last of its major), a folder no installer owns, a
+// cache that is not present, and a finished automatic prune.
+func sampleStorage() model.Storage {
+	installed := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	measured, written := now.Add(-3*time.Minute), now.Add(-2*time.Hour)
+	pruned, op1, op2 := now.Add(-58*time.Minute), now.Add(-30*time.Minute), now.Add(-10*time.Minute)
+	return model.Storage{
+		Toolchains: []model.Toolchain{
+			{Tool: "node", Version: "22.11.0", Arch: "x64", Bytes: 182_400_000, InstalledAt: installed},
+			{Tool: "dotnet", Version: "8.0.414", Arch: "x64", Bytes: 412_000_000, InstalledAt: installed},
+			{Tool: "dotnet", Version: "10.0.100", Arch: "x64", Bytes: 455_000_000, InstalledAt: installed},
+			{Tool: "java", Version: "21.0.8+9", Arch: "x64", Bytes: 195_000_000, InstalledAt: installed},
+		},
+		OtherToolCache: []model.Folder{{Name: "PyPy", Bytes: 98_000_000}},
+		PackageCaches: []model.PackageCache{
+			{Name: "nuget", Label: "NuGet", Paths: []string{"/home/ghrunner/.nuget/packages"}, Present: true,
+				Bytes: 1_240_000_000, Files: 18_204, LastWritten: &written},
+			{Name: "npm", Label: "npm", Paths: []string{"/home/ghrunner/.npm"}, Present: true,
+				Bytes: 310_000_000, Files: 4_410, LastWritten: &written},
+			{Name: "pip", Label: "pip", Paths: []string{"/home/ghrunner/.cache/pip"}},
+		},
+		Docker: model.DockerDisk{
+			Rows: []model.DockerRow{
+				{Type: "Images", Count: 9, Active: 2, Bytes: 6_571_000_000, Reclaimable: 5_627_000_000},
+				{Type: "Containers", Count: 2, Active: 2, Bytes: 40_960},
+				{Type: "Local Volumes", Count: 68, Active: 1, Bytes: 8_660_000_000, Reclaimable: 8_660_000_000},
+				{Type: "Build Cache", Count: 12, Bytes: 1_686_000_000, Reclaimable: 456_000_000},
+			},
+			BuildCacheTypes: []model.BuildCacheType{
+				{Type: "regular", Count: 10, Bytes: 1_600_000_000, Reclaimable: 400_000_000},
+				{Type: "source.local", Count: 2, Bytes: 86_000_000, Reclaimable: 56_000_000},
+			},
+			DiskPct: 61,
+		},
+		MeasuredAt: &measured,
+		Operations: model.Operations{Recent: []model.Operation{
+			{ID: "op2", Kind: "clear", Target: "npm", StartedAt: op2, FinishedAt: &op2, Outcome: "refused", Message: "refused: 1 jobs running"},
+			{ID: "op1", Kind: "install", Target: "node 22", StartedAt: op1, FinishedAt: &op1, Outcome: "ok", Message: "installed node 22.11.0"},
+		}},
+		LastPrune: &model.LastPrune{Trigger: "auto", Scope: "auto", StartedAt: pruned, FinishedAt: &pruned, Outcome: "ok",
+			Steps: []model.PruneStep{{Name: "build cache older than 72h", Freed: 1_200_000_000}, {Name: "dangling images", Freed: 300_000_000}}},
 	}
 }
 

@@ -45,6 +45,14 @@ type Client interface {
 	QueueRunnerUpdate(ctx context.Context) error
 	CancelRunnerUpdate(ctx context.Context) error
 	AvailableRepos(ctx context.Context) ([]model.AvailableRepo, error)
+	Storage(ctx context.Context) (model.Storage, error)
+	RefreshStorage(ctx context.Context) error
+	AvailableToolchains(ctx context.Context, tool string) ([]model.ToolchainChoice, error)
+	InstallToolchain(ctx context.Context, tool, version string) error
+	InstallPreset(ctx context.Context, preset string) error
+	RemoveToolchain(ctx context.Context, tool, version string) error
+	ClearCache(ctx context.Context, name string) error
+	PruneScope(ctx context.Context, scope string) error
 }
 
 type page int
