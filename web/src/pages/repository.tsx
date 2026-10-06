@@ -130,10 +130,10 @@ export function RepositoryPage() {
       for (const key of Object.keys(sent)) {
         if (!sameValue(applied[key], sent[key])) toast.error(`daemon did not apply ${name}.${key}; is it older than this ghr?`)
       }
+      setDraft((d) => settle(d, sent))
     } catch (err) {
       toast.error(`saved, but re-reading the config failed: ${errorText(err)}`)
     }
-    setDraft((d) => settle(d, sent))
     setSaving(false)
     return true
   }

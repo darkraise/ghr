@@ -42,7 +42,10 @@ function loadedValues(c: Config): Values {
   }
 }
 
-const equal: Equal = (key, a, b) => (key in FLOORS ? sameDuration(String(a), String(b)) : sameValue(a, b))
+const equal: Equal = (key, a, b) => {
+  if (key in FLOORS) return sameDuration(String(a), String(b))
+  return typeof a === "string" && typeof b === "string" ? a.trim() === b.trim() : sameValue(a, b)
+}
 
 function fieldErrors(v: Values): Record<string, string> {
   const errors: Record<string, string> = {}
@@ -175,10 +178,10 @@ export function SettingsPage() {
       for (const key of Object.keys(sent)) {
         if (!equal(key, fresh[key], sent[key])) toast.error(`daemon did not apply ${patchKey(key)}; is it older than this ghr?`)
       }
+      setDraft((d) => settle(d, sent, equal))
     } catch (err) {
       toast.error(`saved, but re-reading the config failed: ${errorText(err)}`)
     }
-    setDraft((d) => settle(d, sent, equal))
     setSaving(false)
     return true
   }

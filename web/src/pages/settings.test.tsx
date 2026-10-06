@@ -138,6 +138,18 @@ describe("Settings page", () => {
     expect(screen.queryByText("Save rejected")).toBeNull()
   })
 
+  it("does not call a trimmed text field unapplied", async () => {
+    mockApi(applyingDaemon())
+    const { user } = renderApp("/settings")
+    const memory = await screen.findByLabelText("Memory max")
+    await user.clear(memory)
+    await user.type(memory, "8G ")
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    expect((await screen.findAllByText("Settings saved")).length).toBeGreaterThan(0)
+    await waitFor(() => expect(screen.queryByText(/unsaved change/)).toBeNull())
+    expect(screen.queryByText(/daemon did not apply/)).toBeNull()
+  })
+
   it("says when the daemon did not apply a saved field", async () => {
     mockApi(routes({ "PATCH /api/config": () => noContent() }))
     const { user } = renderApp("/settings")
@@ -146,6 +158,35 @@ describe("Settings page", () => {
     await user.type(max, "3")
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     expect((await screen.findAllByText("daemon did not apply global_max; is it older than this ghr?")).length).toBeGreaterThan(0)
+  })
+
+  it("does not count a space around a loaded value as a change", async () => {
+    mockApi(routes())
+    const { user } = renderApp("/settings")
+    const memory = await screen.findByLabelText("Memory max")
+    await user.type(memory, " ")
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
+  })
+
+  it("keeps the edits when the config cannot be read back after a save", async () => {
+    let saved = false
+    mockApi(
+      routes({
+        "GET /api/config": () => (saved ? json({ error: "ghr is restarting" }, 503) : fixtures.config),
+        "PATCH /api/config": () => {
+          saved = true
+          return noContent()
+        },
+      }),
+    )
+    const { user } = renderApp("/settings")
+    const poll = await screen.findByLabelText("Poll interval")
+    await user.clear(poll)
+    await user.type(poll, "15s")
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    expect((await screen.findAllByText("saved, but re-reading the config failed: ghr is restarting")).length).toBeGreaterThan(0)
+    expect(screen.getByLabelText("Poll interval")).toHaveValue("15s")
+    expect(screen.getByText("● 1 unsaved change")).toBeInTheDocument()
   })
 
   it("discards the edits", async () => {
