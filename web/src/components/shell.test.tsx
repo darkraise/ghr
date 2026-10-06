@@ -69,6 +69,45 @@ describe("shell", () => {
     expect(calls.some((c) => c.method === "POST" && c.path === "/auth/logout")).toBe(true)
   })
 
+  it("lands on /login from the user menu even when the logout request fails", async () => {
+    let authenticated = true
+    const { calls } = mockApi(
+      authedRoutes({
+        "GET /auth/state": () => ({ setup_required: false, authenticated }),
+        "POST /auth/logout": () => {
+          authenticated = false
+          return json({ error: "session already ended" }, 500)
+        },
+      }),
+    )
+    const { user, router } = renderApp("/")
+    await user.click(await screen.findByRole("button", { name: "O" }))
+    await user.click(await screen.findByText("Log out"))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
+    expect(calls.some((c) => c.method === "POST" && c.path === "/auth/logout")).toBe(true)
+  })
+
+  it("logs out from the user menu past unsaved edits", async () => {
+    let authenticated = true
+    mockApi(
+      authedRoutes({
+        "GET /auth/state": () => ({ setup_required: false, authenticated }),
+        "POST /auth/logout": () => {
+          authenticated = false
+          return noContent()
+        },
+      }),
+    )
+    const { user, router } = renderApp("/settings")
+    const poll = await screen.findByLabelText("Poll interval")
+    await user.clear(poll)
+    await user.type(poll, "15s")
+    await user.click(screen.getByRole("button", { name: "O" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Log out" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
+  })
+
   it("sends an expired session to /login", async () => {
     let authenticated = true
     mockApi(

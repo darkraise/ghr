@@ -70,4 +70,29 @@ describe("Install toolchain dialog", () => {
     expect(await dialog.findByText('✖ unknown toolchain "node"')).toBeInTheDocument()
     expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
+
+  it("is not offered while the daemon is unreachable", async () => {
+    mockApi(routes({ "GET /api/status": () => json({ error: "connection refused" }, 502) }))
+    renderApp("/storage")
+    await waitFor(() => expect(screen.getAllByText(/daemon unreachable/).length).toBeGreaterThan(0))
+    expect(await screen.findByRole("button", { name: "Install…" })).toBeDisabled()
+  })
+
+  it("sends Install after the daemon went unreachable and shows the request's error", { timeout: 10_000 }, async () => {
+    let down = false
+    const { calls } = mockApi(
+      routes({
+        "GET /api/status": () => (down ? json({ error: "connection refused" }, 502) : fixtures.status),
+        "POST /api/toolchains": () => json({ error: "connection refused" }, 502),
+      }),
+    )
+    const { user } = renderApp("/storage")
+    const dialog = await openDialog(user)
+    await user.click(await dialog.findByRole("button", { name: /^22\.11\.0/ }))
+    down = true
+    await waitFor(() => expect(screen.getAllByText(/daemon unreachable/).length).toBeGreaterThan(0), { timeout: 4000 })
+    await user.click(dialog.getByRole("button", { name: "Install" }))
+    expect(await dialog.findByText("✖ connection refused")).toBeInTheDocument()
+    expect(calls.some((c) => c.method === "POST" && c.path === "/api/toolchains")).toBe(true)
+  })
 })

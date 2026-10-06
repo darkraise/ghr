@@ -9,7 +9,9 @@ describe("api client", () => {
     const { fetchMock } = mockApi({ "GET /api/status": { epoch: "e" } })
     await api.status()
     const init = fetchMock.mock.calls[0]?.[1]
+    expect(init?.method).toBe("GET")
     expect(new Headers(init?.headers).get("X-GHR")).toBe("1")
+    expect(new Headers(init?.headers).get("Content-Type")).toBeNull()
     expect(init?.credentials).toBe("same-origin")
   })
 
@@ -56,7 +58,8 @@ describe("api client", () => {
     const { calls } = mockApi({ "POST /auth/setup": () => noContent(), "GET /api/history": [] })
     await api.setup("correct horse battery")
     await api.history("darkmem", "", 200)
-    expect(calls[0]?.body).toEqual({ password: "correct horse battery" })
+    expect(calls[0]).toMatchObject({ method: "POST", body: { password: "correct horse battery" }, contentType: "application/json" })
+    expect(calls[1]?.method).toBe("GET")
     expect(calls[1]?.search).toBe("?repo=darkmem&conclusion=&limit=200")
   })
 

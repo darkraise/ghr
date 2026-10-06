@@ -37,7 +37,7 @@ export function mockApi(routes: Record<string, unknown>) {
     const url = new URL(raw, "http://localhost")
     const method = (init?.method ?? "GET").toUpperCase()
     const body = parseBody(init?.body)
-    const contentType = (init?.headers as Record<string, string> | undefined)?.["Content-Type"]
+    const contentType = new Headers(init?.headers).get("Content-Type") ?? undefined
     calls.push({ method, path: url.pathname, search: url.search, body, contentType })
     const route = routes[`${method} ${url.pathname}`]
     if (route === undefined) return json({ error: `no mock for ${method} ${url.pathname}` }, 404)

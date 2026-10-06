@@ -26,7 +26,7 @@ describe("api for the later pages", () => {
     const { calls } = mockApi({ [`${method} ${path}`]: ok })
     await call()
     expect(calls).toHaveLength(1)
-    expect(calls[0]).toMatchObject({ method, path, body })
+    expect(calls[0]).toMatchObject({ method, path, body, contentType: body === undefined ? undefined : "application/json" })
   })
 
   it("sends a replacement token as plain text, unchanged", async () => {
