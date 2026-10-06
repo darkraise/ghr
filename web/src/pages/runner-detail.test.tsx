@@ -1,5 +1,5 @@
-import { screen, waitFor, within } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { afterEach, describe, expect, it } from "vitest"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
@@ -11,6 +11,12 @@ const detailRoutes = (over: Record<string, unknown> = {}) =>
     "GET /api/runners/aaaaaa/log": fixtures.log,
     ...over,
   })
+
+afterEach(() => {
+  Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight")
+  Reflect.deleteProperty(HTMLElement.prototype, "clientHeight")
+  Reflect.deleteProperty(HTMLElement.prototype, "scrollTop")
+})
 
 describe("runner detail page", () => {
   it("shows the runner and its steps", async () => {
@@ -86,5 +92,47 @@ describe("runner detail page", () => {
     mockApi(detailRoutes({ "GET /api/runners/aaaaaa/steps": [] }))
     renderApp("/runners/aaaaaa")
     expect(await screen.findByText("no steps reported yet")).toBeInTheDocument()
+  })
+
+  it("names the step icons, with their own for skipped and cancelled", async () => {
+    mockApi(
+      detailRoutes({
+        "GET /api/runners/aaaaaa/steps": [
+          { number: 1, name: "Set up job", status: "completed", conclusion: "success" },
+          { number: 2, name: "Run tests", status: "in_progress", conclusion: "" },
+          { number: 3, name: "Lint", status: "completed", conclusion: "skipped" },
+          { number: 4, name: "Deploy", status: "completed", conclusion: "cancelled" },
+          { number: 5, name: "Upload", status: "completed", conclusion: "failure" },
+          { number: 6, name: "Post checkout", status: "queued", conclusion: "" },
+        ],
+      }),
+    )
+    renderApp("/runners/aaaaaa")
+    expect(await screen.findByRole("img", { name: "succeeded" })).toHaveTextContent("✔")
+    expect(screen.getByText("running")).toHaveClass("sr-only")
+    expect(screen.getByRole("img", { name: "skipped" })).toHaveTextContent("–")
+    expect(screen.getByRole("img", { name: "cancelled" })).toHaveTextContent("⊘")
+    expect(screen.getByRole("img", { name: "failed" })).toHaveTextContent("✖")
+    expect(screen.getByRole("img", { name: "pending" })).toHaveTextContent("○")
+  })
+
+  it("turns Follow off when the log is scrolled up", async () => {
+    let top = 0
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get: () => 500 })
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => 100 })
+    Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = v
+      },
+    })
+    mockApi(detailRoutes())
+    renderApp("/runners/aaaaaa?tab=log")
+    const log = await screen.findByText(/Listening for Jobs/)
+    expect(screen.getByRole("switch", { name: "Follow" })).toHaveAttribute("aria-checked", "true")
+    top = 0
+    fireEvent.scroll(log)
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Follow" })).toHaveAttribute("aria-checked", "false"))
   })
 })

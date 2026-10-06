@@ -10,8 +10,9 @@ import { PageHeader } from "darkraise-ui/layout"
 import { useEffect, useRef, type ReactNode } from "react"
 import { api } from "@/api/client"
 import { keys, useConfig, useEvents, useMetrics, useStatus } from "@/api/hooks"
-import type { GhrEvent, Metrics, RepoStatus, Status } from "@/api/types"
+import type { GhrEvent, HistoryEntry, Metrics, RepoStatus, Status } from "@/api/types"
 import { RunnersTable } from "@/components/runners-table"
+import { Glyph } from "@/components/glyph"
 import { Sparkline } from "@/components/sparkline"
 import { StateBadge } from "@/components/state-badge"
 import { ago, clock, fmtMem, maxText, series } from "@/lib/format"
@@ -44,6 +45,23 @@ function repoState(r: RepoStatus): string {
   if (r.removing) state = "removing"
   if (r.error) state = "error"
   return state
+}
+
+const jobGlyph: Record<string, { symbol: string; label: string; colour: string }> = {
+  success: { symbol: "✔", label: "succeeded", colour: "text-green-600" },
+  failure: { symbol: "✖", label: "failed", colour: "text-destructive" },
+  cancelled: { symbol: "⊘", label: "cancelled", colour: "text-muted-foreground" },
+  skipped: { symbol: "–", label: "skipped", colour: "text-muted-foreground" },
+}
+
+function LastJob({ job, now }: { job: HistoryEntry; now: number }) {
+  const g = jobGlyph[job.conclusion] ?? jobGlyph.failure
+  return (
+    <>
+      <Glyph symbol={g?.symbol ?? "✖"} label={g?.label ?? "failed"} className={g?.colour} />
+      {` #${job.run_number} ${job.job_name}  ${ago(now - Date.parse(job.finished_at))}`}
+    </>
+  )
 }
 
 function StatusChips({ status, highWater, now }: { status: Status; highWater: number; now: number }) {
@@ -127,11 +145,17 @@ function RepoTable({ repos, now }: { repos: RepoStatus[]; now: number }) {
             <TableCell>
               {r.active}/{maxText(r.max)}
             </TableCell>
-            <TableCell>{r.queued > 0 ? <span className="text-amber-600">⧗ {r.queued}</span> : "–"}</TableCell>
             <TableCell>
-              {r.last_job
-                ? `${r.last_job.conclusion === "success" ? "✔" : "✖"} #${r.last_job.run_number} ${r.last_job.job_name}  ${ago(now - Date.parse(r.last_job.finished_at))}`
-                : "–"}
+              {r.queued > 0 ? (
+                <span className="text-amber-600">
+                  <Glyph symbol="⧗" label="queued" /> {r.queued}
+                </span>
+              ) : (
+                "–"
+              )}
+            </TableCell>
+            <TableCell>
+              {r.last_job ? <LastJob job={r.last_job} now={now} /> : "–"}
               {r.error && <span className="ml-2 text-destructive">{r.error}</span>}
             </TableCell>
           </TableRow>
@@ -142,6 +166,7 @@ function RepoTable({ repos, now }: { repos: RepoStatus[]; now: number }) {
 }
 
 const eventIcon: Record<string, string> = { ok: "✔", warn: "⚠", error: "✖" }
+const eventLabel: Record<string, string> = { ok: "ok", warn: "warning", error: "error" }
 const eventColour: Record<string, string> = { ok: "text-green-600", warn: "text-amber-600", error: "text-destructive" }
 
 function ActivityFeed({ events }: { events: GhrEvent[] }) {
@@ -157,7 +182,7 @@ function ActivityFeed({ events }: { events: GhrEvent[] }) {
         {events.map((e) => (
           <li key={e.seq} className="flex gap-2">
             <span className="text-muted-foreground">{clock(e.time)}</span>
-            <span className={eventColour[e.level] ?? "text-primary"}>{eventIcon[e.level] ?? "▶"}</span>
+            <Glyph symbol={eventIcon[e.level] ?? "▶"} label={eventLabel[e.level] ?? "info"} className={eventColour[e.level] ?? "text-primary"} />
             <span className="w-24 shrink-0 truncate">{e.repo ?? ""}</span>
             <span>{e.msg}</span>
           </li>

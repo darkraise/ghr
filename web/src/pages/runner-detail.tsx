@@ -12,6 +12,7 @@ import { useEffect, useState } from "react"
 import { useContainers, useLogTail, useStatus, useSteps } from "@/api/hooks"
 import type { Container, InstanceStatus, Step } from "@/api/types"
 import { LogView } from "@/components/log-view"
+import { Glyph } from "@/components/glyph"
 import { StopRunnerDialog } from "@/components/runners-table"
 import { StateBadge } from "@/components/state-badge"
 import { dateTimeSec, dur, isZeroTime } from "@/lib/format"
@@ -21,11 +22,19 @@ import { errorText } from "@/query"
 export type DetailTab = "steps" | "log" | "containers"
 
 function stepIcon(s: Step) {
-  if (s.status === "in_progress") return <Spinner size="sm" />
-  if (s.conclusion === "success") return <span className="text-green-600">✔</span>
-  if (s.conclusion === "failure") return <span className="text-destructive">✖</span>
-  if (s.conclusion === "skipped") return <span>–</span>
-  return <span className="text-muted-foreground">○</span>
+  if (s.status === "in_progress") {
+    return (
+      <span className="inline-flex items-center">
+        <Spinner size="sm" />
+        <span className="sr-only">running</span>
+      </span>
+    )
+  }
+  if (s.conclusion === "success") return <Glyph symbol="✔" label="succeeded" className="text-green-600" />
+  if (s.conclusion === "failure") return <Glyph symbol="✖" label="failed" className="text-destructive" />
+  if (s.conclusion === "cancelled") return <Glyph symbol="⊘" label="cancelled" className="text-muted-foreground" />
+  if (s.conclusion === "skipped") return <Glyph symbol="–" label="skipped" className="text-muted-foreground" />
+  return <Glyph symbol="○" label="pending" className="text-muted-foreground" />
 }
 
 function StepList({ steps }: { steps: UseQueryResult<Step[]> }) {
@@ -169,7 +178,7 @@ export function RunnerDetailPage() {
             <Label htmlFor="follow">Follow</Label>
           </div>
           {log.isError && <p className="mb-2 text-sm text-destructive">{errorText(log.error)}</p>}
-          <LogView text={log.data?.text ?? ""} follow={follow} />
+          <LogView text={log.data?.text ?? ""} follow={follow} onFollowChange={setFollow} />
         </TabsContent>
         <TabsContent value="containers">
           <ContainerTable containers={containers} />

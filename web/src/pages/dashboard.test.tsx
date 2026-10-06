@@ -30,7 +30,7 @@ describe("Dashboard page", () => {
     expect(await screen.findByText("old-repo")).toBeInTheDocument()
     expect(screen.getByText("GitHub: not found")).toBeInTheDocument()
     expect(screen.getByText("paused")).toBeInTheDocument()
-    expect(screen.getByText(/✔ #41 build/)).toBeInTheDocument()
+    expect(screen.getByText(/#41 build/)).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "aaaaaa" })).toBeInTheDocument()
     expect(await screen.findByText("runner aaaaaa started")).toBeInTheDocument()
   })
@@ -71,5 +71,20 @@ describe("Dashboard page", () => {
     mockApi(authedRoutes({ "GET /api/status": () => json({ error: "connection refused" }, 502) }))
     renderApp("/")
     expect(await screen.findByText("waiting for the daemon…")).toBeInTheDocument()
+  })
+
+  it("names the status glyphs", async () => {
+    mockApi(authedRoutes())
+    renderApp("/")
+    expect(await screen.findByRole("img", { name: "succeeded" })).toHaveTextContent("✔")
+    expect(screen.getByRole("img", { name: "queued" })).toHaveTextContent("⧗")
+    expect((await screen.findAllByRole("img", { name: "warning" }))[0]).toHaveTextContent("⚠")
+  })
+
+  it("marks a cancelled last job with its own icon", async () => {
+    const repos = fixtures.status.repos.map((r) => (r.last_job ? { ...r, last_job: { ...r.last_job, conclusion: "cancelled" } } : r))
+    mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, repos } }))
+    renderApp("/")
+    expect(await screen.findByRole("img", { name: "cancelled" })).toHaveTextContent("⊘")
   })
 })
