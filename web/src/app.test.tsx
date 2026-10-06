@@ -1,14 +1,61 @@
 import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { render, screen } from "@testing-library/react"
+import { MutationObserver } from "@tanstack/react-query"
+import { act, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import { App } from "./app"
+import { ApiError, api } from "./api/client"
+import { errorText } from "./query"
+import { json, mockApi } from "./test/api"
+import { authedRoutes } from "./test/fixtures"
+import { renderApp } from "./test/render"
 
 describe("App", () => {
-  it("renders the ghr heading", () => {
-    render(<App />)
-    expect(screen.getByRole("heading", { name: "ghr" })).toBeInTheDocument()
+  it("renders the routed page inside the providers", async () => {
+    mockApi(authedRoutes())
+    renderApp("/")
+    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument()
+  })
+
+  it("sends an expired session from any API call to /login", async () => {
+    let authenticated = true
+    mockApi(
+      authedRoutes({
+        "GET /auth/state": () => ({ setup_required: false, authenticated }),
+        "GET /api/status": () => {
+          authenticated = false
+          return json({ error: "not logged in" }, 401)
+        },
+      }),
+    )
+    const { router } = renderApp("/")
+    await act(async () => {
+      await api.status().catch(() => undefined)
+    })
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
+  })
+
+  it("toasts a failed mutation", async () => {
+    mockApi(authedRoutes())
+    const { queryClient } = renderApp("/")
+    await screen.findByRole("heading", { name: "Dashboard" })
+    await act(async () => {
+      await new MutationObserver(queryClient, { mutationFn: () => Promise.reject(new Error("boom")) })
+        .mutate()
+        .catch(() => undefined)
+    })
+    expect((await screen.findAllByText("boom")).length).toBeGreaterThan(0)
+  })
+})
+
+describe("errorText", () => {
+  it("adds the retry time of a rate-limited request", () => {
+    const err = new ApiError(429, "GitHub rate limit; API calls are paused", new Date("2026-10-06T14:20:00Z"))
+    expect(errorText(err)).toBe("GitHub rate limit; API calls are paused — retry after 14:20")
+  })
+  it("passes other errors through", () => {
+    expect(errorText(new Error("boom"))).toBe("boom")
+    expect(errorText("plain")).toBe("plain")
   })
 })
 
