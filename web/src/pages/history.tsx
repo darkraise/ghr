@@ -1,5 +1,6 @@
 import { Card, CardContent } from "darkraise-ui/components/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "darkraise-ui/components/select"
+import { Spinner } from "darkraise-ui/components/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "darkraise-ui/components/table"
 import { PageHeader } from "darkraise-ui/layout"
 import { useState } from "react"
@@ -56,7 +57,9 @@ export function HistoryPage() {
       <Card>
         <CardContent className="p-4">
           {history.isError && <p className="mb-2 text-sm text-destructive">{errorText(history.error)}</p>}
-          {rows.length === 0 && !history.isError ? (
+          {history.isPending ? (
+            <Spinner label="loading…" />
+          ) : rows.length === 0 && !history.isError ? (
             <p className="py-6 text-center text-sm text-muted-foreground">no finished jobs yet</p>
           ) : (
             <Table>
