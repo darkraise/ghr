@@ -15,7 +15,7 @@ import { LogView } from "@/components/log-view"
 import { Glyph } from "@/components/glyph"
 import { StopRunnerDialog } from "@/components/runners-table"
 import { StateBadge } from "@/components/state-badge"
-import { dateTimeSec, dur, isZeroTime } from "@/lib/format"
+import { dateTimeSec, dur, startedAt } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
@@ -90,30 +90,33 @@ function ContainerTable({ containers }: { containers: UseQueryResult<Container[]
 }
 
 export function RunnerDetailPage() {
-  const { id = "" } = useParams({ strict: false }) as { id?: string }
-  const { tab = "steps" } = useSearch({ strict: false }) as { tab?: DetailTab }
+  const { id } = useParams({ from: "/app/runners/$id" })
+  const { tab } = useSearch({ from: "/app/runners/$id" })
   const navigate = useNavigate()
   const status = useStatus()
   const now = useNow()
-  const [snapshot, setSnapshot] = useState<InstanceStatus | undefined>(undefined)
-  const [finishedAt, setFinishedAt] = useState<number | undefined>(undefined)
+  const [kept, setKept] = useState<{ id: string; inst: InstanceStatus } | undefined>(undefined)
+  const [ended, setEnded] = useState<{ id: string; at: number } | undefined>(undefined)
   const [follow, setFollow] = useState(true)
   const [stopping, setStopping] = useState(false)
 
   const current = status.data?.instances.find((i) => i.id === id)
   const live = current !== undefined
   const finished = status.data !== undefined && !live
+  // Kept per runner ID, so moving to another runner never shows this one.
+  const snapshot = kept?.id === id ? kept.inst : undefined
+  const finishedAt = ended?.id === id ? ended.at : undefined
 
   // The detail page outlives the runner: it keeps the last instance it saw,
   // and stops polling steps and containers once the runner leaves /status.
   useEffect(() => {
     if (current) {
-      setSnapshot(current)
-      setFinishedAt(undefined)
+      if (snapshot !== current) setKept({ id, inst: current })
+      setEnded(undefined)
     } else if (status.data && finishedAt === undefined) {
-      setFinishedAt(Date.now())
+      setEnded({ id, at: now })
     }
-  }, [current, status.data, finishedAt])
+  }, [current, snapshot, status.data, finishedAt, id, now])
 
   const steps = useSteps(id, live)
   const containers = useContainers(id, live)
@@ -121,7 +124,7 @@ export function RunnerDetailPage() {
 
   const inst = current ?? snapshot
   const job = inst?.job
-  const start = job && !isZeroTime(job.started_at) ? job.started_at : inst?.since
+  const start = inst ? startedAt(inst) : undefined
   const end = finished ? (finishedAt ?? now) : now
 
   return (

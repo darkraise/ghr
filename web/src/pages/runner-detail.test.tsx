@@ -79,6 +79,23 @@ describe("runner detail page", () => {
     expect(screen.getByRole("button", { name: "Stop runner" })).toBeDisabled()
   })
 
+  it("drops the snapshot when the page moves to another runner", async () => {
+    let gone = false
+    mockApi(
+      detailRoutes({
+        "GET /api/status": () =>
+          gone ? { ...fixtures.status, instances: fixtures.status.instances.filter((i) => i.id !== "aaaaaa") } : fixtures.status,
+      }),
+    )
+    const { router } = renderApp("/runners/aaaaaa")
+    expect(await screen.findByText(/test #42/)).toBeInTheDocument()
+    gone = true
+    expect(await screen.findByText("This runner has finished", {}, { timeout: 3000 })).toBeInTheDocument()
+    await router.navigate({ to: "/runners/$id", params: { id: "zzzzzz" }, search: { tab: "steps" } })
+    expect(await screen.findByRole("heading", { name: "zzzzzz" })).toBeInTheDocument()
+    expect(screen.queryByText(/test #42/)).toBeNull()
+  })
+
   it("keeps the page up while the daemon cannot be reached", async () => {
     mockApi(detailRoutes({ "GET /api/status": () => json({ error: "connection refused" }, 502) }))
     renderApp("/runners/aaaaaa")

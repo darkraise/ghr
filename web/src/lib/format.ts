@@ -68,10 +68,13 @@ export function dateTimeSec(iso: string): string {
   return `${dateTime(iso)}:${pad(new Date(iso).getSeconds())}`
 }
 
-export function elapsed(instance: InstanceStatus, now: number): string {
+export function startedAt(instance: InstanceStatus): string {
   const job = instance.job
-  const start = job && !isZeroTime(job.started_at) ? job.started_at : instance.since
-  return dur(now - Date.parse(start))
+  return job && !isZeroTime(job.started_at) ? job.started_at : instance.since
+}
+
+export function elapsed(instance: InstanceStatus, now: number): string {
+  return dur(now - Date.parse(startedAt(instance)))
 }
 
 export function series(samples: MetricSample[], pick: (s: MetricSample) => number | undefined): (number | null)[] {

@@ -1,8 +1,13 @@
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { keys } from "@/api/hooks"
 import type { InstanceStatus, MetricSample } from "@/api/types"
-import { ago, clock, dateTime, dateTimeSec, dur, elapsed, fmtMem, hhmm, humanBytes, isZeroTime, maxText, series } from "./format"
-import { useNow } from "./use-now"
+import { fixtures } from "@/test/fixtures"
+import { withQuery } from "@/test/query"
+import { ago, clock, dateTime, dateTimeSec, dur, elapsed, fmtMem, hhmm, humanBytes, isZeroTime, maxText, series, startedAt } from "./format"
+import { clockOffset, useNow } from "./use-now"
+
+const statusFixture = fixtures.status
 
 afterEach(() => vi.useRealTimers())
 
@@ -89,11 +94,45 @@ describe("series", () => {
 describe("useNow", () => {
   it("ticks every second", () => {
     vi.useFakeTimers({ now: new Date("2026-10-03T14:05:00Z") })
-    const { result } = renderHook(() => useNow())
+    const { wrapper } = withQuery()
+    const { result } = renderHook(() => useNow(), { wrapper })
     expect(result.current).toBe(Date.parse("2026-10-03T14:05:00Z"))
     act(() => {
       vi.advanceTimersByTime(1000)
     })
     expect(result.current).toBe(Date.parse("2026-10-03T14:05:01Z"))
+  })
+
+  it("follows the daemon's clock from the last status", () => {
+    vi.useFakeTimers({ now: new Date("2026-10-03T14:05:00Z") })
+    const { queryClient, wrapper } = withQuery()
+    queryClient.setQueryData(keys.status, { ...statusFixture, now: "2026-10-03T14:07:30Z" })
+    const { result } = renderHook(() => useNow(), { wrapper })
+    expect(result.current).toBe(Date.parse("2026-10-03T14:07:30Z"))
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(result.current).toBe(Date.parse("2026-10-03T14:07:31Z"))
+  })
+})
+
+describe("clockOffset", () => {
+  it("is the daemon's time minus the browser's when the status arrived", () => {
+    expect(clockOffset({ ...statusFixture, now: "2026-10-03T14:05:10Z" }, Date.parse("2026-10-03T14:05:00Z"))).toBe(10_000)
+  })
+  it("is zero without a status or with an unreadable time", () => {
+    expect(clockOffset(undefined, 5)).toBe(0)
+    expect(clockOffset({ ...statusFixture, now: "" }, 5)).toBe(0)
+  })
+})
+
+describe("startedAt", () => {
+  const base = { id: "a", repo: "r", state: "busy", since: "2026-10-03T14:00:00Z" } as InstanceStatus
+  it("prefers the job's start", () => {
+    expect(startedAt({ ...base, job: { started_at: "2026-10-03T14:02:00Z" } } as InstanceStatus)).toBe("2026-10-03T14:02:00Z")
+  })
+  it("falls back to since without a job or before the job starts", () => {
+    expect(startedAt(base)).toBe("2026-10-03T14:00:00Z")
+    expect(startedAt({ ...base, job: { started_at: "0001-01-01T00:00:00Z" } } as InstanceStatus)).toBe("2026-10-03T14:00:00Z")
   })
 })

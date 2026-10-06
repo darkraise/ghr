@@ -7,12 +7,14 @@ import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
 const DAY = 86_400_000
+// The UI runs on the daemon's clock, the status fixture's now.
+const DAEMON_NOW = Date.parse(fixtures.status.now)
 
 function token(over: Partial<TokenStatus> = {}): TokenStatus {
   return {
     ...fixtures.token,
-    checked_at: new Date(Date.now() - 60_000).toISOString(),
-    expires_at: new Date(Date.now() + 60 * DAY + 3_600_000).toISOString(),
+    checked_at: new Date(DAEMON_NOW - 60_000).toISOString(),
+    expires_at: new Date(DAEMON_NOW + 60 * DAY + 3_600_000).toISOString(),
     ...over,
   }
 }
@@ -29,7 +31,7 @@ describe("GitHub token card", () => {
   })
 
   it("warns when the token expires within 14 days", async () => {
-    mockApi(authedRoutes({ "GET /api/token": token({ expires_at: new Date(Date.now() + 10 * DAY).toISOString() }) }))
+    mockApi(authedRoutes({ "GET /api/token": token({ expires_at: new Date(DAEMON_NOW + 10 * DAY).toISOString() }) }))
     renderApp("/settings")
     expect(await screen.findByText("expires soon")).toBeInTheDocument()
   })

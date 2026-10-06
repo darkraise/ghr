@@ -7,6 +7,8 @@ import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
 const DAY = 86_400_000
+// The UI runs on the daemon's clock, the status fixture's now.
+const DAEMON_NOW = Date.parse(fixtures.status.now)
 
 function withUpdate(runner_update: RunnerUpdate, over: Record<string, unknown> = {}) {
   return authedRoutes({ "GET /api/token": fixtures.token, "GET /api/status": { ...fixtures.status, runner_update }, ...over })
@@ -24,7 +26,7 @@ describe("Maintenance card", () => {
   })
 
   it("queues an available update and shows its deadline", async () => {
-    const deadline = new Date(Date.now() + 20 * DAY + 3_600_000).toISOString()
+    const deadline = new Date(DAEMON_NOW + 20 * DAY + 3_600_000).toISOString()
     const { calls } = mockApi(
       withUpdate({ installed: "2.337.0", latest: "2.338.0", deadline }, { "POST /api/runner-update": () => new Response(null, { status: 202 }) }),
     )
@@ -37,7 +39,7 @@ describe("Maintenance card", () => {
   })
 
   it("says when the runner is up to date", async () => {
-    mockApi(withUpdate({ installed: "2.338.0", checked_at: new Date(Date.now() - 2 * 3_600_000).toISOString() }))
+    mockApi(withUpdate({ installed: "2.338.0", checked_at: new Date(DAEMON_NOW - 2 * 3_600_000).toISOString() }))
     renderApp("/settings")
     expect(await screen.findByText("up to date")).toBeInTheDocument()
     expect(screen.getByText("checked 2h ago")).toBeInTheDocument()
