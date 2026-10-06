@@ -50,12 +50,6 @@ describe("routes", () => {
     expect(await screen.findByRole("heading", { name: "Runners" })).toBeInTheDocument()
   })
 
-  it("shows the later pages as not in the web UI yet", async () => {
-    mockApi(authed)
-    renderAt("/settings")
-    expect(await screen.findByText("Not in the web UI yet")).toBeInTheDocument()
-  })
-
   it("reads the runner detail tab from the search", async () => {
     mockApi(authed)
     const router = renderAt("/runners/aaaaaa?tab=log")
