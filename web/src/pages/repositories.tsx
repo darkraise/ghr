@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
 import { Card, CardContent, CardHeader, CardTitle } from "darkraise-ui/components/card"
 import { EmptyState } from "darkraise-ui/components/empty-state"
@@ -71,6 +72,11 @@ export function RepositoriesPage() {
                 <RepoSummary repo={r} now={now} />
                 <ActivitySummary name={r.name} retention={config.data?.history_retention} now={now} />
                 <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" asChild>
+                    <Link to="/repositories/$name" params={{ name: r.name }} aria-label={`Manage ${r.name}`}>
+                      Manage
+                    </Link>
+                  </Button>
                   <Button
                     size="sm"
                     variant="secondary"

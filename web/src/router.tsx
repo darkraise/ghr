@@ -17,6 +17,7 @@ import { DashboardPage } from "./pages/dashboard"
 import { HistoryPage } from "./pages/history"
 import { LoginPage } from "./pages/login"
 import { RepositoriesPage } from "./pages/repositories"
+import { RepositoryPage } from "./pages/repository"
 import { RunnerDetailPage, type DetailTab } from "./pages/runner-detail"
 import { RunnersPage } from "./pages/runners"
 import { SettingsPage } from "./pages/settings"
@@ -58,6 +59,7 @@ const appRoute = createRoute({
 
 const dashboardRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: DashboardPage })
 const repositoriesRoute = createRoute({ getParentRoute: () => appRoute, path: "/repositories", component: RepositoriesPage })
+const repositoryRoute = createRoute({ getParentRoute: () => appRoute, path: "/repositories/$name", component: RepositoryPage })
 const runnersRoute = createRoute({ getParentRoute: () => appRoute, path: "/runners", component: RunnersPage })
 const runnerRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -73,7 +75,16 @@ const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/sett
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  appRoute.addChildren([dashboardRoute, repositoriesRoute, runnersRoute, runnerRoute, historyRoute, storageRoute, settingsRoute]),
+  appRoute.addChildren([
+    dashboardRoute,
+    repositoriesRoute,
+    repositoryRoute,
+    runnersRoute,
+    runnerRoute,
+    historyRoute,
+    storageRoute,
+    settingsRoute,
+  ]),
 ])
 
 export function createAppRouter({ queryClient, history }: { queryClient: QueryClient; history?: RouterHistory }) {
