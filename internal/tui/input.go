@@ -38,6 +38,11 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return mm, cmd
 		}
 	}
+	if m.page == pageStorage {
+		if ok, mm, cmd := m.storageKey(k); ok {
+			return mm, cmd
+		}
+	}
 	if m.page == pageRepos {
 		if ok, mm, cmd := m.reposHandleKey(k); ok {
 			return mm, cmd
@@ -63,7 +68,7 @@ func (m Model) press(key string) (tea.Model, tea.Cmd) {
 		return m.leave(leaveTarget{quit: true})
 	case "?":
 		return m.openHelp()
-	case "1", "2", "3", "4", "5":
+	case "1", "2", "3", "4", "5", "6":
 		return m.leave(leaveTarget{page: page(key[0] - '1')})
 	case "left", "h":
 		m.focusCard(paneRepos)
@@ -190,6 +195,8 @@ func (m Model) switchPage(p page) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case pageHistory:
 		return m, m.fetchHistory()
+	case pageStorage:
+		return m, m.fetchStorage()
 	case pageSettings:
 		return m, tea.Batch(m.fetchConfig(), m.fetchToken())
 	case pageRepos:
@@ -207,7 +214,7 @@ func (m *Model) move(d int) tea.Cmd {
 		}
 	case m.page == pageDetail:
 		m.scrollDetail(d)
-	case m.page == pageSettings, m.page == pageDashboard && !m.onCard():
+	case m.page == pageSettings, m.page == pageStorage, m.page == pageDashboard && !m.onCard():
 		return nil
 	case m.page == pageRunners || m.focus == paneRunners:
 		m.runnerSel = clamp(m.runnerSel+d, len(m.st.Instances))
@@ -313,7 +320,7 @@ func (m Model) enter() (tea.Model, tea.Cmd) {
 			m.toast.Show("copied "+url, false, m.now())
 		}
 		return m, nil
-	case pageSettings:
+	case pageSettings, pageStorage:
 		return m, nil
 	}
 	if r := m.selectedRunner(); r != nil && m.runnerFocus() {
@@ -350,6 +357,11 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.overlay == ovNone && m.page == pageRepos {
 		if ok, mm, cmd := m.reposMouse(msg); ok {
+			return mm, cmd
+		}
+	}
+	if m.overlay == ovNone && m.page == pageStorage {
+		if ok, mm, cmd := m.storageMouse(msg); ok {
 			return mm, cmd
 		}
 	}

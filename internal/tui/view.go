@@ -62,6 +62,8 @@ func (m Model) pageBody(w, h int) string {
 		return m.runnersPage(w, h)
 	case pageHistory:
 		return m.historyPage(w, h)
+	case pageStorage:
+		return m.storageView(w, h)
 	case pageSettings:
 		return m.settingsView(w, h)
 	case pageDetail:

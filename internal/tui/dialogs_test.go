@@ -16,13 +16,13 @@ func TestHelpGroupsFit(t *testing.T) {
 	m := feed(sampleModel(&fakeClient{}, 120, 22), key("?"))
 	v := m.View()
 	for _, want := range []string{"Global", "Dashboard", "Repositories", "Runner rows", "Detail", "History", "Settings",
-		"1-5", "add/remove/edit", "switch tab", "copy run URL", "takes digits", "set -g mouse on", "[ Close ]"} {
+		"1-6", "Storage", "add/remove/edit", "switch tab", "copy run URL", "takes digits", "set -g mouse on", "[ Close ]"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("help missing %q", want)
 		}
 	}
 	lines := strings.Split(ansi.Strip(v), "\n")
-	for _, p := range [][2]string{{"Global", "Detail"}, {"Dashboard", "History"}, {"Repositories", "Settings"}} {
+	for _, p := range [][2]string{{"Global", "Detail"}, {"Dashboard", "History"}, {"Repositories", "Settings"}, {"Runner rows", "Storage"}} {
 		top, below := lines[lineWith(lines, p[0])], lines[lineWith(lines, p[1])]
 		if ansi.StringWidth(top[:strings.Index(top, p[0])]) != ansi.StringWidth(below[:strings.Index(below, p[1])]) {
 			t.Errorf("%s is not under %s:\n%s", p[1], p[0], v)

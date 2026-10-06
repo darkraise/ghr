@@ -3,8 +3,8 @@
   2 Repositories ╭─ General ───────────────────────────────────────────────────────────────────────────────────────────╮
   3 Runners      │ Mode               › [ queue ▾ ]  start runners only for queued jobs, up to the global max          │
   4 History      │                        ▸ queue  start runners only for queued jobs, up to the global max            │
-▌ 5 Settings     │                          all  keep warm runners per repo, up to each repo's max                     │
-                 │ Global max           [ − ] 3 [ + ]  applies in queue mode                                           │
+  5 Storage      │                          all  keep warm runners per repo, up to each repo's max                     │
+▌ 6 Settings     │ Global max           [ − ] 3 [ + ]  applies in queue mode                                           │
                  │ Owner                darkraise  change in config.yaml and restart the daemon                        │
                  ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
                  ╭─ Timing ────────────────────────────────────────────────────────────────────────────────────────────╮

@@ -3,8 +3,8 @@
   2 Repositories [BUSY]  ·  darkcloud  ·  CI / e2e-journeys  #412  ·  12m04s  ·  started 2026-10-03 13:52:56            
 ▌ 3 Runners                                                                                                             
   4 History      › [ Steps ]   Log     Containers                                                                       
-  5 Settings                                                                                                            
-                 ✔ Set up job                                                                                           
+  5 Storage                                                                                                             
+  6 Settings     ✔ Set up job                                                                                           
                  ⣾ Run e2e journeys                                                                                     
                                                                                                                         
                                                                                                                         

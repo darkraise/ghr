@@ -489,6 +489,9 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 	case reposActRetry:
 		return m, m.fetchActivity()
 	default:
+		if mm, cmd, ok := m.storagePressed(id); ok {
+			return mm, cmd
+		}
 		if label, ok := lcAddLabel(id); ok {
 			if !m.offline() {
 				m.addLabel(label)
@@ -535,10 +538,10 @@ type helpGroup struct {
 }
 
 // helpGroups in reading order. They render as four columns: Global over
-// Detail, Dashboard over History, Repositories over Settings, then Runner
-// rows. No column exceeds ten rows, so the dialog fits the 22-row minimum.
+// Detail, Dashboard over History, Repositories over Settings, Runner rows
+// over Storage. No column exceeds ten rows, so the dialog fits the 22-row minimum.
 var helpGroups = []helpGroup{
-	{"Global", [][2]string{{"1-5", "switch page"}, {"tab", "move focus"}, {"↑↓ j k", "move selection"}, {"? / q", "help / quit"}}},
+	{"Global", [][2]string{{"1-6", "switch page"}, {"tab", "move focus"}, {"↑↓ j k", "move selection"}, {"? / q", "help / quit"}}},
 	{"Dashboard", [][2]string{{"h / →", "repos / runners"}, {"p / P", "pause repo/all"}, {"+ - [ ]", "repo/global cap"}, {"m", "queue/all mode"}, {"a d e", "add/remove/edit"}}},
 	{"Repositories", [][2]string{{"a / d", "add / remove"}, {"p", "pause / resume"}, {"ctrl+s", "save"}}},
 	// The Runners page and the Dashboard's Runners card share these keys.
@@ -546,6 +549,7 @@ var helpGroups = []helpGroup{
 	{"Detail", [][2]string{{"← / →", "switch tab"}, {"x / esc", "stop / back"}, {"pgup/dn", "scroll the list"}}},
 	{"History", [][2]string{{"r / c", "repo / result"}, {"enter", "copy run URL"}}},
 	{"Settings", [][2]string{{"ctrl+s", "save"}, {"← / →", "choose / step"}, {"enter", "open / edit"}, {"esc", "close / stop"}}},
+	{"Storage", [][2]string{{"tab", "next action"}, {"enter", "press"}, {"pgup/dn", "scroll"}}},
 }
 
 const helpColW = 23 // an 8-column key and a 15-column description
@@ -572,7 +576,7 @@ func helpText(inner int) string {
 	if inner < 4*helpColW+3*2 {
 		lines = col(g...)
 	} else {
-		cols := [][]string{col(g[0], g[4]), col(g[1], g[5]), col(g[2], g[6]), col(g[3])}
+		cols := [][]string{col(g[0], g[4]), col(g[1], g[5]), col(g[2], g[6]), col(g[3], g[7])}
 		rows := 0
 		for _, c := range cols {
 			rows = max(rows, len(c))
@@ -589,7 +593,7 @@ func helpText(inner int) string {
 		}
 	}
 	return strings.Join(append(lines, "",
-		"A focused stepper takes digits: 1-5 type into it instead of switching.",
+		"A focused stepper takes digits: 1-6 type into it instead of switching.",
 		"Mouse: click anything; double-click a runner; the wheel scrolls.",
 		"Shift-drag selects text (Option-drag in iTerm2). tmux: set -g mouse on",
 	), "\n")

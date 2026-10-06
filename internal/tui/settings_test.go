@@ -133,7 +133,7 @@ func TestSettingsViewClampsScroll(t *testing.T) {
 func onSettings(t *testing.T, c *fakeClient, w, h int) Model {
 	t.Helper()
 	c.cfg = parseConfig(t, settingsYAML)
-	return feed(sampleModel(c, w, h), key("5"))
+	return feed(sampleModel(c, w, h), key("6"))
 }
 
 func quits(cmd tea.Cmd) bool {

@@ -67,7 +67,7 @@ func TestSidebarAndTabRowNavigate(t *testing.T) {
 	}
 	m = feed(m, key("esc"))
 
-	n := sampleModel(&fakeClient{}, 90, 30)
+	n := sampleModel(&fakeClient{}, 96, 30)
 	if v := n.View(); strings.Contains(v, "▌ 1 Dashboard") || !strings.Contains(v, "[ 1 Dashboard ]") {
 		t.Fatalf("narrow layout should use the tab row:\n%s", v)
 	}

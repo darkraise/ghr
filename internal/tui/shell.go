@@ -200,7 +200,7 @@ func (m Model) sidebar(h int) string {
 // tabRow replaces the sidebar under wideMin columns.
 // The labels shrink to short names, then to numbers, until the row fits.
 func (m Model) tabRow(w int) string {
-	short := []string{"Dash", "Repo", "Run", "Hist", "Set"}
+	short := []string{"Dash", "Repo", "Run", "Hist", "Stor", "Set"}
 	var row string
 	for form := 0; form < 3; form++ {
 		var tabs []string
@@ -279,6 +279,8 @@ func (m Model) footerKeys() []footerKey {
 		return m.settingsFooterKeys()
 	case pageRepos:
 		return m.reposFooterKeys()
+	case pageStorage:
+		return m.storageFooterKeys()
 	}
 	if !m.onCard() {
 		return []footerKey{{"enter", "press"}, {"tab", "next"}, {"?", "help"}, {"q", "quit"}}
@@ -303,14 +305,14 @@ func (m Model) footer(w int) string {
 
 // footerPress runs a clicked footer hint. Navigation and control keys take
 // the same path as the key; the global letter keys run directly, so a click
-// on "q quit" never types a q into a focused text field. The detail page has
-// no text fields and its own x, so every hint there takes the key's path.
+// on "q quit" never types a q into a focused text field. The detail and
+// Storage pages have no text fields, so every hint there takes the key's path.
 func (m Model) footerPress(k string) (tea.Model, tea.Cmd) {
 	switch k {
 	case "tab", "shift+tab", "ctrl+s", "enter", "esc", "up", "left", "right":
 		return m.handleKey(keyMsg(k))
 	}
-	if m.page == pageDetail {
+	if m.page == pageDetail || m.page == pageStorage {
 		return m.handleKey(keyMsg(k))
 	}
 	if m.page == pageRepos {

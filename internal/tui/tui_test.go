@@ -714,7 +714,7 @@ func TestHiddenSelectionKeysDoNothing(t *testing.T) {
 	if len(c.actions()) != 0 || m.overlay != ovNone {
 		t.Fatalf("repo keys on the Runners page: overlay %v actions %v", m.overlay, c.actions())
 	}
-	run(t, m, "5", "x")
+	run(t, m, "6", "x")
 	if len(c.actions()) != 0 {
 		t.Fatalf("x on the Settings page: actions %v", c.actions())
 	}
@@ -914,7 +914,7 @@ func TestSettingsGolden(t *testing.T) {
 	for _, w := range []int{120, 80} {
 		t.Run(fmt.Sprint(w), func(t *testing.T) {
 			c := &fakeClient{cfg: parseConfig(t, settingsYAML)}
-			m := feed(sampleModel(c, w, 30), key("5"))
+			m := feed(sampleModel(c, w, 30), key("6"))
 			golden.RequireEqual(t, []byte(m.View()))
 		})
 	}
@@ -956,7 +956,7 @@ func TestShortTerminalKeepsSelectionVisible(t *testing.T) {
 	})
 	t.Run("settings", func(t *testing.T) {
 		upd, _ := newModel(&fakeClient{}, 120, h, st).Update(configMsg{cfg: sampleConfig(t, repos[:6]...)})
-		check(t, run(t, upd.(Model), "5"), "[ queue ▾ ]")
+		check(t, run(t, upd.(Model), "6"), "[ queue ▾ ]")
 	})
 }
 

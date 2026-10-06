@@ -3,8 +3,8 @@
   2 Repositories ╭─ General ───────────────────────────────────────────────────────────────────────────────────────────╮
   3 Runners      │ Mode               › [ queue ▾ ]  start runners only for queued jobs, up to the global max          │
   4 History      │ Global max           [ − ] 3 [ + ]  applies in queue mode                                           │
-▌ 5 Settings     │ Owner                darkraise  change in config.yaml and restart the daemon                        │
-                 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  5 Storage      │ Owner                darkraise  change in config.yaml and restart the daemon                        │
+▌ 6 Settings     ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
                  ╭─ Timing ────────────────────────────────────────────────────────────────────────────────────────────╮
                  │ Poll interval        [ 10s        ]  how often GitHub is checked (at least 5s)                      │
                  │ Start timeout        [ 2m0s       ]  a runner not online by then is replaced                        │

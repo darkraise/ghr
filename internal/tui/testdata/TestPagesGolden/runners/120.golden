@@ -3,8 +3,8 @@
   2 Repositories ╭─ › Runners ─────────────────────────────────────────────────────────────────────────────────────────╮
 ▌ 3 Runners      │   ID       REPO         STATE       JOB                                               ELAPSED       │
   4 History      │ ▸ a3f9c1   darkcloud    ⣾ [BUSY]    CI / e2e-journeys  #412          …  ( Logs )  [ Stop ] 12m04s   │
-  5 Settings     │   7be210   darkmem      [IDLE]      –                                                 1m30s         │
-                 │   –        darkcloud    ⧗ waiting   2 jobs queued (repo cap 1)                                      │
+  5 Storage      │   7be210   darkmem      [IDLE]      –                                                 1m30s         │
+  6 Settings     │   –        darkcloud    ⧗ waiting   2 jobs queued (repo cap 1)                                      │
                  ╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
                  ╭─ Log preview — a3f9c1 (following) ──────────────────────────────────────────────────────────────────╮
                  │ a3f9c1 after ""                                                                                     │

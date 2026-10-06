@@ -62,11 +62,12 @@ const (
 	pageRepos
 	pageRunners
 	pageHistory
+	pageStorage
 	pageSettings
 	pageDetail // a runner's detail page; not in the sidebar
 )
 
-var pageNames = []string{"Dashboard", "Repositories", "Runners", "History", "Settings"}
+var pageNames = []string{"Dashboard", "Repositories", "Runners", "History", "Storage", "Settings"}
 
 type pane int
 
@@ -155,6 +156,7 @@ type Model struct {
 	epoch    string
 	settings *settingsPage
 	repos    *reposPage
+	store    *storagePage
 	mg       *manageState
 	groups   *pageGroups
 	events   []model.Event
@@ -206,6 +208,7 @@ func New(c Client) Model {
 		c: c, now: time.Now, width: 120, height: 40, settings: newSettingsPage(), repos: newReposPage(), groups: newPageGroups(),
 		order: &cfgOrder{},
 		mg:    newManageState(),
+		store: newStoragePage(),
 		copyFn: func(s string) {
 			fmt.Fprintf(os.Stdout, "\x1b]52;c;%s\a", base64.StdEncoding.EncodeToString([]byte(s)))
 		},
@@ -383,6 +386,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.page == pageRepos && m.frame%slowPoll == 0 {
 			cmds = append(cmds, m.fetchActivity())
 		}
+		if m.page == pageStorage && (m.frame%slowPoll == 0 || m.store.active()) {
+			cmds = append(cmds, m.fetchStorage())
+		}
 		return m, tea.Batch(cmds...)
 	case statusMsg:
 		if msg.err != nil {
@@ -502,6 +508,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case storageMsg:
+		return m.gotStorage(msg)
 	case regDeletedMsg:
 		return m.regDeleted(msg)
 	case configMsg:
@@ -533,7 +541,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if msg.text != "" {
 			m.toast.Show(msg.text, false, m.now())
 		}
-		return m, tea.Batch(m.fetchStatus(), m.fetchEvents(), m.fetchConfig())
+		cmds := []tea.Cmd{m.fetchStatus(), m.fetchEvents(), m.fetchConfig()}
+		if m.page == pageStorage {
+			cmds = append(cmds, m.fetchStorage())
+		}
+		return m, tea.Batch(cmds...)
 	case ui.Pressed:
 		return m.pressed(msg.ID)
 	case tea.KeyMsg:

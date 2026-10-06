@@ -3,8 +3,8 @@
 ▌ 2 Repositories ╭─ › Repos ──────────────────╮ ╭─ darkcloud ──────────────────────────────────────────────────────────╮
   3 Runners      │ › darkcloud   [ACTIVE] ●   │ │ [ACTIVE]  1/1 running · 2 queued                                     │
   4 History      │   darkmem     [ACTIVE]     │ │ ✔ #411 lint · 2m ago                                                 │
-  5 Settings     │   darkagents  [PAUSED]     │ │   ( Pause )    [ Remove ]                                            │
-                 ╰────────────────────────────╯ ╰──────────────────────────────────────────────────────────────────────╯
+  5 Storage      │   darkagents  [PAUSED]     │ │   ( Pause )    [ Remove ]                                            │
+  6 Settings     ╰────────────────────────────╯ ╰──────────────────────────────────────────────────────────────────────╯
                                                 ╭─ Capacity ───────────────────────────────────────────────────────────╮
                                                 │ Max                  [ − ] 2 [ + ]  once set, it stays explicit      │
                                                 │ Warm                 [ − ] 1 [ + ] (default)  applies in all mode    │
