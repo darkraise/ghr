@@ -196,6 +196,7 @@ func Run(ctx context.Context, o Options) error {
 	space := &storage.Service{Tools: tools, Docker: m.Disk, Home: o.Paths.Home, User: runner.RunnerUser,
 		Busy: m.BusyCount, Events: ev}
 	space.Start()
+	defer space.Close()
 	m.PruneDone = space.Trigger
 
 	sampler := metrics.NewSampler(func() metrics.Snapshot {
@@ -236,7 +237,6 @@ func Run(ctx context.Context, o Options) error {
 	if webLn != nil {
 		static, err := fs.Sub(web.Dist, "dist")
 		if err != nil {
-			space.Close()
 			return err
 		}
 		webSrv.Handler = webui.Handler(auth, apiHandler, static, webCfg.Hosts)
