@@ -27,18 +27,27 @@ var CommandTimeout = 10 * time.Minute
 // Exec is the real Runner. Errors name only the command and its first argument,
 // because full argument lists can carry secrets (the JIT config).
 func Exec(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return execute(ctx, false, name, args)
+	return execute(ctx, CommandTimeout, false, name, args)
 }
 
 // ExecGroup is Exec for a command that starts children of its own, such as a
 // script running apt: cancelling it kills its whole process group, not only
 // the command.
 func ExecGroup(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return execute(ctx, true, name, args)
+	return execute(ctx, CommandTimeout, true, name, args)
 }
 
-func execute(ctx context.Context, group bool, name string, args []string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, CommandTimeout)
+// ExecGroupFor is ExecGroup with its own timeout d in place of
+// CommandTimeout, for commands that legitimately run longer, such as a
+// toolchain install.
+func ExecGroupFor(d time.Duration) Runner {
+	return func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return execute(ctx, d, true, name, args)
+	}
+}
+
+func execute(ctx context.Context, timeout time.Duration, group bool, name string, args []string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	if group {
@@ -368,7 +377,18 @@ var DownloadTimeout = 10 * time.Minute
 // Download saves url to dst, following redirects. It sends no credentials:
 // it fetches public release assets.
 func Download(ctx context.Context, url, dst string) error {
-	ctx, cancel := context.WithTimeout(ctx, DownloadTimeout)
+	return download(ctx, DownloadTimeout, url, dst)
+}
+
+// DownloadFor is Download with its own timeout d in place of DownloadTimeout.
+func DownloadFor(d time.Duration) func(ctx context.Context, url, dst string) error {
+	return func(ctx context.Context, url, dst string) error {
+		return download(ctx, d, url, dst)
+	}
+}
+
+func download(ctx context.Context, timeout time.Duration, url, dst string) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

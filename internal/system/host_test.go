@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHostExtractAndRunScriptArgs(t *testing.T) {
@@ -100,5 +101,57 @@ func TestDownload(t *testing.T) {
 	err := Download(context.Background(), srv.URL+"/missing", dst)
 	if err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("404: %v", err)
+	}
+}
+
+// hangingServer never answers; a request ends only when the client gives up.
+func hangingServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestDownloadFollowsDownloadTimeout(t *testing.T) {
+	srv := hangingServer(t)
+	old := DownloadTimeout
+	DownloadTimeout = 100 * time.Millisecond
+	defer func() { DownloadTimeout = old }()
+	start := time.Now()
+	if err := Download(context.Background(), srv.URL, filepath.Join(t.TempDir(), "f")); err == nil {
+		t.Fatal("expected a timeout error")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("Download ignored DownloadTimeout: %v", time.Since(start))
+	}
+}
+
+func TestDownloadForTimesOutAtItsOwnLimit(t *testing.T) {
+	srv := hangingServer(t)
+	old := DownloadTimeout
+	DownloadTimeout = time.Hour
+	defer func() { DownloadTimeout = old }()
+	start := time.Now()
+	if err := DownloadFor(100*time.Millisecond)(context.Background(), srv.URL, filepath.Join(t.TempDir(), "f")); err == nil {
+		t.Fatal("expected a timeout error")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("DownloadFor ignored its own timeout: %v", time.Since(start))
+	}
+}
+
+func TestDownloadForSavesTheBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("archive"))
+	}))
+	t.Cleanup(srv.Close)
+	dst := filepath.Join(t.TempDir(), "a.tar.gz")
+	if err := DownloadFor(time.Minute)(context.Background(), srv.URL, dst); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "archive" {
+		t.Fatalf("saved %q", b)
 	}
 }

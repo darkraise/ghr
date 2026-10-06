@@ -242,3 +242,47 @@ func TestExecTimesOutWhenAChildHoldsOutput(t *testing.T) {
 		t.Fatalf("Exec waited on an inherited pipe: %v", time.Since(start))
 	}
 }
+
+func TestExecGroupFollowsCommandTimeout(t *testing.T) {
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep not on PATH")
+	}
+	old := CommandTimeout
+	CommandTimeout = 100 * time.Millisecond
+	defer func() { CommandTimeout = old }()
+	start := time.Now()
+	if _, err := ExecGroup(context.Background(), "sleep", "10"); err == nil {
+		t.Fatal("expected a timeout error")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("ExecGroup ignored CommandTimeout: %v", time.Since(start))
+	}
+}
+
+func TestExecGroupForTimesOutAtItsOwnLimit(t *testing.T) {
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep not on PATH")
+	}
+	old := CommandTimeout
+	CommandTimeout = time.Hour
+	defer func() { CommandTimeout = old }()
+	start := time.Now()
+	if _, err := ExecGroupFor(100*time.Millisecond)(context.Background(), "sleep", "10"); err == nil {
+		t.Fatal("expected a timeout error")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("ExecGroupFor ignored its own timeout: %v", time.Since(start))
+	}
+}
+
+func TestExecGroupForOutlastsCommandTimeout(t *testing.T) {
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep not on PATH")
+	}
+	old := CommandTimeout
+	CommandTimeout = 100 * time.Millisecond
+	defer func() { CommandTimeout = old }()
+	if _, err := ExecGroupFor(time.Minute)(context.Background(), "sleep", "1"); err != nil {
+		t.Fatalf("ExecGroupFor used CommandTimeout: %v", err)
+	}
+}
