@@ -26,16 +26,17 @@ func DefaultSources() Sources {
 }
 
 // NewEnv is the daemon's Env for the tool cache at root. run should kill a
-// command's whole process group on cancel (system.ExecGroup), because the
-// install scripts start children of their own.
-func NewEnv(root, home, user string, run system.Runner) *Env {
+// command's whole process group on cancel (system.ExecGroupFor), because the
+// install scripts start children of their own; run and fetch carry the
+// install-length timeouts.
+func NewEnv(root, home, user string, run system.Runner, fetch func(ctx context.Context, url, dst string) error) *Env {
 	return &Env{
 		Root:    root,
 		Home:    home,
 		User:    user,
 		Sources: DefaultSources(),
 		Get:     httpGet,
-		Fetch:   system.Download,
+		Fetch:   fetch,
 		Run:     run,
 		Extract: func(ctx context.Context, archive, dir string) error {
 			_, err := run(ctx, "tar", "-xzf", archive, "-C", dir)

@@ -48,13 +48,17 @@ func TestHTTPGet(t *testing.T) {
 	}
 }
 
-func TestNewEnvWiresTheRunner(t *testing.T) {
+func TestNewEnvWiresTheRunnerAndFetch(t *testing.T) {
 	var calls []string
 	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		calls = append(calls, name+" "+strings.Join(args, " "))
 		return nil, nil
 	}
-	e := NewEnv("/var/lib/ghr/toolcache", "/home/ghrunner", "ghrunner", run)
+	fetch := func(_ context.Context, url, dst string) error {
+		calls = append(calls, "fetch "+url+" "+dst)
+		return nil
+	}
+	e := NewEnv("/var/lib/ghr/toolcache", "/home/ghrunner", "ghrunner", run, fetch)
 	if e.Root != "/var/lib/ghr/toolcache" || e.Home != "/home/ghrunner" || e.User != "ghrunner" || e.Sources != DefaultSources() {
 		t.Fatalf("env %+v", e)
 	}
@@ -64,7 +68,10 @@ func TestNewEnvWiresTheRunner(t *testing.T) {
 	if _, err := e.Run(context.Background(), "chown", "x"); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"tar -xzf a.tar.gz -C dir", "chown x"}; !slices.Equal(calls, want) {
+	if err := e.Fetch(context.Background(), "https://example.test/a.tar.gz", "dst"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"tar -xzf a.tar.gz -C dir", "chown x", "fetch https://example.test/a.tar.gz dst"}; !slices.Equal(calls, want) {
 		t.Fatalf("calls %q", calls)
 	}
 	if a, b := e.OpID(), e.OpID(); a == b || a == "" {
@@ -88,7 +95,7 @@ func TestNewEnvExtractsWithRealTar(t *testing.T) {
 	if err := os.Mkdir(out, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := NewEnv(dir, "", "", system.Exec).Extract(context.Background(), archive, out); err != nil {
+	if err := NewEnv(dir, "", "", system.Exec, system.Download).Extract(context.Background(), archive, out); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(filepath.Join(out, "node-22", "bin", "node")) {
