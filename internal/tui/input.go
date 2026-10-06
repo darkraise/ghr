@@ -25,6 +25,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.addRepoKey(k)
 	case ovToken:
 		return m.tokenKey(k)
+	case ovInstall:
+		return m.installKey(k)
 	case ovConfirm, ovHelp, ovUnsaved:
 		return m.dialogKey(k)
 	}
@@ -343,6 +345,9 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		_, cmd := m.add.group.Mouse(msg)
 		return m, cmd
+	}
+	if m.overlay == ovInstall {
+		return m.installMouse(msg)
 	}
 	if m.overlay == ovToken {
 		m.syncToken()

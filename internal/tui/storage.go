@@ -353,6 +353,8 @@ func (m Model) storagePressed(id string) (tea.Model, tea.Cmd, bool) {
 	switch {
 	case id == storePrune, id == storeKeep, id == storeAll, id == storeDangling, id == storeVolumes:
 		mm, cmd = m.confirmPrune(id)
+	case id == storeInstall:
+		mm, cmd = m.openInstall()
 	case id == storePopular:
 		mm, cmd = m.confirmPopular()
 	case id == storeRefresh:

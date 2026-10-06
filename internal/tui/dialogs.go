@@ -405,6 +405,8 @@ func buttonOverlay(id string) overlay {
 		return ovAddRepo
 	case tokOK, tokCancel:
 		return ovToken
+	case instOK, instCancel, instRetry:
+		return ovInstall
 	}
 	return ovNone
 }
@@ -443,6 +445,12 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		return m.submitAddRepo()
 	case addRetry:
 		return m.retryAvailable()
+	case instCancel:
+		m.overlay, m.inst = ovNone, nil
+	case instOK:
+		return m.submitInstall()
+	case instRetry:
+		return m.retryChoices()
 	case dashAdd:
 		return m.openAddRepo()
 	case dashPauseAll:
@@ -649,6 +657,8 @@ func (m Model) withOverlay(base string, w int) string {
 		dialog = m.addRepoView(w)
 	case ovToken:
 		dialog = m.tokenView(w)
+	case ovInstall:
+		dialog = m.installView(w)
 	}
 	return lipgloss.Place(w, lipgloss.Height(base), lipgloss.Center, lipgloss.Center, dialog,
 		lipgloss.WithWhitespaceChars(" "))

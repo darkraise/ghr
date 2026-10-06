@@ -85,6 +85,7 @@ const (
 	ovUnsaved
 	ovAddRepo
 	ovToken
+	ovInstall
 )
 
 // leaveTarget is where the user was going when the unsaved-changes dialog opened.
@@ -196,6 +197,7 @@ type Model struct {
 	leaving       bool           // a save started from the unsaved-changes dialog is in flight
 	add           *addRepoDialog // the open Add repository dialog
 	tok           *tokenDialog   // the open Replace token dialog
+	inst          *installDialog // the open Install toolchain dialog
 
 	toast     ui.Toast
 	frame     int
@@ -528,6 +530,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.added(msg)
 	case availMsg:
 		return m.gotAvailable(msg)
+	case choicesMsg:
+		return m.gotChoices(msg)
+	case installedMsg:
+		return m.installed(msg)
 	case reloadMsg:
 		return m.reloaded(msg)
 	case tokenMsg:
