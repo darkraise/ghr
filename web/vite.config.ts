@@ -8,6 +8,8 @@ const target = process.env.GHR_DEV_URL ?? "http://localhost:8080"
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
+  // The CSP has no font-src, so a font inlined as a data: URI is blocked.
+  build: { assetsInlineLimit: 0 },
   server: {
     host: "localhost",
     port: 5173,
