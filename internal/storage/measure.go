@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -93,6 +94,20 @@ type measured struct {
 	err        string
 }
 
+// inHome refuses a cache path that resolves out of the home through a
+// symlinked directory, so sizes from elsewhere on the LXC are not reported as
+// a cache's. A nil root (no home yet) has nothing to refuse.
+func inHome(r *os.Root, rel string) error {
+	if r == nil {
+		return nil
+	}
+	_, err := r.Lstat(filepath.FromSlash(rel))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
 func emptyMeasured() measured {
 	return measured{
 		toolchains: []model.Toolchain{},
@@ -130,9 +145,19 @@ func measure(ctx context.Context, tools Toolchains, docker Docker, home string, 
 		note(name, err)
 		m.other = append(m.other, model.Folder{Name: name, Bytes: u.Bytes})
 	}
+	r, err := os.OpenRoot(home)
+	if err == nil {
+		defer r.Close()
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		note("runner home", err)
+	}
 	for _, c := range Caches {
 		pc := model.PackageCache{Name: c.Name, Label: c.Label, Paths: c.abs(home)}
-		for _, p := range pc.Paths {
+		for i, p := range pc.Paths {
+			if err := inHome(r, c.Paths[i]); err != nil {
+				note(c.Name, err)
+				continue
+			}
 			u, ok, err := walkCtx(ctx, p)
 			note(c.Name, err)
 			if !ok {

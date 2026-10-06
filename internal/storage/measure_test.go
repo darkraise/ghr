@@ -142,6 +142,41 @@ func TestMeasureKeepsFilesystemResultsWhenDockerFails(t *testing.T) {
 	}
 }
 
+func TestMeasureSkipsACacheBehindALinkOutOfTheHome(t *testing.T) {
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "pip", "wheels", "w"), "w")
+	home := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(home, ".cache")); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	m := measure(context.Background(), &fakeTools{root: t.TempDir()}, &fakeDisk{}, home, time.Now())
+	if !strings.Contains(m.err, "pip: ") {
+		t.Fatalf("err %q", m.err)
+	}
+	for _, c := range m.caches {
+		if c.Name == "pip" && (c.Present || c.Bytes != 0) {
+			t.Fatalf("measured outside the home: %+v", c)
+		}
+	}
+}
+
+func TestMeasureFollowsALinkInsideTheHome(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, "elsewhere", "pip", "wheels", "w"), "w")
+	if err := os.Symlink("elsewhere", filepath.Join(home, ".cache")); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	m := measure(context.Background(), &fakeTools{root: t.TempDir()}, &fakeDisk{}, home, time.Now())
+	if m.err != "" {
+		t.Fatal(m.err)
+	}
+	for _, c := range m.caches {
+		if c.Name == "pip" && (!c.Present || c.Files != 1) {
+			t.Fatalf("pip %+v", c)
+		}
+	}
+}
+
 func TestEmptyMeasuredHasNoNilSlices(t *testing.T) {
 	m := emptyMeasured()
 	if m.toolchains == nil || m.other == nil || m.caches == nil || m.docker == nil || m.cacheTypes == nil {
