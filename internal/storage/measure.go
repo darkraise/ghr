@@ -118,6 +118,31 @@ func emptyMeasured() measured {
 	}
 }
 
+// measureCache walks each of c's paths under home, skipping one that
+// resolves out of r, and names every failure through note.
+func measureCache(ctx context.Context, r *os.Root, home string, c Cache, note func(string, error)) model.PackageCache {
+	pc := model.PackageCache{Name: c.Name, Label: c.Label, Paths: c.abs(home)}
+	for i, p := range pc.Paths {
+		if err := inHome(r, c.Paths[i]); err != nil {
+			note(c.Name, err)
+			continue
+		}
+		u, ok, err := walkCtx(ctx, p)
+		note(c.Name, err)
+		if !ok {
+			continue
+		}
+		pc.Present = true
+		pc.Bytes += u.Bytes
+		pc.Files += u.Files
+		if !u.Last.IsZero() && (pc.LastWritten == nil || u.Last.After(*pc.LastWritten)) {
+			last := u.Last
+			pc.LastWritten = &last
+		}
+	}
+	return pc
+}
+
 // measure walks every installed toolchain, other tool-cache folder and
 // package cache path, then reads Docker's disk usage last. A failed part is
 // named in err and the rest is kept.
@@ -152,26 +177,7 @@ func measure(ctx context.Context, tools Toolchains, docker Docker, home string, 
 		note("runner home", err)
 	}
 	for _, c := range Caches {
-		pc := model.PackageCache{Name: c.Name, Label: c.Label, Paths: c.abs(home)}
-		for i, p := range pc.Paths {
-			if err := inHome(r, c.Paths[i]); err != nil {
-				note(c.Name, err)
-				continue
-			}
-			u, ok, err := walkCtx(ctx, p)
-			note(c.Name, err)
-			if !ok {
-				continue
-			}
-			pc.Present = true
-			pc.Bytes += u.Bytes
-			pc.Files += u.Files
-			if !u.Last.IsZero() && (pc.LastWritten == nil || u.Last.After(*pc.LastWritten)) {
-				last := u.Last
-				pc.LastWritten = &last
-			}
-		}
-		m.caches = append(m.caches, pc)
+		m.caches = append(m.caches, measureCache(ctx, r, home, c, note))
 	}
 	rows, err := docker.DiskUsage(ctx)
 	note("docker system df", err)

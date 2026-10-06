@@ -171,7 +171,9 @@ func TestPopularPresetQueuesNineInstallsInOrder(t *testing.T) {
 
 func TestRemoveAndClearCheckBusyWhenTheyRun(t *testing.T) {
 	tools, node := nodeTools()
-	tools.installed = []toolchain.Installed{{Tool: "node", Version: "20.18.0", Arch: "x64"}}
+	nodeDir := filepath.Join(t.TempDir(), "node", "20.18.0", "x64")
+	writeFile(t, filepath.Join(nodeDir, "bin", "node"), "x")
+	tools.installed = []toolchain.Installed{{Tool: "node", Version: "20.18.0", Arch: "x64", Path: nodeDir}}
 	node.gate = make(chan struct{})
 	node.started = make(chan string, 1)
 	// Windows refuses to rename a directory another handle has open, so park
@@ -218,6 +220,13 @@ func TestRemoveAndClearCheckBusyWhenTheyRun(t *testing.T) {
 	waitFor(t, "five operations", func() bool { return len(s.Snapshot().Operations.Recent) == 5 })
 	if got := recentOutcomes(s)[:2]; !slices.Equal(got, []string{"clear nuget ok", "remove node 20.18.0 ok"}) {
 		t.Fatalf("once idle: %q", got)
+	}
+	// The measurer stays parked, so only a measurement taken by the operation
+	// itself can name the space freed.
+	for _, r := range s.Snapshot().Operations.Recent[:2] {
+		if !strings.HasSuffix(r.Message, " freed)") {
+			t.Errorf("no size measured before deleting: %+v", r)
+		}
 	}
 	if got := node.removedList(); !slices.Equal(got, []string{"20.18.0"}) {
 		t.Fatalf("removed %q", got)

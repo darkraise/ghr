@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/darkraise/ghr/internal/model"
@@ -193,7 +194,10 @@ func (s *Service) Remove(tool, version string) error {
 				return "refused", model.BusyError{N: n}.Error()
 			}
 			progress("removing")
-			note := freed(s.toolchainBytes(tool, version))
+			note := freed(s.toolchainBytes(ctx, tool, version))
+			if ctx.Err() != nil {
+				return "interrupted", ctx.Err().Error()
+			}
 			if err := inst.Remove(version); err != nil {
 				return "failed", err.Error()
 			}
@@ -224,7 +228,10 @@ func (s *Service) Clear(name string) error {
 				return "failed", err.Error()
 			}
 			progress("clearing")
-			note := freed(s.cacheBytes(name))
+			note := freed(s.cacheBytes(ctx, c))
+			if ctx.Err() != nil {
+				return "interrupted", ctx.Err().Error()
+			}
 			if err := clearCache(s.Home, c, id, own); err != nil {
 				return "failed", err.Error()
 			}
@@ -246,7 +253,7 @@ func (s *Service) Available(ctx context.Context, tool string) ([]model.Toolchain
 	return out, nil
 }
 
-// freed names the size the last measurement saw, for an operation's message.
+// freed names the space an operation is about to free, for its message.
 func freed(bytes int64) string {
 	if bytes <= 0 {
 		return ""
@@ -254,24 +261,29 @@ func freed(bytes int64) string {
 	return " (" + model.HumanBytes(bytes) + " freed)"
 }
 
-func (s *Service) toolchainBytes(tool, version string) int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, tc := range s.snap.toolchains {
-		if tc.Tool == tool && tc.Version == version {
-			return tc.Bytes
+// toolchainBytes measures an installed version now; the snapshot can be up
+// to half an hour old. A version that cannot be found or walked counts 0.
+func (s *Service) toolchainBytes(ctx context.Context, tool, version string) int64 {
+	installed, err := s.Tools.Installed()
+	if err != nil {
+		return 0
+	}
+	for _, in := range installed {
+		if in.Tool == tool && in.Version == version {
+			u, _, _ := walkCtx(ctx, in.Path)
+			return u.Bytes
 		}
 	}
 	return 0
 }
 
-func (s *Service) cacheBytes(name string) int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, c := range s.snap.caches {
-		if c.Name == name {
-			return c.Bytes
-		}
+// cacheBytes measures c now, refusing paths that lead out of the home as
+// the measurer does.
+func (s *Service) cacheBytes(ctx context.Context, c Cache) int64 {
+	r, err := os.OpenRoot(s.Home)
+	if err != nil {
+		return 0
 	}
-	return 0
+	defer r.Close()
+	return measureCache(ctx, r, s.Home, c, func(string, error) {}).Bytes
 }
