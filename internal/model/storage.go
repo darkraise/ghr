@@ -130,5 +130,10 @@ func HumanBytes(n int64) string {
 	if i == 0 {
 		return fmt.Sprintf("%d B", n)
 	}
-	return fmt.Sprintf("%.1f %s", f, units[i])
+	s := fmt.Sprintf("%.1f", f)
+	if s == "1000.0" && i < len(units)-1 {
+		f, i = f/1000, i+1
+		s = fmt.Sprintf("%.1f", f)
+	}
+	return s + " " + units[i]
 }

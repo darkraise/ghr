@@ -82,6 +82,9 @@ func TestHumanBytes(t *testing.T) {
 		180000000:     "180.0 MB",
 		6571000000:    "6.6 GB",
 		1500000000000: "1.5 TB",
+		999949:        "999.9 kB",
+		999950:        "1.0 MB",
+		999950000:     "1.0 GB",
 	} {
 		if got := HumanBytes(n); got != want {
 			t.Errorf("HumanBytes(%d) = %q, want %q", n, got, want)
