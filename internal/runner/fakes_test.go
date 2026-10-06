@@ -363,6 +363,36 @@ func (f *fakeDocker) PruneDanglingImages(ctx context.Context) (string, error) {
 	}
 	return "200MB", nil
 }
+func (f *fakeDocker) PruneAllBuildCache(ctx context.Context) (string, error) {
+	f.mu.Lock()
+	f.prunes = append(f.prunes, "all")
+	f.mu.Unlock()
+	if err := f.wait(ctx, "PruneAllBuildCache"); err != nil {
+		return "", err
+	}
+	if err := f.err("PruneAllBuildCache"); err != nil {
+		return "", err
+	}
+	return "3GB", nil
+}
+func (f *fakeDocker) PruneUnusedVolumes(ctx context.Context) (string, error) {
+	f.mu.Lock()
+	f.prunes = append(f.prunes, "volumes")
+	f.mu.Unlock()
+	if err := f.wait(ctx, "PruneUnusedVolumes"); err != nil {
+		return "", err
+	}
+	if err := f.err("PruneUnusedVolumes"); err != nil {
+		return "", err
+	}
+	return "8.65GB", nil
+}
+func (f *fakeDocker) DiskUsage(context.Context) ([]system.DiskRow, error) {
+	return nil, f.err("DiskUsage")
+}
+func (f *fakeDocker) BuildCacheUsage(context.Context) ([]system.CacheTypeUsage, error) {
+	return nil, f.err("BuildCacheUsage")
+}
 
 func (f *fakeDocker) pruneList() string {
 	f.mu.Lock()
@@ -519,7 +549,7 @@ func newHarness(t *testing.T) *harness {
 	ev.Now = func() time.Time { return h.now }
 	h.m = &Manager{
 		Config: func() *config.Config { return h.cfg },
-		GH:     h.gh, SD: h.sd, Docker: h.docker, Host: h.host,
+		GH:     h.gh, SD: h.sd, Docker: h.docker, Disk: h.docker, Host: h.host,
 		Paths: Paths{Dist: dist, Instances: filepath.Join(root, "instances"), Logs: filepath.Join(root, "logs"),
 			Pending: filepath.Join(root, "pending"), ToolCache: filepath.Join(root, "toolcache"),
 			Hooks: "/opt/ghr/hooks", Home: "/home/ghrunner", UpdateState: filepath.Join(root, "runner-update.json")},
@@ -621,7 +651,7 @@ func newEvents(h *harness) *events.Ring {
 func (h *harness) restart(t *testing.T) {
 	t.Helper()
 	old := h.m
-	h.m = &Manager{Config: old.Config, GH: old.GH, SD: old.SD, Docker: old.Docker, Host: old.Host, Paths: old.Paths,
+	h.m = &Manager{Config: old.Config, GH: old.GH, SD: old.SD, Docker: old.Docker, Disk: old.Disk, Host: old.Host, Paths: old.Paths,
 		Events: newEvents(h), History: old.History, Now: old.Now, NewID: old.NewID, Fetch: old.Fetch}
 	if err := h.m.Init(); err != nil {
 		t.Fatal(err)

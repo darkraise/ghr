@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -70,6 +71,16 @@ type Docker interface {
 	PruneDanglingImages(ctx context.Context) (string, error)
 }
 
+// Disk is Docker's disk reporting and the prunes only the prune scopes run.
+type Disk interface {
+	DiskUsage(ctx context.Context) ([]system.DiskRow, error)
+	BuildCacheUsage(ctx context.Context) ([]system.CacheTypeUsage, error)
+	PruneAllBuildCache(ctx context.Context) (string, error)
+	PruneUnusedVolumes(ctx context.Context) (string, error)
+}
+
+var _ Disk = system.Docker{}
+
 type Host interface {
 	CopyTree(ctx context.Context, src, dst string) error
 	ChownR(ctx context.Context, path, user string) error
@@ -133,6 +144,7 @@ type Manager struct {
 	GH      GitHub
 	SD      Systemd
 	Docker  Docker
+	Disk    Disk // the daemon sets system.Docker
 	Host    Host
 	Paths   Paths
 	Events  *events.Ring
@@ -212,6 +224,24 @@ var ErrPruneRunning = errors.New("a prune is already running")
 // ErrClosed is returned by StartPrune once Close has been called.
 var ErrClosed = errors.New("ghr is shutting down")
 
+// Prune scopes, as POST /prune/{scope} names them.
+const (
+	ScopeStandard       = "standard"
+	ScopeBuildCacheKeep = "build-cache-keep"
+	ScopeBuildCacheAll  = "build-cache-all"
+	ScopeDanglingImages = "dangling-images"
+	ScopeUnusedVolumes  = "unused-volumes"
+)
+
+var Scopes = []string{ScopeStandard, ScopeBuildCacheKeep, ScopeBuildCacheAll, ScopeDanglingImages, ScopeUnusedVolumes}
+
+var ErrUnknownScope = errors.New("unknown prune scope")
+
+// BusyError refuses an action while runners have jobs.
+type BusyError struct{ N int }
+
+func (e BusyError) Error() string { return fmt.Sprintf("refused: %d jobs running", e.N) }
+
 // StartPrune starts a forced maintenance prune in the background. The caller
 // returns before it finishes; Wait waits for it and Close interrupts it.
 func (m *Manager) StartPrune() error {
@@ -247,6 +277,22 @@ func (m *Manager) Maintenance() model.MaintenanceStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.maint
+}
+
+// BusyCount is the number of runners with a job. It reads job.json first, so
+// a job the hook has just recorded counts before GitHub confirms it.
+// readJobFiles takes mu itself, so the count takes it afterwards.
+func (m *Manager) BusyCount() int {
+	m.readJobFiles()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, i := range m.insts {
+		if i.State == sched.Busy {
+			n++
+		}
+	}
+	return n
 }
 
 // Close interrupts a running prune and refuses new ones; the daemon calls it
