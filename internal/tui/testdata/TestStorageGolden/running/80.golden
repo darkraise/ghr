@@ -10,8 +10,8 @@ Storage
 │ Build Cache     12     0       1.7 GB                                        │
 │   regular       10             1.6 GB                                        │
 │   source.local  2              86.0 MB                                       │
-│ auto · 13:07 · ok — build cache older than 72h 1.2 GB, dangling images 300.0 │
-│ MB                                                                           │
+│ auto · 13:07 · ok — build cache older than 72h 1.2 GB, dangling images       │
+│ 300.0 MB                                                                     │
 │ › [ Prune ]   ( Build cache to 20GB )   [ All build cache ]                  │
 │   ( Dangling images )   [ Unused volumes ]                                   │
 ╰──────────────────────────────────────────────────────────────────────────────╯

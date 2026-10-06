@@ -3,11 +3,15 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
+	"github.com/muesli/termenv"
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/config"
@@ -139,6 +143,46 @@ func TestStorageDockerCard(t *testing.T) {
 		t.Fatalf("no prune:\n%s", v)
 	}
 }
+
+func TestStorageLastPruneWrapsWholeSizesAndColours(t *testing.T) {
+	m := onStorage(t, &fakeClient{}, 80, 60)
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+	lines := m.lastPruneLines(76)
+	if len(lines) != 2 || ansi.Strip(lines[1]) != "300.0 MB" {
+		t.Fatalf("a size split from its unit: %q", lines)
+	}
+	st := sampleStorage()
+	at := now.Add(-5 * time.Minute)
+	st.LastPrune = &model.LastPrune{Trigger: "manual", Scope: "standard", StartedAt: at, FinishedAt: &at, Outcome: "errors",
+		Steps: []model.PruneStep{{Name: "build cache", Error: "docker: daemon busy, try again later"}, {Name: "dangling images", Freed: 300_000_000}}}
+	m = feed(m, storageMsg{seq: m.store.seq, s: st})
+	lines = m.lastPruneLines(24)
+	var plain []string
+	for _, l := range lines {
+		plain = append(plain, ansi.Strip(l))
+		if ansi.StringWidth(l) > 24 {
+			t.Errorf("line wider than 24: %q", l)
+		}
+		if codes := sgrCodes(l); len(codes) > 0 && codes[len(codes)-1] != "\x1b[0m" {
+			t.Errorf("colour runs past the line end: %q", l)
+		}
+	}
+	if got := strings.Join(plain, " "); got != "manual standard · 14:00 · errors — build cache: docker: daemon busy, try again later, dangling images 300.0 MB" {
+		t.Fatalf("wrapped text %q", got)
+	}
+	for i, p := range plain {
+		if strings.Contains(p, "again") && !strings.Contains(lines[i], "\x1b[") {
+			t.Errorf("a wrapped error lost its colour: %q", lines[i])
+		}
+		if strings.HasPrefix(p, "MB") || strings.HasSuffix(p, "300.0") {
+			t.Errorf("a size split from its unit: %q", plain)
+		}
+	}
+}
+
+func sgrCodes(s string) []string { return regexp.MustCompile(`\x1b\[[0-9;]*m`).FindAllString(s, -1) }
 
 func TestStoragePruneButtonsConfirmFirst(t *testing.T) {
 	c := &fakeClient{}

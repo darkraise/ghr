@@ -473,19 +473,75 @@ func (m Model) lastPruneLines(w int) []string {
 	if p.Trigger != "auto" {
 		head += " " + p.Scope
 	}
-	line := head + " · " + p.FinishedAt.Local().Format("15:04") + " · " + p.Outcome
-	var steps []string
-	for _, st := range p.Steps {
-		if st.Error != "" {
-			steps = append(steps, sRed.Render(st.Name+": "+st.Error))
-		} else {
-			steps = append(steps, st.Name+" "+model.HumanBytes(st.Freed))
+	var words []pruneWord
+	add := func(s string, red bool) {
+		for _, f := range strings.Fields(s) {
+			words = append(words, pruneWord{text: f, red: red})
 		}
 	}
-	if len(steps) > 0 {
-		line += " — " + strings.Join(steps, ", ")
+	add(head+" · "+p.FinishedAt.Local().Format("15:04")+" · "+p.Outcome, false)
+	for i, st := range p.Steps {
+		if i == 0 {
+			add("—", false)
+		} else {
+			words[len(words)-1].tail = ","
+		}
+		if st.Error != "" {
+			add(st.Name+": "+st.Error, true)
+		} else {
+			add(st.Name, false)
+			words = append(words, pruneWord{text: model.HumanBytes(st.Freed)})
+		}
 	}
-	return ui.WrapWords(line, max(w, 1))
+	return wrapPrune(words, max(w, 1))
+}
+
+// pruneWord is a piece of the last-prune line that never breaks, a size
+// included; tail is punctuation glued to it and left uncoloured.
+type pruneWord struct {
+	text, tail string
+	red        bool
+}
+
+// wrapPrune lays words out in w columns on their plain text and colours
+// each line afterwards, so no escape sequence spans a line break.
+func wrapPrune(words []pruneWord, w int) []string {
+	var lines [][]pruneWord
+	var cur []pruneWord
+	curW := 0
+	for _, wd := range words {
+		ww := ansi.StringWidth(wd.text + wd.tail)
+		if len(cur) > 0 && curW+1+ww <= w {
+			cur, curW = append(cur, wd), curW+1+ww
+			continue
+		}
+		if len(cur) > 0 {
+			lines = append(lines, cur)
+		}
+		if ww > w {
+			parts := strings.Split(ansi.Hardwrap(wd.text, w, false), "\n")
+			for _, part := range parts[:len(parts)-1] {
+				lines = append(lines, []pruneWord{{text: part, red: wd.red}})
+			}
+			wd.text = parts[len(parts)-1]
+			ww = ansi.StringWidth(wd.text + wd.tail)
+		}
+		cur, curW = []pruneWord{wd}, ww
+	}
+	lines = append(lines, cur)
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		parts := make([]string, len(l))
+		for j, wd := range l {
+			parts[j] = wd.text
+			if wd.red {
+				parts[j] = sRed.Render(wd.text)
+			}
+			parts[j] += wd.tail
+		}
+		out[i] = strings.Join(parts, " ")
+	}
+	return out
 }
 
 // confirmPrune asks before the prune a Docker card button names, saying
