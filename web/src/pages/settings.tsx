@@ -9,6 +9,8 @@ import { useState, type ReactNode } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useStatus } from "@/api/hooks"
 import type { Config, ConfigPatch, RunnerLimitsPatch } from "@/api/types"
+import { AccountCard } from "@/components/account-card"
+import { MaintenanceCard } from "@/components/maintenance-card"
 import { RejectedAlert, SaveBar } from "@/components/save-bar"
 import { TagField } from "@/components/tag-field"
 import { TokenCard } from "@/components/token-card"
@@ -277,6 +279,8 @@ export function SettingsPage() {
           </Section>
           <div className="mb-4 grid gap-4 lg:grid-cols-2">
             <TokenCard />
+            <MaintenanceCard />
+            <AccountCard />
           </div>
           <SaveBar count={changed.length} saving={saving} disabled={offline} onSave={() => void save()} onDiscard={discard} />
           <UnsavedGuard count={changed.length} page="Settings" saving={saving} onSave={save} onDiscard={discard} />
