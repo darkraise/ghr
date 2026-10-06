@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -240,7 +242,7 @@ func opBadge(outcome string) string {
 // the focus order to the layout order. It runs before every key, click and
 // frame.
 func (m Model) syncStorage() {
-	var ws []ui.Widget
+	ws := m.dockerWidgets()
 	m.store.group.Set(ws)
 }
 
@@ -255,6 +257,7 @@ func (m Model) storageLines(w int) ([]string, map[string]ui.Range) {
 		}
 		out = append(out, lines...)
 	}
+	add(m.dockerCard(w))
 	add(m.opsCard(w), nil)
 	return out, ranges
 }
@@ -340,5 +343,164 @@ func (m Model) storageFooterKeys() []footerKey {
 
 // storagePressed runs a Storage page button; ok is false for any other ID.
 func (m Model) storagePressed(id string) (tea.Model, tea.Cmd, bool) {
-	return m, nil, false
+	var mm tea.Model
+	var cmd tea.Cmd
+	switch {
+	case id == storePrune, id == storeKeep, id == storeAll, id == storeDangling, id == storeVolumes:
+		mm, cmd = m.confirmPrune(id)
+	default:
+		return m, nil, false
+	}
+	return mm, cmd, true
+}
+
+// busyJobs counts the runners running a job: removals, clears and the
+// unused-volumes prune are refused while any is.
+func (m Model) busyJobs() int {
+	n := 0
+	for _, i := range m.st.Instances {
+		if i.State == "busy" {
+			n++
+		}
+	}
+	return n
+}
+
+// refusedHint is the line an action refused while jobs run shows then.
+func (m Model) refusedHint(what string) string {
+	return sAmber.Render(fmt.Sprintf("%s: refused while %d jobs run", what, m.busyJobs()))
+}
+
+// dockerWidgets are the Docker card's prune buttons, disabled while the
+// daemon is unreachable or a prune runs.
+func (m Model) dockerWidgets() []ui.Widget {
+	s := m.store
+	keep := "keep"
+	if m.cfg != nil {
+		keep = clean(m.cfg.BuildCacheKeep)
+	}
+	s.keep.Label = "Build cache to " + keep
+	var ws []ui.Widget
+	for _, b := range []*ui.Button{s.prune, s.keep, s.all, s.dangling, s.volumes} {
+		b.SetDisabled(!m.connected || m.st.Maintenance.Running)
+		ws = append(ws, b)
+	}
+	return ws
+}
+
+// dockerCard renders the Docker disk card w columns wide: the disk bar
+// against disk_high_water, Docker's disk table with a row per build cache
+// type, the last prune and the prune buttons.
+func (m Model) dockerCard(w int) ([]string, map[string]ui.Range) {
+	s, d := m.store, m.store.data.Docker
+	f, in, c := s.group.FocusedID(), w-4, newStoreCard()
+	high := 80
+	if m.cfg != nil {
+		high = m.cfg.DiskHighWater
+	}
+	c.add(ui.Gauge(d.DiskPct, 100, 20) + fmt.Sprintf(" %d%% used · prunes above %d%%", d.DiskPct, high))
+	full := m.width >= wideMin
+	row := func(typ, count, active string, size, reclaimable int64) string {
+		line := cell(typ, 16) + cell(count, 7) + cell(active, 8) + cell(model.HumanBytes(size), 11)
+		if full {
+			line += model.HumanBytes(reclaimable)
+		}
+		return line
+	}
+	head := cell("", 16) + cell("count", 7) + cell("active", 8) + cell("size", 11)
+	if full {
+		head += "reclaimable"
+	}
+	c.add(sDim.Render(head))
+	for _, r := range d.Rows {
+		c.add(row(r.Type, fmt.Sprint(r.Count), fmt.Sprint(r.Active), r.Bytes, r.Reclaimable))
+		if r.Type == "Build Cache" {
+			for _, t := range d.BuildCacheTypes {
+				c.add(sDim.Render(row("  "+t.Type, fmt.Sprint(t.Count), "", t.Bytes, t.Reclaimable)))
+			}
+		}
+	}
+	c.add(m.lastPruneLines(in)...)
+	c.buttons(f, in, s.prune, s.keep, s.all, s.dangling, s.volumes)
+	if m.busyJobs() > 0 {
+		c.add(m.refusedHint("Unused volumes"))
+	}
+	return c.box("Docker disk", w)
+}
+
+// lastPruneLines describe the newest prune in w columns, for example
+// "auto · 14:05 · ok — build cache older than 72h 1.2 GB, dangling images
+// 300.0 MB"; a failed step shows its error in red.
+func (m Model) lastPruneLines(w int) []string {
+	p := m.store.data.LastPrune
+	switch {
+	case m.st.Maintenance.Running || (p != nil && p.FinishedAt == nil):
+		return []string{sAmber.Render("pruning…")}
+	case p == nil:
+		return []string{sDim.Render("no prune since start")}
+	}
+	head := p.Trigger
+	if p.Trigger != "auto" {
+		head += " " + p.Scope
+	}
+	line := head + " · " + p.FinishedAt.Local().Format("15:04") + " · " + p.Outcome
+	var steps []string
+	for _, st := range p.Steps {
+		if st.Error != "" {
+			steps = append(steps, sRed.Render(st.Name+": "+st.Error))
+		} else {
+			steps = append(steps, st.Name+" "+model.HumanBytes(st.Freed))
+		}
+	}
+	if len(steps) > 0 {
+		line += " — " + strings.Join(steps, ", ")
+	}
+	return ui.WrapWords(line, max(w, 1))
+}
+
+// confirmPrune asks before the prune a Docker card button names, saying
+// what it removes.
+func (m Model) confirmPrune(id string) (tea.Model, tea.Cmd) {
+	if m.offline() {
+		return m, nil
+	}
+	keep := "the build_cache_keep size"
+	if m.cfg != nil {
+		keep = clean(m.cfg.BuildCacheKeep)
+	}
+	d := m.store.data.Docker
+	var scope, text string
+	switch id {
+	case storePrune:
+		scope, text = "standard", "Prune now? Removes build cache beyond "+keep+", dangling images, and history and logs past retention."
+	case storeKeep:
+		scope, text = "build-cache-keep", "Prune the build cache down to "+keep+"?"
+	case storeAll:
+		scope, text = "build-cache-all", "Remove all build cache"+reclaim(d, "Build Cache")+"? The next builds start cold."
+	case storeDangling:
+		scope, text = "dangling-images", "Remove dangling images (untagged and used by no container)?"
+	case storeVolumes:
+		scope, text = "unused-volumes", "Remove every volume no container uses"+reclaim(d, "Local Volumes")+"? It is refused while jobs run."
+	default:
+		return m, nil
+	}
+	c := m.c
+	return m.openConfirm(text, func() tea.Cmd {
+		return m.action(scope+" prune started", func(cx context.Context) error {
+			if scope == "standard" {
+				return c.Prune(cx)
+			}
+			return c.PruneScope(cx, scope)
+		})
+	})
+}
+
+// reclaim is " (up to 1.2 GB)" for Docker's row typ, or "" when it frees nothing.
+func reclaim(d model.DockerDisk, typ string) string {
+	for _, r := range d.Rows {
+		if r.Type == typ && r.Reclaimable > 0 {
+			return " (up to " + model.HumanBytes(r.Reclaimable) + ")"
+		}
+	}
+	return ""
 }
