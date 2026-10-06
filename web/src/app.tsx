@@ -28,7 +28,7 @@ export function App({ router, queryClient }: { router: AppRouter; queryClient: Q
     <QueryClientProvider client={queryClient}>
       <ThemeProvider config={themeConfig}>
         <RouterProvider router={router} />
-        <Toaster />
+        <Toaster position="top-center" />
       </ThemeProvider>
     </QueryClientProvider>
   )

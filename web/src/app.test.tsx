@@ -45,6 +45,8 @@ describe("App", () => {
         .catch(() => undefined)
     })
     expect((await screen.findAllByText("boom")).length).toBeGreaterThan(0)
+    // At the top, clear of the sticky save bar at the bottom of the form pages.
+    expect(document.querySelector(".dr-toaster")).toHaveAttribute("data-position", "top-center")
   })
 
   it("redirects once for a burst of 401s and keeps the page asked for", async () => {
