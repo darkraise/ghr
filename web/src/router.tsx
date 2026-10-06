@@ -42,6 +42,8 @@ const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({ c
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
+  validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
+    typeof search.redirect === "string" ? { redirect: search.redirect } : {},
   beforeLoad: async ({ context }) => {
     if ((await authState(context.queryClient)).authenticated) throw redirect({ to: "/" })
   },
@@ -51,8 +53,10 @@ const loginRoute = createRoute({
 const appRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: "app",
-  beforeLoad: async ({ context }) => {
-    if (!(await authState(context.queryClient)).authenticated) throw redirect({ to: "/login" })
+  beforeLoad: async ({ context, location }) => {
+    if (!(await authState(context.queryClient)).authenticated) {
+      throw redirect({ to: "/login", search: location.href === "/" ? {} : { redirect: location.href } })
+    }
   },
   component: Shell,
 })

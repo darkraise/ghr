@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
+import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "darkraise-ui/components/card"
 import { Input } from "darkraise-ui/components/input"
@@ -25,10 +25,17 @@ function loginError(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+// Only a path on this site: "//host" and "/\host" are read by browsers as
+// another origin.
+function safeRedirect(target: string | undefined): string {
+  return target && target.startsWith("/") && !target.startsWith("//") && !target.startsWith("/\\") ? target : "/"
+}
+
 export function LoginPage() {
   const auth = useQuery({ queryKey: keys.auth, queryFn: ({ signal }) => api.authState(signal) })
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const { redirect } = useSearch({ from: "/login" })
   const [password, setPassword] = useState("")
   const [confirm, setConfirm] = useState("")
   const [error, setError] = useState("")
@@ -55,7 +62,7 @@ export function LoginPage() {
     try {
       await (setup ? api.setup(password) : api.login(password))
       await queryClient.invalidateQueries({ queryKey: keys.auth })
-      await navigate({ to: "/" })
+      await navigate({ href: safeRedirect(redirect) })
     } catch (err) {
       setError(loginError(err))
     } finally {
@@ -98,7 +105,7 @@ export function LoginPage() {
                 />
               </div>
             )}
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
             <Button type="submit" loading={busy}>
               {setup ? "Set password" : "Log in"}
             </Button>

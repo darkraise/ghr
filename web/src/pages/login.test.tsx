@@ -1,7 +1,7 @@
 import { screen, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { json, mockApi, noContent } from "@/test/api"
-import { authedRoutes } from "@/test/fixtures"
+import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
 const loginState = { "GET /auth/state": { setup_required: false, authenticated: false } }
@@ -66,6 +66,7 @@ describe("login page", () => {
     await user.type(await screen.findByLabelText("Password"), "not the password")
     await user.click(screen.getByRole("button", { name: "Log in" }))
     expect(await screen.findByText("wrong password")).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent("wrong password")
     expect(router.state.location.pathname).toBe("/login")
   })
 
@@ -79,5 +80,42 @@ describe("login page", () => {
     await user.type(await screen.findByLabelText("Password"), "not the password")
     await user.click(screen.getByRole("button", { name: "Log in" }))
     expect(await screen.findByText("Too many failed logins; try again after 14:20.")).toBeInTheDocument()
+  })
+
+  it("returns to the page asked for after logging in", async () => {
+    let done = false
+    mockApi(
+      authedRoutes({
+        "GET /auth/state": () => ({ setup_required: false, authenticated: done }),
+        "POST /auth/login": () => {
+          done = true
+          return noContent()
+        },
+        "GET /api/history": fixtures.history,
+      }),
+    )
+    const { user, router } = renderApp("/history")
+    await user.type(await screen.findByLabelText("Password"), "correct horse battery")
+    expect(router.state.location.pathname).toBe("/login")
+    expect(router.state.location.search).toEqual({ redirect: "/history" })
+    await user.click(screen.getByRole("button", { name: "Log in" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/history"))
+  })
+
+  it("ignores a redirect that leaves the site", async () => {
+    let done = false
+    mockApi(
+      authedRoutes({
+        "GET /auth/state": () => ({ setup_required: false, authenticated: done }),
+        "POST /auth/login": () => {
+          done = true
+          return noContent()
+        },
+      }),
+    )
+    const { user, router } = renderApp("/login?redirect=%2F%2Fevil.example%2Fx")
+    await user.type(await screen.findByLabelText("Password"), "correct horse battery")
+    await user.click(screen.getByRole("button", { name: "Log in" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"))
   })
 })

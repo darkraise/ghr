@@ -3,11 +3,11 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { MutationObserver } from "@tanstack/react-query"
 import { act, screen, waitFor } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { ApiError, api } from "./api/client"
 import { errorText } from "./query"
 import { json, mockApi } from "./test/api"
-import { authedRoutes } from "./test/fixtures"
+import { authedRoutes, fixtures } from "./test/fixtures"
 import { renderApp } from "./test/render"
 
 describe("App", () => {
@@ -45,6 +45,29 @@ describe("App", () => {
         .catch(() => undefined)
     })
     expect((await screen.findAllByText("boom")).length).toBeGreaterThan(0)
+  })
+
+  it("redirects once for a burst of 401s and keeps the page asked for", async () => {
+    let expired = false
+    const gone = () => json({ error: "not logged in" }, 401)
+    mockApi(
+      authedRoutes({
+        "GET /auth/state": () => ({ setup_required: false, authenticated: !expired }),
+        "GET /api/status": () => (expired ? gone() : fixtures.status),
+        "GET /api/config": () => (expired ? gone() : fixtures.config),
+        "GET /api/history": [],
+      }),
+    )
+    const { router } = renderApp("/history")
+    await screen.findByRole("heading", { name: "History" })
+    const navigate = vi.spyOn(router, "navigate")
+    expired = true
+    await act(async () => {
+      await Promise.all([api.status().catch(() => undefined), api.config().catch(() => undefined)])
+    })
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
+    expect(router.state.location.search).toEqual({ redirect: "/history" })
+    expect(navigate).toHaveBeenCalledTimes(1)
   })
 })
 
