@@ -19,6 +19,7 @@ import (
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/github"
+	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/runner"
 	"github.com/darkraise/ghr/internal/system"
 )
@@ -70,6 +71,15 @@ func (nopDocker) DataRootUsage(context.Context) (int, error)                    
 func (nopDocker) PruneBuildCacheOlderThan(context.Context, int) (string, error) { return "0B", nil }
 func (nopDocker) PruneBuildCacheTo(context.Context, string) (string, error)     { return "0B", nil }
 func (nopDocker) PruneDanglingImages(context.Context) (string, error)           { return "0B", nil }
+
+type nopDisk struct{}
+
+func (nopDisk) DiskUsage(context.Context) ([]system.DiskRow, error) {
+	return []system.DiskRow{{Type: "Images", Count: 1}}, nil
+}
+func (nopDisk) BuildCacheUsage(context.Context) ([]system.CacheTypeUsage, error) { return nil, nil }
+func (nopDisk) PruneAllBuildCache(context.Context) (string, error)               { return "0B", nil }
+func (nopDisk) PruneUnusedVolumes(context.Context) (string, error)               { return "0B", nil }
 
 // dirHost creates instance dirs without cp; links, extraction and scripts
 // are the real host's.
@@ -168,8 +178,8 @@ func TestRunServesTicksReloadsAndKeepsRunners(t *testing.T) {
 		Socket: filepath.Join(dir, "ghr.sock"), HistoryPath: filepath.Join(dir, "history.jsonl"),
 		ShutdownWait: 5 * time.Second,
 		Paths: runner.Paths{Dist: dist, Instances: filepath.Join(dir, "instances"), Logs: filepath.Join(dir, "logs"),
-			Pending: filepath.Join(dir, "pending"), ToolCache: filepath.Join(dir, "toolcache"), Hooks: "/opt/ghr/hooks", Home: "/home/ghrunner"},
-		GitHubURL: fakeGitHub(t).URL, Systemd: sd, Docker: nopDocker{}, Host: dirHost{}, Reload: reload,
+			Pending: filepath.Join(dir, "pending"), ToolCache: filepath.Join(dir, "toolcache"), Hooks: "/opt/ghr/hooks", Home: filepath.Join(dir, "home")},
+		GitHubURL: fakeGitHub(t).URL, Systemd: sd, Docker: nopDocker{}, Disk: nopDisk{}, Host: dirHost{}, Reload: reload,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -242,8 +252,8 @@ func testOptions(t *testing.T, cfg string) Options {
 		Socket: filepath.Join(dir, "ghr.sock"), HistoryPath: filepath.Join(dir, "history.jsonl"),
 		ShutdownWait: 5 * time.Second,
 		Paths: runner.Paths{Dist: dist, Instances: filepath.Join(dir, "instances"), Logs: filepath.Join(dir, "logs"),
-			Pending: filepath.Join(dir, "pending"), ToolCache: filepath.Join(dir, "toolcache"), Hooks: "/opt/ghr/hooks", Home: "/home/ghrunner"},
-		GitHubURL: fakeGitHub(t).URL, Systemd: &recSD{}, Docker: nopDocker{}, Host: dirHost{}, Reload: make(chan os.Signal, 1),
+			Pending: filepath.Join(dir, "pending"), ToolCache: filepath.Join(dir, "toolcache"), Hooks: "/opt/ghr/hooks", Home: filepath.Join(dir, "home")},
+		GitHubURL: fakeGitHub(t).URL, Systemd: &recSD{}, Docker: nopDocker{}, Disk: nopDisk{}, Host: dirHost{}, Reload: make(chan os.Signal, 1),
 	}
 }
 
@@ -436,5 +446,44 @@ func TestRunFailsWhenTheWebPortIsTaken(t *testing.T) {
 	if conn, err := net.DialTimeout("unix", o.Socket, time.Second); err == nil {
 		conn.Close()
 		t.Fatal("the control socket was left serving")
+	}
+}
+
+func TestRunServesStorageAndSweepsTheToolCache(t *testing.T) {
+	o := testOptions(t, cfgYAML)
+	left := filepath.Join(o.Paths.ToolCache, ".tmp", "20261006T140000-abcdef", "partial")
+	if err := os.MkdirAll(left, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, o) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("Run did not return after cancel")
+		}
+	}()
+	c := api.NewUnixClient(o.Socket)
+	var st model.Storage
+	waitFor(t, "the first measurement", func() bool {
+		var err error
+		st, err = c.Storage(context.Background())
+		return err == nil && st.MeasuredAt != nil
+	})
+	if len(st.PackageCaches) != 10 || len(st.Docker.Rows) != 1 || st.Docker.Rows[0].Type != "Images" || st.Toolchains == nil {
+		t.Fatalf("storage %+v", st)
+	}
+	if _, err := os.Stat(filepath.Join(o.Paths.ToolCache, ".tmp")); !os.IsNotExist(err) {
+		t.Fatalf(".tmp survived the start: %v", err)
+	}
+	var ae *api.Error
+	if err := c.PruneScope(context.Background(), "everything"); !errors.As(err, &ae) || ae.Status != 400 {
+		t.Fatalf("unknown scope: %v", err)
+	}
+	if err := c.InstallToolchain(context.Background(), "ruby", "3.3"); !errors.As(err, &ae) || ae.Status != 400 {
+		t.Fatalf("unknown tool: %v", err)
 	}
 }

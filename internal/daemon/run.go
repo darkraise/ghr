@@ -22,7 +22,9 @@ import (
 	"github.com/darkraise/ghr/internal/history"
 	"github.com/darkraise/ghr/internal/metrics"
 	"github.com/darkraise/ghr/internal/runner"
+	"github.com/darkraise/ghr/internal/storage"
 	"github.com/darkraise/ghr/internal/system"
+	"github.com/darkraise/ghr/internal/toolchain"
 	"github.com/darkraise/ghr/internal/webui"
 	"github.com/darkraise/ghr/web"
 )
@@ -44,10 +46,16 @@ type Options struct {
 	GitHubURL string
 	Systemd   runner.Systemd
 	Docker    runner.Docker
+	Disk      runner.Disk
 	Host      runner.Host
 	Fetch     func(ctx context.Context, url, dst string) error
 	Reload    <-chan os.Signal
 }
+
+// InstallTimeout bounds each command and each download of a toolchain
+// install, far above system.CommandTimeout: a .NET SDK, a JDK or Python's
+// pip step can take longer than that on a slow link.
+const InstallTimeout = time.Hour
 
 func DefaultOptions() Options {
 	return Options{
@@ -157,7 +165,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	hist := &history.Store{Path: o.HistoryPath}
 	m := &runner.Manager{
-		Config: store.Config, GH: gh, SD: o.Systemd, Docker: o.Docker, Host: o.Host, Fetch: o.Fetch,
+		Config: store.Config, GH: gh, SD: o.Systemd, Docker: o.Docker, Disk: o.Disk, Host: o.Host, Fetch: o.Fetch,
 		Paths: o.Paths, Events: ev, History: hist, Now: time.Now, NewID: runner.RandomID,
 	}
 	if m.SD == nil {
@@ -165,6 +173,9 @@ func Run(ctx context.Context, o Options) error {
 	}
 	if m.Docker == nil {
 		m.Docker = system.Docker{Run: system.Exec}
+	}
+	if m.Disk == nil {
+		m.Disk = system.Docker{Run: system.Exec}
 	}
 	if m.Host == nil {
 		m.Host = system.Host{Run: system.Exec, Script: system.ExecGroup}
@@ -179,6 +190,12 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	m.Reconcile(ctx, store.Config())
+
+	tools := toolchain.New(toolchain.NewEnv(o.Paths.ToolCache, o.Paths.Home, runner.RunnerUser,
+		system.ExecGroupFor(InstallTimeout), system.DownloadFor(InstallTimeout)))
+	space := &storage.Service{Tools: tools, Docker: m.Disk, Home: o.Paths.Home, Busy: m.BusyCount, Events: ev}
+	space.Start()
+	m.PruneDone = space.Trigger
 
 	sampler := metrics.NewSampler(func() metrics.Snapshot {
 		st := m.Status()
@@ -198,7 +215,7 @@ func Run(ctx context.Context, o Options) error {
 
 	wake := make(chan struct{}, 1)
 	b := &Backend{
-		Store: store, M: m, GH: gh, Events: ev, Hist: hist,
+		Store: store, M: m, GH: gh, Events: ev, Hist: hist, Space: space,
 		CheckToken: func(ctx context.Context, token, repo string) error {
 			c := github.New(owner, func() string { return token })
 			c.BaseURL = gh.BaseURL
@@ -218,6 +235,7 @@ func Run(ctx context.Context, o Options) error {
 	if webLn != nil {
 		static, err := fs.Sub(web.Dist, "dist")
 		if err != nil {
+			space.Close()
 			return err
 		}
 		webSrv.Handler = webui.Handler(auth, apiHandler, static, webCfg.Hosts)
@@ -270,10 +288,15 @@ func Run(ctx context.Context, o Options) error {
 			}
 			wg.Wait()
 			m.Close()
+			space.Close()
 			b.Close()
 			<-sampled
 			done := make(chan struct{})
-			go func() { m.Wait(); close(done) }()
+			go func() {
+				m.Wait()
+				space.Wait()
+				close(done)
+			}()
 			select {
 			case <-done:
 			case <-time.After(o.ShutdownWait):
