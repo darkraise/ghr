@@ -52,6 +52,10 @@ func fakeDaemon(t *testing.T) *[]recorded {
 		case r.URL.Path == "/repos" && strings.Contains(string(b), `"public"`) && !strings.Contains(string(b), `"allow_public":true`):
 			w.WriteHeader(409)
 			json.NewEncoder(w).Encode(map[string]string{"error": "public is public"})
+		case r.URL.Path == "/storage":
+			json.NewEncoder(w).Encode(sampleStorage(now))
+		case r.URL.Path == "/toolchains/available":
+			json.NewEncoder(w).Encode([]model.ToolchainChoice{{Spec: "21", Version: "21.0.8+9", LTS: true}, {Spec: "24", Version: "24.0.2+12"}})
 		default:
 			w.WriteHeader(http.StatusNoContent)
 		}

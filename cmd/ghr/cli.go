@@ -100,6 +100,14 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 			return c.CancelRunnerUpdate(ctx)
 		}
 		return usageError("usage: ghr runner-update [--cancel]")
+	case "storage":
+		return storageCmd(ctx, c, args[1:], out)
+	case "toolchain":
+		return toolchainCmd(ctx, c, args[1:], out)
+	case "cache":
+		return cacheCmd(ctx, c, args[1:], out)
+	case "prune":
+		return pruneCmd(ctx, c, args[1:], out)
 	case "web":
 		if len(args) != 2 || args[1] != "reset-password" {
 			return usageError("usage: ghr web reset-password")

@@ -113,6 +113,13 @@ const usage = `usage: ghr [command]
   logs <id> [-f]                  runner diagnostic log
   history [--repo r] [--conclusion c] [--limit n]
   runner-update [--cancel]        queue (or cancel) a runner update
+  storage [refresh]               disk use: Docker, toolchains, package caches
+  toolchain list | available <tool>
+  toolchain install <tool> <version> | --preset popular
+  toolchain rm <tool> <version>   refused while jobs run
+  cache list | clear <name>       clear is refused while jobs run
+  prune [--scope <scope>]         standard (default), build-cache-keep,
+                                  build-cache-all, dangling-images, unused-volumes
   web reset-password              forget the web UI password
   version
 `
