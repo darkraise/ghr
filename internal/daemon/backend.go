@@ -506,7 +506,7 @@ func (b *Backend) Prune() error { return b.PruneScope(runner.ScopeStandard) }
 // PruneScope starts a manual prune of one scope.
 func (b *Backend) PruneScope(scope string) error {
 	err := b.M.StartPruneScope(scope)
-	var busy runner.BusyError
+	var busy model.BusyError
 	switch {
 	case errors.Is(err, runner.ErrUnknownScope):
 		return api.BadRequest(err.Error())

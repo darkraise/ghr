@@ -48,9 +48,3 @@ func TestBusyCountIgnoresCleaningInstances(t *testing.T) {
 		t.Fatalf("%d busy", n)
 	}
 }
-
-func TestBusyErrorMessage(t *testing.T) {
-	if got := (BusyError{N: 2}).Error(); got != "refused: 2 jobs running" {
-		t.Fatalf("message %q", got)
-	}
-}

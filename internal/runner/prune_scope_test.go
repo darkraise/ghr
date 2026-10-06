@@ -104,7 +104,7 @@ func TestUnusedVolumesRefusedWhileARunnerIsBusy(t *testing.T) {
 	addInstance(t, h, "aaaaaa", sched.Idle)
 	h.writeJob(t, "aaaaaa", 55)
 	err := h.m.StartPruneScope(ScopeUnusedVolumes)
-	var busy BusyError
+	var busy model.BusyError
 	if !errors.As(err, &busy) || busy.N != 1 || err.Error() != "refused: 1 jobs running" {
 		t.Fatalf("err %v", err)
 	}

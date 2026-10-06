@@ -190,7 +190,7 @@ func (s *Service) Remove(tool, version string) error {
 		Operation: model.Operation{ID: s.newID(), Kind: "remove", Target: target},
 		run: func(ctx context.Context, progress func(string)) (string, string) {
 			if n := s.busy(); n > 0 {
-				return "refused", fmt.Sprintf("refused: %d jobs running", n)
+				return "refused", model.BusyError{N: n}.Error()
 			}
 			progress("removing")
 			note := freed(s.toolchainBytes(tool, version))
@@ -217,7 +217,7 @@ func (s *Service) Clear(name string) error {
 		Operation: model.Operation{ID: id, Kind: "clear", Target: name},
 		run: func(ctx context.Context, progress func(string)) (string, string) {
 			if n := s.busy(); n > 0 {
-				return "refused", fmt.Sprintf("refused: %d jobs running", n)
+				return "refused", model.BusyError{N: n}.Error()
 			}
 			own, err := lookupOwner(s.User)
 			if err != nil {

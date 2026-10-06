@@ -241,11 +241,6 @@ var Scopes = []string{ScopeStandard, ScopeBuildCacheKeep, ScopeBuildCacheAll, Sc
 
 var ErrUnknownScope = errors.New("unknown prune scope")
 
-// BusyError refuses an action while runners have jobs.
-type BusyError struct{ N int }
-
-func (e BusyError) Error() string { return fmt.Sprintf("refused: %d jobs running", e.N) }
-
 // StartPrune starts a standard manual prune in the background.
 func (m *Manager) StartPrune() error { return m.StartPruneScope(ScopeStandard) }
 
@@ -265,7 +260,7 @@ func (m *Manager) StartPruneScope(scope string) error {
 	}
 	if scope == ScopeUnusedVolumes {
 		if n := m.BusyCount(); n > 0 {
-			return BusyError{N: n}
+			return model.BusyError{N: n}
 		}
 	}
 	m.mu.Lock()

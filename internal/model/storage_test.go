@@ -88,3 +88,9 @@ func TestHumanBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestBusyErrorMessage(t *testing.T) {
+	if got := (BusyError{N: 2}).Error(); got != "refused: 2 jobs running" {
+		t.Fatalf("message %q", got)
+	}
+}

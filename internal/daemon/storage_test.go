@@ -174,7 +174,7 @@ func TestPruneScopeStatuses(t *testing.T) {
 		want int
 	}{
 		{fmt.Errorf("%w %q", runner.ErrUnknownScope, "everything"), 400},
-		{runner.BusyError{N: 2}, 409},
+		{model.BusyError{N: 2}, 409},
 		{runner.ErrPruneRunning, 409},
 		{runner.ErrUpdateRunning, 409},
 		{runner.ErrClosed, 503},

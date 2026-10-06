@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+// BusyError refuses an action while runners have jobs.
+type BusyError struct{ N int }
+
+func (e BusyError) Error() string { return fmt.Sprintf("refused: %d jobs running", e.N) }
+
 // Storage is what the runner LXC keeps on disk between jobs, served by GET /storage.
 type Storage struct {
 	Toolchains     []Toolchain    `json:"toolchains"`
