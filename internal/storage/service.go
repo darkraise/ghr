@@ -59,16 +59,10 @@ func (s *Service) now() time.Time {
 	return time.Now()
 }
 
-// Start deletes what an interrupted install or clear left behind, then
-// starts the measurer, which measures at once, and the queue worker. Call
+// Start starts the measurer, which measures at once, and the queue worker,
+// which first deletes what an interrupted install or clear left behind. Call
 // it once, before any other method.
 func (s *Service) Start() {
-	if err := s.Tools.CleanTmp(); err != nil {
-		s.Events.Add("warn", "", "storage: clearing the tool cache's .tmp: %v", err)
-	}
-	if err := sweepClearing(s.Home); err != nil {
-		s.Events.Add("warn", "", "storage: removing interrupted cache clears: %v", err)
-	}
 	s.snap = emptyMeasured()
 	s.recent = []model.Operation{}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
@@ -84,6 +78,17 @@ func (s *Service) Start() {
 		defer s.wg.Done()
 		s.work()
 	}()
+}
+
+// cleanUp runs on the worker before its first operation, so an install never
+// races the .tmp clean and the API is not held up by a large interrupted clear.
+func (s *Service) cleanUp() {
+	if err := s.Tools.CleanTmp(); err != nil {
+		s.Events.Add("warn", "", "storage: clearing the tool cache's .tmp: %v", err)
+	}
+	if err := sweepClearing(s.Home); err != nil {
+		s.Events.Add("warn", "", "storage: removing interrupted cache clears: %v", err)
+	}
 }
 
 func (s *Service) measureLoop() {

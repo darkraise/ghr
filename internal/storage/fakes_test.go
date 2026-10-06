@@ -20,6 +20,7 @@ type fakeTools struct {
 	other     []string
 	tools     map[string]*fakeInstaller
 	cleaned   int
+	cleanGate chan struct{} // with it set, CleanTmp waits for a send or a close
 }
 
 func (f *fakeTools) Get(tool string) (toolchain.Installer, error) {
@@ -47,6 +48,9 @@ func (f *fakeTools) Other() ([]string, error) { return f.other, nil }
 func (f *fakeTools) Root() string             { return f.root }
 
 func (f *fakeTools) CleanTmp() error {
+	if f.cleanGate != nil {
+		<-f.cleanGate
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cleaned++

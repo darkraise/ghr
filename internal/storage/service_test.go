@@ -45,16 +45,44 @@ func TestStartCleansUpAndMeasuresAtOnce(t *testing.T) {
 	writeFile(t, filepath.Join(left, "x"), "x")
 	startService(t, s)
 	waitFor(t, "the first measurement", func() bool { return s.Snapshot().MeasuredAt != nil })
-	if n := tools.cleanCount(); n != 1 {
-		t.Fatalf("CleanTmp ran %d times", n)
-	}
-	if _, err := os.Lstat(left); !os.IsNotExist(err) {
-		t.Fatalf("an interrupted clear survived start: %v", err)
-	}
+	waitFor(t, "the clean-up", func() bool {
+		_, err := os.Lstat(left)
+		return tools.cleanCount() == 1 && os.IsNotExist(err)
+	})
 	st := s.Snapshot()
 	if len(st.PackageCaches) != len(Caches) || len(st.Docker.Rows) != 1 || st.Toolchains == nil || st.OtherToolCache == nil ||
 		st.Docker.BuildCacheTypes == nil || st.Operations.Recent == nil || st.Operations.Current != nil || st.Measuring {
 		t.Fatalf("snapshot %+v", st)
+	}
+}
+
+func TestStartDoesNotWaitForTheCleanUpButTheQueueDoes(t *testing.T) {
+	tools, node := nodeTools()
+	tools.cleanGate = make(chan struct{})
+	node.started = make(chan string, 1)
+	s := newService(t, tools, &fakeDisk{})
+	started := make(chan struct{})
+	go func() {
+		startService(t, s)
+		close(started)
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		close(tools.cleanGate)
+		t.Fatal("Start waited for the clean-up")
+	}
+	if err := s.Install("node", "22"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case v := <-node.started:
+		t.Fatalf("install %s ran before the clean-up", v)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(tools.cleanGate)
+	if v := recvVersion(t, node.started); v != "22.11.0" {
+		t.Fatalf("install %s", v)
 	}
 }
 

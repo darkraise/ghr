@@ -54,6 +54,7 @@ func (s *Service) enqueue(ops ...*op) error {
 // work runs queued operations one at a time until Close, then drops the
 // rest of the queue with a warning each.
 func (s *Service) work() {
+	s.cleanUp()
 	for {
 		s.mu.Lock()
 		if s.ctx.Err() != nil {
