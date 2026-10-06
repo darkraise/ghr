@@ -225,6 +225,50 @@ func (c *Client) AvailableRepos(ctx context.Context) ([]model.AvailableRepo, err
 	return rs, err
 }
 
+// Storage returns the daemon's storage snapshot; it never measures.
+func (c *Client) Storage(ctx context.Context) (model.Storage, error) {
+	var s model.Storage
+	err := c.call(ctx, http.MethodGet, "/storage", nil, &s)
+	return s, err
+}
+
+// RefreshStorage asks the daemon to measure now.
+func (c *Client) RefreshStorage(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/storage/refresh", nil, nil)
+}
+
+// AvailableToolchains lists what an install of tool can ask for.
+func (c *Client) AvailableToolchains(ctx context.Context, tool string) ([]model.ToolchainChoice, error) {
+	var cs []model.ToolchainChoice
+	err := c.call(ctx, http.MethodGet, "/toolchains/available?tool="+url.QueryEscape(tool), nil, &cs)
+	return cs, err
+}
+
+// InstallToolchain queues an install; version is resolved when it runs.
+func (c *Client) InstallToolchain(ctx context.Context, tool, version string) error {
+	return c.call(ctx, http.MethodPost, "/toolchains", jsonBody(model.InstallRequest{Tool: tool, Version: version}), nil)
+}
+
+// InstallPreset queues every install of a preset.
+func (c *Client) InstallPreset(ctx context.Context, preset string) error {
+	return c.call(ctx, http.MethodPost, "/toolchains", jsonBody(model.InstallRequest{Preset: preset}), nil)
+}
+
+// RemoveToolchain queues the removal of an installed version.
+func (c *Client) RemoveToolchain(ctx context.Context, tool, version string) error {
+	return c.call(ctx, http.MethodDelete, "/toolchains/"+url.PathEscape(tool)+"/"+url.PathEscape(version), nil, nil)
+}
+
+// ClearCache queues clearing a package cache.
+func (c *Client) ClearCache(ctx context.Context, name string) error {
+	return c.call(ctx, http.MethodPost, "/caches/"+url.PathEscape(name)+"/clear", nil, nil)
+}
+
+// PruneScope starts a manual prune of one scope; its outcome arrives as events.
+func (c *Client) PruneScope(ctx context.Context, scope string) error {
+	return c.call(ctx, http.MethodPost, "/prune/"+url.PathEscape(scope), nil, nil)
+}
+
 // ResetWebPassword forgets the web UI password and ends its sessions. The
 // route exists on the Unix socket only.
 func (c *Client) ResetWebPassword(ctx context.Context) error {

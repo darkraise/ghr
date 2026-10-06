@@ -78,6 +78,13 @@ type Backend interface {
 	QueueRunnerUpdate(ctx context.Context) error
 	CancelRunnerUpdate() error
 	AvailableRepos(ctx context.Context) ([]model.AvailableRepo, error)
+	Storage() model.Storage
+	RefreshStorage() error
+	AvailableToolchains(ctx context.Context, tool string) ([]model.ToolchainChoice, error)
+	InstallToolchain(req model.InstallRequest) error
+	RemoveToolchain(tool, version string) error
+	ClearCache(name string) error
+	PruneScope(scope string) error
 }
 
 func NewServer(b Backend) http.Handler {
@@ -215,11 +222,45 @@ func NewServer(b Backend) http.Handler {
 	mux.HandleFunc("DELETE /runner-update", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, b.CancelRunnerUpdate())
 	})
+	mux.HandleFunc("GET /storage", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.Storage()) })
+	mux.HandleFunc("POST /storage/refresh", accepted(func(*http.Request) error { return b.RefreshStorage() }))
+	mux.HandleFunc("GET /toolchains/available", func(w http.ResponseWriter, r *http.Request) {
+		cs, err := b.AvailableToolchains(r.Context(), r.URL.Query().Get("tool"))
+		if cs == nil {
+			cs = []model.ToolchainChoice{}
+		}
+		respond(w, cs, err)
+	})
+	mux.HandleFunc("POST /toolchains", accepted(func(r *http.Request) error {
+		var req model.InstallRequest
+		if err := decode(r, &req); err != nil {
+			return err
+		}
+		return b.InstallToolchain(req)
+	}))
+	mux.HandleFunc("DELETE /toolchains/{tool}/{version}", accepted(func(r *http.Request) error {
+		return b.RemoveToolchain(r.PathValue("tool"), r.PathValue("version"))
+	}))
+	mux.HandleFunc("POST /caches/{name}/clear", accepted(func(r *http.Request) error { return b.ClearCache(r.PathValue("name")) }))
+	// A route of its own, so a daemon older than the scopes answers a
+	// plain-text 404 instead of running a standard prune.
+	mux.HandleFunc("POST /prune/{scope}", accepted(func(r *http.Request) error { return b.PruneScope(r.PathValue("scope")) }))
 	return mux
 }
 
 func pausePatch(name string, paused bool) model.ConfigPatch {
 	return model.ConfigPatch{Repos: map[string]model.RepoPatch{name: {Paused: &paused}}}
+}
+
+// accepted answers 202 once fn has queued or started its work.
+func accepted(fn func(r *http.Request) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := fn(r); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}
 }
 
 func decode(r *http.Request, v any) error {

@@ -42,6 +42,10 @@ type fakeBackend struct {
 	updateErr    error
 	avail        []model.AvailableRepo
 	availErr     error
+	storage      model.Storage
+	storageErr   error // returned by every storage method
+	choices      []model.ToolchainChoice
+	storageCalls []string
 }
 
 func (f *fakeBackend) AvailableRepos(context.Context) ([]model.AvailableRepo, error) {
