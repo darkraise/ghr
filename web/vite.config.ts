@@ -23,5 +23,8 @@ export default defineConfig({
     env: { TZ: "UTC" },
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    // Node 25 turns on its own Web Storage and warns in every worker that it
+    // has no file; the tests use jsdom's localStorage.
+    execArgv: ["--no-experimental-webstorage"],
   },
 })
