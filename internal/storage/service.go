@@ -59,8 +59,8 @@ func (s *Service) now() time.Time {
 }
 
 // Start deletes what an interrupted install or clear left behind, then
-// starts the measurer, which measures at once. Call it once, before any
-// other method.
+// starts the measurer, which measures at once, and the queue worker. Call
+// it once, before any other method.
 func (s *Service) Start() {
 	if err := s.Tools.CleanTmp(); err != nil {
 		s.Events.Add("warn", "", "storage: clearing the tool cache's .tmp: %v", err)
@@ -74,10 +74,14 @@ func (s *Service) Start() {
 	s.trigger = make(chan struct{}, 1)
 	s.wake = make(chan struct{}, 1)
 	s.trigger <- struct{}{}
-	s.wg.Add(1)
+	s.wg.Add(2)
 	go func() {
 		defer s.wg.Done()
 		s.measureLoop()
+	}()
+	go func() {
+		defer s.wg.Done()
+		s.work()
 	}()
 }
 
