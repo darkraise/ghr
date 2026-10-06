@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "./client"
-import type { GhrEvent, LogChunk } from "./types"
+import type { GhrEvent, LogChunk, Status, Storage } from "./types"
 
 export const POLL_FAST = 1000
 export const POLL_SLOW = 5000
@@ -17,6 +17,13 @@ export const keys = {
   steps: (id: string) => ["steps", id] as const,
   containers: (id: string) => ["containers", id] as const,
   log: (id: string) => ["log", id] as const,
+  token: ["token"] as const,
+  storage: ["storage"] as const,
+  availableRepos: ["available-repos"] as const,
+  repoActivity: (name: string) => ["repo-activity", name] as const,
+  labelCheck: (name: string) => ["label-check", name] as const,
+  registrations: (name: string) => ["registrations", name] as const,
+  toolchainChoices: (tool: string) => ["toolchain-choices", tool] as const,
 }
 
 export function useStatus() {
@@ -102,5 +109,64 @@ export function useLogTail(id: string, enabled: boolean) {
     },
     enabled,
     refetchInterval: enabled ? POLL_FAST : false,
+  })
+}
+
+export const ACTIVITY_LIMIT = 500
+
+export function useToken() {
+  return useQuery({ queryKey: keys.token, queryFn: ({ signal }) => api.token(signal), refetchInterval: POLL_SLOW })
+}
+
+// A prune shows in /status, not /storage; either one running makes the
+// Storage page poll every second, as the TUI's storageActive does.
+export function storageBusy(storage?: Storage, status?: Status): boolean {
+  if (status?.maintenance.running) return true
+  if (!storage) return false
+  return storage.operations.current !== null || storage.operations.queued > 0 || storage.measuring
+}
+
+export function useStorage(status: Status | undefined) {
+  return useQuery({
+    queryKey: keys.storage,
+    queryFn: ({ signal }) => api.storage(signal),
+    refetchInterval: (q) => (storageBusy(q.state.data, status) ? POLL_FAST : POLL_SLOW),
+  })
+}
+
+export function useRepoActivity(name: string) {
+  return useQuery({
+    queryKey: keys.repoActivity(name),
+    queryFn: ({ signal }) => api.history(name, "", ACTIVITY_LIMIT, signal),
+    refetchInterval: POLL_SLOW,
+  })
+}
+
+export function useLabelCheck(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.labelCheck(name),
+    queryFn: ({ signal }) => api.labelCheck(name, signal),
+    enabled,
+    refetchInterval: (q) => (enabled && q.state.data?.state === "checking" ? POLL_FAST : false),
+  })
+}
+
+export function useRegistrations(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.registrations(name),
+    queryFn: ({ signal }) => api.registrations(name, signal),
+    enabled,
+  })
+}
+
+export function useAvailableRepos(enabled: boolean) {
+  return useQuery({ queryKey: keys.availableRepos, queryFn: ({ signal }) => api.availableRepos(signal), enabled, staleTime: 0 })
+}
+
+export function useToolchainChoices(tool: string, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.toolchainChoices(tool),
+    queryFn: ({ signal }) => api.toolchainChoices(tool, signal),
+    enabled: enabled && tool !== "",
   })
 }
