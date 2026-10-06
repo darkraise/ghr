@@ -20,6 +20,8 @@ import (
 	"github.com/darkraise/ghr/internal/metrics"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/runner"
+	"github.com/darkraise/ghr/internal/storage"
+	"github.com/darkraise/ghr/internal/toolchain"
 )
 
 // Manager is the part of *runner.Manager the backend uses.
@@ -31,7 +33,8 @@ type Manager interface {
 	Kill(ctx context.Context, id string) error
 	ClearDegraded()
 	PausedUntil() time.Time
-	StartPrune() error
+	StartPruneScope(scope string) error
+	LastPrune() *model.LastPrune
 	QueueUpdate(ctx context.Context) error
 	CancelUpdate() error
 }
@@ -50,12 +53,25 @@ type GitHub interface {
 	ListUserRepos(ctx context.Context) ([]github.UserRepo, error)
 }
 
+// StorageService is the part of *storage.Service the backend uses.
+type StorageService interface {
+	Snapshot() model.Storage
+	Refresh() error
+	Available(ctx context.Context, tool string) ([]model.ToolchainChoice, error)
+	Install(tool, spec string) error
+	InstallPreset(name string) error
+	Remove(tool, version string) error
+	Clear(name string) error
+}
+
 type Backend struct {
 	Store  *Store
 	M      Manager
 	GH     GitHub
 	Events *events.Ring
 	Hist   *history.Store
+	// Space is the storage service: the snapshot, toolchains and caches.
+	Space StorageService
 	// CheckToken validates a candidate token by reading repo, its runners and its runs with it.
 	CheckToken func(ctx context.Context, token, repo string) error
 	// Wake asks the run loop for an immediate tick after a config change, so a
@@ -484,13 +500,79 @@ func (b *Backend) Reload() ([]string, error) {
 	return warnings, nil
 }
 
-// Prune starts a forced maintenance prune; its progress goes to the events.
-func (b *Backend) Prune() error {
-	err := b.M.StartPrune()
-	if errors.Is(err, runner.ErrPruneRunning) || errors.Is(err, runner.ErrUpdateRunning) {
+// Prune starts a standard manual prune; its progress goes to the events.
+func (b *Backend) Prune() error { return b.PruneScope(runner.ScopeStandard) }
+
+// PruneScope starts a manual prune of one scope.
+func (b *Backend) PruneScope(scope string) error {
+	err := b.M.StartPruneScope(scope)
+	var busy runner.BusyError
+	switch {
+	case errors.Is(err, runner.ErrUnknownScope):
+		return api.BadRequest(err.Error())
+	case errors.As(err, &busy), errors.Is(err, runner.ErrPruneRunning), errors.Is(err, runner.ErrUpdateRunning):
 		return api.Conflict(err.Error())
+	case errors.Is(err, runner.ErrClosed):
+		return &api.Error{Status: http.StatusServiceUnavailable, Msg: err.Error()}
 	}
-	if errors.Is(err, runner.ErrClosed) {
+	return err
+}
+
+// Storage is the storage snapshot with the last prune and the disk reading,
+// which the runner manager keeps.
+func (b *Backend) Storage() model.Storage {
+	st := b.Space.Snapshot()
+	st.LastPrune = b.M.LastPrune()
+	st.Docker.DiskPct = b.M.Status().DiskPct
+	return st
+}
+
+func (b *Backend) RefreshStorage() error { return storageErr(b.Space.Refresh()) }
+
+// AvailableToolchains lists what an install of tool can ask for; an
+// upstream failure is a 502 carrying its message.
+func (b *Backend) AvailableToolchains(ctx context.Context, tool string) ([]model.ToolchainChoice, error) {
+	cs, err := b.Space.Available(ctx, tool)
+	switch {
+	case errors.Is(err, toolchain.ErrUnknownTool):
+		return nil, api.BadRequest(err.Error())
+	case err != nil:
+		return nil, &api.Error{Status: http.StatusBadGateway, Msg: err.Error()}
+	}
+	return cs, nil
+}
+
+// InstallToolchain queues one install or a preset's installs.
+func (b *Backend) InstallToolchain(req model.InstallRequest) error {
+	switch {
+	case req.Preset != "" && req.Tool != "":
+		return api.BadRequest("give a preset or a tool, not both")
+	case req.Preset != "":
+		return storageErr(b.Space.InstallPreset(req.Preset))
+	case req.Tool == "":
+		return api.BadRequest("a tool or a preset is required")
+	}
+	return storageErr(b.Space.Install(req.Tool, req.Version))
+}
+
+func (b *Backend) RemoveToolchain(tool, version string) error {
+	return storageErr(b.Space.Remove(tool, version))
+}
+
+func (b *Backend) ClearCache(name string) error { return storageErr(b.Space.Clear(name)) }
+
+// storageErr gives a storage or toolchain error the status the API answers with.
+func storageErr(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, toolchain.ErrUnknownTool), errors.Is(err, storage.ErrUnknownPreset), errors.Is(err, storage.ErrMissingVersion):
+		return api.BadRequest(err.Error())
+	case errors.Is(err, toolchain.ErrNotInstalled), errors.Is(err, storage.ErrUnknownCache):
+		return api.NotFound(err.Error())
+	case errors.Is(err, storage.ErrNotPresent), errors.Is(err, storage.ErrMeasuring):
+		return api.Conflict(err.Error())
+	case errors.Is(err, storage.ErrClosed):
 		return &api.Error{Status: http.StatusServiceUnavailable, Msg: err.Error()}
 	}
 	return err

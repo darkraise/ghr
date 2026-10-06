@@ -34,7 +34,10 @@ type fakeManager struct {
 	degraded  string
 	updateErr error // returned by QueueUpdate and CancelUpdate
 	updates   []string
-	paused    time.Time // returned by PausedUntil
+	paused    time.Time        // returned by PausedUntil
+	scopes    []string         // scopes StartPruneScope was asked for
+	lastPrune *model.LastPrune // returned by LastPrune
+	diskPct   int              // Status().DiskPct
 }
 
 func (f *fakeManager) PausedUntil() time.Time { return f.paused }
@@ -49,13 +52,16 @@ func (f *fakeManager) CancelUpdate() error {
 	return f.updateErr
 }
 
-func (f *fakeManager) StartPrune() error {
+func (f *fakeManager) StartPruneScope(scope string) error {
 	f.prunes++
+	f.scopes = append(f.scopes, scope)
 	return f.pruneErr
 }
 
+func (f *fakeManager) LastPrune() *model.LastPrune { return f.lastPrune }
+
 func (f *fakeManager) Status() model.Status {
-	return model.Status{Instances: f.insts, Degraded: f.degraded != "", DegradedReason: f.degraded}
+	return model.Status{Instances: f.insts, Degraded: f.degraded != "", DegradedReason: f.degraded, DiskPct: f.diskPct}
 }
 func (f *fakeManager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 	return model.LogChunk{}, runner.ErrUnknownRunner(id)
@@ -211,7 +217,8 @@ func newBackend(t *testing.T) (*Backend, *fakeManager, *fakeGH) {
 	}}
 	b := &Backend{
 		Store: newStore(t), M: m, GH: gh, Events: events.New(),
-		Hist: &history.Store{Path: filepath.Join(t.TempDir(), "h.jsonl")},
+		Hist:  &history.Store{Path: filepath.Join(t.TempDir(), "h.jsonl")},
+		Space: &fakeStorage{},
 		CheckToken: func(ctx context.Context, token, repo string) error {
 			if token == "bad" {
 				return errors.New("401 Bad credentials")
