@@ -13,12 +13,13 @@ func TestClearPathKeepsTheOwner(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("only root can give a directory to another user")
 	}
-	dir := filepath.Join(t.TempDir(), ".npm")
+	home := t.TempDir()
+	dir := filepath.Join(home, ".npm")
 	writeFile(t, filepath.Join(dir, "f"), "x")
 	if err := os.Chown(dir, 12345, 12345); err != nil {
 		t.Fatal(err)
 	}
-	if err := clearPath(dir, "op1"); err != nil {
+	if err := clearIn(t, home, ".npm"); err != nil {
 		t.Fatal(err)
 	}
 	fi, err := os.Lstat(dir)

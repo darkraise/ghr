@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 )
 
@@ -29,6 +28,17 @@ func entries(t *testing.T, dir string) []string {
 		out = append(out, e.Name())
 	}
 	return out
+}
+
+// clearIn clears rel, slash-separated and relative to home, through a root at home.
+func clearIn(t *testing.T, home, rel string) error {
+	t.Helper()
+	r, err := os.OpenRoot(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	return clearPath(r, filepath.FromSlash(rel), "op1")
 }
 
 func TestCacheTable(t *testing.T) {
@@ -77,7 +87,7 @@ func TestClearPathLeavesAnEmptyDirectoryWithTheOldMode(t *testing.T) {
 	if err := os.Chmod(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := clearPath(dir, "op1"); err != nil {
+	if err := clearIn(t, home, ".nuget/packages"); err != nil {
 		t.Fatal(err)
 	}
 	fi, err := os.Stat(dir)
@@ -96,13 +106,19 @@ func TestClearPathLeavesAnEmptyDirectoryWithTheOldMode(t *testing.T) {
 }
 
 func TestRecreateLeavesADirectoryAJobAlreadyMade(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), ".npm")
+	home := t.TempDir()
+	dir := filepath.Join(home, ".npm")
 	writeFile(t, filepath.Join(dir, "_cacache", "index"), "new")
 	fi, err := os.Stat(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := recreate(dir, fi); err != nil {
+	r, err := os.OpenRoot(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if err := recreate(r, ".npm", fi); err != nil {
 		t.Fatalf("an existing directory is not a failure: %v", err)
 	}
 	if got := entries(t, dir); len(got) != 1 || got[0] != "_cacache" {
@@ -127,7 +143,7 @@ func TestClearPathDeletesReadOnlyFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := clearPath(dir, "op1"); err != nil {
+	if err := clearIn(t, home, "go/pkg/mod"); err != nil {
 		t.Fatal(err)
 	}
 	if got := entries(t, dir); len(got) != 0 {
@@ -146,7 +162,7 @@ func TestClearPathRemovesASymlinkNotItsTarget(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(dir, "link")); err != nil {
 		t.Skip("no symlinks here:", err)
 	}
-	if err := clearPath(dir, "op1"); err != nil {
+	if err := clearIn(t, home, ".npm"); err != nil {
 		t.Fatal(err)
 	}
 	if got := entries(t, dir); len(got) != 0 {
@@ -164,7 +180,7 @@ func TestClearPathOnASymlinkedCacheRemovesOnlyTheLink(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(home, ".npm")); err != nil {
 		t.Skip("no symlinks here:", err)
 	}
-	if err := clearPath(filepath.Join(home, ".npm"), "op1"); err != nil {
+	if err := clearIn(t, home, ".npm"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(home, ".npm")); !os.IsNotExist(err) {
@@ -175,7 +191,7 @@ func TestClearPathOnASymlinkedCacheRemovesOnlyTheLink(t *testing.T) {
 	}
 }
 
-func TestClearCacheRefusesASymlinkedParent(t *testing.T) {
+func TestClearCacheRefusesALinkOutOfTheHome(t *testing.T) {
 	outside := t.TempDir()
 	writeFile(t, filepath.Join(outside, "pip", "wheel"), "keep")
 	home := t.TempDir()
@@ -183,23 +199,41 @@ func TestClearCacheRefusesASymlinkedParent(t *testing.T) {
 		t.Skip("no symlinks here:", err)
 	}
 	c, _ := cacheByName("pip")
-	if err := clearCache(home, c, "op1"); err == nil || !strings.Contains(err.Error(), "is a symlink") {
-		t.Fatalf("err %v", err)
+	if err := clearCache(home, c, "op1"); err == nil {
+		t.Fatal("cleared through a link out of the home")
 	}
 	if _, err := os.Stat(filepath.Join(outside, "pip", "wheel")); err != nil {
 		t.Fatalf("cleared through the link: %v", err)
 	}
 	writeFile(t, filepath.Join(outside, ".pip"+clearingTag+"op9", "x"), "keep")
-	if err := sweepClearing(home); err != nil {
-		t.Fatal(err)
+	if err := sweepClearing(home); err == nil {
+		t.Fatal("swept through a link out of the home without a word")
 	}
 	if _, err := os.Stat(filepath.Join(outside, ".pip"+clearingTag+"op9", "x")); err != nil {
 		t.Fatalf("swept through the link: %v", err)
 	}
 }
 
+func TestClearCacheFollowsALinkInsideTheHome(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, "elsewhere", "pip", "wheel"), "x")
+	if err := os.Symlink("elsewhere", filepath.Join(home, ".cache")); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	c, _ := cacheByName("pip")
+	if err := clearCache(home, c, "op1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := entries(t, filepath.Join(home, "elsewhere", "pip")); len(got) != 0 {
+		t.Fatalf("not empty: %v", got)
+	}
+	if fi, err := os.Lstat(filepath.Join(home, ".cache")); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link itself changed: %v", err)
+	}
+}
+
 func TestClearPathMissingIsNothing(t *testing.T) {
-	if err := clearPath(filepath.Join(t.TempDir(), "absent"), "op1"); err != nil {
+	if err := clearIn(t, t.TempDir(), "absent"); err != nil {
 		t.Fatal(err)
 	}
 }

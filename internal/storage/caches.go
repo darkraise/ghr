@@ -5,7 +5,7 @@ package storage
 
 import (
 	"errors"
-	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,91 +60,62 @@ func (c Cache) present(home string) bool {
 
 const clearingTag = ".ghr-clearing-"
 
-// clearPath empties path so a job sees either the old tree or an empty
+// clearPath empties rel so a job sees either the old tree or an empty
 // directory, never a half-deleted one: rename it aside (atomic), recreate the
-// empty directory with the old owner and mode, then delete the renamed tree.
-// The daemon runs as root, so read-only files (Go's module cache) need no
-// chmod, and os.RemoveAll removes a symlink without following it. A path
-// that is itself a symlink is removed and not recreated.
-func clearPath(path, opID string) error {
-	fi, err := os.Lstat(path)
-	if os.IsNotExist(err) {
+// empty directory with the old owner and mode, then delete the renamed tree. The daemon
+// runs as root, so read-only files (Go's module cache) need no chmod, and
+// RemoveAll removes a symlink without following it. A path that is itself a
+// symlink is removed and not recreated.
+func clearPath(r *os.Root, rel, opID string) error {
+	fi, err := r.Lstat(rel)
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	aside := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+clearingTag+opID)
-	if err := os.Rename(path, aside); err != nil {
+	aside := filepath.Join(filepath.Dir(rel), "."+filepath.Base(rel)+clearingTag+opID)
+	if err := r.Rename(rel, aside); err != nil {
 		return err
 	}
 	var recreateErr error
 	if fi.IsDir() {
-		recreateErr = recreate(path, fi)
+		recreateErr = recreate(r, rel, fi)
 	}
 	// The renamed tree goes whether or not the directory came back: a failed
 	// recreate must not strand it until the next daemon start.
-	return errors.Join(recreateErr, os.RemoveAll(aside))
+	return errors.Join(recreateErr, r.RemoveAll(aside))
 }
 
 // recreate makes the empty directory a clear leaves behind. A directory that
 // already exists was made by a job that ran in between, and stays untouched.
-func recreate(path string, old os.FileInfo) error {
-	if err := os.Mkdir(path, old.Mode().Perm()); err != nil {
-		if os.IsExist(err) {
+func recreate(r *os.Root, rel string, old os.FileInfo) error {
+	perm := old.Mode().Perm()
+	if err := r.Mkdir(rel, perm); err != nil {
+		if errors.Is(err, fs.ErrExist) {
 			return nil
 		}
 		return err
 	}
-	// Mkdir applies the umask. Chmod through a root at the parent: a job
-	// can swap the new directory for a symlink, which os.Chmod would
-	// follow anywhere as root, while Root.Chmod refuses to leave the parent.
-	r, err := os.OpenRoot(filepath.Dir(path))
-	if err != nil {
+	// Mkdir applies the umask.
+	if err := r.Chmod(rel, perm); err != nil {
 		return err
 	}
-	err = r.Chmod(filepath.Base(path), old.Mode().Perm())
-	r.Close()
-	if err != nil {
-		return err
-	}
-	return chownLike(path, old)
+	return chownLike(r, rel, old)
 }
 
-// noLinkedParent refuses a path below home when a directory between home and
-// the path is a symlink: root must not rename or delete through a link a job
-// planted (clearPath already removes a link at the path itself unfollowed).
-func noLinkedParent(home, path string) error {
-	rel, err := filepath.Rel(home, filepath.Dir(path))
-	if err != nil || rel == "." {
-		return err
-	}
-	cur := home
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
-		cur = filepath.Join(cur, part)
-		fi, err := os.Lstat(cur)
-		if os.IsNotExist(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%s is a symlink; not clearing through it", cur)
-		}
-	}
-	return nil
-}
-
-// clearCache clears every existing path of c.
+// clearCache clears every existing path of c. Every step goes through a root
+// at home, so root never renames or deletes through a symlink a job planted
+// that leads out of the home, even one swapped in mid-clear.
 func clearCache(home string, c Cache, opID string) error {
+	r, err := os.OpenRoot(home)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
 	var errs []error
-	for _, p := range c.abs(home) {
-		if err := noLinkedParent(home, p); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if err := clearPath(p, opID); err != nil {
+	for _, p := range c.Paths {
+		if err := clearPath(r, filepath.FromSlash(p), opID); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -154,20 +125,25 @@ func clearCache(home string, c Cache, opID string) error {
 // sweepClearing deletes trees a clear renamed aside but did not finish
 // deleting, as a daemon stop mid-clear leaves them.
 func sweepClearing(home string) error {
+	r, err := os.OpenRoot(home)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer r.Close()
 	seen := map[string]bool{}
 	var errs []error
 	for _, c := range Caches {
-		for _, p := range c.abs(home) {
-			dir := filepath.Dir(p)
+		for _, p := range c.Paths {
+			dir := filepath.Dir(filepath.FromSlash(p))
 			if seen[dir] {
 				continue
 			}
 			seen[dir] = true
-			if noLinkedParent(home, p) != nil {
-				continue
-			}
-			es, err := os.ReadDir(dir)
-			if os.IsNotExist(err) {
+			es, err := readDirIn(r, dir)
+			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
 			if err != nil {
@@ -176,7 +152,7 @@ func sweepClearing(home string) error {
 			}
 			for _, e := range es {
 				if strings.HasPrefix(e.Name(), ".") && strings.Contains(e.Name(), clearingTag) {
-					if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
+					if err := r.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
 						errs = append(errs, err)
 					}
 				}
@@ -184,4 +160,13 @@ func sweepClearing(home string) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func readDirIn(r *os.Root, dir string) ([]fs.DirEntry, error) {
+	f, err := r.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return f.ReadDir(-1)
 }

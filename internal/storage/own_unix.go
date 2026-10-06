@@ -7,13 +7,13 @@ import (
 	"syscall"
 )
 
-// chownLike gives path the owner and group fi records, without following a symlink.
-func chownLike(path string, fi os.FileInfo) error {
+// chownLike gives rel the owner and group fi records, without following a symlink.
+func chownLike(r *os.Root, rel string, fi os.FileInfo) error {
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
 		return nil
 	}
-	return os.Lchown(path, int(st.Uid), int(st.Gid))
+	return r.Lchown(rel, int(st.Uid), int(st.Gid))
 }
 
 // allocated is the space fi takes on disk, as du counts it.
