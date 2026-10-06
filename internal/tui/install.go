@@ -81,6 +81,9 @@ func (m Model) openInstall() (tea.Model, tea.Cmd) {
 // fetchChoices loads the versions the selected tool offers into d.
 func (m Model) fetchChoices(d *installDialog) tea.Cmd {
 	tool := d.tool.Value().Text
+	if tool != d.shown {
+		d.picker = ui.NewPicker(instPick, pickerRows)
+	}
 	d.shown, d.loading, d.listErr, d.choices = tool, true, "", nil
 	d.picker.SetOptions(nil)
 	d.sync(m.connected)
@@ -102,10 +105,12 @@ func (m Model) gotChoices(msg choicesMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		d.listErr = errText(msg.err)
 	} else {
-		d.choices = msg.cs
+		d.choices = make([]model.ToolchainChoice, len(msg.cs))
 		opts := make([]ui.PickOption, len(msg.cs))
 		for i, c := range msg.cs {
-			opts[i] = ui.PickOption{Label: clean(c.Version)}
+			c.Spec, c.Version = clean(c.Spec), clean(c.Version)
+			d.choices[i] = c
+			opts[i] = ui.PickOption{Label: c.Version}
 			if c.LTS {
 				opts[i].Badge = ui.Badge("lts", ui.BadgeOK)
 			}
@@ -129,7 +134,7 @@ func (m Model) retryChoices() (tea.Model, tea.Cmd) {
 func (d *installDialog) target() string {
 	if o, ok := d.picker.Picked(); ok {
 		for _, c := range d.choices {
-			if clean(c.Version) == o.Label {
+			if c.Version == o.Label {
 				return c.Spec
 			}
 		}
@@ -235,11 +240,11 @@ func (m Model) installed(msg installedMsg) (tea.Model, tea.Cmd) {
 	mine := m.overlay == ovInstall && m.inst == msg.d
 	if msg.err != nil {
 		if mine {
-			m.inst.busy, m.inst.err = false, clean(msg.err.Error())
+			m.inst.busy, m.inst.err = false, errText(msg.err)
 			m.inst.sync(m.connected)
 			return m, nil
 		}
-		m.toast.Show(clean(msg.err.Error()), true, m.now())
+		m.toast.Show(errText(msg.err), true, m.now())
 		return m, nil
 	}
 	if mine {

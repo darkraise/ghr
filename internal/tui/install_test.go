@@ -4,7 +4,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/model"
 )
 
@@ -77,6 +79,45 @@ func TestInstallDialogErrorsStayInside(t *testing.T) {
 	m.inst.group.Focus(instPick) // the retried list replaced Retry, so focus moved off it
 	m = feed(m, keys("2", "2", "enter", "tab", "enter")...)
 	if v := m.View(); m.overlay != ovInstall || !strings.Contains(v, "✖ unknown tool") {
+		t.Fatalf("install error:\n%s", v)
+	}
+}
+
+func TestInstallDialogCleansTheDaemonsVersions(t *testing.T) {
+	dirty := "24.9.0\x1b]0;pwned\a"
+	c := &fakeClient{choices: map[string][]model.ToolchainChoice{"node": {{Spec: dirty, Version: dirty}}}}
+	m := click(t, onStorage(t, c, 120, 40), storeInstall)
+	m = feed(m, keys("tab", "enter")...)
+	if v := m.View(); strings.Contains(v, "pwned") || strings.ContainsAny(v, "\x1b\a") {
+		t.Fatalf("an escape sequence reached the dialog:\n%q", v)
+	}
+	m = feed(m, keys("tab", "enter")...)
+	if got := strings.Join(c.actions(), "|"); got != "install node 24.9.0" {
+		t.Fatalf("actions %q", got)
+	}
+	if v := m.View(); strings.Contains(v, "pwned") || strings.ContainsAny(v, "\x1b\a") {
+		t.Fatalf("an escape sequence reached the toast:\n%q", v)
+	}
+}
+
+func TestInstallDialogChangingToolDropsTheTypedFilter(t *testing.T) {
+	c := &fakeClient{choices: nodeChoices()}
+	m := click(t, onStorage(t, c, 120, 40), storeInstall)
+	m = feed(m, keys("tab", "2", "2", "shift+tab", "right")...)
+	if got := m.inst.target(); got != "" || m.inst.ok.Focusable() {
+		t.Fatalf("a node filter survived the switch to python: target %q, install enabled %v", got, m.inst.ok.Focusable())
+	}
+	if v := m.View(); !strings.Contains(v, "3.13.7") {
+		t.Fatalf("the python list is filtered by the old text:\n%s", v)
+	}
+}
+
+func TestInstallDialogRejectionKeepsTheRetryTime(t *testing.T) {
+	retry := now.Add(time.Hour)
+	c := &fakeClient{choices: nodeChoices(), installErr: &api.Error{Status: 429, Msg: "rate limited", RetryAt: retry}}
+	m := click(t, onStorage(t, c, 120, 40), storeInstall)
+	m = feed(m, keys("tab", "2", "2", "enter", "tab", "enter")...)
+	if v := m.View(); !strings.Contains(v, "✖ rate limited, try again after "+retry.Local().Format("15:04")) {
 		t.Fatalf("install error:\n%s", v)
 	}
 }
