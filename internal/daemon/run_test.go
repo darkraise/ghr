@@ -487,3 +487,35 @@ func TestRunServesStorageAndSweepsTheToolCache(t *testing.T) {
 		t.Fatalf("unknown tool: %v", err)
 	}
 }
+
+func TestRunMeasuresAfterAPrune(t *testing.T) {
+	o := testOptions(t, cfgYAML)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, o) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+		}
+	}()
+	c := api.NewUnixClient(o.Socket)
+	var first time.Time
+	waitFor(t, "the first measurement", func() bool {
+		st, err := c.Storage(context.Background())
+		if err != nil || st.MeasuredAt == nil || st.Measuring {
+			return false
+		}
+		first = *st.MeasuredAt
+		return true
+	})
+	time.Sleep(10 * time.Millisecond) // so the next measurement's time differs on a coarse clock
+	if err := c.PruneScope(context.Background(), runner.ScopeBuildCacheAll); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "a measurement after the prune", func() bool {
+		st, err := c.Storage(context.Background())
+		return err == nil && st.MeasuredAt != nil && st.MeasuredAt.After(first)
+	})
+}
