@@ -22,6 +22,15 @@ describe("Runners page", () => {
     expect(idle.getByText("idle")).toBeInTheDocument()
   })
 
+  it("names each row's buttons after its runner", async () => {
+    mockApi(authedRoutes())
+    renderApp("/runners")
+    const row = await rowOf("aaaaaa")
+    expect(row.getByRole("button", { name: "Logs for runner aaaaaa" })).toHaveTextContent("Logs")
+    expect(row.getByRole("button", { name: "Copy ID of runner aaaaaa" })).toHaveTextContent("Copy ID")
+    expect(row.getByRole("button", { name: "Stop runner aaaaaa" })).toHaveTextContent("Stop")
+  })
+
   it("says when no runner is up", async () => {
     mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, instances: [], repos: [] } }))
     renderApp("/runners")
@@ -46,12 +55,12 @@ describe("Runners page", () => {
     const { user } = renderApp("/runners")
     const row = await rowOf("aaaaaa")
 
-    await user.click(row.getByRole("button", { name: "Stop" }))
+    await user.click(row.getByRole("button", { name: "Stop runner aaaaaa" }))
     expect(await screen.findByText("Runner aaaaaa is running a job. Stop it?")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Cancel" }))
     expect(calls.some((c) => c.method === "DELETE")).toBe(false)
 
-    await user.click(row.getByRole("button", { name: "Stop" }))
+    await user.click(row.getByRole("button", { name: "Stop runner aaaaaa" }))
     await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Stop" }))
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/runners/aaaaaa")).toBe(true))
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
@@ -61,8 +70,34 @@ describe("Runners page", () => {
   it("asks plainly before stopping an idle runner", async () => {
     mockApi(authedRoutes())
     const { user } = renderApp("/runners")
-    await user.click((await rowOf("bbbbbb")).getByRole("button", { name: "Stop" }))
+    await user.click((await rowOf("bbbbbb")).getByRole("button", { name: "Stop runner bbbbbb" }))
     expect(await screen.findByText("Stop runner bbbbbb?")).toBeInTheDocument()
+  })
+
+  it("follows a runner that picks up a job while the dialog is open", { timeout: 10_000 }, async () => {
+    let busy = false
+    mockApi(
+      authedRoutes({
+        "GET /api/status": () => ({
+          ...fixtures.status,
+          instances: fixtures.status.instances.map((i) => (busy && i.id === "bbbbbb" ? { ...i, state: "busy" } : i)),
+        }),
+      }),
+    )
+    const { user } = renderApp("/runners")
+    await user.click((await rowOf("bbbbbb")).getByRole("button", { name: "Stop runner bbbbbb" }))
+    expect(await screen.findByText("Stop runner bbbbbb?")).toBeInTheDocument()
+    busy = true
+    expect(await screen.findByText("Runner bbbbbb is running a job. Stop it?", {}, { timeout: 3000 })).toBeInTheDocument()
+  })
+
+  it("keeps the runner's name in the dialog while it closes", async () => {
+    mockApi(authedRoutes())
+    const { user } = renderApp("/runners")
+    await user.click((await rowOf("bbbbbb")).getByRole("button", { name: "Stop runner bbbbbb" }))
+    await screen.findByText("Stop runner bbbbbb?")
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.queryByText(/undefined/)).toBeNull()
   })
 
   it("copies a runner ID", async () => {
@@ -72,7 +107,7 @@ describe("Runners page", () => {
     Object.defineProperty(window, "isSecureContext", { value: true, configurable: true })
     const writeText = vi.fn(async () => {})
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
-    await user.click((await rowOf("aaaaaa")).getByRole("button", { name: "Copy ID" }))
+    await user.click((await rowOf("aaaaaa")).getByRole("button", { name: "Copy ID of runner aaaaaa" }))
     expect(writeText).toHaveBeenCalledWith("aaaaaa")
     expect((await screen.findAllByText("copied aaaaaa")).length).toBeGreaterThan(0)
     Reflect.deleteProperty(navigator, "clipboard")
@@ -81,7 +116,7 @@ describe("Runners page", () => {
   it("opens the log tab from Logs", async () => {
     mockApi(authedRoutes())
     const { user, router } = renderApp("/runners")
-    await user.click((await rowOf("aaaaaa")).getByRole("button", { name: "Logs" }))
+    await user.click((await rowOf("aaaaaa")).getByRole("button", { name: "Logs for runner aaaaaa" }))
     await waitFor(() => expect(router.state.location.pathname).toBe("/runners/aaaaaa"))
     expect(router.state.location.search).toEqual({ tab: "log" })
   })

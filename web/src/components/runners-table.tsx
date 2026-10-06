@@ -16,7 +16,7 @@ import { toast } from "darkraise-ui/components/sonner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "darkraise-ui/components/table"
 import { useState } from "react"
 import { api } from "@/api/client"
-import { keys } from "@/api/hooks"
+import { keys, useStatus } from "@/api/hooks"
 import type { InstanceStatus, Status } from "@/api/types"
 import { StateBadge } from "@/components/state-badge"
 import { copyText } from "@/lib/clipboard"
@@ -76,14 +76,15 @@ export function RunnersTable({ status, actions }: { status: Status; actions: boo
                     <Button
                       size="sm"
                       variant="outline"
+                      aria-label={`Logs for runner ${i.id}`}
                       onClick={() => void navigate({ to: "/runners/$id", params: { id: i.id }, search: { tab: "log" } })}
                     >
                       Logs
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => void copy(i.id)}>
+                    <Button size="sm" variant="outline" aria-label={`Copy ID of runner ${i.id}`} onClick={() => void copy(i.id)}>
                       Copy ID
                     </Button>
-                    <Button size="sm" variant="destructive" onClick={() => setStopping(i)}>
+                    <Button size="sm" variant="destructive" aria-label={`Stop runner ${i.id}`} onClick={() => setStopping(i)}>
                       Stop
                     </Button>
                   </div>
@@ -114,6 +115,12 @@ export function RunnersTable({ status, actions }: { status: Status; actions: boo
 
 export function StopRunnerDialog({ instance, onClose }: { instance: InstanceStatus | null; onClose: () => void }) {
   const queryClient = useQueryClient()
+  const status = useStatus()
+  // Holds the runner while the dialog animates closed, and reads its live
+  // state so the wording follows a runner that picks up a job meanwhile.
+  const [held, setHeld] = useState<InstanceStatus | null>(instance)
+  if (instance !== null && instance.id !== held?.id) setHeld(instance)
+  const live = held ? (status.data?.instances.find((i) => i.id === held.id) ?? held) : null
   const stop = useMutation({
     mutationFn: (id: string) => api.stopRunner(id),
     onSuccess: (_data, id) => {
@@ -121,7 +128,7 @@ export function StopRunnerDialog({ instance, onClose }: { instance: InstanceStat
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.status }),
   })
-  const busy = instance?.state === "busy"
+  const busy = live?.state === "busy"
   return (
     <AlertDialog
       open={instance !== null}
@@ -131,9 +138,7 @@ export function StopRunnerDialog({ instance, onClose }: { instance: InstanceStat
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>
-            {busy ? `Runner ${instance?.id} is running a job. Stop it?` : `Stop runner ${instance?.id}?`}
-          </AlertDialogTitle>
+          <AlertDialogTitle>{busy ? `Runner ${live?.id} is running a job. Stop it?` : `Stop runner ${live?.id}?`}</AlertDialogTitle>
           <AlertDialogDescription>
             {busy ? "The job it is running fails." : "ghr stops the runner and cleans it up."}
           </AlertDialogDescription>
@@ -143,7 +148,7 @@ export function StopRunnerDialog({ instance, onClose }: { instance: InstanceStat
           <AlertDialogAction
             data-variant="destructive"
             onClick={() => {
-              if (instance) stop.mutate(instance.id)
+              if (live) stop.mutate(live.id)
             }}
           >
             Stop
