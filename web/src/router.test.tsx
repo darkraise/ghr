@@ -31,7 +31,7 @@ describe("routes", () => {
     ["/repositories", "Repositories"],
     ["/storage", "Storage"],
     ["/settings", "Settings"],
-    ["/runners/aaaaaa", "Runner"],
+    ["/runners/aaaaaa", "aaaaaa"],
   ])("serves %s", async (path, title) => {
     mockApi(authed)
     renderAt(path)
