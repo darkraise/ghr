@@ -95,6 +95,21 @@ func TestClearPathLeavesAnEmptyDirectoryWithTheOldMode(t *testing.T) {
 	}
 }
 
+func TestRecreateLeavesADirectoryAJobAlreadyMade(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".npm")
+	writeFile(t, filepath.Join(dir, "_cacache", "index"), "new")
+	fi, err := os.Stat(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recreate(dir, fi); err != nil {
+		t.Fatalf("an existing directory is not a failure: %v", err)
+	}
+	if got := entries(t, dir); len(got) != 1 || got[0] != "_cacache" {
+		t.Fatalf("a job's files were touched: %v", got)
+	}
+}
+
 func TestClearPathDeletesReadOnlyFiles(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("read-only files block deletion on Windows; the daemon runs on Linux")

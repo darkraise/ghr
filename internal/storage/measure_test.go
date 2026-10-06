@@ -41,6 +41,19 @@ func TestWalkSumsSizeFilesAndNewestTime(t *testing.T) {
 	}
 }
 
+func TestWalkStopsWhenCancelled(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"a", "b", "c"} {
+		writeFile(t, filepath.Join(dir, f), "x")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	u, ok, err := walkCtx(ctx, dir)
+	if !ok || !errors.Is(err, context.Canceled) || u.Files == 3 {
+		t.Fatalf("usage %+v, ok %v, err %v", u, ok, err)
+	}
+}
+
 func TestWalkMissingPath(t *testing.T) {
 	u, ok, err := walk(filepath.Join(t.TempDir(), "absent"))
 	if ok || err != nil || u != (usage{}) {

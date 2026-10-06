@@ -78,27 +78,37 @@ func clearPath(path, opID string) error {
 	if err := os.Rename(path, aside); err != nil {
 		return err
 	}
+	var recreateErr error
 	if fi.IsDir() {
-		if err := os.Mkdir(path, fi.Mode().Perm()); err != nil {
-			return err
-		}
-		// Mkdir applies the umask. Chmod through a root at the parent: a job
-		// can swap the new directory for a symlink, which os.Chmod would
-		// follow anywhere as root, while Root.Chmod refuses to leave the parent.
-		r, err := os.OpenRoot(filepath.Dir(path))
-		if err != nil {
-			return err
-		}
-		err = r.Chmod(filepath.Base(path), fi.Mode().Perm())
-		r.Close()
-		if err != nil {
-			return err
-		}
-		if err := chownLike(path, fi); err != nil {
-			return err
-		}
+		recreateErr = recreate(path, fi)
 	}
-	return os.RemoveAll(aside)
+	// The renamed tree goes whether or not the directory came back: a failed
+	// recreate must not strand it until the next daemon start.
+	return errors.Join(recreateErr, os.RemoveAll(aside))
+}
+
+// recreate makes the empty directory a clear leaves behind. A directory that
+// already exists was made by a job that ran in between, and stays untouched.
+func recreate(path string, old os.FileInfo) error {
+	if err := os.Mkdir(path, old.Mode().Perm()); err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
+		return err
+	}
+	// Mkdir applies the umask. Chmod through a root at the parent: a job
+	// can swap the new directory for a symlink, which os.Chmod would
+	// follow anywhere as root, while Root.Chmod refuses to leave the parent.
+	r, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	err = r.Chmod(filepath.Base(path), old.Mode().Perm())
+	r.Close()
+	if err != nil {
+		return err
+	}
+	return chownLike(path, old)
 }
 
 // noLinkedParent refuses a path below home when a directory between home and

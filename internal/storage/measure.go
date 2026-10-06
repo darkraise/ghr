@@ -41,7 +41,11 @@ type usage struct {
 // when path does not exist. Entries that vanish mid-walk, as a running job
 // deletes them, are skipped; the first other error is returned with the
 // partial sums.
-func walk(path string) (usage, bool, error) {
+func walk(path string) (usage, bool, error) { return walkCtx(context.Background(), path) }
+
+// walkCtx stops with ctx's error when ctx ends, so a daemon shutting down is
+// not held by a walk of a module cache with hundreds of thousands of files.
+func walkCtx(ctx context.Context, path string) (usage, bool, error) {
 	var u usage
 	if _, err := os.Lstat(path); os.IsNotExist(err) {
 		return u, false, nil
@@ -50,6 +54,9 @@ func walk(path string) (usage, bool, error) {
 	}
 	var first error
 	walkErr := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err == nil {
 			var fi fs.FileInfo
 			if fi, err = d.Info(); err == nil {
@@ -111,7 +118,7 @@ func measure(ctx context.Context, tools Toolchains, docker Docker, home string, 
 	installed, err := tools.Installed()
 	note("toolchains", err)
 	for _, in := range installed {
-		u, _, err := walk(in.Path)
+		u, _, err := walkCtx(ctx, in.Path)
 		note(in.Tool+" "+in.Version, err)
 		m.toolchains = append(m.toolchains, model.Toolchain{Tool: in.Tool, Version: in.Version, Arch: in.Arch,
 			Path: in.Path, Bytes: u.Bytes, InstalledAt: in.InstalledAt})
@@ -119,14 +126,14 @@ func measure(ctx context.Context, tools Toolchains, docker Docker, home string, 
 	other, err := tools.Other()
 	note("tool cache", err)
 	for _, name := range other {
-		u, _, err := walk(filepath.Join(tools.Root(), name))
+		u, _, err := walkCtx(ctx, filepath.Join(tools.Root(), name))
 		note(name, err)
 		m.other = append(m.other, model.Folder{Name: name, Bytes: u.Bytes})
 	}
 	for _, c := range Caches {
 		pc := model.PackageCache{Name: c.Name, Label: c.Label, Paths: c.abs(home)}
 		for _, p := range pc.Paths {
-			u, ok, err := walk(p)
+			u, ok, err := walkCtx(ctx, p)
 			note(c.Name, err)
 			if !ok {
 				continue
