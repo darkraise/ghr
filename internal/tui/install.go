@@ -172,10 +172,16 @@ func (m Model) installKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if _, onButton := d.group.Focused().(*ui.Button); onButton && k.String() == "enter" {
 		return m.pressed(d.group.FocusedID())
 	}
-	before := d.tool.Value().Text
+	before, onPicker := d.tool.Value().Text, d.group.FocusedID() == instPick
 	if ok, cmd := d.group.Key(k); ok {
 		if d.tool.Value().Text != before {
 			return m, tea.Batch(cmd, m.fetchChoices(d))
+		}
+		// A pick advances focus while Install is still disabled, which lands on
+		// Cancel; once the pick enables Install, focus belongs there.
+		if onPicker && d.group.FocusedID() != instPick {
+			d.sync(m.connected)
+			d.group.Focus(instOK)
 		}
 		return m, cmd
 	}

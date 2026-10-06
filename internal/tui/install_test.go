@@ -30,11 +30,14 @@ func TestInstallDialogInstallsAPickedVersion(t *testing.T) {
 			t.Errorf("missing %q:\n%s", want, v)
 		}
 	}
-	m = feed(m, keys("tab", "2", "2", "enter")...) // the pick moves focus on to Cancel
+	m = feed(m, keys("tab", "2", "2", "enter")...)
 	if v := m.View(); strings.Contains(v, "24.9.0") || !strings.Contains(v, "22.10.0") {
 		t.Fatalf("filter 22:\n%s", v)
 	}
-	m = feed(m, keys("tab", "enter")...)
+	if f := m.inst.group.FocusedID(); f != instOK {
+		t.Fatalf("after a pick focus is on %q, want Install", f)
+	}
+	m = feed(m, key("enter"))
 	if got := strings.Join(c.actions(), "|"); got != "install node 22.11.0" || m.overlay != ovNone {
 		t.Fatalf("actions %q overlay %v", got, m.overlay)
 	}
@@ -77,7 +80,7 @@ func TestInstallDialogErrorsStayInside(t *testing.T) {
 	}
 	c.installErr = errors.New("unknown tool")
 	m.inst.group.Focus(instPick) // the retried list replaced Retry, so focus moved off it
-	m = feed(m, keys("2", "2", "enter", "tab", "enter")...)
+	m = feed(m, keys("2", "2", "enter", "enter")...)
 	if v := m.View(); m.overlay != ovInstall || !strings.Contains(v, "✖ unknown tool") {
 		t.Fatalf("install error:\n%s", v)
 	}
@@ -91,7 +94,7 @@ func TestInstallDialogCleansTheDaemonsVersions(t *testing.T) {
 	if v := m.View(); strings.Contains(v, "pwned") || strings.ContainsAny(v, "\x1b\a") {
 		t.Fatalf("an escape sequence reached the dialog:\n%q", v)
 	}
-	m = feed(m, keys("tab", "enter")...)
+	m = feed(m, key("enter"))
 	if got := strings.Join(c.actions(), "|"); got != "install node 24.9.0" {
 		t.Fatalf("actions %q", got)
 	}
@@ -116,7 +119,7 @@ func TestInstallDialogRejectionKeepsTheRetryTime(t *testing.T) {
 	retry := now.Add(time.Hour)
 	c := &fakeClient{choices: nodeChoices(), installErr: &api.Error{Status: 429, Msg: "rate limited", RetryAt: retry}}
 	m := click(t, onStorage(t, c, 120, 40), storeInstall)
-	m = feed(m, keys("tab", "2", "2", "enter", "tab", "enter")...)
+	m = feed(m, keys("tab", "2", "2", "enter", "enter")...)
 	if v := m.View(); !strings.Contains(v, "✖ rate limited, try again after "+retry.Local().Format("15:04")) {
 		t.Fatalf("install error:\n%s", v)
 	}
