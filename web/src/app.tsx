@@ -17,7 +17,7 @@ export function App({ router, queryClient }: { router: AppRouter; queryClient: Q
       redirecting = true
       queryClient.clear()
       void router
-        .navigate({ to: "/login", search: href === "/" ? {} : { redirect: href } })
+        .navigate({ to: "/login", search: href === "/" ? {} : { redirect: href }, ignoreBlocker: true })
         .finally(() => {
           redirecting = false
         })

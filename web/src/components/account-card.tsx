@@ -49,7 +49,7 @@ export function AccountCard() {
       // a session that already ended still lands on the login page
     }
     queryClient.clear()
-    await navigate({ to: "/login" })
+    await navigate({ to: "/login", ignoreBlocker: true })
   }
 
   return (

@@ -126,4 +126,25 @@ describe("Account card", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
     expect(calls.some((c) => c.method === "POST" && c.path === "/auth/logout")).toBe(true)
   })
+
+  it("logs out without asking about unsaved edits", async () => {
+    let authenticated = true
+    mockApi(
+      authedRoutes({
+        "GET /api/token": fixtures.token,
+        "GET /auth/state": () => ({ setup_required: false, authenticated }),
+        "POST /auth/logout": () => {
+          authenticated = false
+          return noContent()
+        },
+      }),
+    )
+    const { user, router } = renderApp("/settings")
+    const poll = await screen.findByLabelText("Poll interval")
+    await user.clear(poll)
+    await user.type(poll, "15s")
+    await user.click(screen.getByRole("button", { name: "Log out" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
+  })
 })

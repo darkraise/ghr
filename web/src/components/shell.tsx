@@ -52,7 +52,7 @@ export function Shell() {
       // a session that already ended still lands on the login page
     }
     queryClient.clear()
-    await navigate({ to: "/login" })
+    await navigate({ to: "/login", ignoreBlocker: true })
   }
 
   const unreachable = status.isError && !(status.error instanceof ApiError && status.error.status === 401)

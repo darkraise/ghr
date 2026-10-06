@@ -102,7 +102,7 @@ describe("login page", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/history"))
   })
 
-  it("ignores a redirect that leaves the site", async () => {
+  it.each(["//evil.example/x", "https://evil.example/x", "/\\evil.example/x"])("ignores the redirect %s that leaves the site", async (target) => {
     let done = false
     mockApi(
       authedRoutes({
@@ -113,7 +113,7 @@ describe("login page", () => {
         },
       }),
     )
-    const { user, router } = renderApp("/login?redirect=%2F%2Fevil.example%2Fx")
+    const { user, router } = renderApp(`/login?redirect=${encodeURIComponent(target)}`)
     await user.type(await screen.findByLabelText("Password"), "correct horse battery")
     await user.click(screen.getByRole("button", { name: "Log in" }))
     await waitFor(() => expect(router.state.location.pathname).toBe("/"))

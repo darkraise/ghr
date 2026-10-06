@@ -69,6 +69,28 @@ describe("App", () => {
     expect(router.state.location.search).toEqual({ redirect: "/history" })
     expect(navigate).toHaveBeenCalledTimes(1)
   })
+
+  it("leaves a page with unsaved edits when the session expires", async () => {
+    let expired = false
+    mockApi(
+      authedRoutes({
+        "GET /auth/state": () => ({ setup_required: false, authenticated: !expired }),
+        "GET /api/status": () => (expired ? json({ error: "not logged in" }, 401) : fixtures.status),
+        "GET /api/token": fixtures.token,
+      }),
+    )
+    const { router, user } = renderApp("/settings")
+    const poll = await screen.findByLabelText("Poll interval")
+    await user.clear(poll)
+    await user.type(poll, "15s")
+    expect(await screen.findByText("● 1 unsaved change")).toBeInTheDocument()
+    expired = true
+    await act(async () => {
+      await api.status().catch(() => undefined)
+    })
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
+  })
 })
 
 describe("errorText", () => {
