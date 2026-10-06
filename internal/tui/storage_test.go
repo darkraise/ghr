@@ -170,3 +170,90 @@ func TestStoragePruneButtonsConfirmFirst(t *testing.T) {
 		t.Fatalf("buttons stay enabled while a prune runs:\n%s", v)
 	}
 }
+
+func TestStorageToolchainsCard(t *testing.T) {
+	m := onStorage(t, &fakeClient{}, 120, 80)
+	v := m.View()
+	for _, want := range []string{"Toolchains", "node    22.11.0", "182.4 MB", "installed 2026-10-01", "dotnet  10.0.100",
+		"java    21.0.8+9", "PyPy", "98.0 MB", "other: a job's own setup step", "Remove: refused while 1 jobs run",
+		"[ Install… ]", "( Install popular set )"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("missing %q:\n%s", want, v)
+		}
+	}
+	st := sampleStorage()
+	st.Operations.Current = &model.Operation{ID: "op3", Kind: "install", Target: "node 24.9.0", StartedAt: now, Progress: "extracting"}
+	st.Operations.Queued = 2
+	if v := feed(m, storageMsg{seq: m.store.seq, s: st}).View(); !strings.Contains(v, "installing node 24.9.0 — extracting (2 queued)") {
+		t.Fatalf("queue line:\n%s", v)
+	}
+}
+
+func TestStorageRemoveConfirmsWithTheSize(t *testing.T) {
+	c := &fakeClient{}
+	m := onStorage(t, c, 120, 80)
+	m = click(t, m, storeRmPrefix+"dotnet/8.0.414")
+	if !strings.Contains(m.confirmText, "Remove dotnet 8.0.414 (412.0 MB)?") ||
+		!strings.Contains(m.confirmText, "also removes the 8.0 runtimes and packs") {
+		t.Fatalf("confirmation %q", m.confirmText)
+	}
+	m = feed(m, key("y"))
+	if m = click(t, m, storeRmPrefix+"node/22.11.0"); m.overlay != ovConfirm || strings.Contains(m.confirmText, "runtimes") {
+		t.Fatalf("a node removal warns about .NET runtimes: %q", m.confirmText)
+	}
+	m = feed(m, key("y"))
+	if got := strings.Join(c.actions(), "|"); got != "rm-toolchain dotnet 8.0.414|rm-toolchain node 22.11.0" {
+		t.Fatalf("actions %q", got)
+	}
+	st := sampleStorage()
+	st.Toolchains = append(st.Toolchains, model.Toolchain{Tool: "dotnet", Version: "8.0.120", Arch: "x64", Bytes: 400_000_000, InstalledAt: now})
+	c.storage = &st
+	m = feed(m, storageMsg{seq: m.store.seq, s: st})
+	m = click(t, m, storeRmPrefix+"dotnet/8.0.414")
+	if m.overlay != ovConfirm || !strings.Contains(m.confirmText, "Remove dotnet 8.0.414") || strings.Contains(m.confirmText, "runtimes") {
+		t.Fatalf("one of two 8.0 SDKs: overlay %v, %q", m.overlay, m.confirmText)
+	}
+}
+
+func TestStoragePopularSetListsTheNineEntries(t *testing.T) {
+	c := &fakeClient{}
+	m := click(t, onStorage(t, c, 120, 80), storePopular)
+	if !strings.Contains(m.confirmText, "node 22, node 24, dotnet 8.0, dotnet 10.0, python 3.13, python 3.14, go latest, java 21, java 25") {
+		t.Fatalf("confirmation %q", m.confirmText)
+	}
+	if m = feed(m, key("y")); strings.Join(c.actions(), "|") != "install-preset popular" || !strings.Contains(m.View(), "queued: popular set") {
+		t.Fatalf("actions %v\n%s", c.actions(), m.View())
+	}
+}
+
+func TestStoragePackageCachesCard(t *testing.T) {
+	c := &fakeClient{}
+	m := onStorage(t, c, 120, 80)
+	v := m.View()
+	for _, want := range []string{"Package caches", "NuGet", "/home/ghrunner/.nuget/packages", "1.2 GB", "18204 files",
+		"written 2h ago", "pip         not present", "Clear: refused while 1 jobs run", "measured 14:02", "( Refresh )"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("missing %q:\n%s", want, v)
+		}
+	}
+	if m.store.clear["pip"] != nil {
+		t.Fatal("a cache that is not present has a Clear button")
+	}
+	if v := onStorage(t, &fakeClient{}, 80, 80).View(); strings.Contains(v, "18204 files") {
+		t.Fatalf("the files column shows at 80 columns:\n%s", v)
+	}
+	if m = click(t, m, storeClearPrefix+"nuget"); m.confirmText != "Clear the NuGet cache (1.2 GB)? Jobs download what they need again." {
+		t.Fatalf("confirmation %q", m.confirmText)
+	}
+	m = feed(m, key("y"))
+	m = click(t, m, storeRefresh)
+	if got := strings.Join(c.actions(), "|"); got != "clear nuget|refresh-storage" {
+		t.Fatalf("actions %q", got)
+	}
+	st := sampleStorage()
+	st.Measuring, st.MeasureError = true, "docker system df: Cannot connect to the Docker daemon"
+	m = feed(m, storageMsg{seq: m.store.seq, s: st})
+	if v := m.View(); !strings.Contains(v, "measuring…") || !strings.Contains(v, "✖ docker system df: Cannot connect") || m.store.refresh.Focusable() {
+		t.Fatalf("measuring:\n%s", v)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/toolchain"
 	"github.com/darkraise/ghr/internal/tui/ui"
 )
 
@@ -243,6 +244,8 @@ func opBadge(outcome string) string {
 // frame.
 func (m Model) syncStorage() {
 	ws := m.dockerWidgets()
+	ws = append(ws, m.toolchainWidgets()...)
+	ws = append(ws, m.cacheWidgets()...)
 	m.store.group.Set(ws)
 }
 
@@ -258,6 +261,8 @@ func (m Model) storageLines(w int) ([]string, map[string]ui.Range) {
 		out = append(out, lines...)
 	}
 	add(m.dockerCard(w))
+	add(m.toolchainsCard(w))
+	add(m.cachesCard(w))
 	add(m.opsCard(w), nil)
 	return out, ranges
 }
@@ -348,6 +353,14 @@ func (m Model) storagePressed(id string) (tea.Model, tea.Cmd, bool) {
 	switch {
 	case id == storePrune, id == storeKeep, id == storeAll, id == storeDangling, id == storeVolumes:
 		mm, cmd = m.confirmPrune(id)
+	case id == storePopular:
+		mm, cmd = m.confirmPopular()
+	case id == storeRefresh:
+		mm, cmd = m.refreshStorage()
+	case strings.HasPrefix(id, storeRmPrefix):
+		mm, cmd = m.confirmRemove(strings.TrimPrefix(id, storeRmPrefix))
+	case strings.HasPrefix(id, storeClearPrefix):
+		mm, cmd = m.confirmClear(strings.TrimPrefix(id, storeClearPrefix))
 	default:
 		return m, nil, false
 	}
@@ -503,4 +516,247 @@ func reclaim(d model.DockerDisk, typ string) string {
 		}
 	}
 	return ""
+}
+
+// toolchainKey names an installed version; its Remove button's ID ends with it.
+func toolchainKey(t model.Toolchain) string { return t.Tool + "/" + t.Version }
+
+// toolchainWidgets are one Remove per installed version, then Install… and
+// Install popular set. Buttons of versions no longer installed are dropped.
+func (m Model) toolchainWidgets() []ui.Widget {
+	s := m.store
+	var ws []ui.Widget
+	live := map[string]bool{}
+	for _, t := range s.data.Toolchains {
+		k := toolchainKey(t)
+		live[k] = true
+		b := s.rm[k]
+		if b == nil {
+			b = ui.NewButton(storeRmPrefix+k, "Remove", ui.Danger)
+			s.rm[k] = b
+		}
+		b.SetDisabled(!m.connected)
+		ws = append(ws, b)
+	}
+	for k := range s.rm {
+		if !live[k] {
+			delete(s.rm, k)
+		}
+	}
+	s.install.SetDisabled(!m.connected)
+	s.popular.SetDisabled(!m.connected)
+	return append(ws, s.install, s.popular)
+}
+
+// cacheWidgets are one Clear per present cache, then Refresh, which waits
+// while a measurement runs.
+func (m Model) cacheWidgets() []ui.Widget {
+	s := m.store
+	var ws []ui.Widget
+	live := map[string]bool{}
+	for _, pc := range s.data.PackageCaches {
+		if !pc.Present {
+			continue
+		}
+		live[pc.Name] = true
+		b := s.clear[pc.Name]
+		if b == nil {
+			b = ui.NewButton(storeClearPrefix+pc.Name, "Clear", ui.Danger)
+			s.clear[pc.Name] = b
+		}
+		b.SetDisabled(!m.connected)
+		ws = append(ws, b)
+	}
+	for k := range s.clear {
+		if !live[k] {
+			delete(s.clear, k)
+		}
+	}
+	s.refresh.SetDisabled(!m.connected || s.data.Measuring)
+	return append(ws, s.refresh)
+}
+
+// toolchainsCard renders the Toolchains card w columns wide: a row per
+// installed version with Remove, the folders no installer owns, what the
+// queue is doing, and the install buttons.
+func (m Model) toolchainsCard(w int) ([]string, map[string]ui.Range) {
+	s := m.store
+	f, in, c := s.group.FocusedID(), w-4, newStoreCard()
+	if len(s.data.Toolchains) == 0 && len(s.data.OtherToolCache) == 0 {
+		c.add(sDim.Render("the tool cache is empty"))
+	}
+	for _, t := range s.data.Toolchains {
+		text := cell(t.Tool, 8) + cell(t.Version, 14) + cell(model.HumanBytes(t.Bytes), 11) +
+			sDim.Render("installed "+t.InstalledAt.Local().Format("2006-01-02"))
+		if b := s.rm[toolchainKey(t)]; b != nil {
+			c.right(text, b, f, in)
+		} else {
+			c.add(text)
+		}
+	}
+	for _, o := range s.data.OtherToolCache {
+		c.add(cell(o.Name, 22) + cell(model.HumanBytes(o.Bytes), 11) + sDim.Render("other: a job's own setup step"))
+	}
+	if line := m.queueLine(); line != "" {
+		c.add(line)
+	}
+	if m.busyJobs() > 0 {
+		c.add(m.refusedHint("Remove"))
+	}
+	c.buttons(f, in, s.install, s.popular)
+	return c.box("Toolchains", w)
+}
+
+// queueLine says what the operation queue is doing, for example
+// "installing node 24.9.0 — extracting (2 queued)", or "" when it is idle.
+func (m Model) queueLine() string {
+	o := m.store.data.Operations
+	if o.Current == nil {
+		if o.Queued > 0 {
+			return sAmber.Render(fmt.Sprintf("%d queued", o.Queued))
+		}
+		return ""
+	}
+	verb := map[string]string{"install": "installing", "remove": "removing", "clear": "clearing"}[o.Current.Kind]
+	if verb == "" {
+		verb = o.Current.Kind
+	}
+	line := verb + " " + o.Current.Target
+	if o.Current.Progress != "" {
+		line += " — " + o.Current.Progress
+	}
+	if o.Queued > 0 {
+		line += fmt.Sprintf(" (%d queued)", o.Queued)
+	}
+	return sAmber.Render(line)
+}
+
+// cachesCard renders the Package caches card w columns wide: a row per
+// cache with Clear, or "not present", and the measurement footer.
+func (m Model) cachesCard(w int) ([]string, map[string]ui.Range) {
+	s := m.store
+	f, in, c := s.group.FocusedID(), w-4, newStoreCard()
+	full := m.width >= wideMin
+	for _, pc := range s.data.PackageCaches {
+		if !pc.Present {
+			c.add(cell(pc.Label, 12) + sDim.Render("not present"))
+			continue
+		}
+		tail := cell(model.HumanBytes(pc.Bytes), 11)
+		if full {
+			tail += cell(fmt.Sprintf("%d files", pc.Files), 13)
+		}
+		last := "never written"
+		if pc.LastWritten != nil {
+			last = "written " + ago(m.now().Sub(*pc.LastWritten))
+		}
+		tail += cell(last, 18)
+		b := s.clear[pc.Name]
+		if b == nil {
+			c.add(cell(pc.Label, 12) + tail)
+			continue
+		}
+		pathW := max(in-12-ansi.StringWidth(tail)-ansi.StringWidth(b.View(false, 0))-1, 4)
+		c.right(cell(pc.Label, 12)+sDim.Render(cell(strings.Join(pc.Paths, " "), pathW))+" "+tail, b, f, in)
+	}
+	if m.busyJobs() > 0 {
+		c.add(m.refusedHint("Clear"))
+	}
+	status := sDim.Render("not measured yet")
+	switch {
+	case s.data.Measuring:
+		status = sAmber.Render("measuring…")
+	case s.data.MeasuredAt != nil:
+		status = sDim.Render("measured " + s.data.MeasuredAt.Local().Format("15:04"))
+	}
+	c.right(status, s.refresh, f, ansi.StringWidth(status)+2+ansi.StringWidth(s.refresh.View(false, 0)))
+	if s.data.MeasureError != "" {
+		for _, l := range ui.WrapWords("✖ "+s.data.MeasureError, max(in, 1)) {
+			c.add(sRed.Render(l))
+		}
+	}
+	return c.box("Package caches", w)
+}
+
+// lastDotnetMajor is the SDK's major version when t is the only installed
+// .NET SDK of that major, since removing it then also removes the major's
+// runtimes and packs; otherwise "".
+func (m Model) lastDotnetMajor(t model.Toolchain) string {
+	if t.Tool != "dotnet" {
+		return ""
+	}
+	major, _, _ := strings.Cut(t.Version, ".")
+	for _, o := range m.store.data.Toolchains {
+		if o.Tool == "dotnet" && o.Version != t.Version && strings.HasPrefix(o.Version, major+".") {
+			return ""
+		}
+	}
+	return major
+}
+
+// confirmRemove asks before removing the version k names (see toolchainKey).
+func (m Model) confirmRemove(k string) (tea.Model, tea.Cmd) {
+	if m.offline() {
+		return m, nil
+	}
+	for _, t := range m.store.data.Toolchains {
+		if toolchainKey(t) != k {
+			continue
+		}
+		tool, version, c := t.Tool, t.Version, m.c
+		text := fmt.Sprintf("Remove %s %s (%s)?", tool, version, model.HumanBytes(t.Bytes))
+		if major := m.lastDotnetMajor(t); major != "" {
+			text += fmt.Sprintf(" It is the last .NET %s SDK, so this also removes the %s.0 runtimes and packs.", major, major)
+		}
+		return m.openConfirm(text, func() tea.Cmd {
+			return m.action("queued: remove "+tool+" "+version, func(cx context.Context) error {
+				return c.RemoveToolchain(cx, tool, version)
+			})
+		})
+	}
+	return m, nil
+}
+
+// confirmClear asks before clearing the present cache name.
+func (m Model) confirmClear(name string) (tea.Model, tea.Cmd) {
+	if m.offline() {
+		return m, nil
+	}
+	for _, pc := range m.store.data.PackageCaches {
+		if pc.Name != name || !pc.Present {
+			continue
+		}
+		label, c := pc.Label, m.c
+		text := fmt.Sprintf("Clear the %s cache (%s)? Jobs download what they need again.", label, model.HumanBytes(pc.Bytes))
+		return m.openConfirm(text, func() tea.Cmd {
+			return m.action("queued: clear "+label, func(cx context.Context) error { return c.ClearCache(cx, name) })
+		})
+	}
+	return m, nil
+}
+
+// confirmPopular asks before queueing the popular set, listing its entries.
+func (m Model) confirmPopular() (tea.Model, tea.Cmd) {
+	if m.offline() {
+		return m, nil
+	}
+	var names []string
+	for _, e := range toolchain.Popular {
+		names = append(names, e.Tool+" "+e.Spec)
+	}
+	text := "Install the popular set? " + strings.Join(names, ", ") + ". Versions already installed are skipped."
+	c := m.c
+	return m.openConfirm(text, func() tea.Cmd {
+		return m.action("queued: popular set", func(cx context.Context) error { return c.InstallPreset(cx, "popular") })
+	})
+}
+
+// refreshStorage asks the daemon to measure now; a measurement already
+// running answers with an error the toast shows.
+func (m Model) refreshStorage() (tea.Model, tea.Cmd) {
+	if m.offline() {
+		return m, nil
+	}
+	c := m.c
+	return m, m.action("measurement started", func(cx context.Context) error { return c.RefreshStorage(cx) })
 }
