@@ -388,7 +388,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.page == pageRepos && m.frame%slowPoll == 0 {
 			cmds = append(cmds, m.fetchActivity())
 		}
-		if m.page == pageStorage && (m.frame%slowPoll == 0 || m.store.active()) {
+		if m.page == pageStorage && (m.frame%slowPoll == 0 || m.storageActive()) {
 			cmds = append(cmds, m.fetchStorage())
 		}
 		return m, tea.Batch(cmds...)

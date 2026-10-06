@@ -84,11 +84,12 @@ func (m Model) fetchStorage() tea.Cmd {
 	}
 }
 
-// active reports whether the page polls every tick: an operation runs or
-// waits, or a measurement is in progress.
-func (s *storagePage) active() bool {
+// storageActive reports whether the Storage page polls every tick: an
+// operation runs or waits, a measurement is in progress, or a prune runs.
+func (m Model) storageActive() bool {
+	s := m.store
 	o := s.data.Operations
-	return o.Current != nil || o.Queued > 0 || s.data.Measuring
+	return o.Current != nil || o.Queued > 0 || s.data.Measuring || m.st.Maintenance.Running
 }
 
 // gotStorage shows a snapshot. A failed read keeps the last one and names

@@ -63,6 +63,17 @@ func TestStoragePollsEverySecondWhileBusy(t *testing.T) {
 	if m = ticks(m, 3); c.storageN != base+3 {
 		t.Fatalf("a busy page polled %d times in 3 ticks", c.storageN-base)
 	}
+	idle := sampleStorage()
+	c.storage = &idle
+	m = feed(m, storageMsg{seq: m.store.seq, s: idle})
+	pruning := sampleStatus()
+	pruning.Maintenance.Running = true
+	c.st = &pruning
+	m = feed(m, statusMsg{st: pruning})
+	base = c.storageN
+	if m = ticks(m, 3); c.storageN != base+3 {
+		t.Fatalf("a page with a prune running polled %d times in 3 ticks", c.storageN-base)
+	}
 }
 
 func TestStorageAnnouncesOnlyNewlyFinishedOperations(t *testing.T) {
