@@ -17,6 +17,19 @@ jobs:
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
       - run: go test -race -count=1 -timeout 180s ./...
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run lint
+        working-directory: web
+      - run: npm run typecheck
+        working-directory: web
+      - run: npm test
+        working-directory: web
 
   release:
     needs: test
@@ -51,6 +64,16 @@ jobs:
             next="v$major.$minor.$((patch + 1))"
           fi
           echo "VERSION=$next" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        if: env.VERSION != ''
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: web
+        if: env.VERSION != ''
+        working-directory: web
+        run: npm ci && npm run build && test -f dist/index.html
       - name: build
         if: env.VERSION != ''
         env:
