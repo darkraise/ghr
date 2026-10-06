@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -17,6 +18,15 @@ import (
 type usageError string
 
 func (e usageError) Error() string { return string(e) }
+
+// flagError turns a flag parse failure into a usage error, except -h, which
+// run answers with the usage text.
+func flagError(err error) error {
+	if errors.Is(err, flag.ErrHelp) {
+		return err
+	}
+	return usageError(err.Error())
+}
 
 type stringList []string
 
@@ -175,7 +185,7 @@ func repo(ctx context.Context, c *api.Client, args []string) error {
 		var labels stringList
 		fs.Var(&labels, "label", "")
 		if err := fs.Parse(args[2:]); err != nil {
-			return usageError(err.Error())
+			return flagError(err)
 		}
 		if fs.NArg() > 0 {
 			return usageError("unexpected argument " + fs.Arg(0))
@@ -242,7 +252,7 @@ func historyCmd(ctx context.Context, c *api.Client, args []string, out io.Writer
 	conclusion := fs.String("conclusion", "", "")
 	limit := fs.Int("limit", 20, "")
 	if err := fs.Parse(args); err != nil {
-		return usageError(err.Error())
+		return flagError(err)
 	}
 	h, err := c.History(ctx, *repo, *conclusion, *limit)
 	if err != nil {

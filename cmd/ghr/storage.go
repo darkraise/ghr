@@ -129,7 +129,7 @@ func pruneCmd(ctx context.Context, c *api.Client, args []string, out io.Writer) 
 	fs.SetOutput(io.Discard)
 	scope := fs.String("scope", "", "")
 	if err := fs.Parse(args); err != nil {
-		return usageError(err.Error())
+		return flagError(err)
 	}
 	if fs.NArg() > 0 {
 		return usageError("unexpected argument " + fs.Arg(0))

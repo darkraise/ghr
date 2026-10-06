@@ -25,6 +25,16 @@ func TestVersionAndUsage(t *testing.T) {
 	}
 }
 
+func TestSubcommandHelpPrintsUsage(t *testing.T) {
+	for _, args := range [][]string{{"prune", "-h"}, {"history", "--help"}, {"repo", "add", "x", "-h"}} {
+		var out, errb bytes.Buffer
+		code := run(args, strings.NewReader(""), &out, &errb)
+		if code != 0 || !strings.Contains(out.String(), "usage: ghr") || errb.Len() != 0 {
+			t.Errorf("%v: exit %d stdout %d bytes stderr %q", args, code, out.Len(), errb.String())
+		}
+	}
+}
+
 func TestDaemonFailsWithoutConfig(t *testing.T) {
 	if _, err := os.Stat("/etc/ghr/config.yaml"); err == nil {
 		t.Skip("a real ghr config exists on this machine; not starting a daemon from a test")
