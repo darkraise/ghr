@@ -1,0 +1,22 @@
+[
+  {
+    "seq": 1,
+    "time": "2026-10-03T14:02:00Z",
+    "level": "info",
+    "msg": "ghr daemon started (owner darkraise, mode queue)"
+  },
+  {
+    "seq": 2,
+    "time": "2026-10-03T14:03:00Z",
+    "level": "ok",
+    "repo": "darkmem",
+    "msg": "runner aaaaaa started"
+  },
+  {
+    "seq": 3,
+    "time": "2026-10-03T14:04:00Z",
+    "level": "warn",
+    "repo": "darkcloud",
+    "msg": "repo paused"
+  }
+]

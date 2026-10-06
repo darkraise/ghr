@@ -1,0 +1,20 @@
+[
+  {
+    "number": 1,
+    "name": "Set up job",
+    "status": "completed",
+    "conclusion": "success"
+  },
+  {
+    "number": 2,
+    "name": "Run tests",
+    "status": "in_progress",
+    "conclusion": ""
+  },
+  {
+    "number": 3,
+    "name": "Post checkout",
+    "status": "queued",
+    "conclusion": ""
+  }
+]

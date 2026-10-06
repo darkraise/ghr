@@ -1,0 +1,20 @@
+{
+  "state": "done",
+  "checked_at": "2026-10-03T14:04:00Z",
+  "partial": false,
+  "groups": [
+    {
+      "labels": [
+        "homelab",
+        "self-hosted"
+      ],
+      "jobs": [
+        "ci / build",
+        "ci / test"
+      ],
+      "more": 0,
+      "count": 12,
+      "last_seen": "2026-10-03T13:05:00Z"
+    }
+  ]
+}

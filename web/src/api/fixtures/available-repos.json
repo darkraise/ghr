@@ -1,0 +1,12 @@
+[
+  {
+    "name": "darkmem",
+    "private": true,
+    "configured": true
+  },
+  {
+    "name": "new-repo",
+    "private": true,
+    "configured": false
+  }
+]

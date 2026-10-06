@@ -1,0 +1,41 @@
+{
+  "owner": "darkraise",
+  "mode": "queue",
+  "global_max": 2,
+  "poll_interval": "10s",
+  "start_timeout": "2m0s",
+  "idle_timeout": "5m0s",
+  "disk_high_water": 80,
+  "build_cache_keep": "20GB",
+  "history_retention": "30d",
+  "labels": [
+    "homelab"
+  ],
+  "runner_limits": {
+    "memory_max": "6G",
+    "cpu_quota": "200%"
+  },
+  "repos": [
+    {
+      "name": "darkmem",
+      "max": 2,
+      "warm": 1,
+      "labels": [
+        "gpu"
+      ],
+      "cleanup_name_prefixes": [
+        "darkmem-"
+      ]
+    },
+    {
+      "name": "darkcloud",
+      "paused": true
+    }
+  ],
+  "web": {
+    "listen": "0.0.0.0:8080",
+    "hosts": [
+      "ghr.lan"
+    ]
+  }
+}

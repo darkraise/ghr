@@ -1,0 +1,13 @@
+[
+  {
+    "id": 5,
+    "name": "ghr-aaaaaa",
+    "status": "online",
+    "busy": true,
+    "labels": [
+      "self-hosted",
+      "homelab"
+    ],
+    "ghr": true
+  }
+]

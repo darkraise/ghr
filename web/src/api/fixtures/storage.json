@@ -1,0 +1,105 @@
+{
+  "toolchains": [
+    {
+      "tool": "node",
+      "version": "22.11.0",
+      "arch": "x64",
+      "path": "/var/lib/ghr/toolcache/node/22.11.0/x64",
+      "bytes": 190000000,
+      "installed_at": "2026-09-30T14:05:00Z"
+    }
+  ],
+  "other_tool_cache": [
+    {
+      "name": "PyPy",
+      "bytes": 80000000
+    }
+  ],
+  "package_caches": [
+    {
+      "name": "nuget",
+      "label": "NuGet",
+      "paths": [
+        ".nuget/packages"
+      ],
+      "present": true,
+      "bytes": 3600000000,
+      "files": 41000,
+      "last_written": "2026-10-03T13:05:00Z"
+    },
+    {
+      "name": "cargo",
+      "label": "Cargo",
+      "paths": [
+        ".cargo/registry",
+        ".cargo/git"
+      ],
+      "present": false,
+      "bytes": 0,
+      "files": 0
+    }
+  ],
+  "docker": {
+    "rows": [
+      {
+        "type": "Images",
+        "count": 10,
+        "active": 2,
+        "bytes": 8100000000,
+        "reclaimable": 7100000000
+      },
+      {
+        "type": "Build Cache",
+        "count": 12,
+        "active": 0,
+        "bytes": 420000000,
+        "reclaimable": 380000000
+      }
+    ],
+    "build_cache_types": [
+      {
+        "type": "regular",
+        "count": 10,
+        "bytes": 334000000,
+        "reclaimable": 300000000
+      }
+    ],
+    "disk_pct": 61
+  },
+  "measured_at": "2026-10-03T14:03:00Z",
+  "measuring": false,
+  "operations": {
+    "current": {
+      "id": "op3",
+      "kind": "install",
+      "target": "node 24",
+      "started_at": "2026-10-03T14:04:30Z",
+      "progress": "extracting"
+    },
+    "queued": 1,
+    "recent": [
+      {
+        "id": "op2",
+        "kind": "clear",
+        "target": "nuget",
+        "started_at": "2026-10-03T13:05:00Z",
+        "finished_at": "2026-10-03T13:06:00Z",
+        "outcome": "ok",
+        "message": "cleared NuGet (3.6 GB freed)"
+      }
+    ]
+  },
+  "last_prune": {
+    "trigger": "manual",
+    "scope": "build-cache-all",
+    "started_at": "2026-10-03T13:15:00Z",
+    "finished_at": "2026-10-03T13:16:00Z",
+    "outcome": "ok",
+    "steps": [
+      {
+        "name": "all build cache",
+        "freed": 6800000
+      }
+    ]
+  }
+}

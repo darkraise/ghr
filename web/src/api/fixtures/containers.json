@@ -1,0 +1,9 @@
+[
+  {
+    "id": "c0ffee12",
+    "name": "ghr-aaaaaa-db-1",
+    "image": "postgres:17",
+    "state": "running",
+    "project": "ghr-aaaaaa"
+  }
+]

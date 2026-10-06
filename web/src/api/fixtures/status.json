@@ -1,0 +1,87 @@
+{
+  "now": "2026-10-03T14:05:00Z",
+  "epoch": "lz3k9a",
+  "mode": "queue",
+  "global_max": 2,
+  "degraded": false,
+  "rate_remaining": 4980,
+  "disk_pct": 61,
+  "repos": [
+    {
+      "name": "darkmem",
+      "paused": false,
+      "max": 2,
+      "active": 1,
+      "queued": 3,
+      "last_job": {
+        "id": "h1",
+        "repo": "darkmem",
+        "run_id": 101,
+        "run_number": "41",
+        "workflow": "ci",
+        "job_name": "build",
+        "conclusion": "success",
+        "started_at": "2026-10-03T13:35:00Z",
+        "finished_at": "2026-10-03T13:40:00Z",
+        "html_url": "https://github.com/darkraise/darkmem/actions/runs/101/job/1"
+      }
+    },
+    {
+      "name": "darkcloud",
+      "paused": true,
+      "max": 1,
+      "active": 0,
+      "queued": 0
+    },
+    {
+      "name": "old-repo",
+      "paused": true,
+      "removing": true,
+      "max": 1,
+      "active": 0,
+      "queued": 0,
+      "error": "GitHub: not found"
+    }
+  ],
+  "instances": [
+    {
+      "id": "aaaaaa",
+      "repo": "darkmem",
+      "runner_name": "ghr-aaaaaa",
+      "state": "busy",
+      "since": "2026-10-03T14:00:00Z",
+      "job": {
+        "run_id": 102,
+        "run_number": "42",
+        "workflow": "ci",
+        "name": "test",
+        "html_url": "https://github.com/darkraise/darkmem/actions/runs/102/job/2",
+        "started_at": "2026-10-03T14:01:00Z"
+      }
+    },
+    {
+      "id": "bbbbbb",
+      "repo": "darkmem",
+      "runner_name": "ghr-bbbbbb",
+      "state": "idle",
+      "since": "2026-10-03T14:04:00Z"
+    }
+  ],
+  "maintenance": {
+    "running": false,
+    "last_started": "2026-10-03T12:05:00Z",
+    "last_finished": "2026-10-03T12:06:00Z",
+    "last_outcome": "ok"
+  },
+  "runner_update": {
+    "installed": "2.337.0",
+    "latest": "2.338.0",
+    "latest_published": "2026-10-01T14:05:00Z",
+    "deadline": "2026-10-23T14:05:00Z",
+    "checked_at": "2026-10-03T13:05:00Z",
+    "queued": true,
+    "queued_at": "2026-10-03T13:55:00Z",
+    "last_outcome": "current",
+    "last_finished": "2026-10-02T14:05:00Z"
+  }
+}
