@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "d
 import { toast } from "darkraise-ui/components/sonner"
 import { useState } from "react"
 import { api } from "@/api/client"
-import { keys, useStatus, useToolchainChoices } from "@/api/hooks"
+import { keys, useToolchainChoices } from "@/api/hooks"
 import { errorText } from "@/query"
 
 const TOOLS = [
@@ -33,7 +33,6 @@ export function InstallDialog({ open, onClose }: { open: boolean; onClose: () =>
 
 function InstallForm({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient()
-  const offline = useStatus().isError
   const [tool, setTool] = useState("node")
   const [filter, setFilter] = useState("")
   const [picked, setPicked] = useState<string | null>(null)
@@ -135,7 +134,7 @@ function InstallForm({ onClose }: { onClose: () => void }) {
         <Button variant="secondary" onClick={onClose}>
           Cancel
         </Button>
-        <Button disabled={busy || offline || target === ""} onClick={() => void submit()}>
+        <Button disabled={busy || target === ""} onClick={() => void submit()}>
           {busy ? "Queuing…" : "Install"}
         </Button>
       </DialogFooter>

@@ -30,6 +30,23 @@ describe("Add repository dialog", () => {
     expect(dialog.getByText("no match")).toBeInTheDocument()
   })
 
+  it("answers Add when the daemon went unreachable after the dialog opened", { timeout: 10_000 }, async () => {
+    let down = false
+    const { calls } = mockApi(
+      routes({
+        "GET /api/status": () => (down ? json({ error: "connection refused" }, 502) : fixtures.status),
+        "POST /api/repos": () => noContent(),
+      }),
+    )
+    const { dialog, user } = await open()
+    await user.click(dialog.getByRole("option", { name: /new-repo/ }))
+    down = true
+    await waitFor(() => expect(screen.getAllByText(/daemon unreachable/).length).toBeGreaterThan(0), { timeout: 4000 })
+    await user.click(dialog.getByRole("button", { name: "Add" }))
+    expect(await dialog.findByText("✖ the daemon is unreachable")).toBeInTheDocument()
+    expect(calls.some((c) => c.method === "POST")).toBe(false)
+  })
+
   it("says when the token sees no repo", async () => {
     mockApi(routes({ "GET /api/repos/available": [] }))
     const { user } = renderApp("/repositories")

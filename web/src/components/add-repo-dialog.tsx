@@ -159,7 +159,7 @@ export function AddRepoDialog({ open, onClose }: { open: boolean; onClose: () =>
           <Button variant="outline" onClick={close}>
             Cancel
           </Button>
-          <Button disabled={!picked || busy || status.isError} onClick={() => void add()}>
+          <Button disabled={!picked || busy} onClick={() => void add()}>
             {busy ? "Adding…" : "Add"}
           </Button>
         </DialogFooter>
