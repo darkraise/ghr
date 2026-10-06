@@ -2,9 +2,12 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/config"
@@ -255,5 +258,54 @@ func TestStoragePackageCachesCard(t *testing.T) {
 	m = feed(m, storageMsg{seq: m.store.seq, s: st})
 	if v := m.View(); !strings.Contains(v, "measuring…") || !strings.Contains(v, "✖ docker system df: Cannot connect") || m.store.refresh.Focusable() {
 		t.Fatalf("measuring:\n%s", v)
+	}
+}
+
+// idleStorage opens the Storage page, w by 60, with no runner busy.
+func idleStorage(t *testing.T, c *fakeClient, w int) Model {
+	t.Helper()
+	st := sampleStatus()
+	st.Instances[0].State, st.Instances[0].Job = "idle", nil
+	c.st = &st
+	return withConfig(feed(newModel(c, w, 60, st), key("5")), c)
+}
+
+// storageStates builds the Storage page in each state a golden records.
+var storageStates = map[string]func(t *testing.T, w int) Model{
+	"idle": func(t *testing.T, w int) Model { return idleStorage(t, &fakeClient{}, w) },
+	"running": func(t *testing.T, w int) Model {
+		st := sampleStorage()
+		st.Operations.Current = &model.Operation{ID: "op3", Kind: "install", Target: "node 24.9.0", StartedAt: now, Progress: "extracting"}
+		st.Operations.Queued = 2
+		return idleStorage(t, &fakeClient{storage: &st}, w)
+	},
+	"busy": func(t *testing.T, w int) Model {
+		c := &fakeClient{}
+		return withConfig(feed(newModel(c, w, 60, sampleStatus()), key("5")), c)
+	},
+	"install": func(t *testing.T, w int) Model {
+		return click(t, idleStorage(t, &fakeClient{choices: nodeChoices()}, w), storeInstall)
+	},
+	"confirm": func(t *testing.T, w int) Model {
+		return click(t, idleStorage(t, &fakeClient{}, w), storeRmPrefix+"dotnet/8.0.414")
+	},
+}
+
+func TestStorageGolden(t *testing.T) {
+	for name, build := range storageStates {
+		for _, w := range []int{120, 80} {
+			t.Run(fmt.Sprintf("%s/%d", name, w), func(t *testing.T) {
+				golden.RequireEqual(t, []byte(build(t, w).View()))
+			})
+		}
+	}
+}
+
+// Every Storage state fills its screen exactly, down to the 40-column minimum.
+func TestStorageFitsNarrow(t *testing.T) {
+	for name, build := range storageStates {
+		for _, w := range []int{80, 56, 40} {
+			fits(t, "storage "+name, build(t, w).View(), w, 60)
+		}
 	}
 }
