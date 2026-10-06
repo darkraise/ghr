@@ -9,6 +9,7 @@ import labelCheckJson from "./fixtures/label-check.json"
 import logJson from "./fixtures/log.json"
 import metricsJson from "./fixtures/metrics.json"
 import registrationsJson from "./fixtures/registrations.json"
+import statusDegradedJson from "./fixtures/status-degraded.json"
 import statusJson from "./fixtures/status.json"
 import stepsJson from "./fixtures/steps.json"
 import storageJson from "./fixtures/storage.json"
@@ -33,6 +34,7 @@ import type {
 // Assigning each fixture to its type makes `tsc --noEmit` fail when a Go
 // field the UI declares is renamed or retyped.
 const status: Status = statusJson
+const degraded: Status = statusDegradedJson
 const events: GhrEvent[] = eventsJson
 const history: HistoryEntry[] = historyJson
 const log: LogChunk = logJson
@@ -55,6 +57,22 @@ describe("type fixtures", () => {
     expect(status.repos[0]?.last_job?.finished_at).toBeTruthy()
     expect(status.runner_update.deadline).toBeTruthy()
     expect(status.maintenance.last_outcome).toBe("ok")
+  })
+
+  // tsc cannot catch a renamed optional field (an imported JSON value gets no
+  // excess-property check, and a missing optional key is allowed), so this
+  // asserts each one the UI reads is still present.
+  it("the optional status fields keep their names", () => {
+    expect(degraded.degraded).toBe(true)
+    expect(degraded.degraded_reason).toBeTruthy()
+    expect(degraded.repos[0]?.error).toBeTruthy()
+    expect(degraded.repos[0]?.removing).toBe(true)
+    expect(degraded.instances[0]).not.toHaveProperty("job")
+    expect(degraded.maintenance.running).toBe(true)
+    expect(degraded.runner_update.check_error).toBeTruthy()
+    expect(degraded.runner_update.last_error).toBeTruthy()
+    expect(degraded.runner_update.running).toBe(true)
+    expect(degraded.runner_update.last_outcome).toBe("failed")
   })
 
   it("the live feeds carry their cursors", () => {

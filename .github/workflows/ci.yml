@@ -33,7 +33,7 @@ jobs:
       - run: npm run build
         working-directory: web
       - name: no inlined fonts
-        run: "! grep -q 'data:font' dist/assets/*.css"
+        run: "ls dist/assets/*.css > /dev/null && ! grep -q 'data:font' dist/assets/*.css"
         working-directory: web
 
   release:

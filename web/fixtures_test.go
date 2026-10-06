@@ -70,6 +70,18 @@ func fixtureValues() map[string]any {
 				Deadline: ptr(at(20 * 24 * time.Hour)), CheckedAt: ptr(at(-time.Hour)), Queued: true,
 				QueuedAt: ptr(at(-10 * time.Minute)), LastOutcome: "current", LastFinished: ptr(at(-24 * time.Hour))},
 		},
+		"status-degraded": model.Status{
+			Now: fixtureTime, Epoch: "lz3k9b", Mode: "all", GlobalMax: 2, Degraded: true,
+			DegradedReason: "GitHub rejected the token: 401 Bad credentials", DiskPct: 91,
+			Repos: []model.RepoStatus{{Name: "darkmem", Paused: true, Removing: true, Max: 1, Error: "GitHub: not found"}},
+			Instances: []model.InstanceStatus{
+				{ID: "cccccc", Repo: "darkmem", RunnerName: "ghr-cccccc", State: "starting", Since: at(-10 * time.Second)},
+			},
+			Maintenance: model.MaintenanceStatus{Running: true, LastStarted: ptr(at(-time.Minute))},
+			RunnerUpdate: model.RunnerUpdate{Installed: "2.337.0", Latest: "2.338.0", CheckedAt: ptr(at(-time.Hour)),
+				CheckError: "GitHub rate limit", Running: true, LastOutcome: "failed", LastError: "download failed: 502",
+				LastFinished: ptr(at(-2 * time.Hour))},
+		},
 		"events": []model.Event{
 			{Seq: 1, Time: at(-3 * time.Minute), Level: "info", Msg: "ghr daemon started (owner darkraise, mode queue)"},
 			{Seq: 2, Time: at(-2 * time.Minute), Level: "ok", Repo: "darkmem", Msg: "runner aaaaaa started"},

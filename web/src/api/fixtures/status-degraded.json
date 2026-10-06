@@ -1,0 +1,44 @@
+{
+  "now": "2026-10-03T14:05:00Z",
+  "epoch": "lz3k9b",
+  "mode": "all",
+  "global_max": 2,
+  "degraded": true,
+  "degraded_reason": "GitHub rejected the token: 401 Bad credentials",
+  "rate_remaining": 0,
+  "disk_pct": 91,
+  "repos": [
+    {
+      "name": "darkmem",
+      "paused": true,
+      "removing": true,
+      "max": 1,
+      "active": 0,
+      "queued": 0,
+      "error": "GitHub: not found"
+    }
+  ],
+  "instances": [
+    {
+      "id": "cccccc",
+      "repo": "darkmem",
+      "runner_name": "ghr-cccccc",
+      "state": "starting",
+      "since": "2026-10-03T14:04:50Z"
+    }
+  ],
+  "maintenance": {
+    "running": true,
+    "last_started": "2026-10-03T14:04:00Z"
+  },
+  "runner_update": {
+    "installed": "2.337.0",
+    "latest": "2.338.0",
+    "checked_at": "2026-10-03T13:05:00Z",
+    "check_error": "GitHub rate limit",
+    "running": true,
+    "last_outcome": "failed",
+    "last_error": "download failed: 502",
+    "last_finished": "2026-10-03T12:05:00Z"
+  }
+}
