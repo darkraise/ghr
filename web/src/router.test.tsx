@@ -14,7 +14,7 @@ describe("routes", () => {
   it("sends a visitor without a session to /login", async () => {
     mockApi(anonymous)
     const router = renderAt("/runners")
-    expect(await screen.findByRole("heading", { name: "Log in" })).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "Log in" })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe("/login")
   })
 
