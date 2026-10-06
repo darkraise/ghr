@@ -82,8 +82,16 @@ func clearPath(path, opID string) error {
 		if err := os.Mkdir(path, fi.Mode().Perm()); err != nil {
 			return err
 		}
-		// Mkdir applies the umask.
-		if err := os.Chmod(path, fi.Mode().Perm()); err != nil {
+		// Mkdir applies the umask. Chmod through a root at the parent: a job
+		// can swap the new directory for a symlink, which os.Chmod would
+		// follow anywhere as root, while Root.Chmod refuses to leave the parent.
+		r, err := os.OpenRoot(filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		err = r.Chmod(filepath.Base(path), fi.Mode().Perm())
+		r.Close()
+		if err != nil {
 			return err
 		}
 		if err := chownLike(path, fi); err != nil {
