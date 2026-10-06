@@ -1,6 +1,7 @@
 import { screen, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { json, mockApi } from "@/test/api"
+import { authedRoutes } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
 const authed = { "GET /auth/state": { setup_required: false, authenticated: true } }
@@ -48,6 +49,24 @@ describe("routes", () => {
     down = false
     await user.click(screen.getByRole("button", { name: "Retry" }))
     expect(await screen.findByRole("heading", { name: "Runners" })).toBeInTheDocument()
+  })
+
+  it("offers a retry when the auth check fails while moving between pages", async () => {
+    let down = false
+    mockApi(
+      authedRoutes({
+        "GET /auth/state": () => (down ? json({ error: "connection refused" }, 502) : authed["GET /auth/state"]),
+        "GET /api/history": [],
+      }),
+    )
+    const { user } = renderApp("/runners")
+    expect(await screen.findByRole("heading", { name: "Runners" })).toBeInTheDocument()
+    down = true
+    await user.click(screen.getByRole("link", { name: "History" }))
+    expect(await screen.findByText("cannot load the page: connection refused")).toBeInTheDocument()
+    down = false
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+    expect(await screen.findByRole("heading", { name: "History" })).toBeInTheDocument()
   })
 
   it("reads the runner detail tab from the search", async () => {

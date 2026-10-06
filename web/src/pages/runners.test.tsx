@@ -1,8 +1,16 @@
 import { screen, waitFor, within } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
+
+const secureContext = Object.getOwnPropertyDescriptor(window, "isSecureContext")
+
+afterEach(() => {
+  Reflect.deleteProperty(navigator, "clipboard")
+  if (secureContext) Object.defineProperty(window, "isSecureContext", secureContext)
+  else Reflect.deleteProperty(window, "isSecureContext")
+})
 
 async function rowOf(id: string) {
   const cell = await screen.findByRole("link", { name: id })
@@ -110,7 +118,6 @@ describe("Runners page", () => {
     await user.click((await rowOf("aaaaaa")).getByRole("button", { name: "Copy ID of runner aaaaaa" }))
     expect(writeText).toHaveBeenCalledWith("aaaaaa")
     expect((await screen.findAllByText("copied aaaaaa")).length).toBeGreaterThan(0)
-    Reflect.deleteProperty(navigator, "clipboard")
   })
 
   it("opens the log tab from Logs", async () => {

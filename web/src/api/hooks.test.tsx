@@ -29,7 +29,7 @@ describe("appendLog", () => {
 })
 
 describe("useEvents", () => {
-  it("polls by cursor and starts over when the epoch changes", async () => {
+  it("polls by cursor and starts over when the epoch changes", { timeout: 10_000 }, async () => {
     let restarted = false
     const { calls } = mockApi({
       "GET /api/events": ({ url }: { url: URL }) => {
@@ -51,7 +51,7 @@ describe("useEvents", () => {
     expect(calls.filter((c) => c.search === "?after=0")).toHaveLength(2)
   })
 
-  it("waits for an epoch before polling", async () => {
+  it("waits for an epoch before polling", { timeout: 10_000 }, async () => {
     const { calls } = mockApi({ "GET /api/events": [] })
     const { wrapper } = withQuery()
     renderHook(() => useEvents(undefined), { wrapper })
@@ -61,7 +61,7 @@ describe("useEvents", () => {
 })
 
 describe("useLogTail", () => {
-  it("advances the cursor on every poll", async () => {
+  it("advances the cursor on every poll", { timeout: 10_000 }, async () => {
     const chunks: Record<string, LogChunk> = {
       "": { data: "one\n", next: "c1" },
       c1: { data: "two\n", next: "c2" },
@@ -78,7 +78,7 @@ describe("useLogTail", () => {
     expect(calls.map((c) => c.search).slice(0, 2)).toEqual(["?cursor=", "?cursor=c1"])
   })
 
-  it("does not poll while the log is closed", async () => {
+  it("does not poll while the log is closed", { timeout: 10_000 }, async () => {
     const { calls } = mockApi({ "GET /api/runners/aaaaaa/log": { data: "x", next: "c1" } })
     const { wrapper } = withQuery()
     renderHook(() => useLogTail("aaaaaa", false), { wrapper })

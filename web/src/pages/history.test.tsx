@@ -46,4 +46,11 @@ describe("History page", () => {
     renderApp("/history")
     expect(await screen.findByText("history file unreadable")).toBeInTheDocument()
   })
+
+  it("shows loading until the first read answers", async () => {
+    mockApi(authedRoutes({ "GET /api/history": () => new Promise(() => {}) }))
+    renderApp("/history")
+    expect(await screen.findByText("loading…")).toBeInTheDocument()
+    expect(screen.queryByText("no finished jobs yet")).toBeNull()
+  })
 })
