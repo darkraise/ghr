@@ -27,6 +27,16 @@ function routes(over: Record<string, unknown> = {}) {
 }
 
 describe("Repositories page", () => {
+  it("names a cancelled last job as cancelled", async () => {
+    const repos = fixtures.status.repos.map((r) =>
+      r.name === "darkmem" && r.last_job ? { ...r, last_job: { ...r.last_job, conclusion: "cancelled" } } : r,
+    )
+    mockApi(routes({ "GET /api/status": { ...fixtures.status, repos }, "GET /api/history": [] }))
+    renderApp("/repositories")
+    expect(await screen.findByRole("img", { name: "cancelled" })).toBeInTheDocument()
+    expect(screen.queryByRole("img", { name: "failed" })).toBeNull()
+  })
+
   it("shows a card per repo with its state, counts and activity", async () => {
     mockApi(routes())
     renderApp("/repositories")

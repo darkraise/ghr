@@ -13,6 +13,8 @@ export function repoState(r: RepoStatus): string {
   return "active"
 }
 
+const outcome = (conclusion: string) => (conclusion === "success" ? "succeeded" : conclusion === "cancelled" ? "cancelled" : "failed")
+
 export function RepoSummary({ repo, now }: { repo: RepoStatus; now: number }) {
   const job = repo.last_job
   const ok = job?.conclusion === "success"
@@ -26,7 +28,7 @@ export function RepoSummary({ repo, now }: { repo: RepoStatus; now: number }) {
       </div>
       {job ? (
         <p>
-          <span role="img" aria-label={ok ? "succeeded" : "failed"} className={ok ? "text-green-600" : "text-destructive"}>
+          <span role="img" aria-label={outcome(job.conclusion)} className={ok ? "text-green-600" : "text-destructive"}>
             {ok ? "✔" : "✖"}
           </span>{" "}
           #{job.run_number} {job.job_name} · {ago(now - Date.parse(job.finished_at))}
