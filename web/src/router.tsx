@@ -10,6 +10,7 @@ import {
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import { api } from "./api/client"
 import { keys } from "./api/hooks"
+import { RouteError } from "./components/route-error"
 import { Shell } from "./components/shell"
 import { routerAdapter } from "./lib/router-adapter"
 import { DashboardPage } from "./pages/dashboard"
@@ -76,7 +77,7 @@ const routeTree = rootRoute.addChildren([
 ])
 
 export function createAppRouter({ queryClient, history }: { queryClient: QueryClient; history?: RouterHistory }) {
-  return createRouter({ routeTree, context: { queryClient }, history })
+  return createRouter({ routeTree, context: { queryClient }, history, defaultErrorComponent: RouteError })
 }
 
 export type AppRouter = ReturnType<typeof createAppRouter>

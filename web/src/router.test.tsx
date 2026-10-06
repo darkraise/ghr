@@ -1,6 +1,6 @@
 import { screen, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import { mockApi } from "@/test/api"
+import { json, mockApi } from "@/test/api"
 import { renderApp } from "@/test/render"
 
 const authed = { "GET /auth/state": { setup_required: false, authenticated: true } }
@@ -36,6 +36,18 @@ describe("routes", () => {
     mockApi(authed)
     renderAt(path)
     expect(await screen.findByRole("heading", { name: title })).toBeInTheDocument()
+  })
+
+  it("offers a retry when the daemon cannot be asked who is logged in", async () => {
+    let down = true
+    mockApi({
+      "GET /auth/state": () => (down ? json({ error: "connection refused" }, 502) : authed["GET /auth/state"]),
+    })
+    const { user } = renderApp("/runners")
+    expect(await screen.findByText("cannot load the page: connection refused")).toBeInTheDocument()
+    down = false
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+    expect(await screen.findByRole("heading", { name: "Runners" })).toBeInTheDocument()
   })
 
   it("shows the later pages as not in the web UI yet", async () => {
