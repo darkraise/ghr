@@ -4,6 +4,7 @@ import { Toaster } from "darkraise-ui/components/sonner"
 import { ThemeProvider } from "darkraise-ui/theme"
 import { useEffect } from "react"
 import { setUnauthorizedHandler } from "./api/client"
+import { loginSearch } from "./lib/redirect"
 import type { AppRouter } from "./router"
 import { themeConfig } from "./theme.config"
 
@@ -17,7 +18,7 @@ export function App({ router, queryClient }: { router: AppRouter; queryClient: Q
       redirecting = true
       queryClient.clear()
       void router
-        .navigate({ to: "/login", search: href === "/" ? {} : { redirect: href }, ignoreBlocker: true })
+        .navigate({ to: "/login", search: loginSearch(href), ignoreBlocker: true })
         .finally(() => {
           redirecting = false
         })

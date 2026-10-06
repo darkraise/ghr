@@ -11,6 +11,7 @@ import { keys } from "./api/hooks"
 import { RootLayout } from "./components/root-layout"
 import { RouteError } from "./components/route-error"
 import { Shell } from "./components/shell"
+import { loginSearch, safeRedirect } from "./lib/redirect"
 import { DashboardPage } from "./pages/dashboard"
 import { HistoryPage } from "./pages/history"
 import { LoginPage } from "./pages/login"
@@ -34,8 +35,8 @@ const loginRoute = createRoute({
   path: "/login",
   validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
     typeof search.redirect === "string" ? { redirect: search.redirect } : {},
-  beforeLoad: async ({ context }) => {
-    if ((await authState(context.queryClient)).authenticated) throw redirect({ to: "/" })
+  beforeLoad: async ({ context, search }) => {
+    if ((await authState(context.queryClient)).authenticated) throw redirect({ href: safeRedirect(search.redirect) })
   },
   component: LoginPage,
 })
@@ -45,7 +46,7 @@ const appRoute = createRoute({
   id: "app",
   beforeLoad: async ({ context, location }) => {
     if (!(await authState(context.queryClient)).authenticated) {
-      throw redirect({ to: "/login", search: location.href === "/" ? {} : { redirect: location.href } })
+      throw redirect({ to: "/login", search: loginSearch(location.href) })
     }
   },
   component: Shell,

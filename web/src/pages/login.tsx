@@ -9,6 +9,7 @@ import { useState, type FormEvent } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys } from "@/api/hooks"
 import { hhmm } from "@/lib/format"
+import { safeRedirect } from "@/lib/redirect"
 
 const MIN_BYTES = 12
 const MAX_BYTES = 1024
@@ -23,12 +24,6 @@ function loginError(err: unknown): string {
     return `Too many failed logins; try again after ${hhmm(err.retryAt)}.`
   }
   return err instanceof Error ? err.message : String(err)
-}
-
-// Only a path on this site: "//host" and "/\host" are read by browsers as
-// another origin.
-function safeRedirect(target: string | undefined): string {
-  return target && target.startsWith("/") && !target.startsWith("//") && !target.startsWith("/\\") ? target : "/"
 }
 
 export function LoginPage() {

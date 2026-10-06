@@ -26,6 +26,20 @@ describe("routes", () => {
     expect(router.state.location.pathname).toBe("/")
   })
 
+  it("sends a logged-in visitor from /login to the page it asked for", async () => {
+    mockApi(authedRoutes({ "GET /api/history": [] }))
+    const router = renderAt("/login?redirect=%2Fhistory")
+    expect(await screen.findByRole("heading", { name: "History" })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/history")
+  })
+
+  it("keeps a logged-in visitor on the site whatever /login is asked to open", async () => {
+    mockApi(authed)
+    const router = renderAt("/login?redirect=%2F%2Fevil.example%2Fx")
+    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/")
+  })
+
   it.each([
     ["/runners", "Runners"],
     ["/history", "History"],
