@@ -11,6 +11,7 @@ import { keys, useConfig, useStatus, useStorage } from "@/api/hooks"
 import type { Config, DockerDisk, PruneScope, Status, Storage } from "@/api/types"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { RefusedHint } from "@/components/refused-hint"
+import { ToolchainsCard } from "@/components/toolchains-card"
 import { hhmm, humanBytes } from "@/lib/format"
 import { errorText } from "@/query"
 
@@ -177,6 +178,7 @@ export function StoragePage() {
       {data ? (
         <div className="grid gap-4 xl:grid-cols-2">
           <DockerCard storage={data} status={status.data} config={config.data} offline={offline} />
+          <ToolchainsCard storage={data} status={status.data} offline={offline} />
         </div>
       ) : (
         !storage.isError && <p className="text-sm text-muted-foreground">loading…</p>
