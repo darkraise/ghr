@@ -109,24 +109,39 @@ func (m Model) gotStorage(msg storageMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// announce shows a toast for the newest operation that finished since the
-// last snapshot. The first snapshot only records where the page starts, so
-// opening it does not replay old results.
+// announce shows one toast naming every operation that finished since the
+// last snapshot, the unsuccessful ones first so a narrow toast line keeps
+// them. The first snapshot only records where the page starts, so opening it
+// does not replay old results.
 func (m *Model) announce(recent []model.Operation) {
 	s := m.store
 	if len(recent) == 0 || recent[0].ID == s.lastOp {
 		return
 	}
-	o := recent[0]
-	s.lastOp = o.ID
+	fresh := recent
+	for i, o := range recent {
+		if o.ID == s.lastOp {
+			fresh = recent[:i]
+			break
+		}
+	}
+	s.lastOp = recent[0].ID
 	if !s.loaded {
 		return
 	}
-	text := o.Kind + " " + o.Target + ": " + o.Outcome
-	if o.Message != "" {
-		text = o.Kind + " " + o.Target + ": " + o.Message
+	var bad, good []string
+	for _, o := range fresh {
+		text := o.Kind + " " + o.Target + ": " + o.Outcome
+		if o.Message != "" {
+			text = o.Kind + " " + o.Target + ": " + o.Message
+		}
+		if o.Outcome == "ok" || o.Outcome == "skipped" {
+			good = append(good, text)
+		} else {
+			bad = append(bad, text)
+		}
 	}
-	m.toast.Show(text, o.Outcome != "ok" && o.Outcome != "skipped", m.now())
+	m.toast.Show(strings.Join(append(bad, good...), " · "), len(bad) > 0, m.now())
 }
 
 // cleanStorage sanitises the text fields of s in place; the slices come from

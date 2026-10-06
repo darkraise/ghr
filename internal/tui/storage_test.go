@@ -78,6 +78,14 @@ func TestStorageAnnouncesOnlyNewlyFinishedOperations(t *testing.T) {
 	if m = feed(m, storageMsg{seq: m.store.seq, s: st}); m.toast.Active() {
 		t.Fatal("the same operation was announced twice")
 	}
+	st.Operations.Recent = append([]model.Operation{
+		{ID: "op5", Kind: "install", Target: "node 22", StartedAt: now, FinishedAt: &done, Outcome: "ok", Message: "installed node 22.11.0"},
+		{ID: "op4", Kind: "remove", Target: "go 1.25.0", StartedAt: now, FinishedAt: &done, Outcome: "failed", Message: "remove go 1.25.0: busy"},
+	}, st.Operations.Recent...)
+	m = feed(m, storageMsg{seq: m.store.seq, s: st})
+	if want := "remove go 1.25.0: remove go 1.25.0: busy · install node 22: installed node 22.11.0"; m.toast.Text != want || !m.toast.Err {
+		t.Fatalf("two finished between polls: toast %q err=%v, want %q", m.toast.Text, m.toast.Err, want)
+	}
 }
 
 func TestStorageKeepsTheNewestReply(t *testing.T) {
