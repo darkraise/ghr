@@ -11,6 +11,7 @@ import { keys, useConfig, useStatus } from "@/api/hooks"
 import type { Config, ConfigPatch, RunnerLimitsPatch } from "@/api/types"
 import { RejectedAlert, SaveBar } from "@/components/save-bar"
 import { TagField } from "@/components/tag-field"
+import { TokenCard } from "@/components/token-card"
 import { UnsavedGuard } from "@/components/unsaved-guard"
 import { changedKeys, sameValue, settle, type Equal, type Values } from "@/lib/draft"
 import { DAY_MS, durationError, sameDuration } from "@/lib/duration"
@@ -274,6 +275,9 @@ export function SettingsPage() {
             {plain("memory_max", "Memory max", "per runner, e.g. 6G, 50% or infinity")}
             {plain("cpu_quota", "CPU quota", "per runner, e.g. 200%")}
           </Section>
+          <div className="mb-4 grid gap-4 lg:grid-cols-2">
+            <TokenCard />
+          </div>
           <SaveBar count={changed.length} saving={saving} disabled={offline} onSave={() => void save()} onDiscard={discard} />
           <UnsavedGuard count={changed.length} page="Settings" saving={saving} onSave={save} onDiscard={discard} />
         </>
