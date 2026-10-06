@@ -153,29 +153,19 @@ func TestMaintenanceSection(t *testing.T) {
 	c := &fakeClient{token: tokenStatus(87), warnings: []string{"labels: duplicate"}}
 	m := onSettings(t, c, 140, 70)
 	v := m.View()
-	for _, want := range []string{"Maintenance", "61% used", "not pruned since the daemon started", "[ Reload config.yaml ]", "[ Prune now ]"} {
+	for _, want := range []string{"Maintenance", "[ Reload config.yaml ]"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("missing %q", want)
 		}
 	}
+	for _, gone := range []string{"Prune now", "% used", "pruned"} {
+		if strings.Contains(v, gone) {
+			t.Errorf("%q belongs to the Storage page now", gone)
+		}
+	}
 	m = click(t, m, setReload)
-	if !strings.Contains(m.View(), "config reloaded (1 warning, see Activity)") {
-		t.Fatalf("reload toast:\n%s", m.View())
-	}
-	m = click(t, m, setPrune)
-	if got := strings.Join(c.actions(), "|"); got != "reload|prune" || !strings.Contains(m.View(), "prune started — see Activity") {
+	if got := strings.Join(c.actions(), "|"); got != "reload" || !strings.Contains(m.View(), "config reloaded (1 warning, see Activity)") {
 		t.Fatalf("actions %q\n%s", got, m.View())
-	}
-	st := sampleStatus()
-	st.Maintenance.Running = true
-	m = feed(m, statusMsg{st: st})
-	if v := m.View(); !strings.Contains(v, "pruning…") || m.mg.prune.Focusable() {
-		t.Fatalf("running prune:\n%s", v)
-	}
-	done := now.Add(-2 * time.Hour)
-	st.Maintenance = model.MaintenanceStatus{LastFinished: &done, LastOutcome: "ok"}
-	if v := feed(m, statusMsg{st: st}).View(); !strings.Contains(v, "last pruned 2h ago (ok)") {
-		t.Fatalf("finished prune:\n%s", v)
 	}
 	c.reloadErr = &api.Error{Status: 400, Msg: "owner changed from darkraise to x: restart ghr to switch owners"}
 	if v := click(t, m, setReload).View(); !strings.Contains(v, "reload rejected: owner changed") {

@@ -473,8 +473,6 @@ func (m Model) pressed(id string) (tea.Model, tea.Cmd) {
 		m.repos.alert = nil
 	case setReload:
 		return m.reloadConfig()
-	case setPrune:
-		return m.startPrune()
 	case setRunnerQueue:
 		return m.queueRunnerUpdate()
 	case setRunnerCancel:

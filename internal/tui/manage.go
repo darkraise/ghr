@@ -24,7 +24,6 @@ const (
 	setReplaceToken = "settings/token"
 	setTokenRetry   = "settings/token/retry"
 	setReload       = "settings/reload"
-	setPrune        = "settings/prune"
 	setRunnerQueue  = "settings/runner/queue"
 	setRunnerCancel = "settings/runner/cancel"
 	tokField        = "token/field"
@@ -44,7 +43,6 @@ type manageState struct {
 	replace  *ui.Button
 	tokRetry *ui.Button
 	reload   *ui.Button
-	prune    *ui.Button
 	rnQueue  *ui.Button
 	rnCancel *ui.Button
 
@@ -83,7 +81,6 @@ func newManageState() *manageState {
 		replace:    ui.NewButton(setReplaceToken, "Replace token", ui.Primary),
 		tokRetry:   ui.NewButton(setTokenRetry, "Retry", ui.Secondary),
 		reload:     ui.NewButton(setReload, "Reload config.yaml", ui.Primary),
-		prune:      ui.NewButton(setPrune, "Prune now", ui.Primary),
 		rnQueue:    ui.NewButton(setRunnerQueue, "Queue update", ui.Primary),
 		rnCancel:   ui.NewButton(setRunnerCancel, "Cancel queued update", ui.Secondary),
 		regRefresh: ui.NewButton(reposRegRefresh, "Refresh", ui.Secondary),
@@ -330,32 +327,11 @@ func (m Model) reloaded(msg reloadMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.fetchStatus(), m.fetchEvents(), m.fetchConfig(), m.fetchToken())
 }
 
-func (m Model) startPrune() (tea.Model, tea.Cmd) {
-	if m.offline() {
-		return m, nil
-	}
-	return m, m.action("prune started — see Activity", func(c context.Context) error { return m.c.Prune(c) })
-}
-
-// maintenanceSection is the Settings card for disk use, the last manual
-// prune, the runner version, Reload and Prune now.
+// maintenanceSection is the Settings card for the runner version and
+// Reload; disk use and pruning are on the Storage page.
 func (m Model) maintenanceSection() ui.Section {
-	ms := m.st.Maintenance
-	last := "not pruned since the daemon started"
-	switch {
-	case ms.Running:
-		last = "pruning…"
-	case ms.LastFinished != nil:
-		last = fmt.Sprintf("last pruned %s (%s)", ago(m.now().Sub(*ms.LastFinished)), ms.LastOutcome)
-	}
 	m.mg.reload.SetDisabled(!m.connected)
-	m.mg.prune.SetDisabled(!m.connected || ms.Running)
-	rows := []ui.Row{
-		{Label: "Disk", Text: fmt.Sprintf("%d%% used", m.st.DiskPct)},
-		{Label: "Prune", Text: last},
-	}
-	rows = append(rows, m.runnerRows()...)
-	rows = append(rows, ui.Row{Items: []ui.Widget{m.mg.reload, m.mg.prune}})
+	rows := append(m.runnerRows(), ui.Row{Items: []ui.Widget{m.mg.reload}})
 	return ui.Section{Title: "Maintenance", Rows: rows}
 }
 
