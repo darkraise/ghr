@@ -6,13 +6,13 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router"
-import { act, render, screen } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useState } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { UnsavedGuard } from "./unsaved-guard"
 
-function setup(saveResult = true) {
+function setup(saveResult = true, settles = saveResult) {
   const onSave = vi.fn()
   const onDiscard = vi.fn()
   function Form() {
@@ -26,7 +26,7 @@ function setup(saveResult = true) {
           saving={false}
           onSave={async () => {
             onSave()
-            if (saveResult) setCount(0)
+            if (settles) setCount(0)
             return saveResult
           }}
           onDiscard={() => {
@@ -74,6 +74,16 @@ describe("UnsavedGuard", () => {
     await user.click(screen.getByRole("button", { name: "Save" }))
     expect(await screen.findByText("other page")).toBeInTheDocument()
     expect(onSave).toHaveBeenCalledTimes(1)
+  })
+
+  it("stays when changes remain after the save", async () => {
+    const { router, user, onSave } = setup(true, false)
+    await leave(router)
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(screen.getByText("form page")).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/")
   })
 
   it("stays when the save fails", async () => {

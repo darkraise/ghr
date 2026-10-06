@@ -49,6 +49,19 @@ describe("repository page", () => {
     expect(screen.queryByText(/daemon did not apply/)).toBeNull()
   })
 
+  it("starts a fresh draft on another repository", async () => {
+    mockApi(routes())
+    const { user, router } = renderApp("/repositories/darkmem")
+    const max = await screen.findByLabelText("Max")
+    await user.clear(max)
+    await user.type(max, "2")
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
+    await router.navigate({ to: "/repositories/$name", params: { name: "darkcloud" } })
+    expect(await screen.findByRole("heading", { name: "darkcloud" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Max")).toHaveValue(null)
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
+  })
+
   it("says when the daemon did not apply a field", async () => {
     mockApi(routes({ "PATCH /api/config": () => noContent() }))
     const { user } = renderApp("/repositories/darkmem")
@@ -57,6 +70,25 @@ describe("repository page", () => {
     expect(
       (await screen.findAllByText("daemon did not apply darkmem.cleanup_name_prefixes; is it older than this ghr?")).length,
     ).toBeGreaterThan(0)
+  })
+
+  it("shows the saved value when the config cannot be read back after a save", async () => {
+    let saved = false
+    mockApi(
+      routes({
+        "GET /api/config": () => (saved ? json({ error: "ghr is restarting" }, 503) : fixtures.config),
+        "PATCH /api/config": () => {
+          saved = true
+          return noContent()
+        },
+      }),
+    )
+    const { user } = renderApp("/repositories/darkmem")
+    await user.type(await screen.findByRole("textbox", { name: "Prefixes" }), "test_{Enter}")
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    expect((await screen.findAllByText("saved, but re-reading the config failed: ghr is restarting")).length).toBeGreaterThan(0)
+    expect(screen.getByText("test_")).toBeInTheDocument()
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
   })
 
   it("shows a rejected save and keeps the edit", async () => {

@@ -168,7 +168,7 @@ describe("Settings page", () => {
     expect(screen.queryByText(/unsaved change/)).toBeNull()
   })
 
-  it("keeps the edits when the config cannot be read back after a save", async () => {
+  it("shows the saved values when the config cannot be read back after a save", async () => {
     let saved = false
     mockApi(
       routes({
@@ -186,7 +186,45 @@ describe("Settings page", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     expect((await screen.findAllByText("saved, but re-reading the config failed: ghr is restarting")).length).toBeGreaterThan(0)
     expect(screen.getByLabelText("Poll interval")).toHaveValue("15s")
-    expect(screen.getByText("● 1 unsaved change")).toBeInTheDocument()
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
+  })
+
+  it("lets a later read replace the saved values when the read back failed", async () => {
+    let reads = 0
+    const outside = { ...fixtures.config, poll_interval: "45s" }
+    mockApi(
+      routes({
+        "GET /api/config": () => {
+          reads++
+          if (reads === 1) return fixtures.config
+          return reads === 2 ? json({ error: "ghr is restarting" }, 503) : outside
+        },
+        "PATCH /api/config": () => noContent(),
+      }),
+    )
+    const { user, queryClient } = renderApp("/settings")
+    const poll = await screen.findByLabelText("Poll interval")
+    await user.clear(poll)
+    await user.type(poll, "15s")
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    expect((await screen.findAllByText(/re-reading the config failed/)).length).toBeGreaterThan(0)
+    await queryClient.refetchQueries({ queryKey: ["config"] })
+    await waitFor(() => expect(screen.getByLabelText("Poll interval")).toHaveValue("45s"))
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
+  })
+
+  it("names only the first field the daemon did not apply", async () => {
+    mockApi(routes({ "PATCH /api/config": () => noContent() }))
+    const { user } = renderApp("/settings")
+    const max = await screen.findByLabelText("Global max")
+    await user.clear(max)
+    await user.type(max, "3")
+    const poll = screen.getByLabelText("Poll interval")
+    await user.clear(poll)
+    await user.type(poll, "15s")
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    expect((await screen.findAllByText("daemon did not apply global_max; is it older than this ghr?")).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/daemon did not apply poll_interval/)).toBeNull()
   })
 
   it("discards the edits", async () => {

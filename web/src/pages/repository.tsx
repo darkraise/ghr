@@ -10,7 +10,7 @@ import { PageHeader } from "darkraise-ui/layout"
 import { useState, type ReactNode } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useStatus } from "@/api/hooks"
-import type { RepoConfig, RepoPatch } from "@/api/types"
+import type { Config, RepoConfig, RepoPatch } from "@/api/types"
 import { ActivitySummary, RepoSummary } from "@/components/repo-summary"
 import { LabelCheckCard } from "@/components/label-check-card"
 import { RegistrationsCard } from "@/components/registrations-card"
@@ -66,7 +66,12 @@ function Row({ label, htmlFor, desc, error, children }: { label: string; htmlFor
 }
 
 export function RepositoryPage() {
-  const { name = "" } = useParams({ strict: false }) as { name?: string }
+  const { name } = useParams({ from: "/app/repositories/$name" })
+  // Keyed by name: each repository starts with its own empty draft.
+  return <RepositoryForm key={name} name={name} />
+}
+
+function RepositoryForm({ name }: { name: string }) {
   const status = useStatus()
   const config = useConfig()
   const now = useNow()
@@ -127,13 +132,17 @@ export function RepositoryPage() {
     try {
       const fresh = await queryClient.fetchQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), staleTime: 0 })
       const applied = repoValues(fresh.repos?.find((r) => r.name === name))
-      for (const key of Object.keys(sent)) {
-        if (!sameValue(applied[key], sent[key])) toast.error(`daemon did not apply ${name}.${key}; is it older than this ghr?`)
-      }
-      setDraft((d) => settle(d, sent))
+      const missed = Object.keys(sent).find((key) => !sameValue(applied[key], sent[key]))
+      if (missed) toast.error(`daemon did not apply ${name}.${missed}; is it older than this ghr?`)
     } catch (err) {
       toast.error(`saved, but re-reading the config failed: ${errorText(err)}`)
+      // Until a read succeeds the cached config shows what was sent; the next
+      // poll replaces it with what the daemon holds.
+      queryClient.setQueryData<Config>(keys.config, (c) =>
+        c && { ...c, repos: c.repos?.map((r) => (r.name === name ? { ...r, ...(sent as RepoPatch) } : r)) ?? null },
+      )
     }
+    setDraft((d) => settle(d, sent))
     setSaving(false)
     return true
   }

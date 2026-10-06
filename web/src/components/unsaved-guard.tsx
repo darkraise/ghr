@@ -8,6 +8,7 @@ import {
   AlertDialogTitle,
 } from "darkraise-ui/components/alert-dialog"
 import { Button } from "darkraise-ui/components/button"
+import { useEffect, useState } from "react"
 
 export function UnsavedGuard({
   count,
@@ -23,6 +24,15 @@ export function UnsavedGuard({
   onDiscard: () => void
 }) {
   const blocker = useBlocker({ shouldBlockFn: () => count > 0 || saving, enableBeforeUnload: count > 0, withResolver: true })
+  const [saved, setSaved] = useState(false)
+  // Leaves only once the save has settled every change: an edit the save did
+  // not carry keeps the page, with the save bar showing what is left.
+  useEffect(() => {
+    if (!saved || saving || blocker.status !== "blocked") return
+    setSaved(false)
+    if (count === 0) blocker.proceed()
+    else blocker.reset()
+  }, [saved, saving, count, blocker])
   if (blocker.status !== "blocked") return null
   const { proceed, reset } = blocker
   const changes = count === 1 ? "1 unsaved change" : `${count} unsaved changes`
@@ -52,7 +62,7 @@ export function UnsavedGuard({
           >
             Discard
           </Button>
-          <Button disabled={saving} onClick={() => void onSave().then((ok) => (ok ? proceed() : reset()))}>
+          <Button disabled={saving || saved} onClick={() => void onSave().then((ok) => (ok ? setSaved(true) : reset()))}>
             Save
           </Button>
         </AlertDialogFooter>

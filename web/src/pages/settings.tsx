@@ -74,6 +74,13 @@ function toPatch(sent: Values): ConfigPatch {
   return patch as ConfigPatch
 }
 
+// The daemon took the save, so until a read succeeds the cached config shows
+// what was sent; the next poll replaces it with what the daemon holds.
+function withPatch(c: Config, patch: ConfigPatch): Config {
+  const { runner_limits: limits, ...rest } = patch
+  return { ...c, ...rest, runner_limits: { ...c.runner_limits, ...limits } } as Config
+}
+
 const patchKey = (key: string) => (isLimit(key) ? `runner_limits.${key}` : key)
 
 function Section({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
@@ -175,13 +182,13 @@ export function SettingsPage() {
       const fresh = loadedValues(
         await queryClient.fetchQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), staleTime: 0 }),
       )
-      for (const key of Object.keys(sent)) {
-        if (!equal(key, fresh[key], sent[key])) toast.error(`daemon did not apply ${patchKey(key)}; is it older than this ghr?`)
-      }
-      setDraft((d) => settle(d, sent, equal))
+      const missed = Object.keys(sent).find((key) => !equal(key, fresh[key], sent[key]))
+      if (missed) toast.error(`daemon did not apply ${patchKey(missed)}; is it older than this ghr?`)
     } catch (err) {
       toast.error(`saved, but re-reading the config failed: ${errorText(err)}`)
+      queryClient.setQueryData<Config>(keys.config, (c) => c && withPatch(c, toPatch(sent)))
     }
+    setDraft((d) => settle(d, sent, equal))
     setSaving(false)
     return true
   }
