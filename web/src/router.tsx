@@ -10,6 +10,7 @@ import {
 import { RouterAdapterProvider } from "darkraise-ui/router"
 import { api } from "./api/client"
 import { keys } from "./api/hooks"
+import { Shell } from "./components/shell"
 import { routerAdapter } from "./lib/router-adapter"
 import { DashboardPage } from "./pages/dashboard"
 import { HistoryPage } from "./pages/history"
@@ -34,10 +35,6 @@ function Root() {
   )
 }
 
-function AppFrame() {
-  return <Outlet />
-}
-
 const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({ component: Root })
 
 const loginRoute = createRoute({
@@ -55,7 +52,7 @@ const appRoute = createRoute({
   beforeLoad: async ({ context }) => {
     if (!(await authState(context.queryClient)).authenticated) throw redirect({ to: "/login" })
   },
-  component: AppFrame,
+  component: Shell,
 })
 
 const dashboardRoute = createRoute({ getParentRoute: () => appRoute, path: "/", component: DashboardPage })

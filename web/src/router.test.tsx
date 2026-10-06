@@ -1,22 +1,13 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { createMemoryHistory, RouterProvider } from "@tanstack/react-router"
-import { render, screen, waitFor } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { mockApi } from "@/test/api"
-import { createAppRouter } from "./router"
+import { renderApp } from "@/test/render"
 
 const authed = { "GET /auth/state": { setup_required: false, authenticated: true } }
 const anonymous = { "GET /auth/state": { setup_required: false, authenticated: false } }
 
 function renderAt(path: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const router = createAppRouter({ queryClient, history: createMemoryHistory({ initialEntries: [path] }) })
-  render(
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>,
-  )
-  return router
+  return renderApp(path).router
 }
 
 describe("routes", () => {
