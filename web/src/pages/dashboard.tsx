@@ -16,6 +16,7 @@ import { Glyph } from "@/components/glyph"
 import { Sparkline } from "@/components/sparkline"
 import { StateBadge } from "@/components/state-badge"
 import { ago, clock, fmtMem, maxText, series } from "@/lib/format"
+import { repoState } from "@/lib/status"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
@@ -37,14 +38,6 @@ function allPaused(repos: RepoStatus[]): boolean {
 function diskVariant(pct: number, highWater: number): BadgeVariant {
   if (pct >= 95) return "red"
   return pct >= highWater ? "amber" : "secondary"
-}
-
-function repoState(r: RepoStatus): string {
-  let state = "active"
-  if (r.paused) state = "paused"
-  if (r.removing) state = "removing"
-  if (r.error) state = "error"
-  return state
 }
 
 const jobGlyph: Record<string, { symbol: string; label: string; colour: string }> = {

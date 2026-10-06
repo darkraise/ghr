@@ -4,14 +4,8 @@ import type { RepoStatus } from "@/api/types"
 import { StateBadge } from "@/components/state-badge"
 import { summarize } from "@/lib/activity"
 import { ago, maxText } from "@/lib/format"
+import { repoState } from "@/lib/status"
 import { errorText } from "@/query"
-
-export function repoState(r: RepoStatus): string {
-  if (r.error) return "error"
-  if (r.removing) return "removing"
-  if (r.paused) return "paused"
-  return "active"
-}
 
 const outcome = (conclusion: string) => (conclusion === "success" ? "succeeded" : conclusion === "cancelled" ? "cancelled" : "failed")
 

@@ -3,16 +3,14 @@ import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
-  Outlet,
   redirect,
   type RouterHistory,
 } from "@tanstack/react-router"
-import { RouterAdapterProvider } from "darkraise-ui/router"
 import { api } from "./api/client"
 import { keys } from "./api/hooks"
+import { RootLayout } from "./components/root-layout"
 import { RouteError } from "./components/route-error"
 import { Shell } from "./components/shell"
-import { routerAdapter } from "./lib/router-adapter"
 import { DashboardPage } from "./pages/dashboard"
 import { HistoryPage } from "./pages/history"
 import { LoginPage } from "./pages/login"
@@ -29,15 +27,7 @@ function authState(queryClient: QueryClient) {
   return queryClient.fetchQuery({ queryKey: keys.auth, queryFn: ({ signal }) => api.authState(signal), staleTime: 0 })
 }
 
-function Root() {
-  return (
-    <RouterAdapterProvider value={routerAdapter}>
-      <Outlet />
-    </RouterAdapterProvider>
-  )
-}
-
-const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({ component: Root })
+const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({ component: RootLayout })
 
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,

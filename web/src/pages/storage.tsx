@@ -11,9 +11,10 @@ import { keys, useConfig, useStatus, useStorage } from "@/api/hooks"
 import type { Config, DockerDisk, PruneScope, Status, Storage } from "@/api/types"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { RefusedHint } from "@/components/refused-hint"
-import { OperationsCard, PackageCachesCard, useOperationToasts } from "@/components/storage-cards"
+import { OperationsCard, PackageCachesCard } from "@/components/storage-cards"
 import { ToolchainsCard } from "@/components/toolchains-card"
 import { hhmm, humanBytes } from "@/lib/format"
+import { useOperationToasts } from "@/lib/use-operation-toasts"
 import { errorText } from "@/query"
 
 function reclaim(d: DockerDisk, type: string): string {

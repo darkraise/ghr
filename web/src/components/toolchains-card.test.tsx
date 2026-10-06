@@ -4,7 +4,7 @@ import type { Toolchain } from "@/api/types"
 import { mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
-import { lastDotnetMajor, queueText } from "./toolchains-card"
+import { lastDotnetMajor, queueText } from "@/lib/toolchains"
 
 const routes = (over: Record<string, unknown> = {}) => authedRoutes({ "GET /api/storage": fixtures.storage, ...over })
 

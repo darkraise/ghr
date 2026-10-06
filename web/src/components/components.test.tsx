@@ -2,7 +2,8 @@ import { render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { copyText } from "@/lib/clipboard"
 import { Sparkline } from "./sparkline"
-import { StateBadge, stateVariant } from "./state-badge"
+import { stateVariant } from "@/lib/status"
+import { StateBadge } from "./state-badge"
 
 function secure(value: boolean) {
   Object.defineProperty(window, "isSecureContext", { value, configurable: true })

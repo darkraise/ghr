@@ -1,6 +1,6 @@
 import type { Status } from "@/api/types"
 
-export function busyJobs(status: Status | undefined): number {
+function busyJobs(status: Status | undefined): number {
   return status?.instances.filter((i) => i.state === "busy").length ?? 0
 }
 

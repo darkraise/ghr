@@ -6,35 +6,17 @@ import { Table, TableBody, TableCell, TableRow } from "darkraise-ui/components/t
 import { useState } from "react"
 import { api } from "@/api/client"
 import { keys } from "@/api/hooks"
-import type { Operations, Status, Storage, Toolchain } from "@/api/types"
+import type { Status, Storage, Toolchain } from "@/api/types"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { InstallDialog } from "@/components/install-dialog"
 import { RefusedHint } from "@/components/refused-hint"
 import { dateTime, humanBytes } from "@/lib/format"
+import { lastDotnetMajor, queueText } from "@/lib/toolchains"
 
 // The daemon's popular preset (internal/toolchain/set.go); the TUI lists it
 // in the same words before queueing it.
 const POPULAR_QUESTION =
   "Install the popular set? node 22, node 24, dotnet 8.0, dotnet 10.0, python 3.13, python 3.14, go latest, java 21, java 25. Versions already installed are skipped."
-
-const VERBS: Record<string, string> = { install: "installing", remove: "removing", clear: "clearing" }
-
-// Removing the last SDK of a .NET major also removes that major's runtimes
-// and packs, so the confirmation says so.
-export function lastDotnetMajor(t: Toolchain, all: Toolchain[]): string {
-  if (t.tool !== "dotnet") return ""
-  const major = t.version.split(".")[0] ?? ""
-  return all.some((o) => o.tool === "dotnet" && o.version !== t.version && o.version.startsWith(`${major}.`)) ? "" : major
-}
-
-export function queueText(ops: Operations): string {
-  const c = ops.current
-  if (!c) return ops.queued > 0 ? `${ops.queued} queued` : ""
-  let text = `${VERBS[c.kind] ?? c.kind} ${c.target}`
-  if (c.progress) text += ` — ${c.progress}`
-  if (ops.queued > 0) text += ` (${ops.queued} queued)`
-  return text
-}
 
 export function ToolchainsCard({ storage, status, offline }: { storage: Storage; status: Status | undefined; offline: boolean }) {
   const queryClient = useQueryClient()

@@ -1,16 +1,6 @@
-import { Link, useNavigate, useRouter, useRouterState } from "@tanstack/react-router"
-import type { RouterAdapter, RouterLinkProps } from "darkraise-ui/router"
-
-function RouterLink({ to, activeClassName, activeExact, ...rest }: RouterLinkProps) {
-  return (
-    <Link
-      to={to}
-      activeOptions={activeExact ? { exact: true } : undefined}
-      activeProps={activeClassName ? { className: activeClassName } : undefined}
-      {...rest}
-    />
-  )
-}
+import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router"
+import type { RouterAdapter } from "darkraise-ui/router"
+import { RouterLink } from "@/components/router-link"
 
 export const routerAdapter: RouterAdapter = {
   Link: RouterLink,
