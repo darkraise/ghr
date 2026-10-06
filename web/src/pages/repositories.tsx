@@ -8,6 +8,7 @@ import { PageHeader } from "darkraise-ui/layout"
 import { useState } from "react"
 import { api } from "@/api/client"
 import { keys, useConfig, useStatus } from "@/api/hooks"
+import { AddRepoDialog } from "@/components/add-repo-dialog"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { ActivitySummary, RepoSummary } from "@/components/repo-summary"
 import { useNow } from "@/lib/use-now"
@@ -18,6 +19,7 @@ export function RepositoriesPage() {
   const now = useNow()
   const queryClient = useQueryClient()
   const [confirm, setConfirm] = useState<Confirm | null>(null)
+  const [adding, setAdding] = useState(false)
   const refresh = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: keys.status }),
@@ -48,11 +50,16 @@ export function RepositoriesPage() {
     )
   }
   const offline = status.isError
+  const addButton = (
+    <Button disabled={offline} onClick={() => setAdding(true)}>
+      + Add repository
+    </Button>
+  )
   return (
     <>
-      <PageHeader title="Repositories" />
+      <PageHeader title="Repositories" actions={addButton} />
       {st.repos.length === 0 ? (
-        <EmptyState title="No repositories yet" />
+        <EmptyState title="No repositories yet" action={addButton} />
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {st.repos.map((r) => (
@@ -96,6 +103,7 @@ export function RepositoriesPage() {
         </div>
       )}
       <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
+      <AddRepoDialog open={adding} onClose={() => setAdding(false)} />
     </>
   )
 }
