@@ -52,7 +52,7 @@ describe("routes", () => {
 
   it("shows the later pages as not in the web UI yet", async () => {
     mockApi(authed)
-    renderAt("/storage")
+    renderAt("/settings")
     expect(await screen.findByText("Not in the web UI yet")).toBeInTheDocument()
   })
 

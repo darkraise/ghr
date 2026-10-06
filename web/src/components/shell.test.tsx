@@ -43,7 +43,7 @@ describe("shell", () => {
   it("keeps config, metrics and events polling on every page", async () => {
     const { calls } = mockApi(authedRoutes())
     renderApp("/storage")
-    await screen.findByText("Not in the web UI yet")
+    await screen.findByRole("heading", { name: "Storage" })
     await waitFor(() => {
       for (const path of ["/api/config", "/api/metrics", "/api/events"]) {
         expect(calls.some((c) => c.path === path)).toBe(true)
