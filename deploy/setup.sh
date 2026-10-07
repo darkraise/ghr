@@ -2,6 +2,8 @@
 # Installs or upgrades ghr and native GitHub Actions runners on a Debian 13 LXC.
 # Idempotent: re-run to upgrade Docker, the runner and ghr. Never overwrites config or token.
 #   bash setup.sh   (asks for the GitHub owner, the PAT and the web password; Enter skips any)
+#   curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh | bash
+#     (no prompts: finish in the browser; bash <(curl -fsSL ...) keeps the prompts)
 # Optional: GHR_VERSION=v0.1.1 RUNNER_VERSION=2.337.0
 #   GHR_TOOLCHAINS=popular|none (default: popular on a first install, none on an upgrade)
 #   GHR_OWNER=... and GHR_TOKEN=... configure GitHub for scripts that cannot answer the
@@ -25,7 +27,6 @@ STATE_DIR=/var/lib/ghr
 ETC_DIR=/etc/ghr
 APT_SOURCES_DIR=/etc/apt/sources.list.d
 READY_TIMEOUT=60
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIRST_INSTALL=0
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -142,12 +143,17 @@ install_ghr() {
   tar -xzf "$tmp/ghr_linux_amd64.tar.gz" -C "$tmp"
   install -m 0755 "$tmp/ghr/ghr" /usr/local/bin/ghr
   install -m 0755 "$tmp/ghr/job-started.sh" "$tmp/ghr/job-completed.sh" "$HOOKS_DIR/"
+  if [ -f "$tmp/ghr/config.example.yaml" ]; then
+    install -m 0644 "$tmp/ghr/config.example.yaml" "$OPT_DIR/config.example.yaml"
+  fi
   rm -rf "$tmp"
 }
 
 install_config() {
   if [ ! -f "$ETC_DIR/config.yaml" ]; then
-    install -m 0600 "$SCRIPT_DIR/config.example.yaml" "$ETC_DIR/config.yaml"
+    [ -f "$OPT_DIR/config.example.yaml" ] ||
+      die "the ghr $GHR_VERSION release has no config.example.yaml; install a newer GHR_VERSION"
+    install -m 0600 "$OPT_DIR/config.example.yaml" "$ETC_DIR/config.yaml"
     log "wrote $ETC_DIR/config.yaml from config.example.yaml"
     FIRST_INSTALL=1
     # Files, not variables: a first install that dies before preinstall_toolchains
@@ -341,6 +347,8 @@ main() {
   print_next
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+# Piped into bash (curl ... | bash), BASH_SOURCE is empty; sourced by the tests, it
+# differs from $0. main runs last, so a truncated download runs nothing.
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" == "$0" ]]; then
   main "$@"
 fi

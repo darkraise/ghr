@@ -92,12 +92,20 @@ jobs:
         run: |
           mkdir -p dist/ghr
           go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o dist/ghr/ghr ./cmd/ghr
-          cp hooks/job-started.sh hooks/job-completed.sh dist/ghr/
-          chmod 0755 dist/ghr/*
+          cp hooks/job-started.sh hooks/job-completed.sh deploy/config.example.yaml dist/ghr/
+          chmod 0755 dist/ghr/ghr dist/ghr/*.sh
           tar -C dist -czf dist/ghr_linux_amd64.tar.gz ghr
+          tar -tzf dist/ghr_linux_amd64.tar.gz | grep -qx ghr/config.example.yaml
           (cd dist && sha256sum ghr_linux_amd64.tar.gz > checksums.txt)
+      - name: setup.sh
+        if: env.VERSION != ''
+        run: |
+          # The published copy installs its own release by default. It stays out of
+          # checksums.txt: older setup.sh copies verify every line of that file.
+          sed 's/^GHR_VERSION="${GHR_VERSION:-latest}"$/GHR_VERSION="${GHR_VERSION:-'"$VERSION"'}"/' deploy/setup.sh > dist/setup.sh
+          grep -qxF "GHR_VERSION=\"\${GHR_VERSION:-$VERSION}\"" dist/setup.sh
       - name: publish
         if: env.VERSION != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$VERSION" dist/ghr_linux_amd64.tar.gz dist/checksums.txt --target "$GITHUB_SHA" --generate-notes
+        run: gh release create "$VERSION" dist/ghr_linux_amd64.tar.gz dist/checksums.txt dist/setup.sh --target "$GITHUB_SHA" --generate-notes

@@ -22,11 +22,19 @@ configured caps:
 
 ## Install / upgrade
 
-Copy `deploy/` to the LXC and run as root:
+As root on the LXC:
 
 ```bash
-bash setup.sh
+curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh | bash
+# or: wget -qO- https://github.com/darkraise/ghr/releases/latest/download/setup.sh | bash
 ```
+
+Piped like this, setup.sh asks nothing and ends with the browser URL that finishes setup.
+To answer the prompts in the terminal instead, run
+`bash <(curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh)`,
+or `bash deploy/setup.sh` from a checkout. Each release publishes its own `setup.sh`,
+which installs that release unless `GHR_VERSION` says otherwise:
+`https://github.com/darkraise/ghr/releases/download/<version>/setup.sh`.
 
 On a first install it asks for the GitHub owner (a user or org) and the PAT, the PAT
 without echo, then for the web UI password; press Enter at any prompt to skip it.
@@ -36,9 +44,9 @@ adjusts settings and chooses toolchains. Scripts can pass `GHR_OWNER`, `GHR_TOKE
 `GHR_WEB_PASSWORD` instead, then run `ghr setup finish`; `GHR_TOKEN` alone no longer
 configures ghr.
 
-Re-run `bash setup.sh` to upgrade Docker, the runner and ghr. It never overwrites
-`/etc/ghr/config.yaml` or `/etc/ghr/token`. While ghr is not configured, a re-run asks for the owner and PAT again. Pin versions with `GHR_VERSION=v0.1.1` or
-`RUNNER_VERSION=2.337.0`. Prefer re-running while no jobs are running: a Docker upgrade
+Re-run setup.sh the same way to upgrade Docker, the runner and ghr. It never overwrites
+`/etc/ghr/config.yaml` or `/etc/ghr/token`. While ghr is not configured, a re-run asks for the owner and PAT again. Pin versions with `GHR_VERSION=v0.1.17` or
+`RUNNER_VERSION=2.337.0`; a first install needs v0.1.17 or later, the first release that ships its example config. Prefer re-running while no jobs are running: a Docker upgrade
 restarts the Docker daemon, which stops the containers of running jobs. setup.sh stops ghr
 while it installs the runner, so a queued runner update cannot run at the same time;
 running runners are separate units and keep their jobs. If setup.sh fails after that, it

@@ -101,7 +101,9 @@ new_case() {
   DIST_DIR="$T/$1/dist"
   MARK_DIR="$T/$1/mark"
   STATE_DIR="$T/$1/state"
-  mkdir -p "$DIST_DIR" "$MARK_DIR" "$STATE_DIR"
+  OPT_DIR="$T/$1/opt"
+  mkdir -p "$DIST_DIR" "$MARK_DIR" "$STATE_DIR" "$OPT_DIR"
+  cp "$HERE/../config.example.yaml" "$OPT_DIR/"
   echo 0 > "$MARK_DIR/fetches"
   echo 0 > "$MARK_DIR/polls"
   READY_AFTER=1
@@ -184,6 +186,75 @@ check "d: a first install marks setup pending" [ -f "$STATE_DIR/setup-pending" ]
 rm -f "$STATE_DIR/setup-pending"
 run install_config >/dev/null 2>&1
 check "d: an upgrade does not mark setup pending" absent "$STATE_DIR/setup-pending"
+
+new_case d-no-example
+ETC_DIR="$T/d-no-example/etc"
+mkdir -p "$ETC_DIR"
+rm "$OPT_DIR/config.example.yaml"
+out=$( (GHR_VERSION=v0.1.16; run install_config) 2>&1)
+rc=$?
+check "d: a first install without the bundled example fails" [ "$rc" -ne 0 ]
+check "d: names the release that lacks it" contains "$out" "the ghr v0.1.16 release has no config.example.yaml"
+check "d: no config.yaml written" absent "$ETC_DIR/config.yaml"
+touch "$ETC_DIR/config.yaml"
+out=$(run install_config 2>&1)
+rc=$?
+check "d: an upgrade does not need the example" [ "$rc" -eq 0 ]
+
+# (l) install_ghr installs the example config the release ships.
+new_case l-install-ghr
+for variant in with without; do
+  mkdir -p "$T/l-$variant/ghr"
+  printf '#!/bin/sh
+' > "$T/l-$variant/ghr/ghr"
+  touch "$T/l-$variant/ghr/job-started.sh" "$T/l-$variant/ghr/job-completed.sh"
+  [ "$variant" = without ] || printf 'owner: ""
+' > "$T/l-$variant/ghr/config.example.yaml"
+  tar -czf "$T/l-$variant/ghr_linux_amd64.tar.gz" -C "$T/l-$variant" ghr
+  (cd "$T/l-$variant" && sha256sum ghr_linux_amd64.tar.gz > checksums.txt)
+done
+# fake_release serves the l-$1 release: curl copies the requested file and
+# records the URL; install into OPT_DIR is real, anything else is recorded.
+fake_release() {
+  RELEASE="$1"
+  curl() {
+    local out="" url=""
+    while [ $# -gt 0 ]; do
+      case "$1" in -o) out="$2"; shift ;; -*) ;; *) url="$1" ;; esac
+      shift
+    done
+    echo "$url" >> "$MARK_DIR/urls"
+    cp "$T/l-$RELEASE/${url##*/}" "$out"
+  }
+  install() {
+    case "${*: -1}" in
+      "$OPT_DIR"/*) command install "$@" ;;
+      *) echo "install $*" >> "$MARK_DIR/installs" ;;
+    esac
+  }
+}
+rm "$OPT_DIR/config.example.yaml"
+out=$( (fake_release with; GHR_VERSION=v0.1.17; run install_ghr) 2>&1)
+rc=$?
+check "l: install_ghr succeeds" [ "$rc" -eq 0 ]
+check "l: the bundled example lands in OPT_DIR" [ -f "$OPT_DIR/config.example.yaml" ]
+check "l: a pinned version downloads that release" contains "$(cat "$MARK_DIR/urls")" "releases/download/v0.1.17/ghr_linux_amd64.tar.gz"
+check "l: the binary is installed" contains "$(cat "$MARK_DIR/installs")" "/usr/local/bin/ghr"
+rm -f "$OPT_DIR/config.example.yaml"
+out=$( (fake_release without; GHR_VERSION=latest; run install_ghr) 2>&1)
+rc=$?
+check "l: a release without the example still installs" [ "$rc" -eq 0 ]
+check "l: and installs no example" absent "$OPT_DIR/config.example.yaml"
+
+# (m) Piped into bash (curl ... | bash), setup.sh runs main instead of nothing.
+if [ "$(id -u)" -ne 0 ]; then
+  out=$(bash < "$HERE/../setup.sh" 2>&1)
+  rc=$?
+  check "m: a piped run fails as non-root" [ "$rc" -ne 0 ]
+  check "m: because main ran its root check" contains "$out" "run as root"
+else
+  echo "note: skipping the piped-run test as root, where it would install for real"
+fi
 
 # (f) The apt step installs the libraries the python-versions builds link.
 new_case f-apt
