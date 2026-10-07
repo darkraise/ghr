@@ -1,0 +1,17 @@
+owner: ""                   # GitHub user or org; set by setup.sh, ghr setup github, or the web UI
+mode: queue                 # queue | all
+global_max: 2               # queue mode only
+poll_interval: 10s
+start_timeout: 2m
+idle_timeout: 5m
+disk_high_water: 80         # percent of the Docker data-root filesystem
+build_cache_keep: 20GB
+history_retention: 30d
+labels: [homelab, docker]   # added to every runner; keeps existing workflows matching
+runner_limits:
+  memory_max: 6G
+  cpu_quota: 200%
+web:                          # browser UI; the first visitor sets its password (setup.sh can set it first)
+  listen: 0.0.0.0:8080
+  # hosts: [ghr.lan]          # names a proxy serves it under; IPs and localhost always work
+repos: []

@@ -18,6 +18,8 @@ jobs:
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
       - run: go test -race -count=1 -timeout 180s ./...
+      - name: setup.sh tests
+        run: bash deploy/tests/setup_test.sh
       - uses: actions/setup-node@v4
         with:
           node-version-file: web/.nvmrc
