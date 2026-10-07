@@ -156,6 +156,9 @@ type Manager struct {
 	// PruneDone, when set, is called after every manual prune and after an
 	// automatic prune that pruned.
 	PruneDone func()
+	// Epoch, when set, is the status epoch Init uses instead of minting one,
+	// so a daemon that served before the manager started keeps one epoch.
+	Epoch string
 
 	mu             sync.Mutex
 	insts          map[string]*instance
@@ -196,7 +199,10 @@ func (m *Manager) Init() error {
 	m.lastJob = map[string]model.HistoryEntry{}
 	m.lastPrune = m.Now()
 	m.maintCtx, m.maintCancel = context.WithCancel(context.Background())
-	m.epoch = strconv.FormatInt(m.Now().UnixNano(), 36)
+	m.epoch = m.Epoch
+	if m.epoch == "" {
+		m.epoch = strconv.FormatInt(m.Now().UnixNano(), 36)
+	}
 	m.loadUpdate()
 	entries, err := m.History.Query("", "", 0)
 	if err != nil {

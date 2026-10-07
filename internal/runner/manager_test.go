@@ -104,3 +104,14 @@ func TestUnknownRunner(t *testing.T) {
 		t.Fatalf("lookup %s %d %s %v", repo, runID, name, err)
 	}
 }
+
+func TestInitKeepsAGivenEpoch(t *testing.T) {
+	h := newHarness(t)
+	h.m.Epoch = "given"
+	if err := h.m.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.m.Status().Epoch; got != "given" {
+		t.Fatalf("epoch %q", got)
+	}
+}
