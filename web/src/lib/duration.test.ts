@@ -25,7 +25,7 @@ describe("durationError", () => {
     expect(durationError("poll_interval", " 15s ", 5000)).toBe("")
   })
 
-  it("names what is wrong, as the TUI does", () => {
+  it("names what is wrong", () => {
     expect(durationError("poll_interval", "soon", 5000)).toBe('invalid duration "soon"')
     expect(durationError("start_timeout", "0s", 0)).toBe("start_timeout must be greater than 0")
     expect(durationError("poll_interval", "2s", 5000)).toBe("poll_interval must be at least 5s")

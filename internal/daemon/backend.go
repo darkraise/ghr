@@ -147,7 +147,7 @@ func (b *Backend) RunnerContainers(ctx context.Context, id string) ([]model.Cont
 }
 
 // stepsTTL bounds how often one runner's steps are fetched from GitHub,
-// however many browser tabs and TUIs poll its detail view.
+// however many browser tabs poll its detail view.
 const stepsTTL = 5 * time.Second
 
 type stepsEntry struct {

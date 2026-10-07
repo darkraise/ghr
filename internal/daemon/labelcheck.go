@@ -31,7 +31,7 @@ type labelEntry struct {
 
 // labelChecks holds each repo's last label scan, keyed by the lower-cased
 // repo name. Results belong to one token generation and are dropped when
-// the token changes; classification against labels happens in the TUI, so a
+// the token changes; classification against labels happens in the web UI, so a
 // config change never makes a stored result wrong.
 type labelChecks struct {
 	mu      sync.Mutex

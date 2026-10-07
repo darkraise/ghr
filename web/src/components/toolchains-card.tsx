@@ -13,8 +13,8 @@ import { RefusedHint } from "@/components/refused-hint"
 import { dateTime, humanBytes } from "@/lib/format"
 import { lastDotnetMajor, queueText } from "@/lib/toolchains"
 
-// The daemon's popular preset (internal/toolchain/set.go); the TUI lists it
-// in the same words before queueing it.
+// The daemon's popular preset (internal/toolchain/set.go), listed in the
+// same words the confirmation shows before queueing it.
 const POPULAR_QUESTION =
   "Install the popular set? node 22, node 24, dotnet 8.0, dotnet 10.0, python 3.13, python 3.14, go latest, java 21, java 25. Versions already installed are skipped."
 

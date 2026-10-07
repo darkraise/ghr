@@ -15,7 +15,7 @@ afterEach(() => {
 })
 
 describe("StateBadge", () => {
-  it("colours states as the TUI does", () => {
+  it("colours each state", () => {
     expect(stateVariant("busy")).toBe("blue")
     expect(stateVariant("success")).toBe("green")
     expect(stateVariant("idle")).toBe("amber")

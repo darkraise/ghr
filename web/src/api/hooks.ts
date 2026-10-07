@@ -119,7 +119,7 @@ export function useToken() {
 }
 
 // A prune shows in /status, not /storage; either one running makes the
-// Storage page poll every second, as the TUI's storageActive does.
+// Storage page poll every second.
 export function storageBusy(storage?: Storage, status?: Status): boolean {
   if (status?.maintenance.running) return true
   if (!storage) return false

@@ -29,7 +29,7 @@ export function Shell() {
   const epoch = status.data?.epoch
   const seenEpoch = useRef<string | undefined>(undefined)
   // Mounted here, not per page, so config, metrics and the event feed poll
-  // on every page as the TUI's do, and the Dashboard opens with them warm.
+  // on every page, and the Dashboard opens with them warm.
   useConfig()
   useMetrics()
   useEvents(epoch)

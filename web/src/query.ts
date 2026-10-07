@@ -8,7 +8,7 @@ export function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-// Polls do not retry: the next poll is the retry, as in the TUI. A failed
+// Polls do not retry: the next poll is the retry. A failed
 // action shows as a toast, whichever page started it.
 export function createQueryClient(): QueryClient {
   return new QueryClient({

@@ -22,7 +22,7 @@ describe("dur", () => {
 })
 
 describe("ago", () => {
-  it("matches the TUI's buckets", () => {
+  it("buckets elapsed time", () => {
     expect(ago(30_000)).toBe("just now")
     expect(ago(5 * 60_000)).toBe("5m ago")
     expect(ago(3 * 3_600_000)).toBe("3h ago")
