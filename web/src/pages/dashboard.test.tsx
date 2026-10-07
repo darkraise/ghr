@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
@@ -62,7 +62,7 @@ describe("Dashboard page", () => {
   it("shows the empty states", async () => {
     mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, repos: [], instances: [] }, "GET /api/events": [] }))
     renderApp("/")
-    expect(await screen.findByText("no repos configured — add one on the Repositories page")).toBeInTheDocument()
+    expect(await screen.findByText("no repos configured")).toBeInTheDocument()
     expect(screen.getByText("no runners — they start when jobs are queued")).toBeInTheDocument()
     expect(screen.getByText("no activity yet")).toBeInTheDocument()
   })
@@ -86,5 +86,57 @@ describe("Dashboard page", () => {
     mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, repos } }))
     renderApp("/")
     expect(await screen.findByRole("img", { name: "cancelled" })).toHaveTextContent("⊘")
+  })
+
+  it("switches the mode and steps the global max", async () => {
+    const { calls } = mockApi(authedRoutes({ "PATCH /api/config": () => noContent() }))
+    const { user } = renderApp("/")
+    await user.click(await screen.findByRole("button", { name: "Switch to ALL" }))
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH" && JSON.stringify(c.body) === '{"mode":"all"}')).toBe(true))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Raise global max" })).toBeEnabled())
+    await user.click(screen.getByRole("button", { name: "Raise global max" }))
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH" && JSON.stringify(c.body) === '{"global_max":3}')).toBe(true))
+    expect((await screen.findAllByText("global max 3")).length).toBeGreaterThan(0)
+  })
+
+  it("lowers the global max no further than 1", async () => {
+    mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, global_max: 1 } }))
+    renderApp("/")
+    expect(await screen.findByRole("button", { name: "Lower global max" })).toBeDisabled()
+  })
+
+  it("steps a repo's max, except an unlimited one", async () => {
+    const repos = fixtures.status.repos.map((r) => (r.name === "darkcloud" ? { ...r, max: 0 } : r))
+    const { calls } = mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, repos }, "PATCH /api/config": () => noContent() }))
+    const { user } = renderApp("/")
+    expect(await screen.findByRole("button", { name: "Raise max for darkcloud" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Lower max for darkcloud" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Lower max for old-repo" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "Raise max for darkmem" }))
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PATCH" && JSON.stringify(c.body) === '{"repos":{"darkmem":{"max":3}}}')).toBe(true),
+    )
+  })
+
+  it("adds, edits, pauses and removes repos, and acts on runners", async () => {
+    const { calls } = mockApi(
+      authedRoutes({
+        "GET /api/repos/available": fixtures.availableRepos,
+        "POST /api/repos/darkmem/pause": () => noContent(),
+        "DELETE /api/repos/darkmem": () => noContent(),
+      }),
+    )
+    const { user } = renderApp("/")
+    expect(await screen.findByRole("link", { name: "Edit darkmem" })).toHaveAttribute("href", "/repositories/darkmem")
+    expect(screen.getByRole("button", { name: "Stop runner aaaaaa" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Pause darkmem" }))
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/repos/darkmem/pause")).toBe(true))
+    await user.click(screen.getByRole("button", { name: "Remove darkmem" }))
+    const ask = within(await screen.findByRole("alertdialog"))
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false)
+    await user.click(ask.getByRole("button", { name: "Remove" }))
+    await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/repos/darkmem")).toBe(true))
+    await user.click(screen.getByRole("button", { name: "+ Add repository" }))
+    expect(await screen.findByRole("heading", { name: "Add repository" })).toBeInTheDocument()
   })
 })

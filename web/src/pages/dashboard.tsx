@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient, type UseQueryResult } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
 import { Card, CardContent, CardHeader, CardTitle } from "darkraise-ui/components/card"
 import { toast } from "darkraise-ui/components/sonner"
@@ -6,14 +7,17 @@ import { Spinner } from "darkraise-ui/components/spinner"
 import { Stat, StatLabel, StatValue } from "darkraise-ui/components/stat"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "darkraise-ui/components/table"
 import { PageHeader } from "darkraise-ui/layout"
-import { useEffect, useRef, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { api } from "@/api/client"
 import { keys, useEvents, useMetrics, useStatus } from "@/api/hooks"
-import type { GhrEvent, HistoryEntry, Metrics, RepoStatus, Status } from "@/api/types"
-import { RunnersTable } from "@/components/runners-table"
+import type { ConfigPatch, GhrEvent, HistoryEntry, Metrics, RepoStatus, Status } from "@/api/types"
+import { AddRepoDialog } from "@/components/add-repo-dialog"
 import { Glyph } from "@/components/glyph"
+import { RepoActionButtons } from "@/components/repo-actions"
+import { RunnersTable } from "@/components/runners-table"
 import { Sparkline } from "@/components/sparkline"
 import { StateBadge } from "@/components/state-badge"
+import { Stepper } from "@/components/stepper"
 import { ago, clock, fmtMem, maxText, series } from "@/lib/format"
 import { capText, repoState, running } from "@/lib/status"
 import { useNow } from "@/lib/use-now"
@@ -79,9 +83,21 @@ function StatTiles({ status, metrics }: { status: Status; metrics: UseQueryResul
   )
 }
 
-function RepoTable({ repos, now }: { repos: RepoStatus[]; now: number }) {
+function RepoTable({
+  repos,
+  now,
+  offline,
+  busy,
+  onMax,
+}: {
+  repos: RepoStatus[]
+  now: number
+  offline: boolean
+  busy: boolean
+  onMax: (name: string, max: number) => void
+}) {
   if (repos.length === 0) {
-    return <p className="py-6 text-center text-sm text-muted-foreground">no repos configured — add one on the Repositories page</p>
+    return <p className="py-6 text-center text-sm text-muted-foreground">no repos configured</p>
   }
   return (
     <Table>
@@ -92,6 +108,7 @@ function RepoTable({ repos, now }: { repos: RepoStatus[]; now: number }) {
           <TableHead>Run</TableHead>
           <TableHead>Queue</TableHead>
           <TableHead>Last job</TableHead>
+          <TableHead className="text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -116,6 +133,24 @@ function RepoTable({ repos, now }: { repos: RepoStatus[]; now: number }) {
             <TableCell>
               {r.last_job ? <LastJob job={r.last_job} now={now} /> : "–"}
               {r.error && <span className="ml-2 text-destructive">{r.error}</span>}
+            </TableCell>
+            <TableCell>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Stepper
+                  label={`max for ${r.name}`}
+                  value={r.max}
+                  text={maxText(r.max)}
+                  disabled={offline || busy || r.max === 0}
+                  title={r.max === 0 ? "unlimited: change it on the repository page" : undefined}
+                  onChange={(n) => onMax(r.name, n)}
+                />
+                <Button size="sm" variant="outline" asChild>
+                  <Link to="/repositories/$name" params={{ name: r.name }} aria-label={`Edit ${r.name}`}>
+                    Edit
+                  </Link>
+                </Button>
+                <RepoActionButtons repo={r} offline={offline} />
+              </div>
             </TableCell>
           </TableRow>
         ))}
@@ -157,12 +192,24 @@ export function DashboardPage() {
   const events = useEvents(status.data?.epoch)
   const now = useNow()
   const queryClient = useQueryClient()
+  const [adding, setAdding] = useState(false)
   const toggle = useMutation({
     mutationFn: (resume: boolean) => (resume ? api.resumeAll() : api.pauseAll()),
     onSuccess: (_data, resume) => {
       toast.success(resume ? "resumed all repos" : "paused all repos (drain)")
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.status }),
+  })
+  const patch = useMutation({
+    mutationFn: ({ body }: { body: ConfigPatch; done: string }) => api.patchConfig(body),
+    onSuccess: (_data, { done }) => {
+      toast.success(done)
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.status }),
+        queryClient.invalidateQueries({ queryKey: keys.config }),
+      ]),
   })
 
   const st = status.data
@@ -174,25 +221,53 @@ export function DashboardPage() {
       </>
     )
   }
+  const offline = status.isError
   const paused = allPaused(st.repos)
+  const otherMode = st.mode === "all" ? "queue" : "all"
   return (
     <>
       <PageHeader
         title="Dashboard"
         actions={
-          <Button variant="secondary" disabled={status.isError || toggle.isPending} onClick={() => toggle.mutate(paused)}>
-            {paused ? "Resume all" : "Pause all"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              disabled={offline || patch.isPending}
+              onClick={() => patch.mutate({ body: { mode: otherMode }, done: `mode ${otherMode}` })}
+            >
+              Switch to {otherMode.toUpperCase()}
+            </Button>
+            <span className="text-sm text-muted-foreground">global max</span>
+            <Stepper
+              label="global max"
+              value={st.global_max}
+              disabled={offline || patch.isPending}
+              title="applies in queue mode"
+              onChange={(n) => patch.mutate({ body: { global_max: n }, done: `global max ${n}` })}
+            />
+            <Button variant="secondary" disabled={offline || toggle.isPending} onClick={() => toggle.mutate(paused)}>
+              {paused ? "Resume all" : "Pause all"}
+            </Button>
+          </div>
         }
       />
       <StatTiles status={st} metrics={metrics} />
       <div className="mb-4 grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Repositories</CardTitle>
+            <Button size="sm" disabled={offline} onClick={() => setAdding(true)}>
+              + Add repository
+            </Button>
           </CardHeader>
           <CardContent>
-            <RepoTable repos={st.repos} now={now} />
+            <RepoTable
+              repos={st.repos}
+              now={now}
+              offline={offline}
+              busy={patch.isPending}
+              onMax={(name, max) => patch.mutate({ body: { repos: { [name]: { max } } }, done: `${name} max ${max}` })}
+            />
           </CardContent>
         </Card>
         <Card>
@@ -200,7 +275,7 @@ export function DashboardPage() {
             <CardTitle>Runners</CardTitle>
           </CardHeader>
           <CardContent>
-            <RunnersTable status={st} actions={false} />
+            <RunnersTable status={st} actions />
           </CardContent>
         </Card>
       </div>
@@ -212,6 +287,7 @@ export function DashboardPage() {
           <ActivityFeed events={events} />
         </CardContent>
       </Card>
+      <AddRepoDialog open={adding} onClose={() => setAdding(false)} />
     </>
   )
 }
