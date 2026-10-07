@@ -2,12 +2,12 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/darkraise/ghr/internal/tui"
+	"github.com/darkraise/ghr/internal/api"
 )
 
 func TestVersionAndUsage(t *testing.T) {
@@ -53,33 +53,7 @@ func stubTerminal(t *testing.T, on bool) {
 	t.Cleanup(func() { isTerminal = old })
 }
 
-// stubTUI replaces runTUI with fn for one test and restores it afterwards.
-func stubTUI(t *testing.T, fn func(tui.Client) error) {
-	t.Helper()
-	old := runTUI
-	runTUI = fn
-	t.Cleanup(func() { runTUI = old })
-}
-
-func TestBareGhrOpensTUIOnTerminal(t *testing.T) {
-	calls := 0
-	stubTUI(t, func(tui.Client) error { calls++; return nil })
-	stubTerminal(t, true)
-	var out, errb bytes.Buffer
-	if code := run(nil, strings.NewReader(""), &out, &errb); code != 0 || calls != 1 {
-		t.Fatalf("bare ghr: exit %d, tui calls %d, stderr %q", code, calls, errb.String())
-	}
-	if code := run([]string{"tui"}, strings.NewReader(""), &out, &errb); code != 0 || calls != 2 {
-		t.Fatalf("ghr tui: exit %d, tui calls %d", code, calls)
-	}
-	stubTUI(t, func(tui.Client) error { return errors.New("terminal gone") })
-	if code := run(nil, strings.NewReader(""), &out, &errb); code != 1 || !strings.Contains(errb.String(), "ghr: terminal gone") {
-		t.Fatalf("tui error: exit %d, stderr %q", code, errb.String())
-	}
-}
-
-// The production detector needs both stdin and stdout on a terminal; a
-// detector that always says false would never open the TUI.
+// The production detector needs both stdin and stdout on a terminal.
 func TestStdioIsTerminalNeedsBoth(t *testing.T) {
 	old := fdIsTerminal
 	t.Cleanup(func() { fdIsTerminal = old })
@@ -103,12 +77,45 @@ func TestStdioIsTerminalNeedsBoth(t *testing.T) {
 	}
 }
 
+func TestBareGhrRunsStatusOnTerminal(t *testing.T) {
+	reqs := fakeDaemon(t)
+	stubTerminal(t, true)
+	var out, errb bytes.Buffer
+	if code := run(nil, strings.NewReader(""), &out, &errb); code != 0 || !strings.Contains(out.String(), "mode queue  global 1/3") {
+		t.Fatalf("bare ghr: exit %d out %q err %q", code, out.String(), errb.String())
+	}
+	if last := (*reqs)[len(*reqs)-1]; last.path != "/status" {
+		t.Fatalf("request %+v", last)
+	}
+}
+
+func TestBareGhrReportsAnUnreachableDaemon(t *testing.T) {
+	old := newClient
+	t.Cleanup(func() { newClient = old })
+	newClient = func() *api.Client { return api.NewUnixClient(filepath.Join(t.TempDir(), "missing.sock")) }
+	stubTerminal(t, true)
+	var out, errb bytes.Buffer
+	if code := run(nil, strings.NewReader(""), &out, &errb); code != 1 || !strings.Contains(errb.String(), "ghr: ghr daemon unreachable") {
+		t.Fatalf("exit %d err %q", code, errb.String())
+	}
+}
+
 func TestBareGhrPrintsUsageWithoutTerminal(t *testing.T) {
-	calls := 0
-	stubTUI(t, func(tui.Client) error { calls++; return nil })
 	stubTerminal(t, false)
 	var out, errb bytes.Buffer
-	if code := run(nil, strings.NewReader(""), &out, &errb); code != 2 || calls != 0 || !strings.Contains(errb.String(), "usage: ghr") {
-		t.Fatalf("exit %d, tui calls %d, stderr %q", code, calls, errb.String())
+	if code := run(nil, strings.NewReader(""), &out, &errb); code != 2 || !strings.Contains(errb.String(), "usage: ghr") || out.Len() != 0 {
+		t.Fatalf("exit %d out %q err %q", code, out.String(), errb.String())
+	}
+}
+
+func TestTuiIsAnUnknownCommand(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := run([]string{"tui"}, strings.NewReader(""), &out, &errb); code != 2 || !strings.Contains(errb.String(), "ghr: unknown command tui") {
+		t.Fatalf("exit %d err %q", code, errb.String())
+	}
+	out.Reset()
+	run([]string{"help"}, strings.NewReader(""), &out, &errb)
+	if strings.Contains(out.String(), "tui") || !strings.Contains(out.String(), "same as status, in a terminal") {
+		t.Fatalf("usage:\n%s", out.String())
 	}
 }

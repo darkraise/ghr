@@ -12,11 +12,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/charmbracelet/x/term"
+	"golang.org/x/term"
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/daemon"
-	"github.com/darkraise/ghr/internal/tui"
 )
 
 var version = "dev"
@@ -35,11 +34,10 @@ func socketPath() string {
 // newClient is replaced in tests.
 var newClient = func() *api.Client { return api.NewUnixClient(socketPath()) }
 
-// runTUI, isTerminal and fdIsTerminal are replaced in tests.
+// isTerminal and fdIsTerminal are replaced in tests.
 var (
-	runTUI       = tui.Run
 	isTerminal   = stdioIsTerminal
-	fdIsTerminal = term.IsTerminal
+	fdIsTerminal = func(fd uintptr) bool { return term.IsTerminal(int(fd)) }
 )
 
 // stdioIsTerminal reports whether both stdin and stdout are terminals.
@@ -47,23 +45,14 @@ func stdioIsTerminal() bool {
 	return fdIsTerminal(os.Stdin.Fd()) && fdIsTerminal(os.Stdout.Fd())
 }
 
-// openTUI runs the dashboard and returns the process exit code.
-func openTUI(stderr io.Writer) int {
-	if err := runTUI(newClient()); err != nil {
-		fmt.Fprintln(stderr, "ghr:", err)
-		return 1
-	}
-	return 0
-}
-
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		// Scripts and pipes keep the old usage-and-exit-2 behaviour.
-		if isTerminal() {
-			return openTUI(stderr)
+		if !isTerminal() {
+			fmt.Fprint(stderr, usage)
+			return 2
 		}
-		fmt.Fprint(stderr, usage)
-		return 2
+		args = []string{"status"}
 	}
 	switch args[0] {
 	case "daemon":
@@ -80,8 +69,6 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
-	case "tui":
-		return openTUI(stderr)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -102,9 +89,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 const usage = `usage: ghr [command]
 
-  (no command)                    open the interactive dashboard
+  (no command)                    same as status, in a terminal
   daemon                          run the supervisor (systemd runs this)
-  tui                             same as no command
   status                          repos, runners and health
   pause <repo> | resume <repo>    stop/start new runners for a repo
   drain | resume-all              pause/resume every repo
