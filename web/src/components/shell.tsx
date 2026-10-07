@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { Outlet, useNavigate } from "@tanstack/react-router"
+import { Link, Outlet, useNavigate } from "@tanstack/react-router"
 import { Alert, AlertDescription, AlertTitle } from "darkraise-ui/components/alert"
 import { SidebarLayout, useBrandStore, type NavGroup } from "darkraise-ui/layout"
 import { Boxes, GitBranch, HardDrive, HistoryIcon, LayoutDashboard, Settings } from "lucide-react"
@@ -69,6 +69,16 @@ export function Shell() {
         <Alert variant="warning" className="mb-4">
           <AlertTitle>Degraded</AlertTitle>
           <AlertDescription>DEGRADED: {status.data.degraded_reason} — no new runners</AlertDescription>
+        </Alert>
+      )}
+      {status.data?.setup_pending && (
+        <Alert className="mb-4">
+          <AlertTitle>First-run setup is not finished.</AlertTitle>
+          <AlertDescription>
+            <Link to="/setup" className="underline">
+              Finish setup
+            </Link>
+          </AlertDescription>
         </Alert>
       )}
       <StatusChips />

@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router"
 import { api } from "./api/client"
 import { keys } from "./api/hooks"
+import type { SetupState } from "./api/types"
 import { RootLayout } from "./components/root-layout"
 import { RouteError } from "./components/route-error"
 import { Shell } from "./components/shell"
@@ -33,6 +34,16 @@ async function requireSession(queryClient: QueryClient, href: string) {
   if (!(await authState(queryClient)).authenticated) throw redirect({ to: "/login", search: loginSearch(href) })
 }
 
+// staleTime 0, like authState. A failed read does not redirect: the page
+// loads, and the Shell's status poll or the wizard reports the daemon.
+async function setupState(queryClient: QueryClient): Promise<SetupState | undefined> {
+  try {
+    return await queryClient.fetchQuery({ queryKey: keys.setup, queryFn: ({ signal }) => api.setupState(signal), staleTime: 0 })
+  } catch {
+    return undefined
+  }
+}
+
 const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({ component: RootLayout })
 
 const loginRoute = createRoute({
@@ -49,7 +60,10 @@ const loginRoute = createRoute({
 const appRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: "app",
-  beforeLoad: ({ context, location }) => requireSession(context.queryClient, location.href),
+  beforeLoad: async ({ context, location }) => {
+    await requireSession(context.queryClient, location.href)
+    if ((await setupState(context.queryClient))?.configured === false) throw redirect({ to: "/setup" })
+  },
   component: Shell,
 })
 
@@ -58,7 +72,11 @@ const appRoute = createRoute({
 const setupLayout = createRoute({
   getParentRoute: () => rootRoute,
   id: "setup",
-  beforeLoad: ({ context, location }) => requireSession(context.queryClient, location.href),
+  beforeLoad: async ({ context, location }) => {
+    await requireSession(context.queryClient, location.href)
+    const state = await setupState(context.queryClient)
+    if (state?.configured && !state.setup_pending) throw redirect({ to: "/" })
+  },
 })
 
 const setupRoute = createRoute({ getParentRoute: () => setupLayout, path: "/setup", component: SetupPage })

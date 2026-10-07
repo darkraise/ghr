@@ -1,7 +1,7 @@
 import { screen, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { json, mockApi } from "@/test/api"
-import { authedRoutes } from "@/test/fixtures"
+import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
 const authed = { "GET /auth/state": { setup_required: false, authenticated: true } }
@@ -93,5 +93,48 @@ describe("routes", () => {
     mockApi(authed)
     const router = renderAt("/runners/aaaaaa?tab=bogus")
     await waitFor(() => expect(router.state.location.search).toEqual({ tab: "steps" }))
+  })
+
+  const setupState = (over: Record<string, unknown>) => ({
+    configured: true,
+    starting: false,
+    setup_pending: false,
+    toolchains_pending: false,
+    owner: "darkraise",
+    web_listen: "0.0.0.0:8080",
+    ...over,
+  })
+
+  it("sends an unconfigured daemon to /setup", async () => {
+    mockApi(authedRoutes({ "GET /api/setup": setupState({ configured: false, owner: "" }) }))
+    const router = renderAt("/runners")
+    expect(await screen.findByRole("heading", { name: "Set up ghr" })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/setup")
+  })
+
+  it("sends a finished setup from /setup to the dashboard", async () => {
+    mockApi(authedRoutes({ "GET /api/setup": setupState({}) }))
+    const router = renderAt("/setup")
+    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/")
+  })
+
+  it("shows a banner while setup is pending, linking to /setup", async () => {
+    mockApi(
+      authedRoutes({
+        "GET /api/setup": setupState({ setup_pending: true }),
+        "GET /api/status": { ...fixtures.status, setup_pending: true },
+      }),
+    )
+    const view = renderApp("/")
+    expect(await screen.findByText("First-run setup is not finished.")).toBeInTheDocument()
+    await view.user.click(screen.getByRole("link", { name: "Finish setup" }))
+    await waitFor(() => expect(view.router.state.location.pathname).toBe("/setup"))
+  })
+
+  it("loads the app when the setup state cannot be read", async () => {
+    mockApi(authedRoutes({ "GET /api/history": [] }))
+    renderAt("/history")
+    expect(await screen.findByRole("heading", { name: "History" })).toBeInTheDocument()
   })
 })
