@@ -23,7 +23,7 @@ func socketHandler(api http.Handler, auth *webui.Auth, ev *events.Ring) http.Han
 			writeSocketError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		ev.Add("warn", "", "web password reset; the next visitor to the web UI sets a new one")
+		ev.Add("warn", "", "web password removed; set a new one with: ghr web set-password")
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /web/set-password", func(w http.ResponseWriter, r *http.Request) {

@@ -72,7 +72,7 @@ export function LoginPage() {
           <CardTitle>ghr</CardTitle>
           <CardDescription>
             {setup
-              ? "Choose the web password. The first visitor sets it, so do this now."
+              ? "No password is set. Run ghr web set-password over SSH, or set it here from the host itself."
               : "Log in to manage this runner host."}
           </CardDescription>
         </CardHeader>

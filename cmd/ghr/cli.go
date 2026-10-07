@@ -128,7 +128,7 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 			if err := c.ResetWebPassword(ctx); err != nil {
 				return err
 			}
-			fmt.Fprintln(out, "web password removed; the next visitor to the web UI sets a new one")
+			fmt.Fprintln(out, "web password removed; set a new one with: ghr web set-password")
 			return nil
 		case "set-password":
 			pw, err := readNewPassword(ctx, stdin, errOut)
@@ -291,7 +291,7 @@ func maxText(n int) string {
 
 func printStatus(out io.Writer, st model.Status) {
 	if st.WebSetupRequired {
-		fmt.Fprintln(out, "warning: the web UI has no password; the first visitor sets it. Run: ghr web set-password")
+		fmt.Fprintln(out, "warning: the web UI has no password. Run: ghr web set-password")
 	}
 	running := 0
 	for _, i := range st.Instances {

@@ -58,7 +58,7 @@ func TestResetRouteIsSocketOnly(t *testing.T) {
 	}
 	evs := b.Events.After(0)
 	if len(evs) == 0 || evs[len(evs)-1].Level != "warn" ||
-		!strings.Contains(evs[len(evs)-1].Msg, "web password reset; the next visitor to the web UI sets a new one") {
+		!strings.Contains(evs[len(evs)-1].Msg, "web password removed; set a new one with: ghr web set-password") {
 		t.Fatalf("events %+v", evs)
 	}
 

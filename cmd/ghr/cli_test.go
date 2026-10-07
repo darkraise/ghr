@@ -229,7 +229,7 @@ func TestLogsReportsWriteError(t *testing.T) {
 func TestWebResetPassword(t *testing.T) {
 	reqs := fakeDaemon(t)
 	code, out, errOut := runCLI(t, "", "web", "reset-password")
-	if code != 0 || !strings.Contains(out, "web password removed; the next visitor to the web UI sets a new one") {
+	if code != 0 || !strings.Contains(out, "web password removed; set a new one with: ghr web set-password") {
 		t.Fatalf("exit %d out %q err %q", code, out, errOut)
 	}
 	last := (*reqs)[len(*reqs)-1]
@@ -322,7 +322,7 @@ func TestSetPasswordPromptStopsWhenCancelled(t *testing.T) {
 func TestStatusWarnsWhileTheWebUIHasNoPassword(t *testing.T) {
 	var out bytes.Buffer
 	printStatus(&out, model.Status{Mode: "queue", GlobalMax: 1, WebSetupRequired: true})
-	const warning = "warning: the web UI has no password; the first visitor sets it. Run: ghr web set-password\n"
+	const warning = "warning: the web UI has no password. Run: ghr web set-password\n"
 	if !strings.HasPrefix(out.String(), warning) {
 		t.Fatalf("output:\n%s", out.String())
 	}
