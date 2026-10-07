@@ -1,5 +1,5 @@
 import type { BadgeVariant } from "darkraise-ui/components/badge"
-import type { RepoStatus } from "@/api/types"
+import type { RepoStatus, Status } from "@/api/types"
 
 const variants: Record<string, BadgeVariant> = {
   active: "green",
@@ -29,4 +29,12 @@ export function repoState(r: RepoStatus): string {
   if (r.removing) return "removing"
   if (r.paused) return "paused"
   return "active"
+}
+
+export function running(status: Status): number {
+  return status.instances.filter((i) => i.state !== "cleaning").length
+}
+
+export function capText(status: Status): string {
+  return status.mode === "all" ? "∞" : String(status.global_max)
 }

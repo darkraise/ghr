@@ -6,6 +6,7 @@ import { Boxes, GitBranch, HardDrive, HistoryIcon, LayoutDashboard, Settings } f
 import { useEffect, useRef } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useEvents, useMetrics, useStatus } from "@/api/hooks"
+import { StatusChips } from "@/components/status-chips"
 import { errorText } from "@/query"
 
 const nav: NavGroup[] = [
@@ -70,6 +71,7 @@ export function Shell() {
           <AlertDescription>DEGRADED: {status.data.degraded_reason} — no new runners</AlertDescription>
         </Alert>
       )}
+      <StatusChips />
       <Outlet />
     </SidebarLayout>
   )

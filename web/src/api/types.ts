@@ -80,6 +80,7 @@ export interface Status {
   instances: InstanceStatus[]
   maintenance: MaintenanceStatus
   runner_update: RunnerUpdate
+  web_setup_required?: boolean
 }
 
 export interface GhrEvent {

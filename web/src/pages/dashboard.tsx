@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient, type UseQueryResult } from "@tanstack/react-query"
-import { Badge, type BadgeVariant } from "darkraise-ui/components/badge"
 import { Button } from "darkraise-ui/components/button"
 import { Card, CardContent, CardHeader, CardTitle } from "darkraise-ui/components/card"
 import { toast } from "darkraise-ui/components/sonner"
@@ -9,35 +8,20 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "d
 import { PageHeader } from "darkraise-ui/layout"
 import { useEffect, useRef, type ReactNode } from "react"
 import { api } from "@/api/client"
-import { keys, useConfig, useEvents, useMetrics, useStatus } from "@/api/hooks"
+import { keys, useEvents, useMetrics, useStatus } from "@/api/hooks"
 import type { GhrEvent, HistoryEntry, Metrics, RepoStatus, Status } from "@/api/types"
 import { RunnersTable } from "@/components/runners-table"
 import { Glyph } from "@/components/glyph"
 import { Sparkline } from "@/components/sparkline"
 import { StateBadge } from "@/components/state-badge"
 import { ago, clock, fmtMem, maxText, series } from "@/lib/format"
-import { repoState } from "@/lib/status"
+import { capText, repoState, running } from "@/lib/status"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
-
-const DAY = 86_400_000
-
-function running(status: Status): number {
-  return status.instances.filter((i) => i.state !== "cleaning").length
-}
-
-function capText(status: Status): string {
-  return status.mode === "all" ? "∞" : String(status.global_max)
-}
 
 function allPaused(repos: RepoStatus[]): boolean {
   const live = repos.filter((r) => !r.removing)
   return live.length > 0 && live.every((r) => r.paused)
-}
-
-function diskVariant(pct: number, highWater: number): BadgeVariant {
-  if (pct >= 95) return "red"
-  return pct >= highWater ? "amber" : "secondary"
 }
 
 const jobGlyph: Record<string, { symbol: string; label: string; colour: string }> = {
@@ -54,24 +38,6 @@ function LastJob({ job, now }: { job: HistoryEntry; now: number }) {
       <Glyph symbol={g?.symbol ?? "✖"} label={g?.label ?? "failed"} className={g?.colour} />
       {` #${job.run_number} ${job.job_name}  ${ago(now - Date.parse(job.finished_at))}`}
     </>
-  )
-}
-
-function StatusChips({ status, highWater, now }: { status: Status; highWater: number; now: number }) {
-  const deadline = status.runner_update.deadline
-  return (
-    <div className="mb-4 flex flex-wrap gap-2">
-      <Badge variant="outline">mode {status.mode.toUpperCase()}</Badge>
-      <Badge variant="outline">
-        runners {running(status)}/{capText(status)}
-      </Badge>
-      <Badge variant="outline">api {status.rate_remaining}</Badge>
-      <Badge variant={diskVariant(status.disk_pct, highWater)}>disk {status.disk_pct}%</Badge>
-      {status.degraded && <Badge variant="red">degraded: {status.degraded_reason}</Badge>}
-      {deadline && (
-        <Badge variant={Date.parse(deadline) - now <= 7 * DAY ? "red" : "amber"}>runner ↑ {status.runner_update.latest}</Badge>
-      )}
-    </div>
   )
 }
 
@@ -187,7 +153,6 @@ function ActivityFeed({ events }: { events: GhrEvent[] }) {
 
 export function DashboardPage() {
   const status = useStatus()
-  const config = useConfig()
   const metrics = useMetrics()
   const events = useEvents(status.data?.epoch)
   const now = useNow()
@@ -220,7 +185,6 @@ export function DashboardPage() {
           </Button>
         }
       />
-      <StatusChips status={st} highWater={config.data?.disk_high_water ?? 80} now={now} />
       <StatTiles status={st} metrics={metrics} />
       <div className="mb-4 grid gap-4 lg:grid-cols-2">
         <Card>

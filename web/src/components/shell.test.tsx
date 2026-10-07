@@ -123,4 +123,14 @@ describe("shell", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"), { timeout: 3000 })
     expect(screen.queryByText(/daemon unreachable/)).toBeNull()
   })
+
+  it("shows the status chips on every page", async () => {
+    mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
+    renderApp("/history")
+    expect(await screen.findByText("mode QUEUE")).toBeInTheDocument()
+    expect(screen.getByText("runners 2/2")).toBeInTheDocument()
+    expect(screen.getByText("api 4980")).toBeInTheDocument()
+    expect(screen.getByText("disk 61%")).toBeInTheDocument()
+    expect(screen.getByText("runner ↑ 2.338.0")).toBeInTheDocument()
+  })
 })
