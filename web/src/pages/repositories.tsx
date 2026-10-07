@@ -1,16 +1,13 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
 import { Card, CardContent, CardHeader, CardTitle } from "darkraise-ui/components/card"
 import { EmptyState } from "darkraise-ui/components/empty-state"
-import { toast } from "darkraise-ui/components/sonner"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { useState } from "react"
-import { api } from "@/api/client"
-import { keys, useConfig, useStatus } from "@/api/hooks"
+import { useConfig, useStatus } from "@/api/hooks"
 import { AddRepoDialog } from "@/components/add-repo-dialog"
-import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
+import { RepoActionButtons } from "@/components/repo-actions"
 import { ActivitySummary, RepoSummary } from "@/components/repo-summary"
 import { useNow } from "@/lib/use-now"
 
@@ -18,28 +15,7 @@ export function RepositoriesPage() {
   const status = useStatus()
   const config = useConfig()
   const now = useNow()
-  const queryClient = useQueryClient()
-  const [confirm, setConfirm] = useState<Confirm | null>(null)
   const [adding, setAdding] = useState(false)
-  const refresh = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: keys.status }),
-      queryClient.invalidateQueries({ queryKey: keys.config }),
-    ])
-  const pause = useMutation({
-    mutationFn: ({ name, resume }: { name: string; resume: boolean }) => (resume ? api.resumeRepo(name) : api.pauseRepo(name)),
-    onSuccess: (_data, { name, resume }) => {
-      toast.success(`${resume ? "resumed" : "paused"} ${name}`)
-    },
-    onSettled: refresh,
-  })
-  const remove = useMutation({
-    mutationFn: (name: string) => api.removeRepo(name),
-    onSuccess: (_data, name) => {
-      toast.success(`removing ${name}`)
-    },
-    onSettled: refresh,
-  })
 
   const st = status.data
   if (!st) {
@@ -77,38 +53,13 @@ export function RepositoriesPage() {
                       Manage
                     </Link>
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    aria-label={`${r.paused ? "Resume" : "Pause"} ${r.name}`}
-                    disabled={offline || Boolean(r.removing)}
-                    onClick={() => pause.mutate({ name: r.name, resume: r.paused })}
-                  >
-                    {r.paused ? "Resume" : "Pause"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    aria-label={`Remove ${r.name}`}
-                    disabled={offline || Boolean(r.removing)}
-                    onClick={() =>
-                      setConfirm({
-                        title: `Remove repo ${r.name}? Its running jobs finish first.`,
-                        action: "Remove",
-                        destructive: true,
-                        run: () => remove.mutate(r.name),
-                      })
-                    }
-                  >
-                    Remove
-                  </Button>
+                  <RepoActionButtons repo={r} offline={offline} />
                 </div>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
-      <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
       <AddRepoDialog open={adding} onClose={() => setAdding(false)} />
     </>
   )
