@@ -67,13 +67,14 @@ const InstallTimeout = time.Hour
 
 func DefaultOptions() Options {
 	return Options{
-		ConfigPath:       "/etc/ghr/config.yaml",
-		TokenPath:        "/etc/ghr/token",
-		Socket:           api.DefaultSocket,
-		HistoryPath:      "/var/lib/ghr/history.jsonl",
-		WebPasswordPath:  "/etc/ghr/web-password",
-		SetupPendingPath: "/var/lib/ghr/setup-pending", ToolchainsPendingPath: "/var/lib/ghr/toolchains-pending",
-		ShutdownWait: 30 * time.Second,
+		ConfigPath:            "/etc/ghr/config.yaml",
+		TokenPath:             "/etc/ghr/token",
+		Socket:                api.DefaultSocket,
+		HistoryPath:           "/var/lib/ghr/history.jsonl",
+		WebPasswordPath:       "/etc/ghr/web-password",
+		SetupPendingPath:      "/var/lib/ghr/setup-pending",
+		ToolchainsPendingPath: "/var/lib/ghr/toolchains-pending",
+		ShutdownWait:          30 * time.Second,
 		Paths: runner.Paths{
 			Dist:        "/opt/ghr/dist/current",
 			Instances:   "/var/lib/ghr/instances",
