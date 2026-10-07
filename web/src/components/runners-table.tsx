@@ -14,7 +14,7 @@ import { Badge } from "darkraise-ui/components/badge"
 import { Button } from "darkraise-ui/components/button"
 import { toast } from "darkraise-ui/components/sonner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "darkraise-ui/components/table"
-import { useState } from "react"
+import { useState, type KeyboardEvent, type MouseEvent } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, useStatus } from "@/api/hooks"
 import type { InstanceStatus, Status } from "@/api/types"
@@ -24,7 +24,17 @@ import { elapsed } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
-export function RunnersTable({ status, actions }: { status: Status; actions: boolean }) {
+export function RunnersTable({
+  status,
+  actions,
+  selected,
+  onSelect,
+}: {
+  status: Status
+  actions: boolean
+  selected?: string | null
+  onSelect?: (id: string) => void
+}) {
   const navigate = useNavigate()
   const now = useNow()
   const [stopping, setStopping] = useState<InstanceStatus | null>(null)
@@ -43,71 +53,96 @@ export function RunnersTable({ status, actions }: { status: Status; actions: boo
     }
   }
 
+  const ids = status.instances.map((i) => i.id)
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (!onSelect || ids.length === 0 || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return
+    e.preventDefault()
+    const at = selected ? ids.indexOf(selected) : -1
+    const next = at === -1 ? 0 : e.key === "ArrowDown" ? Math.min(at + 1, ids.length - 1) : Math.max(at - 1, 0)
+    const id = ids[next]
+    if (id) onSelect(id)
+  }
+  function onRowClick(e: MouseEvent<HTMLTableRowElement>, id: string) {
+    if (!onSelect || (e.target as HTMLElement).closest("a,button")) return
+    onSelect(id)
+  }
+
   return (
     <>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>ID</TableHead>
-            <TableHead>Repo</TableHead>
-            <TableHead>State</TableHead>
-            <TableHead>Job</TableHead>
-            <TableHead>Elapsed</TableHead>
-            {actions && <TableHead className="text-right">Actions</TableHead>}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {status.instances.map((i) => (
-            <TableRow key={i.id}>
-              <TableCell className="font-mono">
-                <Link to="/runners/$id" params={{ id: i.id }} search={{ tab: "steps" }} className="hover:underline">
-                  {i.id}
-                </Link>
-              </TableCell>
-              <TableCell>{i.repo}</TableCell>
-              <TableCell>
-                <StateBadge state={i.state} />
-              </TableCell>
-              <TableCell>{i.job ? `${i.job.name} #${i.job.run_number}` : "–"}</TableCell>
-              <TableCell>{elapsed(i, now)}</TableCell>
-              {actions && (
-                <TableCell>
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      aria-label={`Logs for runner ${i.id}`}
-                      onClick={() => void navigate({ to: "/runners/$id", params: { id: i.id }, search: { tab: "log" } })}
-                    >
-                      Logs
-                    </Button>
-                    <Button size="sm" variant="outline" aria-label={`Copy ID of runner ${i.id}`} onClick={() => void copy(i.id)}>
-                      Copy ID
-                    </Button>
-                    <Button size="sm" variant="destructive" aria-label={`Stop runner ${i.id}`} onClick={() => setStopping(i)}>
-                      Stop
-                    </Button>
-                  </div>
+      <div
+        tabIndex={onSelect ? 0 : undefined}
+        aria-label={onSelect ? "Runners table" : undefined}
+        onKeyDown={onSelect ? onKeyDown : undefined}
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>ID</TableHead>
+              <TableHead>Repo</TableHead>
+              <TableHead>State</TableHead>
+              <TableHead>Job</TableHead>
+              <TableHead>Elapsed</TableHead>
+              {actions && <TableHead className="text-right">Actions</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {status.instances.map((i) => (
+              <TableRow
+                key={i.id}
+                aria-selected={onSelect ? i.id === selected : undefined}
+                className={onSelect ? `cursor-pointer ${i.id === selected ? "bg-muted" : ""}` : undefined}
+                onClick={(e) => onRowClick(e, i.id)}
+              >
+                <TableCell className="font-mono">
+                  <Link to="/runners/$id" params={{ id: i.id }} search={{ tab: "steps" }} className="hover:underline">
+                    {i.id}
+                  </Link>
                 </TableCell>
-              )}
-            </TableRow>
-          ))}
-          {waiting.map((r) => (
-            <TableRow key={`waiting-${r.name}`}>
-              <TableCell>–</TableCell>
-              <TableCell>{r.name}</TableCell>
-              <TableCell>
-                <Badge variant="amber" size="sm">
-                  ⧗ waiting
-                </Badge>
-              </TableCell>
-              <TableCell colSpan={actions ? 3 : 2}>
-                {r.queued} jobs queued (repo cap {r.max})
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+                <TableCell>{i.repo}</TableCell>
+                <TableCell>
+                  <StateBadge state={i.state} />
+                </TableCell>
+                <TableCell>{i.job ? `${i.job.name} #${i.job.run_number}` : "–"}</TableCell>
+                <TableCell>{elapsed(i, now)}</TableCell>
+                {actions && (
+                  <TableCell>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        aria-label={`Logs for runner ${i.id}`}
+                        onClick={() => void navigate({ to: "/runners/$id", params: { id: i.id }, search: { tab: "log" } })}
+                      >
+                        Logs
+                      </Button>
+                      <Button size="sm" variant="outline" aria-label={`Copy ID of runner ${i.id}`} onClick={() => void copy(i.id)}>
+                        Copy ID
+                      </Button>
+                      <Button size="sm" variant="destructive" aria-label={`Stop runner ${i.id}`} onClick={() => setStopping(i)}>
+                        Stop
+                      </Button>
+                    </div>
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+            {waiting.map((r) => (
+              <TableRow key={`waiting-${r.name}`}>
+                <TableCell>–</TableCell>
+                <TableCell>{r.name}</TableCell>
+                <TableCell>
+                  <Badge variant="amber" size="sm">
+                    ⧗ waiting
+                  </Badge>
+                </TableCell>
+                <TableCell colSpan={actions ? 3 : 2}>
+                  {r.queued} jobs queued (repo cap {r.max})
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
       <StopRunnerDialog instance={stopping} onClose={() => setStopping(null)} />
     </>
   )

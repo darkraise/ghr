@@ -156,4 +156,67 @@ describe("Runners page", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/runners/aaaaaa"))
     expect(router.state.location.search).toEqual({ tab: "log" })
   })
+
+  it("previews the first runner's log", async () => {
+    mockApi(authedRoutes({ "GET /api/runners/aaaaaa/log": fixtures.log }))
+    renderApp("/runners")
+    expect(await screen.findByText("Log preview — aaaaaa (following)")).toBeInTheDocument()
+    expect(await screen.findByText(/Running job: test/)).toBeInTheDocument()
+    const row = (await screen.findByRole("link", { name: "aaaaaa" })).closest("tr")
+    expect(row).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("switches the preview to a clicked row, but not on its buttons", async () => {
+    mockApi(
+      authedRoutes({
+        "GET /api/runners/aaaaaa/log": fixtures.log,
+        "GET /api/runners/bbbbbb/log": { data: "bbbbbb says hi\n", next: "x" },
+      }),
+    )
+    const { user } = renderApp("/runners")
+    await screen.findByText("Log preview — aaaaaa (following)")
+    await user.click((await rowOf("bbbbbb")).getByRole("button", { name: "Stop runner bbbbbb" }))
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.getByText("Log preview — aaaaaa (following)")).toBeInTheDocument()
+    await user.click((await rowOf("bbbbbb")).getByText("idle"))
+    expect(await screen.findByText("Log preview — bbbbbb (following)")).toBeInTheDocument()
+    expect(await screen.findByText(/bbbbbb says hi/)).toBeInTheDocument()
+  })
+
+  it("moves the selection with the arrow keys", async () => {
+    mockApi(authedRoutes({ "GET /api/runners/aaaaaa/log": fixtures.log, "GET /api/runners/bbbbbb/log": fixtures.log }))
+    const { user } = renderApp("/runners")
+    await screen.findByText("Log preview — aaaaaa (following)")
+    screen.getByLabelText("Runners table").focus()
+    await user.keyboard("{ArrowDown}")
+    expect(await screen.findByText("Log preview — bbbbbb (following)")).toBeInTheDocument()
+  })
+
+  it("keeps an ended runner's log and stops polling it", { timeout: 10_000 }, async () => {
+    let gone = false
+    const { calls } = mockApi(
+      authedRoutes({
+        "GET /api/status": () => ({
+          ...fixtures.status,
+          instances: fixtures.status.instances.filter((i) => !(gone && i.id === "aaaaaa")),
+        }),
+        "GET /api/runners/aaaaaa/log": fixtures.log,
+        "GET /api/runners/bbbbbb/log": fixtures.log,
+      }),
+    )
+    renderApp("/runners")
+    expect(await screen.findByText(/Running job: test/)).toBeInTheDocument()
+    gone = true
+    expect(await screen.findByText("Log preview — aaaaaa (ended)", {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(screen.getByText(/Running job: test/)).toBeInTheDocument()
+    const polls = calls.filter((c) => c.path === "/api/runners/aaaaaa/log").length
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    expect(calls.filter((c) => c.path === "/api/runners/aaaaaa/log").length).toBe(polls)
+  })
+
+  it("says no runner is selected when none is up", async () => {
+    mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, instances: [], repos: [] } }))
+    renderApp("/runners")
+    expect(await screen.findByText("Log preview — no runner selected")).toBeInTheDocument()
+  })
 })

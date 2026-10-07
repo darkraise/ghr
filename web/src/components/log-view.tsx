@@ -6,10 +6,12 @@ export function LogView({
   text,
   follow,
   onFollowChange,
+  className = "h-[60vh]",
 }: {
   text: string
   follow: boolean
   onFollowChange?: (follow: boolean) => void
+  className?: string
 }) {
   const ref = useRef<HTMLPreElement>(null)
   useEffect(() => {
@@ -30,7 +32,7 @@ export function LogView({
     <pre
       ref={ref}
       onScroll={onScroll}
-      className="h-[60vh] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-mono text-xs"
+      className={`${className} overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-mono text-xs`}
     >
       {text || "no log output yet"}
     </pre>
