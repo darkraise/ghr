@@ -19,6 +19,31 @@ type Status struct {
 	RunnerUpdate   RunnerUpdate      `json:"runner_update"`
 	// WebSetupRequired is true while the web UI listens with no password set.
 	WebSetupRequired bool `json:"web_setup_required"`
+	// Unconfigured is true while ghr has no owner or token; an older daemon
+	// omits it, which reads as configured.
+	Unconfigured bool `json:"unconfigured,omitempty"`
+	// SetupPending is true until first-run setup is finished.
+	SetupPending bool `json:"setup_pending,omitempty"`
+}
+
+// SetupState is GET /setup. Configured means the full API serves; Starting
+// means owner and token are saved and the manager is still starting.
+type SetupState struct {
+	Configured        bool   `json:"configured"`
+	Starting          bool   `json:"starting"`
+	SetupPending      bool   `json:"setup_pending"`
+	ToolchainsPending bool   `json:"toolchains_pending"`
+	Owner             string `json:"owner"`
+	WebListen         string `json:"web_listen"`
+}
+
+type SetupGitHubRequest struct {
+	Owner string `json:"owner"`
+	Token string `json:"token"`
+}
+
+type SetupFinishRequest struct {
+	Toolchains string `json:"toolchains"`
 }
 
 // RunnerUpdate is the GitHub Actions runner's version state, served inside
