@@ -280,3 +280,21 @@ func (c *Client) ResetWebPassword(ctx context.Context) error {
 func (c *Client) SetWebPassword(ctx context.Context, password string) error {
 	return c.call(ctx, http.MethodPost, "/web/set-password", jsonBody(map[string]string{"password": password}), nil)
 }
+
+// SetupState reports how far first-run setup has got.
+func (c *Client) SetupState(ctx context.Context) (model.SetupState, error) {
+	var s model.SetupState
+	err := c.call(ctx, http.MethodGet, "/setup", nil, &s)
+	return s, err
+}
+
+// SetupGitHub saves the GitHub owner and token of an unconfigured daemon; an
+// empty owner keeps the one config.yaml names.
+func (c *Client) SetupGitHub(ctx context.Context, owner, token string) error {
+	return c.call(ctx, http.MethodPost, "/setup/github", jsonBody(model.SetupGitHubRequest{Owner: owner, Token: token}), nil)
+}
+
+// SetupFinish ends first-run setup; toolchains is "popular" or "none".
+func (c *Client) SetupFinish(ctx context.Context, toolchains string) error {
+	return c.call(ctx, http.MethodPost, "/setup/finish", jsonBody(model.SetupFinishRequest{Toolchains: toolchains}), nil)
+}

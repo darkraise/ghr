@@ -114,5 +114,8 @@ const usage = `usage: ghr [command]
                                   build-cache-all, dangling-images, unused-volumes
   web reset-password              forget the web UI password
   web set-password                set the web UI password (prompts, or reads stdin)
+  setup                           first-run state: configured, wizard, owner
+  setup github [--owner <owner>]  set the GitHub owner and token (prompts, or reads stdin)
+  setup finish [--toolchains popular|none]
   version
 `

@@ -332,3 +332,18 @@ func TestStatusWarnsWhileTheWebUIHasNoPassword(t *testing.T) {
 		t.Fatalf("warned with a password set:\n%s", out.String())
 	}
 }
+
+func TestStatusWhileUnconfigured(t *testing.T) {
+	var out bytes.Buffer
+	printStatus(&out, model.Status{Mode: "queue", GlobalMax: 2, Unconfigured: true, WebSetupRequired: true})
+	want := "warning: ghr is not configured. Run: ghr setup github --owner <owner>, or open the web UI\n" +
+		"warning: the web UI has no password. Run: ghr web set-password\n"
+	if out.String() != want {
+		t.Fatalf("output:\n%s", out.String())
+	}
+	out.Reset()
+	printStatus(&out, model.Status{Mode: "queue", GlobalMax: 2})
+	if !strings.HasPrefix(out.String(), "mode queue") {
+		t.Fatalf("a status without the field must print as configured:\n%s", out.String())
+	}
+}

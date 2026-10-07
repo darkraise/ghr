@@ -118,6 +118,8 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 		return cacheCmd(ctx, c, args[1:], out)
 	case "prune":
 		return pruneCmd(ctx, c, args[1:], out)
+	case "setup":
+		return setupCmd(ctx, c, args[1:], stdin, out, errOut)
 	case "web":
 		const webUsage = "usage: ghr web <reset-password|set-password>"
 		if len(args) != 2 {
@@ -290,8 +292,14 @@ func maxText(n int) string {
 }
 
 func printStatus(out io.Writer, st model.Status) {
+	if st.Unconfigured {
+		fmt.Fprintln(out, "warning: ghr is not configured. Run: ghr setup github --owner <owner>, or open the web UI")
+	}
 	if st.WebSetupRequired {
 		fmt.Fprintln(out, "warning: the web UI has no password. Run: ghr web set-password")
+	}
+	if st.Unconfigured {
+		return
 	}
 	running := 0
 	for _, i := range st.Instances {
