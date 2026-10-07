@@ -28,6 +28,7 @@ var (
 	ErrPasswordSet    = errors.New("a web password is already set")
 	ErrSetupRequired  = errors.New("no web password is set yet; set one first")
 	ErrWrongPassword  = errors.New("wrong password")
+	ErrSetupRemote    = errors.New("set the first password over SSH: ghr web set-password (or open this page through an SSH tunnel to localhost)")
 )
 
 // ThrottledError refuses a login from a client with too many recent failures.
@@ -325,18 +326,30 @@ func (a *Auth) Reset() error {
 	return nil
 }
 
-// ClientKey is the throttle key for a request's remote address: the IPv4
-// address, or the IPv6 /64, since one IPv6 host can use a whole /64.
-func ClientKey(remoteAddr string) string {
-	host, _, err := net.SplitHostPort(remoteAddr)
+// remoteAddr parses a request's RemoteAddr. A dual-stack listener reports an
+// IPv4 client as ::ffff:a.b.c.d; Unmap turns it back into an IPv4 address.
+func remoteAddr(s string) (netip.Addr, bool) {
+	host, _, err := net.SplitHostPort(s)
 	if err != nil {
-		host = remoteAddr
+		host = s
 	}
 	ip, err := netip.ParseAddr(host)
 	if err != nil {
-		return host
+		return netip.Addr{}, false
 	}
-	ip = ip.Unmap().WithZone("")
+	return ip.Unmap().WithZone(""), true
+}
+
+// ClientKey is the throttle key for a request's remote address: the IPv4
+// address, or the IPv6 /64, since one IPv6 host can use a whole /64.
+func ClientKey(addr string) string {
+	ip, ok := remoteAddr(addr)
+	if !ok {
+		if host, _, err := net.SplitHostPort(addr); err == nil {
+			return host
+		}
+		return addr
+	}
 	if ip.Is6() {
 		p, _ := ip.Prefix(64)
 		return p.String()

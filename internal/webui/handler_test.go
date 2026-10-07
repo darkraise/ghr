@@ -69,13 +69,23 @@ func sessionCookie(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
 
 func body(pw string) string { return `{"password":"` + pw + `"}` }
 
+// local sends the request from loopback, then applies mods.
+func local(mods ...func(*http.Request)) func(*http.Request) {
+	return func(r *http.Request) {
+		r.RemoteAddr = "127.0.0.1:5555"
+		for _, m := range mods {
+			m(r)
+		}
+	}
+}
+
 func TestSetupThenAPI(t *testing.T) {
 	h, _, api := newTestHandler(t)
 	rec := do(h, http.MethodGet, "/auth/state", "", nil)
 	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"authenticated":false,"setup_required":true}` {
 		t.Fatalf("state: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = do(h, http.MethodPost, "/auth/setup", body(pw), nil)
+	rec = do(h, http.MethodPost, "/auth/setup", body(pw), local())
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("setup: %d %s", rec.Code, rec.Body.String())
 	}
@@ -94,7 +104,7 @@ func TestSetupThenAPI(t *testing.T) {
 	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Fatalf("api cache-control %q", cc)
 	}
-	if rec := do(h, http.MethodPost, "/auth/setup", body(pw), nil); rec.Code != http.StatusConflict {
+	if rec := do(h, http.MethodPost, "/auth/setup", body(pw), local()); rec.Code != http.StatusConflict {
 		t.Fatalf("second setup: %d", rec.Code)
 	}
 }
@@ -105,7 +115,7 @@ func TestLoginResponses(t *testing.T) {
 		!strings.Contains(rec.Body.String(), "no web password is set yet") {
 		t.Fatalf("login before setup: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(h, http.MethodPost, "/auth/setup", body("short"), nil); rec.Code != http.StatusBadRequest ||
+	if rec := do(h, http.MethodPost, "/auth/setup", body("short"), local()); rec.Code != http.StatusBadRequest ||
 		!strings.Contains(rec.Body.String(), "password must be 12 to 1024 bytes") {
 		t.Fatalf("short setup: %d %s", rec.Code, rec.Body.String())
 	}
@@ -136,7 +146,7 @@ func TestLoginResponses(t *testing.T) {
 
 func TestSecureCookie(t *testing.T) {
 	h, _, _ := newTestHandler(t)
-	rec := do(h, http.MethodPost, "/auth/setup", body(pw), func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https") })
+	rec := do(h, http.MethodPost, "/auth/setup", body(pw), local(func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https") }))
 	if c := sessionCookie(t, rec); !c.Secure {
 		t.Fatal("cookie not Secure behind an HTTPS proxy")
 	}
@@ -319,11 +329,49 @@ func TestUnreadablePasswordFile(t *testing.T) {
 	for _, rec := range []*httptest.ResponseRecorder{
 		do(h, http.MethodGet, "/auth/state", "", nil),
 		do(h, http.MethodPost, "/auth/login", body(pw), nil),
-		do(h, http.MethodPost, "/auth/setup", body(pw), nil),
+		do(h, http.MethodPost, "/auth/setup", body(pw), local()),
 	} {
 		if rec.Code != http.StatusInternalServerError ||
 			!strings.Contains(rec.Body.String(), "web password file is unreadable; run ghr web set-password") {
 			t.Errorf("%d %s", rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestSetupOnlyFromLoopback(t *testing.T) {
+	remote := map[string]func(*http.Request){
+		"LAN address":           nil,
+		"unparseable address":   func(r *http.Request) { r.RemoteAddr = "pipe" },
+		"X-Forwarded-For":       local(func(r *http.Request) { r.Header.Set("X-Forwarded-For", "192.168.0.10") }),
+		"empty X-Forwarded-For": local(func(r *http.Request) { r.Header["X-Forwarded-For"] = []string{""} }),
+		"X-Real-IP":             local(func(r *http.Request) { r.Header.Set("X-Real-IP", "192.168.0.10") }),
+		"Forwarded":             local(func(r *http.Request) { r.Header.Set("Forwarded", "for=192.168.0.10") }),
+	}
+	for name, mod := range remote {
+		h, a, _ := newTestHandler(t)
+		rec := do(h, http.MethodPost, "/auth/setup", body(pw), mod)
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), ErrSetupRemote.Error()) ||
+			len(rec.Result().Cookies()) != 0 {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+		if req, err := a.SetupRequired(); !req || err != nil {
+			t.Errorf("%s: setup required %v err %v", name, req, err)
+		}
+	}
+
+	h, a, _ := newTestHandler(t)
+	if _, err := a.Setup(pw); err != nil {
+		t.Fatal(err)
+	}
+	if rec := do(h, http.MethodPost, "/auth/setup", body(pw), nil); rec.Code != http.StatusForbidden {
+		t.Errorf("remote setup with a password set: %d %s", rec.Code, rec.Body.String())
+	}
+
+	for _, addr := range []string{"127.0.0.1:5555", "127.8.9.10:5555", "[::1]:5555", "[::ffff:127.0.0.1]:5555"} {
+		h, _, _ := newTestHandler(t)
+		rec := do(h, http.MethodPost, "/auth/setup", body(pw), func(r *http.Request) { r.RemoteAddr = addr })
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("%s: %d %s", addr, rec.Code, rec.Body.String())
 		}
 	}
 }
