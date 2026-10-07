@@ -170,13 +170,34 @@ func TestStoreConfigureWriteFailures(t *testing.T) {
 	saved, _ := os.ReadFile(s.ConfigPath)
 	os.Remove(s.ConfigPath)
 	os.Mkdir(s.ConfigPath, 0o755)
-	if err := s.Configure("darkraise", "tok1"); err == nil || s.Configured() || s.Token() != "tok1" {
+	if err := s.Configure("darkraise", "tok1"); err == nil || s.Configured() || s.Token() != "" {
 		t.Fatalf("owner write failure: err %v configured %v token %q", err, s.Configured(), s.Token())
+	}
+	if data, _ := os.ReadFile(s.TokenPath); string(data) != "tok1\n" {
+		t.Fatalf("owner write failure: token file %q", data)
 	}
 	os.Remove(s.ConfigPath)
 	os.WriteFile(s.ConfigPath, saved, 0o600)
 	if err := s.Configure("darkraise", "tok2"); err != nil || !s.Configured() || s.Token() != "tok2" {
 		t.Fatalf("retry: err %v token %q", err, s.Token())
+	}
+}
+
+// A case-only owner difference is still a config save, and its failure must
+// leave ghr unconfigured.
+func TestStoreConfigureOwnerCaseWriteFailure(t *testing.T) {
+	s := unconfiguredStore(t, "darkraise", nil)
+	saved, _ := os.ReadFile(s.ConfigPath)
+	os.Remove(s.ConfigPath)
+	os.Mkdir(s.ConfigPath, 0o755)
+	if err := s.Configure("DarkRaise", "tok1"); err == nil || s.Configured() || s.Token() != "" || s.Config().Owner != "darkraise" {
+		t.Fatalf("owner case change write failure: err %v configured %v token %q owner %q",
+			err, s.Configured(), s.Token(), s.Config().Owner)
+	}
+	os.Remove(s.ConfigPath)
+	os.WriteFile(s.ConfigPath, saved, 0o600)
+	if err := s.Configure("DarkRaise", "tok2"); err != nil || s.Config().Owner != "DarkRaise" || s.Token() != "tok2" {
+		t.Fatalf("owner case change retry: err %v owner %q token %q", err, s.Config().Owner, s.Token())
 	}
 }
 

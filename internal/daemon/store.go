@@ -126,8 +126,9 @@ func (s *Store) SetToken(tok string) error {
 
 // Configure sets the first owner and token. The check and both writes happen
 // under one hold of s.mu, so a concurrent reload cannot configure another
-// owner in between. The token is written first: if the owner write then
-// fails, ghr stays unconfigured and a retry overwrites the token.
+// owner in between. The token file is written first and published only once
+// the owner is saved: if the owner write fails, ghr stays unconfigured and a
+// retry overwrites the token file.
 func (s *Store) Configure(owner, token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -138,24 +139,33 @@ func (s *Store) Configure(owner, token string) error {
 	if cur.Owner != "" && !strings.EqualFold(cur.Owner, owner) {
 		return &OwnerMismatchError{Owner: cur.Owner}
 	}
-	if err := s.writeToken(token); err != nil {
+	if err := s.writeTokenFile(token); err != nil {
 		return err
 	}
-	if cur.Owner == owner {
-		return nil
+	if cur.Owner != owner {
+		c := cur.Clone()
+		c.Owner = owner
+		if err := config.Save(s.ConfigPath, c); err != nil {
+			return err
+		}
+		s.cfg.Store(c)
 	}
-	c := cur.Clone()
-	c.Owner = owner
-	if err := config.Save(s.ConfigPath, c); err != nil {
-		return err
-	}
-	s.cfg.Store(c)
+	s.token.Store(&token)
 	return nil
 }
 
-// writeToken writes the token file (0600, temporary file and rename); the
-// caller holds s.mu.
+// writeToken writes the token file and swaps it in; the caller holds s.mu.
 func (s *Store) writeToken(tok string) error {
+	if err := s.writeTokenFile(tok); err != nil {
+		return err
+	}
+	s.token.Store(&tok)
+	return nil
+}
+
+// writeTokenFile writes the token file (0600, temporary file and rename)
+// without publishing it; the caller holds s.mu.
+func (s *Store) writeTokenFile(tok string) error {
 	tmp, err := os.CreateTemp(filepath.Dir(s.TokenPath), ".token-*")
 	if err != nil {
 		return err
@@ -172,9 +182,5 @@ func (s *Store) writeToken(tok string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp.Name(), s.TokenPath); err != nil {
-		return err
-	}
-	s.token.Store(&tok)
-	return nil
+	return os.Rename(tmp.Name(), s.TokenPath)
 }
