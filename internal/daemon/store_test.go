@@ -1,9 +1,14 @@
 package daemon
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/darkraise/ghr/internal/config"
@@ -64,5 +69,132 @@ func TestStoreUpdateReloadToken(t *testing.T) {
 	data, _ := os.ReadFile(s.TokenPath)
 	if s.Token() != "tok2" || strings.TrimSpace(string(data)) != "tok2" {
 		t.Fatalf("token %q file %q", s.Token(), data)
+	}
+}
+
+// unconfiguredStore opens a store whose config names owner (possibly empty)
+// and whose token file holds token, or is missing when token is nil.
+func unconfiguredStore(t *testing.T, owner string, token *string) *Store {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := strings.Replace(cfgYAML, "owner: darkraise", "owner: "+strconv.Quote(owner), 1)
+	os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o600)
+	if token != nil {
+		os.WriteFile(filepath.Join(dir, "token"), []byte(*token), 0o600)
+	}
+	s, _, err := OpenStore(filepath.Join(dir, "config.yaml"), filepath.Join(dir, "token"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func TestStoreOpensUnconfigured(t *testing.T) {
+	empty := " \n"
+	for name, s := range map[string]*Store{
+		"no token file":    unconfiguredStore(t, "", nil),
+		"empty token file": unconfiguredStore(t, "", &empty),
+		"owner, no token":  unconfiguredStore(t, "darkraise", nil),
+	} {
+		if s.Configured() || s.Token() != "" {
+			t.Errorf("%s: configured %v token %q", name, s.Configured(), s.Token())
+		}
+	}
+	if !newStore(t).Configured() {
+		t.Fatal("owner and token: not configured")
+	}
+}
+
+func TestStoreReloadSetsTheFirstOwnerAndToken(t *testing.T) {
+	s := unconfiguredStore(t, "", nil)
+	os.WriteFile(s.ConfigPath, []byte(cfgYAML), 0o600)
+	if _, err := s.Reload(); err != nil || s.Configured() || s.Config().Owner != "darkraise" {
+		t.Fatalf("owner without a token: err %v configured %v", err, s.Configured())
+	}
+	os.WriteFile(s.TokenPath, []byte("tok1\n"), 0o600)
+	if _, err := s.Reload(); err != nil || !s.Configured() || s.Token() != "tok1" {
+		t.Fatalf("owner and token: err %v token %q", err, s.Token())
+	}
+	os.WriteFile(s.TokenPath, []byte("\n"), 0o600)
+	if _, err := s.Reload(); err == nil || s.Token() != "tok1" {
+		t.Fatalf("emptied token after a token: err %v token %q", err, s.Token())
+	}
+	os.Remove(s.TokenPath)
+	if _, err := s.Reload(); err == nil || s.Token() != "tok1" {
+		t.Fatalf("removed token after a token: err %v token %q", err, s.Token())
+	}
+}
+
+func TestStoreConfigure(t *testing.T) {
+	s := unconfiguredStore(t, "", nil)
+	if err := s.Configure("DarkRaise", "tok1"); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(s.TokenPath)
+	if !s.Configured() || s.Token() != "tok1" || string(data) != "tok1\n" || s.Config().Owner != "DarkRaise" {
+		t.Fatalf("after configure: owner %q token %q file %q", s.Config().Owner, s.Token(), data)
+	}
+	if c, _, err := config.Load(s.ConfigPath); err != nil || c.Owner != "DarkRaise" {
+		t.Fatalf("saved config: err %v", err)
+	}
+	if err := s.Configure("DarkRaise", "tok2"); !errors.Is(err, ErrConfigured) || s.Token() != "tok1" {
+		t.Fatalf("second configure: %v", err)
+	}
+
+	s = unconfiguredStore(t, "darkraise", nil)
+	var mismatch *OwnerMismatchError
+	err := s.Configure("someone-else", "tok1")
+	if !errors.As(err, &mismatch) || mismatch.Owner != "darkraise" ||
+		err.Error() != "config.yaml names owner darkraise; edit config.yaml to change it" {
+		t.Fatalf("another owner: %v", err)
+	}
+	if _, err := os.Stat(s.TokenPath); !os.IsNotExist(err) {
+		t.Fatal("a refused configure wrote the token")
+	}
+	if err := s.Configure("DarkRaise", "tok1"); err != nil || s.Config().Owner != "DarkRaise" {
+		t.Fatalf("config's owner in another case: err %v owner %q", err, s.Config().Owner)
+	}
+}
+
+func TestStoreConfigureWriteFailures(t *testing.T) {
+	s := unconfiguredStore(t, "", nil)
+	os.Mkdir(s.TokenPath, 0o755)
+	if err := s.Configure("darkraise", "tok1"); err == nil || s.Configured() || s.Token() != "" || s.Config().Owner != "" {
+		t.Fatalf("token write failure: err %v token %q owner %q", err, s.Token(), s.Config().Owner)
+	}
+	if data, _ := os.ReadFile(s.ConfigPath); strings.Contains(string(data), "darkraise") {
+		t.Fatal("the owner was saved although the token write failed")
+	}
+
+	s = unconfiguredStore(t, "", nil)
+	saved, _ := os.ReadFile(s.ConfigPath)
+	os.Remove(s.ConfigPath)
+	os.Mkdir(s.ConfigPath, 0o755)
+	if err := s.Configure("darkraise", "tok1"); err == nil || s.Configured() || s.Token() != "tok1" {
+		t.Fatalf("owner write failure: err %v configured %v token %q", err, s.Configured(), s.Token())
+	}
+	os.Remove(s.ConfigPath)
+	os.WriteFile(s.ConfigPath, saved, 0o600)
+	if err := s.Configure("darkraise", "tok2"); err != nil || !s.Configured() || s.Token() != "tok2" {
+		t.Fatalf("retry: err %v token %q", err, s.Token())
+	}
+}
+
+func TestStoreConfiguresOnce(t *testing.T) {
+	s := unconfiguredStore(t, "", nil)
+	var ok atomic.Int32
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if s.Configure("darkraise", fmt.Sprintf("tok%d", i)) == nil {
+				ok.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if ok.Load() != 1 {
+		t.Fatalf("%d configures succeeded", ok.Load())
 	}
 }
