@@ -273,6 +273,30 @@ func TestRunServesTheWebUI(t *testing.T) {
 	}()
 	c := api.NewUnixClient(o.Socket)
 	waitFor(t, "the socket to serve status", func() bool { _, err := c.Status(context.Background()); return err == nil })
+	setupRequired := func() bool {
+		t.Helper()
+		st, err := c.Status(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st.WebSetupRequired
+	}
+	if !setupRequired() {
+		t.Fatal("a listener with no password must report web_setup_required")
+	}
+	waitFor(t, "the no-password warning", func() bool {
+		evs, err := c.Events(context.Background(), 0)
+		if err != nil {
+			return false
+		}
+		for _, e := range evs {
+			if e.Level == "warn" && strings.HasPrefix(e.Msg, "web UI on ") &&
+				strings.HasSuffix(e.Msg, " has no password; run: ghr web set-password") {
+				return true
+			}
+		}
+		return false
+	})
 
 	hc := &http.Client{Timeout: 10 * time.Second}
 	call := func(method, path, body, session string) (*http.Response, string) {
@@ -315,6 +339,9 @@ func TestRunServesTheWebUI(t *testing.T) {
 			session = ck.Value
 		}
 	}
+	if setupRequired() {
+		t.Fatal("after setup: web_setup_required must be false")
+	}
 	resp, body = call(http.MethodGet, "/api/status", "", session)
 	if resp.StatusCode != 200 || !strings.Contains(body, `"epoch"`) {
 		t.Fatalf("api with a session: %d %s", resp.StatusCode, body)
@@ -324,6 +351,15 @@ func TestRunServesTheWebUI(t *testing.T) {
 	}
 	if err := c.ResetWebPassword(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	if !setupRequired() {
+		t.Fatal("after a reset: web_setup_required must be true")
+	}
+	if err := c.SetWebPassword(context.Background(), "set over the socket"); err != nil {
+		t.Fatal(err)
+	}
+	if setupRequired() {
+		t.Fatal("after SetWebPassword: web_setup_required must be false")
 	}
 	if resp, _ := call(http.MethodGet, "/api/status", "", session); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("session after reset: %d", resp.StatusCode)
@@ -424,6 +460,9 @@ func TestRunWithoutTheWebListener(t *testing.T) {
 	}
 	if !warned || listening {
 		t.Fatalf("warned %v listening %v in %+v", warned, listening, evs)
+	}
+	if st, err := c.Status(context.Background()); err != nil || st.WebSetupRequired {
+		t.Fatalf("without a listener: web_setup_required %v err %v", st.WebSetupRequired, err)
 	}
 	if err := c.ResetWebPassword(context.Background()); err != nil {
 		t.Fatal(err)

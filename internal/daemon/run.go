@@ -232,6 +232,13 @@ func Run(ctx context.Context, o Options) error {
 			}
 		},
 	}
+	if webLn != nil {
+		b.WebSetupRequired = func() bool {
+			// An unreadable file is reported by the start-up warning instead.
+			req, err := auth.SetupRequired()
+			return err == nil && req
+		}
+	}
 	apiHandler := api.NewServer(b)
 	srv.Handler = socketHandler(apiHandler, auth, ev)
 	if webLn != nil {
@@ -254,6 +261,9 @@ func Run(ctx context.Context, o Options) error {
 			}
 		}()
 		ev.Add("info", "", "web UI listening on %s", webLn.Addr())
+		if b.WebSetupRequired() {
+			ev.Add("warn", "", "web UI on %s has no password; run: ghr web set-password", webLn.Addr())
+		}
 	}
 	ev.Add("info", "", "ghr daemon started (owner %s, mode %s)", owner, store.Config().Mode)
 
