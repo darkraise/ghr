@@ -318,3 +318,17 @@ func TestSetPasswordPromptStopsWhenCancelled(t *testing.T) {
 		t.Fatalf("asked again after the cancel: %q", prompts.String())
 	}
 }
+
+func TestStatusWarnsWhileTheWebUIHasNoPassword(t *testing.T) {
+	var out bytes.Buffer
+	printStatus(&out, model.Status{Mode: "queue", GlobalMax: 1, WebSetupRequired: true})
+	const warning = "warning: the web UI has no password; the first visitor sets it. Run: ghr web set-password\n"
+	if !strings.HasPrefix(out.String(), warning) {
+		t.Fatalf("output:\n%s", out.String())
+	}
+	out.Reset()
+	printStatus(&out, model.Status{Mode: "queue", GlobalMax: 1})
+	if strings.Contains(out.String(), "warning:") {
+		t.Fatalf("warned with a password set:\n%s", out.String())
+	}
+}

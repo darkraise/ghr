@@ -290,6 +290,9 @@ func maxText(n int) string {
 }
 
 func printStatus(out io.Writer, st model.Status) {
+	if st.WebSetupRequired {
+		fmt.Fprintln(out, "warning: the web UI has no password; the first visitor sets it. Run: ghr web set-password")
+	}
 	running := 0
 	for _, i := range st.Instances {
 		if i.State != "cleaning" {
