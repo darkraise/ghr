@@ -118,6 +118,25 @@ describe("Dashboard page", () => {
     )
   })
 
+  it("disables the controls while the daemon is unreachable", async () => {
+    let fail = false
+    mockApi(authedRoutes({ "GET /api/status": () => (fail ? json({ error: "connection refused" }, 502) : fixtures.status) }))
+    renderApp("/")
+    const names = [
+      "Switch to ALL",
+      "Raise global max",
+      "Pause all",
+      "+ Add repository",
+      "Raise max for darkmem",
+      "Pause darkmem",
+      "Remove darkmem",
+    ]
+    for (const name of names) expect(await screen.findByRole("button", { name })).toBeEnabled()
+    fail = true
+    await waitFor(() => expect(screen.getByRole("button", { name: "Pause all" })).toBeDisabled(), { timeout: 3000 })
+    for (const name of names) expect(screen.getByRole("button", { name })).toBeDisabled()
+  })
+
   it("adds, edits, pauses and removes repos, and acts on runners", async () => {
     const { calls } = mockApi(
       authedRoutes({
