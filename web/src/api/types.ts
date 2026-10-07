@@ -81,6 +81,17 @@ export interface Status {
   maintenance: MaintenanceStatus
   runner_update: RunnerUpdate
   web_setup_required?: boolean
+  unconfigured?: boolean
+  setup_pending?: boolean
+}
+
+export interface SetupState {
+  configured: boolean
+  starting: boolean
+  setup_pending: boolean
+  toolchains_pending: boolean
+  owner: string
+  web_listen: string
 }
 
 export interface GhrEvent {

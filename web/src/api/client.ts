@@ -12,6 +12,7 @@ import type {
   Metrics,
   PruneScope,
   Registration,
+  SetupState,
   Status,
   Step,
   Storage,
@@ -84,6 +85,9 @@ export const api = {
   login: (password: string) => send("POST", "/auth/login", { password }),
   logout: () => send("POST", "/auth/logout"),
   changePassword: (current: string, next: string) => send("POST", "/auth/password", { current, new: next }),
+  setupState: (signal?: AbortSignal) => request<SetupState>("GET", "/api/setup", undefined, signal),
+  setupGitHub: (owner: string, token: string) => send("POST", "/api/setup/github", { owner, token }),
+  setupFinish: (toolchains: "popular" | "none") => send("POST", "/api/setup/finish", { toolchains }),
   status: (signal?: AbortSignal) => request<Status>("GET", "/api/status", undefined, signal),
   events: (after: number, signal?: AbortSignal) =>
     request<GhrEvent[]>("GET", `/api/events?${query({ after })}`, undefined, signal),

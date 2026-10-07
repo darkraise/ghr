@@ -9,6 +9,7 @@ export const MAX_LOG = 256 * 1024
 
 export const keys = {
   auth: ["auth"] as const,
+  setup: ["setup"] as const,
   status: ["status"] as const,
   config: ["config"] as const,
   metrics: ["metrics"] as const,
@@ -28,6 +29,20 @@ export const keys = {
 
 export function useStatus() {
   return useQuery({ queryKey: keys.status, queryFn: ({ signal }) => api.status(signal), refetchInterval: POLL_FAST })
+}
+
+// How long the wizard waits for ghr to start after saving owner and token;
+// tests shorten it.
+export const setupStart = { limitMs: 60_000 }
+
+// Polls while the caller waits for ghr to start, or while the daemon says it
+// is starting (a reload in the middle of it).
+export function useSetupState(poll: boolean) {
+  return useQuery({
+    queryKey: keys.setup,
+    queryFn: ({ signal }) => api.setupState(signal),
+    refetchInterval: (q) => (poll || q.state.data?.starting ? POLL_FAST : false),
+  })
 }
 
 export function useConfig() {
