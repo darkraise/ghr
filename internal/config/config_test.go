@@ -378,4 +378,13 @@ func TestEmptyOwnerValidates(t *testing.T) {
 	if err != nil || c.Owner != "" {
 		t.Fatalf("empty owner: err %v owner %q", err, c.Owner)
 	}
+	for owner, want := range map[string]string{`"  darkraise "`: "darkraise", `" "`: ""} {
+		c, _, err := Parse([]byte(strings.Replace(sample, "owner: darkraise", "owner: "+owner, 1)))
+		if err != nil {
+			t.Fatalf("owner %s: %v", owner, err)
+		}
+		if c.Owner != want {
+			t.Fatalf("owner %s: got %q, want %q", owner, c.Owner, want)
+		}
+	}
 }

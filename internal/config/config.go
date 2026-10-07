@@ -170,6 +170,7 @@ func Parse(data []byte) (*Config, []string, error) {
 	} else if !errors.Is(err, io.EOF) {
 		return nil, nil, fmt.Errorf("parse config: %w", err)
 	}
+	c.Owner = strings.TrimSpace(c.Owner)
 	warnings, err := c.Validate()
 	if err != nil {
 		return nil, nil, err
