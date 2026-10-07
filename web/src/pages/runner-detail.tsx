@@ -15,6 +15,7 @@ import { LogView } from "@/components/log-view"
 import { Glyph } from "@/components/glyph"
 import { StopRunnerDialog } from "@/components/runners-table"
 import { StateBadge } from "@/components/state-badge"
+import { copyWithToast } from "@/lib/clipboard"
 import { dateTimeSec, dur, startedAt } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
@@ -124,6 +125,7 @@ export function RunnerDetailPage() {
 
   const inst = current ?? snapshot
   const job = inst?.job
+  const runUrl = job?.html_url
   const start = inst ? startedAt(inst) : undefined
   const end = finished ? (finishedAt ?? now) : now
 
@@ -134,12 +136,17 @@ export function RunnerDetailPage() {
         title={id}
         actions={
           <div className="flex gap-2">
-            {job?.html_url && (
-              <Button variant="outline" asChild>
-                <a href={job.html_url} target="_blank" rel="noreferrer">
-                  Open run
-                </a>
-              </Button>
+            {runUrl && (
+              <>
+                <Button variant="outline" asChild>
+                  <a href={runUrl} target="_blank" rel="noreferrer">
+                    Open run
+                  </a>
+                </Button>
+                <Button variant="outline" onClick={() => void copyWithToast(runUrl, "run URL")}>
+                  Copy URL
+                </Button>
+              </>
             )}
             <Button variant="destructive" disabled={!live || status.isError} onClick={() => setStopping(true)}>
               Stop runner

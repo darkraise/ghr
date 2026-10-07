@@ -1,3 +1,4 @@
+import { Button } from "darkraise-ui/components/button"
 import { Card, CardContent } from "darkraise-ui/components/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "darkraise-ui/components/select"
 import { Spinner } from "darkraise-ui/components/spinner"
@@ -6,6 +7,7 @@ import { PageHeader } from "darkraise-ui/layout"
 import { useState } from "react"
 import { useConfig, useHistory } from "@/api/hooks"
 import { StateBadge } from "@/components/state-badge"
+import { copyWithToast } from "@/lib/clipboard"
 import { dateTime, dur } from "@/lib/format"
 import { errorText } from "@/query"
 
@@ -77,6 +79,7 @@ export function HistoryPage() {
               <TableBody>
                 {rows.map((h) => {
                   const took = Date.parse(h.finished_at) - Date.parse(h.started_at)
+                  const url = h.html_url
                   return (
                     <TableRow key={h.id}>
                       <TableCell>{dateTime(h.finished_at)}</TableCell>
@@ -95,10 +98,20 @@ export function HistoryPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        {h.html_url && (
-                          <a href={h.html_url} target="_blank" rel="noreferrer" className="text-sm hover:underline">
-                            Open run
-                          </a>
+                        {url && (
+                          <div className="flex items-center justify-end gap-2">
+                            <a href={url} target="_blank" rel="noreferrer" className="text-sm hover:underline">
+                              Open run
+                            </a>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              aria-label={`Copy URL of ${h.job_name} #${h.run_number}`}
+                              onClick={() => void copyWithToast(url, "run URL")}
+                            >
+                              Copy URL
+                            </Button>
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>

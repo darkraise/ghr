@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
@@ -16,6 +16,8 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight")
   Reflect.deleteProperty(HTMLElement.prototype, "clientHeight")
   Reflect.deleteProperty(HTMLElement.prototype, "scrollTop")
+  Reflect.deleteProperty(navigator, "clipboard")
+  Reflect.deleteProperty(window, "isSecureContext")
 })
 
 describe("runner detail page", () => {
@@ -151,5 +153,16 @@ describe("runner detail page", () => {
     top = 0
     fireEvent.scroll(log)
     await waitFor(() => expect(screen.getByRole("switch", { name: "Follow" })).toHaveAttribute("aria-checked", "false"))
+  })
+
+  it("copies the run's URL", async () => {
+    mockApi(detailRoutes())
+    const { user } = renderApp("/runners/aaaaaa")
+    Object.defineProperty(window, "isSecureContext", { value: true, configurable: true })
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    await user.click(await screen.findByRole("button", { name: "Copy URL" }))
+    expect(writeText).toHaveBeenCalledWith("https://github.com/darkraise/darkmem/actions/runs/102/job/2")
+    expect((await screen.findAllByText("copied run URL")).length).toBeGreaterThan(0)
   })
 })

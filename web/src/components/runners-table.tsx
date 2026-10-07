@@ -19,10 +19,9 @@ import { ApiError, api } from "@/api/client"
 import { keys, useStatus } from "@/api/hooks"
 import type { InstanceStatus, Status } from "@/api/types"
 import { StateBadge } from "@/components/state-badge"
-import { copyText } from "@/lib/clipboard"
+import { copyWithToast } from "@/lib/clipboard"
 import { elapsed } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
-import { errorText } from "@/query"
 
 export function RunnersTable({
   status,
@@ -42,15 +41,6 @@ export function RunnersTable({
 
   if (status.instances.length === 0 && waiting.length === 0) {
     return <p className="py-6 text-center text-sm text-muted-foreground">no runners — they start when jobs are queued</p>
-  }
-
-  async function copy(id: string) {
-    try {
-      await copyText(id)
-      toast.success(`copied ${id}`)
-    } catch (err) {
-      toast.error(errorText(err))
-    }
   }
 
   const ids = status.instances.map((i) => i.id)
@@ -115,7 +105,7 @@ export function RunnersTable({
                       >
                         Logs
                       </Button>
-                      <Button size="sm" variant="outline" aria-label={`Copy ID of runner ${i.id}`} onClick={() => void copy(i.id)}>
+                      <Button size="sm" variant="outline" aria-label={`Copy ID of runner ${i.id}`} onClick={() => void copyWithToast(i.id, i.id)}>
                         Copy ID
                       </Button>
                       <Button size="sm" variant="destructive" aria-label={`Stop runner ${i.id}`} onClick={() => setStopping(i)}>
