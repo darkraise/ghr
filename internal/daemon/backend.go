@@ -84,7 +84,10 @@ type Backend struct {
 	// WebApplied is the web block the running listener started with. Only a
 	// restart applies a change, so a reload that changes it warns.
 	WebApplied config.Web
-	checks     labelChecks
+	// WebSetupRequired reports whether the web listener runs with no password
+	// set; nil, as without a listener, reports false.
+	WebSetupRequired func() bool
+	checks           labelChecks
 
 	stepsMu    sync.Mutex
 	steps      map[string]stepsEntry
@@ -111,7 +114,13 @@ func (b *Backend) now() time.Time {
 // errNotRemoving aborts a FinalizeRemovals update for a repo resumed meanwhile.
 var errNotRemoving = errors.New("repo is no longer being removed")
 
-func (b *Backend) Status() model.Status                { return b.M.Status() }
+func (b *Backend) Status() model.Status {
+	st := b.M.Status()
+	if b.WebSetupRequired != nil {
+		st.WebSetupRequired = b.WebSetupRequired()
+	}
+	return st
+}
 func (b *Backend) EventsAfter(seq int64) []model.Event { return b.Events.After(seq) }
 func (b *Backend) Config() any                         { return b.Store.Config() }
 

@@ -17,6 +17,8 @@ type Status struct {
 	Instances      []InstanceStatus  `json:"instances"`
 	Maintenance    MaintenanceStatus `json:"maintenance"`
 	RunnerUpdate   RunnerUpdate      `json:"runner_update"`
+	// WebSetupRequired is true while the web UI listens with no password set.
+	WebSetupRequired bool `json:"web_setup_required"`
 }
 
 // RunnerUpdate is the GitHub Actions runner's version state, served inside

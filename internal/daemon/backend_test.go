@@ -870,3 +870,19 @@ func TestPatchCannotChangeWeb(t *testing.T) {
 		t.Fatalf("global_max %d web %+v", c.GlobalMax, c.Web)
 	}
 }
+
+func TestStatusReportsWebSetupRequired(t *testing.T) {
+	b, _, _ := newBackend(t)
+	if b.Status().WebSetupRequired {
+		t.Fatal("without a web listener: want false")
+	}
+	required := true
+	b.WebSetupRequired = func() bool { return required }
+	if !b.Status().WebSetupRequired {
+		t.Fatal("a listener with no password: want true")
+	}
+	required = false
+	if b.Status().WebSetupRequired {
+		t.Fatal("after a password is set: want false")
+	}
+}
