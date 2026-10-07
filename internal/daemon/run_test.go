@@ -693,6 +693,7 @@ func TestRunConfiguresFromTheWebUI(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || json.Unmarshal([]byte(body), &after) != nil || after.Unconfigured || after.Epoch != before.Epoch {
 		t.Fatalf("status after, same session: %d %s (epoch before %q)", resp.StatusCode, body, before.Epoch)
 	}
+	waitFor(t, "the start event", func() bool { return strings.Contains(eventMsgs(t, o.Socket), "ghr daemon started") })
 	msgs := eventMsgs(t, o.Socket)
 	for _, want := range []string{
 		"ghr is not configured; finish setup at http://<this host>:" + port + "/setup or run: ghr setup github --owner <owner>",
@@ -753,6 +754,7 @@ func TestRunConfiguresOnceWhenReloadAndSetupRace(t *testing.T) {
 	reload <- os.Interrupt
 	wg.Wait()
 	waitFor(t, "the full API", func() bool { st, _ := setupStateOver(o.Socket); return st.Configured })
+	waitFor(t, "the start event", func() bool { return strings.Contains(eventMsgs(t, o.Socket), "ghr daemon started") })
 	if n := strings.Count(eventMsgs(t, o.Socket), "ghr daemon started"); n != 1 {
 		t.Fatalf("the manager started %d times", n)
 	}
