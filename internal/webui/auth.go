@@ -310,8 +310,7 @@ func (a *Auth) Set(password string) error {
 	return err
 }
 
-// Reset forgets the password and ends every session. Until a new one is set,
-// only a loopback client can set it from the browser.
+// Reset forgets the password and ends every session.
 func (a *Auth) Reset() error {
 	a.fileMu.Lock()
 	defer a.fileMu.Unlock()
