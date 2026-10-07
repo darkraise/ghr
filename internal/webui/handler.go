@@ -165,24 +165,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-// fromLoopback reports whether r comes straight from this host. A forwarding
-// header means a proxy relayed it; a proxy on this host would otherwise make
-// every visitor look local.
-func fromLoopback(r *http.Request) bool {
-	for _, name := range []string{"X-Forwarded-For", "X-Real-IP", "Forwarded"} {
-		if len(r.Header.Values(name)) > 0 {
-			return false
-		}
-	}
-	ip, ok := remoteAddr(r.RemoteAddr)
-	return ok && ip.IsLoopback()
-}
-
 func (h *handler) setup(w http.ResponseWriter, r *http.Request) {
-	if !fromLoopback(r) {
-		h.fail(w, ErrSetupRemote)
-		return
-	}
 	var b passwordBody
 	if !decodeBody(w, r, &b) {
 		return
@@ -264,8 +247,6 @@ func (h *handler) fail(w http.ResponseWriter, err error) {
 		})
 	case errors.Is(err, ErrWrongPassword):
 		writeError(w, http.StatusUnauthorized, err.Error())
-	case errors.Is(err, ErrSetupRemote):
-		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, ErrPasswordLength):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, ErrPasswordSet), errors.Is(err, ErrSetupRequired):

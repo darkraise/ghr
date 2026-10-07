@@ -338,40 +338,19 @@ func TestUnreadablePasswordFile(t *testing.T) {
 	}
 }
 
-func TestSetupOnlyFromLoopback(t *testing.T) {
-	remote := map[string]func(*http.Request){
-		"LAN address":           nil,
-		"unparseable address":   func(r *http.Request) { r.RemoteAddr = "pipe" },
-		"X-Forwarded-For":       local(func(r *http.Request) { r.Header.Set("X-Forwarded-For", "192.168.0.10") }),
-		"empty X-Forwarded-For": local(func(r *http.Request) { r.Header["X-Forwarded-For"] = []string{""} }),
-		"X-Real-IP":             local(func(r *http.Request) { r.Header.Set("X-Real-IP", "192.168.0.10") }),
-		"Forwarded":             local(func(r *http.Request) { r.Header.Set("Forwarded", "for=192.168.0.10") }),
-	}
-	for name, mod := range remote {
+func TestSetupFromAnyAddress(t *testing.T) {
+	for name, mod := range map[string]func(*http.Request){
+		"LAN address":     nil,
+		"X-Forwarded-For": func(r *http.Request) { r.Header.Set("X-Forwarded-For", "192.168.0.10") },
+		"loopback":        local(),
+	} {
 		h, a, _ := newTestHandler(t)
 		rec := do(h, http.MethodPost, "/auth/setup", body(pw), mod)
-		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), ErrSetupRemote.Error()) ||
-			len(rec.Result().Cookies()) != 0 {
+		if rec.Code != http.StatusNoContent || len(rec.Result().Cookies()) == 0 {
 			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
 		}
-		if req, err := a.SetupRequired(); !req || err != nil {
+		if req, err := a.SetupRequired(); req || err != nil {
 			t.Errorf("%s: setup required %v err %v", name, req, err)
-		}
-	}
-
-	h, a, _ := newTestHandler(t)
-	if _, err := a.Setup(pw); err != nil {
-		t.Fatal(err)
-	}
-	if rec := do(h, http.MethodPost, "/auth/setup", body(pw), nil); rec.Code != http.StatusForbidden {
-		t.Errorf("remote setup with a password set: %d %s", rec.Code, rec.Body.String())
-	}
-
-	for _, addr := range []string{"127.0.0.1:5555", "127.8.9.10:5555", "[::1]:5555", "[::ffff:127.0.0.1]:5555"} {
-		h, _, _ := newTestHandler(t)
-		rec := do(h, http.MethodPost, "/auth/setup", body(pw), func(r *http.Request) { r.RemoteAddr = addr })
-		if rec.Code != http.StatusNoContent {
-			t.Errorf("%s: %d %s", addr, rec.Code, rec.Body.String())
 		}
 	}
 }

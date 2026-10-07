@@ -22,9 +22,7 @@ describe("login page", () => {
     const password = await screen.findByLabelText("Password")
     const confirm = screen.getByLabelText("Confirm password")
     const submit = screen.getByRole("button", { name: "Set password" })
-    expect(
-      screen.getByText("No password is set. Run ghr web set-password over SSH, or set it here from the host itself."),
-    ).toBeInTheDocument()
+    expect(screen.getByText("No password is set. Choose one to claim this ghr.")).toBeInTheDocument()
 
     await user.type(password, "short")
     await user.type(confirm, "short")

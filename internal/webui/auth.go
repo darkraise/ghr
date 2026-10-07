@@ -28,7 +28,6 @@ var (
 	ErrPasswordSet    = errors.New("a web password is already set")
 	ErrSetupRequired  = errors.New("no web password is set yet; set one first")
 	ErrWrongPassword  = errors.New("wrong password")
-	ErrSetupRemote    = errors.New("set the first password over SSH: ghr web set-password (or open this page through an SSH tunnel to localhost)")
 )
 
 // ThrottledError refuses a login from a client with too many recent failures.
