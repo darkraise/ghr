@@ -279,9 +279,6 @@ func (c *Config) EffectiveLabels(r Repo) []string {
 func (c *Config) Validate() ([]string, error) {
 	var errs []string
 	var warnings []string
-	if strings.TrimSpace(c.Owner) == "" {
-		errs = append(errs, "owner is required")
-	}
 	if c.Mode != ModeQueue && c.Mode != ModeAll {
 		errs = append(errs, fmt.Sprintf("mode must be %q or %q", ModeQueue, ModeAll))
 	}

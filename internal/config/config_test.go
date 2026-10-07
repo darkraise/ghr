@@ -79,7 +79,6 @@ func TestValidateErrors(t *testing.T) {
 	two := 2
 	three := 3
 	cases := map[string]func(c *Config){
-		"owner is required":            func(c *Config) { c.Owner = "" },
 		"mode must be":                 func(c *Config) { c.Mode = "fast" },
 		"global_max must be >= 1":      func(c *Config) { c.GlobalMax = 0 },
 		"duplicate repo darkmem":       func(c *Config) { c.Repos = append(c.Repos, Repo{Name: "darkmem"}) },
@@ -371,5 +370,12 @@ func TestWebValidation(t *testing.T) {
 		if _, err := c.Validate(); err != nil {
 			t.Errorf("%+v rejected: %v", w, err)
 		}
+	}
+}
+
+func TestEmptyOwnerValidates(t *testing.T) {
+	c, _, err := Parse([]byte(strings.Replace(sample, "owner: darkraise", `owner: ""`, 1)))
+	if err != nil || c.Owner != "" {
+		t.Fatalf("empty owner: err %v owner %q", err, c.Owner)
 	}
 }
