@@ -274,3 +274,9 @@ func (c *Client) PruneScope(ctx context.Context, scope string) error {
 func (c *Client) ResetWebPassword(ctx context.Context) error {
 	return c.call(ctx, http.MethodPost, "/web/reset-password", nil, nil)
 }
+
+// SetWebPassword replaces the web UI password and ends its sessions. The
+// route exists on the Unix socket only.
+func (c *Client) SetWebPassword(ctx context.Context, password string) error {
+	return c.call(ctx, http.MethodPost, "/web/set-password", jsonBody(map[string]string{"password": password}), nil)
+}

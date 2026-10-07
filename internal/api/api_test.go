@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -451,5 +453,24 @@ func TestResetWebPasswordPostsToTheSocketRoute(t *testing.T) {
 	c := &Client{Base: srv.URL, HTTP: &http.Client{Timeout: 5 * time.Second}}
 	if err := c.ResetWebPassword(context.Background()); err != nil || got != "POST /web/reset-password" {
 		t.Fatalf("err %v request %q", err, got)
+	}
+}
+
+func TestSetWebPasswordPostsTheBody(t *testing.T) {
+	var got, body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Method + " " + r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	c := &Client{Base: srv.URL, HTTP: &http.Client{Timeout: 5 * time.Second}}
+	if err := c.SetWebPassword(context.Background(), "a <long> secret"); err != nil || got != "POST /web/set-password" {
+		t.Fatalf("err %v request %q", err, got)
+	}
+	var sent map[string]string
+	if err := json.Unmarshal([]byte(body), &sent); err != nil || sent["password"] != "a <long> secret" {
+		t.Fatalf("body %q: %v", body, err)
 	}
 }
