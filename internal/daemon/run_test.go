@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -254,6 +255,7 @@ func testOptions(t *testing.T, cfg string) Options {
 		Paths: runner.Paths{Dist: dist, Instances: filepath.Join(dir, "instances"), Logs: filepath.Join(dir, "logs"),
 			Pending: filepath.Join(dir, "pending"), ToolCache: filepath.Join(dir, "toolcache"), Hooks: "/opt/ghr/hooks", Home: filepath.Join(dir, "home")},
 		GitHubURL: fakeGitHub(t).URL, Systemd: &recSD{}, Docker: nopDocker{}, Disk: nopDisk{}, Host: dirHost{}, Reload: make(chan os.Signal, 1),
+		SetupPendingPath: filepath.Join(dir, "setup-pending"), ToolchainsPendingPath: filepath.Join(dir, "toolchains-pending"),
 	}
 }
 
@@ -557,4 +559,268 @@ func TestRunMeasuresAfterAPrune(t *testing.T) {
 		st, err := c.Storage(context.Background())
 		return err == nil && st.MeasuredAt != nil && st.MeasuredAt.After(first)
 	})
+}
+
+// startRun runs the daemon until the test ends; done receives Run's result.
+func startRun(t *testing.T, o Options) (context.CancelFunc, <-chan error) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	finished := make(chan struct{})
+	go func() { done <- Run(ctx, o); close(finished) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-finished:
+		case <-time.After(10 * time.Second):
+			t.Error("Run did not return")
+		}
+	})
+	return cancel, done
+}
+
+// unconfiguredOptions is testOptions with no owner and no token file, a
+// GitHub that answers first-run setup, and a reload channel the test sends on.
+func unconfiguredOptions(t *testing.T, extra string) (Options, chan os.Signal) {
+	t.Helper()
+	o := testOptions(t, strings.Replace(cfgYAML, "owner: darkraise", `owner: ""`, 1)+extra)
+	os.Remove(o.TokenPath)
+	o.GitHubURL = fakeSetupGitHub(t).URL
+	reload := make(chan os.Signal, 1)
+	o.Reload = reload
+	return o, reload
+}
+
+// socketCall is a raw request over the Unix socket.
+func socketCall(socket, method, path, body string) (int, string, error) {
+	var rd io.Reader
+	if body != "" {
+		rd = strings.NewReader(body)
+	}
+	req, _ := http.NewRequest(method, "http://ghr"+path, rd)
+	resp, err := api.NewUnixClient(socket).HTTP.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b), nil
+}
+
+func setupStateOver(socket string) (model.SetupState, bool) {
+	code, body, err := socketCall(socket, http.MethodGet, "/setup", "")
+	var st model.SetupState
+	if err != nil || code != http.StatusOK || json.Unmarshal([]byte(body), &st) != nil {
+		return st, false
+	}
+	return st, true
+}
+
+// webCall calls the web listener with the X-GHR header and an optional session.
+func webCall(t *testing.T, addr, method, path, body, session string) (*http.Response, string) {
+	t.Helper()
+	var rd io.Reader
+	if body != "" {
+		rd = strings.NewReader(body)
+	}
+	req, _ := http.NewRequest(method, "http://"+addr+path, rd)
+	req.Header.Set("X-GHR", "1")
+	if session != "" {
+		req.AddCookie(&http.Cookie{Name: "ghr_session", Value: session})
+	}
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp, string(b)
+}
+
+func eventMsgs(t *testing.T, socket string) string {
+	t.Helper()
+	evs, err := api.NewUnixClient(socket).Events(context.Background(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var msgs []string
+	for _, e := range evs {
+		msgs = append(msgs, e.Msg)
+	}
+	return strings.Join(msgs, "\n")
+}
+
+func TestRunConfiguresFromTheWebUI(t *testing.T) {
+	addr := freeAddr(t)
+	_, port, _ := net.SplitHostPort(addr)
+	o, _ := unconfiguredOptions(t, "web:\n  listen: "+addr+"\n")
+	cancel, done := startRun(t, o)
+	waitFor(t, "the setup phase", func() bool { _, ok := setupStateOver(o.Socket); return ok })
+	if st, _ := setupStateOver(o.Socket); st.Configured || st.Starting || st.Owner != "" || st.WebListen != addr {
+		t.Fatalf("before configuring: %+v", st)
+	}
+	if resp, _ := webCall(t, addr, http.MethodGet, "/api/setup", "", ""); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("setup state without a session: %d", resp.StatusCode)
+	}
+	if resp, _ := webCall(t, addr, http.MethodPost, "/api/setup/github", `{"owner":"darkraise","token":"good"}`, ""); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("configure without a session: %d", resp.StatusCode)
+	}
+	resp, body := webCall(t, addr, http.MethodPost, "/auth/setup", `{"password":"correct horse battery"}`, "")
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("claim: %d %s", resp.StatusCode, body)
+	}
+	var session string
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "ghr_session" {
+			session = ck.Value
+		}
+	}
+	resp, body = webCall(t, addr, http.MethodGet, "/api/status", "", session)
+	var before model.Status
+	if resp.StatusCode != http.StatusOK || json.Unmarshal([]byte(body), &before) != nil || !before.Unconfigured || before.Epoch == "" {
+		t.Fatalf("status before: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := webCall(t, addr, http.MethodGet, "/api/config", "", session); resp.StatusCode != http.StatusServiceUnavailable ||
+		!strings.Contains(body, "ghr is not configured yet; finish setup first") {
+		t.Fatalf("config before: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := webCall(t, addr, http.MethodPost, "/api/setup/github", `{"owner":"darkraise","token":"good"}`, session); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("configure: %d %s", resp.StatusCode, body)
+	}
+	waitFor(t, "the full API", func() bool { st, _ := setupStateOver(o.Socket); return st.Configured })
+	resp, body = webCall(t, addr, http.MethodGet, "/api/status", "", session)
+	var after model.Status
+	if resp.StatusCode != http.StatusOK || json.Unmarshal([]byte(body), &after) != nil || after.Unconfigured || after.Epoch != before.Epoch {
+		t.Fatalf("status after, same session: %d %s (epoch before %q)", resp.StatusCode, body, before.Epoch)
+	}
+	msgs := eventMsgs(t, o.Socket)
+	for _, want := range []string{
+		"ghr is not configured; finish setup at http://<this host>:" + port + "/setup or run: ghr setup github --owner <owner>",
+		"ghr configured for owner DarkRaise; starting",
+		"ghr daemon started (owner DarkRaise, mode queue)",
+	} {
+		if !strings.Contains(msgs, want) {
+			t.Errorf("events lack %q:\n%s", want, msgs)
+		}
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("the web listener outlived Run: %v", err)
+	}
+	l.Close()
+}
+
+func TestRunConfiguresOnReload(t *testing.T) {
+	o, reload := unconfiguredOptions(t, "")
+	startRun(t, o)
+	waitFor(t, "the setup phase", func() bool { _, ok := setupStateOver(o.Socket); return ok })
+	if code, body, _ := socketCall(o.Socket, http.MethodGet, "/config", ""); code != http.StatusServiceUnavailable {
+		t.Fatalf("config before: %d %s", code, body)
+	}
+	if !strings.Contains(eventMsgs(t, o.Socket), "ghr is not configured; run: ghr setup github --owner <owner>") {
+		t.Fatal("no start-up warning without the web UI")
+	}
+	os.WriteFile(o.ConfigPath, []byte(cfgYAML), 0o600)
+	reload <- os.Interrupt
+	waitFor(t, "the owner-only reload", func() bool { return strings.Contains(eventMsgs(t, o.Socket), "config and token reloaded") })
+	if st, _ := setupStateOver(o.Socket); st.Configured || st.Starting || st.Owner != "darkraise" {
+		t.Fatalf("owner without a token: %+v", st)
+	}
+	os.WriteFile(o.TokenPath, []byte("good\n"), 0o600)
+	reload <- os.Interrupt
+	waitFor(t, "the full API", func() bool { st, _ := setupStateOver(o.Socket); return st.Configured })
+	if st, err := api.NewUnixClient(o.Socket).Status(context.Background()); err != nil || st.Unconfigured {
+		t.Fatalf("status after: %+v %v", st, err)
+	}
+}
+
+func TestRunConfiguresOnceWhenReloadAndSetupRace(t *testing.T) {
+	o, reload := unconfiguredOptions(t, "")
+	startRun(t, o)
+	waitFor(t, "the setup phase", func() bool { _, ok := setupStateOver(o.Socket); return ok })
+	os.WriteFile(o.ConfigPath, []byte(cfgYAML), 0o600)
+	os.WriteFile(o.TokenPath, []byte("good\n"), 0o600)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		socketCall(o.Socket, http.MethodPost, "/setup/github", `{"owner":"darkraise","token":"good"}`)
+	}()
+	reload <- os.Interrupt
+	wg.Wait()
+	waitFor(t, "the full API", func() bool { st, _ := setupStateOver(o.Socket); return st.Configured })
+	if n := strings.Count(eventMsgs(t, o.Socket), "ghr daemon started"); n != 1 {
+		t.Fatalf("the manager started %d times", n)
+	}
+}
+
+func TestRunStopsWhileUnconfigured(t *testing.T) {
+	addr := freeAddr(t)
+	o, _ := unconfiguredOptions(t, "web:\n  listen: "+addr+"\n")
+	cancel, done := startRun(t, o)
+	waitFor(t, "the setup phase", func() bool { _, ok := setupStateOver(o.Socket); return ok })
+	if err := api.NewUnixClient(o.Socket).SetWebPassword(context.Background(), "set over the socket"); err != nil {
+		t.Fatalf("set-password while unconfigured: %v", err)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("the web listener outlived Run: %v", err)
+	}
+	l.Close()
+	if _, err := api.NewUnixClient(o.Socket).Status(context.Background()); err == nil {
+		t.Fatal("the socket still answers")
+	}
+}
+
+func TestRunClosesListenersWhenAConfiguredStartFails(t *testing.T) {
+	addr := freeAddr(t)
+	o, _ := unconfiguredOptions(t, "web:\n  listen: "+addr+"\n")
+	if err := os.MkdirAll(o.HistoryPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, done := startRun(t, o)
+	waitFor(t, "the setup phase", func() bool { _, ok := setupStateOver(o.Socket); return ok })
+	if code, body, err := socketCall(o.Socket, http.MethodPost, "/setup/github", `{"owner":"darkraise","token":"good"}`); err != nil || code != http.StatusNoContent {
+		t.Fatalf("configure: %d %s %v", code, body, err)
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a start with an unreadable history returned nil")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after the failed start")
+	}
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("the web listener was left open: %v", err)
+	}
+	l.Close()
+}
+
+func TestRunReportsAPendingSetup(t *testing.T) {
+	o := testOptions(t, cfgYAML)
+	os.WriteFile(o.SetupPendingPath, nil, 0o600)
+	startRun(t, o)
+	c := api.NewUnixClient(o.Socket)
+	waitFor(t, "the socket", func() bool { _, err := c.Status(context.Background()); return err == nil })
+	if st, _ := c.Status(context.Background()); !st.SetupPending || st.Unconfigured {
+		t.Fatalf("status %+v", st)
+	}
+	if st, _ := setupStateOver(o.Socket); !st.Configured || !st.SetupPending || st.Owner != "darkraise" {
+		t.Fatalf("setup state %+v", st)
+	}
 }

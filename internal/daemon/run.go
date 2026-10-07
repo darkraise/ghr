@@ -12,11 +12,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/darkraise/ghr/internal/api"
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/events"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/history"
@@ -36,7 +39,12 @@ type Options struct {
 	HistoryPath string
 	// WebPasswordPath holds the web UI's password hash.
 	WebPasswordPath string
-	Paths           runner.Paths
+	// SetupPendingPath marks an unfinished first-run setup and
+	// ToolchainsPendingPath an unmade toolchain choice; setup.sh creates both
+	// on a first install.
+	SetupPendingPath      string
+	ToolchainsPendingPath string
+	Paths                 runner.Paths
 	// ShutdownWait bounds how long shutdown waits for in-flight cleanups; an
 	// unfinished cleanup resumes at the next start.
 	ShutdownWait time.Duration
@@ -59,12 +67,13 @@ const InstallTimeout = time.Hour
 
 func DefaultOptions() Options {
 	return Options{
-		ConfigPath:      "/etc/ghr/config.yaml",
-		TokenPath:       "/etc/ghr/token",
-		Socket:          api.DefaultSocket,
-		HistoryPath:     "/var/lib/ghr/history.jsonl",
-		WebPasswordPath: "/etc/ghr/web-password",
-		ShutdownWait:    30 * time.Second,
+		ConfigPath:       "/etc/ghr/config.yaml",
+		TokenPath:        "/etc/ghr/token",
+		Socket:           api.DefaultSocket,
+		HistoryPath:      "/var/lib/ghr/history.jsonl",
+		WebPasswordPath:  "/etc/ghr/web-password",
+		SetupPendingPath: "/var/lib/ghr/setup-pending", ToolchainsPendingPath: "/var/lib/ghr/toolchains-pending",
+		ShutdownWait: 30 * time.Second,
 		Paths: runner.Paths{
 			Dist:        "/opt/ghr/dist/current",
 			Instances:   "/var/lib/ghr/instances",
@@ -117,7 +126,119 @@ func checkToken(ctx context.Context, c *github.Client, repo string) error {
 	return nil
 }
 
+// swapHandler serves the handler stored last, so the setup phase hands over
+// to the full API without rebinding a listener.
+type swapHandler struct{ h atomic.Pointer[http.Handler] }
+
+func (s *swapHandler) Store(h http.Handler) { s.h.Store(&h) }
+
+func (s *swapHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	(*s.h.Load()).ServeHTTP(w, r)
+}
+
+// running is what a configured start builds.
+type running struct {
+	m       *runner.Manager
+	space   *storage.Service
+	b       *Backend
+	sampled chan struct{}
+	wake    chan struct{}
+}
+
+// start reads the owner once, then adopts and reconciles the runners already
+// on the host before anything serves the full API.
+func start(ctx context.Context, o Options, store *Store, ev *events.Ring, epoch string, webCfg config.Web, webSetupRequired func() bool) (*running, error) {
+	owner := store.Config().Owner
+	gh := github.New(owner, store.Token)
+	if o.GitHubURL != "" {
+		gh.BaseURL = o.GitHubURL
+	}
+	hist := &history.Store{Path: o.HistoryPath}
+	m := &runner.Manager{
+		Config: store.Config, GH: gh, SD: o.Systemd, Docker: o.Docker, Disk: o.Disk, Host: o.Host, Fetch: o.Fetch,
+		Paths: o.Paths, Events: ev, History: hist, Now: time.Now, NewID: runner.RandomID, Epoch: epoch,
+	}
+	if m.SD == nil {
+		m.SD = system.Systemd{Run: system.Exec}
+	}
+	if m.Docker == nil {
+		m.Docker = system.Docker{Run: system.Exec}
+	}
+	if m.Disk == nil {
+		m.Disk = system.Docker{Run: system.Exec}
+	}
+	if m.Host == nil {
+		m.Host = system.Host{Run: system.Exec, Script: system.ExecGroup}
+	}
+	if m.Fetch == nil {
+		m.Fetch = system.Download
+	}
+	if err := m.Init(); err != nil {
+		return nil, err
+	}
+	if err := m.Adopt(ctx); err != nil {
+		return nil, err
+	}
+	m.Reconcile(ctx, store.Config())
+
+	tools := toolchain.New(toolchain.NewEnv(o.Paths.ToolCache, o.Paths.Home, runner.RunnerUser,
+		system.ExecGroupFor(InstallTimeout), system.DownloadFor(InstallTimeout)))
+	space := &storage.Service{Tools: tools, Docker: m.Disk, Home: o.Paths.Home, User: runner.RunnerUser,
+		Busy: m.BusyCount, Events: ev}
+	space.Start()
+	m.PruneDone = space.Trigger
+
+	sampler := metrics.NewSampler(func() metrics.Snapshot {
+		st := m.Status()
+		var s metrics.Snapshot
+		for _, i := range st.Instances {
+			if i.State != "cleaning" {
+				s.Live++
+			}
+		}
+		for _, r := range st.Repos {
+			s.Queued += r.Queued
+		}
+		return s
+	}, func() int { return m.Status().DiskPct })
+	sampled := make(chan struct{})
+	go func() { sampler.Run(ctx, time.Minute); close(sampled) }()
+
+	wake := make(chan struct{}, 1)
+	b := &Backend{
+		Store: store, M: m, GH: gh, Events: ev, Hist: hist, Space: space,
+		CheckToken: func(ctx context.Context, token, repo string) error {
+			c := github.New(owner, func() string { return token })
+			c.BaseURL = gh.BaseURL
+			return checkToken(ctx, c, repo)
+		},
+		Sampler:          sampler,
+		WebApplied:       webCfg,
+		WebSetupRequired: webSetupRequired,
+		SetupPending:     func() bool { return exists(o.SetupPendingPath) },
+		Wake: func() {
+			select {
+			case wake <- struct{}{}:
+			default:
+			}
+		},
+	}
+	return &running{m: m, space: space, b: b, sampled: sampled, wake: wake}, nil
+}
+
+// notConfigured is the start-up warning while ghr has no owner or token.
+func notConfigured(webLn net.Listener) string {
+	const cli = "run: ghr setup github --owner <owner>"
+	if webLn == nil {
+		return "ghr is not configured; " + cli
+	}
+	_, port, _ := net.SplitHostPort(webLn.Addr().String())
+	return "ghr is not configured; finish setup at http://<this host>:" + port + "/setup or " + cli
+}
+
 // Run starts the daemon and blocks until ctx is cancelled. Runner units keep running after it exits.
+// Without an owner or a token it serves first-run setup until both are set,
+// then starts the manager in the same process.
 func Run(ctx context.Context, o Options) error {
 	store, warnings, err := OpenStore(o.ConfigPath, o.TokenPath)
 	if err != nil {
@@ -158,114 +279,7 @@ func Run(ctx context.Context, o Options) error {
 	if err := auth.Check(); err != nil {
 		ev.Add("warn", "", "%v", err)
 	}
-	owner := store.Config().Owner
-	gh := github.New(owner, store.Token)
-	if o.GitHubURL != "" {
-		gh.BaseURL = o.GitHubURL
-	}
-	hist := &history.Store{Path: o.HistoryPath}
-	m := &runner.Manager{
-		Config: store.Config, GH: gh, SD: o.Systemd, Docker: o.Docker, Disk: o.Disk, Host: o.Host, Fetch: o.Fetch,
-		Paths: o.Paths, Events: ev, History: hist, Now: time.Now, NewID: runner.RandomID,
-	}
-	if m.SD == nil {
-		m.SD = system.Systemd{Run: system.Exec}
-	}
-	if m.Docker == nil {
-		m.Docker = system.Docker{Run: system.Exec}
-	}
-	if m.Disk == nil {
-		m.Disk = system.Docker{Run: system.Exec}
-	}
-	if m.Host == nil {
-		m.Host = system.Host{Run: system.Exec, Script: system.ExecGroup}
-	}
-	if m.Fetch == nil {
-		m.Fetch = system.Download
-	}
-	if err := m.Init(); err != nil {
-		return err
-	}
-	if err := m.Adopt(ctx); err != nil {
-		return err
-	}
-	m.Reconcile(ctx, store.Config())
-
-	tools := toolchain.New(toolchain.NewEnv(o.Paths.ToolCache, o.Paths.Home, runner.RunnerUser,
-		system.ExecGroupFor(InstallTimeout), system.DownloadFor(InstallTimeout)))
-	space := &storage.Service{Tools: tools, Docker: m.Disk, Home: o.Paths.Home, User: runner.RunnerUser,
-		Busy: m.BusyCount, Events: ev}
-	space.Start()
-	defer space.Close()
-	m.PruneDone = space.Trigger
-
-	sampler := metrics.NewSampler(func() metrics.Snapshot {
-		st := m.Status()
-		var s metrics.Snapshot
-		for _, i := range st.Instances {
-			if i.State != "cleaning" {
-				s.Live++
-			}
-		}
-		for _, r := range st.Repos {
-			s.Queued += r.Queued
-		}
-		return s
-	}, func() int { return m.Status().DiskPct })
-	sampled := make(chan struct{})
-	go func() { sampler.Run(ctx, time.Minute); close(sampled) }()
-
-	wake := make(chan struct{}, 1)
-	b := &Backend{
-		Store: store, M: m, GH: gh, Events: ev, Hist: hist, Space: space,
-		CheckToken: func(ctx context.Context, token, repo string) error {
-			c := github.New(owner, func() string { return token })
-			c.BaseURL = gh.BaseURL
-			return checkToken(ctx, c, repo)
-		},
-		Sampler:    sampler,
-		WebApplied: webCfg,
-		Wake: func() {
-			select {
-			case wake <- struct{}{}:
-			default:
-			}
-		},
-	}
-	if webLn != nil {
-		b.WebSetupRequired = func() bool {
-			// An unreadable file is reported by the start-up warning instead.
-			req, err := auth.SetupRequired()
-			return err == nil && req
-		}
-	}
-	apiHandler := api.NewServer(b)
-	srv.Handler = socketHandler(apiHandler, auth, ev)
-	if webLn != nil {
-		static, err := fs.Sub(web.Dist, "dist")
-		if err != nil {
-			return err
-		}
-		webSrv.Handler = webui.Handler(auth, apiHandler, static, webCfg.Hosts)
-	}
-	served = true
-	go func() {
-		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("api server: %v", err)
-		}
-	}()
-	if webLn != nil {
-		go func() {
-			if err := webSrv.Serve(webLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Printf("web server: %v", err)
-			}
-		}()
-		ev.Add("info", "", "web UI listening on %s", webLn.Addr())
-		if b.WebSetupRequired() {
-			ev.Add("warn", "", "web UI on %s has no password; run: ghr web set-password", webLn.Addr())
-		}
-	}
-	ev.Add("info", "", "ghr daemon started (owner %s, mode %s)", owner, store.Config().Mode)
+	epoch := strconv.FormatInt(time.Now().UnixNano(), 36)
 
 	reload := o.Reload
 	if reload == nil {
@@ -274,38 +288,144 @@ func Run(ctx context.Context, o Options) error {
 		defer signal.Stop(hup)
 		reload = hup
 	}
+
+	var webSetupRequired func() bool
+	webListen := ""
+	if webLn != nil {
+		// A wildcard listener reports [::] on a dual-stack host; setup output uses the configured address.
+		webListen = webCfg.Listen
+		webSetupRequired = func() bool {
+			// An unreadable file is reported by the start-up warning instead.
+			req, err := auth.SetupRequired()
+			return err == nil && req
+		}
+	}
+	ready := make(chan struct{})
+	var readyOnce sync.Once
+	su := &setup{
+		store: store, events: ev, githubURL: o.GitHubURL,
+		setupPending: o.SetupPendingPath, toolchainsPending: o.ToolchainsPendingPath,
+		webListen: webListen, epoch: epoch, webSetupRequired: webSetupRequired,
+		ready: func() { readyOnce.Do(func() { close(ready) }) },
+	}
+	handler := &swapHandler{}
+	srv.Handler = socketHandler(handler, auth, ev)
+	if webLn != nil {
+		static, err := fs.Sub(web.Dist, "dist")
+		if err != nil {
+			return err
+		}
+		webSrv.Handler = webui.Handler(auth, handler, static, webCfg.Hosts)
+	}
+	serve := func() {
+		served = true
+		go func() {
+			if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("api server: %v", err)
+			}
+		}()
+		if webLn == nil {
+			return
+		}
+		go func() {
+			if err := webSrv.Serve(webLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("web server: %v", err)
+			}
+		}()
+		ev.Add("info", "", "web UI listening on %s", webLn.Addr())
+		if webSetupRequired() {
+			ev.Add("warn", "", "web UI on %s has no password; run: ghr web set-password", webLn.Addr())
+		}
+	}
+	// Every return after serve goes through teardown, so no path leaves the
+	// socket or the web port bound.
+	teardown := func() {
+		var wg sync.WaitGroup
+		for _, s := range []*http.Server{srv, webSrv} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := s.Shutdown(shutdownCtx); err != nil {
+					// Shutdown leaves connections open when its deadline passes.
+					s.Close()
+				}
+			}()
+		}
+		wg.Wait()
+	}
+
+	unconfigured := !store.Configured()
+	if unconfigured {
+		handler.Store(su.routes(su.unconfigured()))
+		serve()
+		ev.Add("warn", "", "%s", notConfigured(webLn))
+	wait:
+		for {
+			select {
+			case <-ctx.Done():
+				teardown()
+				return nil
+			case <-ready:
+				break wait
+			case <-reload:
+				ws, err := store.Reload()
+				if err != nil {
+					ev.Add("error", "", "reload rejected, keeping previous config: %v", err)
+					continue
+				}
+				for _, w := range ws {
+					ev.Add("warn", "", "config: %s", w)
+				}
+				ev.Add("info", "", "config and token reloaded")
+				if store.Configured() {
+					su.ready()
+				}
+			}
+		}
+	}
+
+	rt, err := start(ctx, o, store, ev, epoch, webCfg, webSetupRequired)
+	if err != nil {
+		if served {
+			teardown()
+		}
+		return err
+	}
+	defer rt.space.Close()
+	// Handler first: GET /setup reports configured only once the full API serves.
+	handler.Store(su.routes(api.NewServer(rt.b)))
+	su.backend.Store(rt.b)
+	if !served {
+		serve()
+	}
+	owner := store.Config().Owner
+	if unconfigured {
+		ev.Add("info", "", "ghr configured for owner %s; starting", owner)
+	}
+	ev.Add("info", "", "ghr daemon started (owner %s, mode %s)", owner, store.Config().Mode)
+
+	m := rt.m
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	tick := func() {
 		m.Tick(ctx)
-		b.FinalizeRemovals()
+		rt.b.FinalizeRemovals()
 		timer.Reset(store.Config().PollInterval.D())
 	}
 	for {
 		select {
 		case <-ctx.Done():
-			var wg sync.WaitGroup
-			for _, s := range []*http.Server{srv, webSrv} {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer cancel()
-					if err := s.Shutdown(shutdownCtx); err != nil {
-						// Shutdown leaves connections open when its deadline passes.
-						s.Close()
-					}
-				}()
-			}
-			wg.Wait()
+			teardown()
 			m.Close()
-			space.Close()
-			b.Close()
-			<-sampled
+			rt.space.Close()
+			rt.b.Close()
+			<-rt.sampled
 			done := make(chan struct{})
 			go func() {
 				m.Wait()
-				space.Wait()
+				rt.space.Wait()
 				close(done)
 			}()
 			select {
@@ -315,8 +435,8 @@ func Run(ctx context.Context, o Options) error {
 			}
 			return nil
 		case <-reload:
-			b.Reload()
-		case <-wake:
+			rt.b.Reload()
+		case <-rt.wake:
 			tick()
 		case <-timer.C:
 			tick()

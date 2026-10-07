@@ -87,7 +87,9 @@ type Backend struct {
 	// WebSetupRequired reports whether the web listener runs with no password
 	// set; nil, as without a listener, reports false.
 	WebSetupRequired func() bool
-	checks           labelChecks
+	// SetupPending reports an unfinished first-run setup; nil reports false.
+	SetupPending func() bool
+	checks       labelChecks
 
 	stepsMu    sync.Mutex
 	steps      map[string]stepsEntry
@@ -118,6 +120,9 @@ func (b *Backend) Status() model.Status {
 	st := b.M.Status()
 	if b.WebSetupRequired != nil {
 		st.WebSetupRequired = b.WebSetupRequired()
+	}
+	if b.SetupPending != nil {
+		st.SetupPending = b.SetupPending()
 	}
 	return st
 }
