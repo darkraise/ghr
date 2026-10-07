@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -456,4 +457,91 @@ func TestClientKey(t *testing.T) {
 			t.Errorf("ClientKey(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+func TestSetReplacesThePassword(t *testing.T) {
+	a, _ := newTestAuth(t)
+	for _, bad := range []string{strings.Repeat("x", MinPasswordLen-1), strings.Repeat("x", MaxPasswordLen+1)} {
+		if err := a.Set(bad); !errors.Is(err, ErrPasswordLength) {
+			t.Fatalf("%d bytes: %v", len(bad), err)
+		}
+	}
+	if _, err := os.Stat(a.path); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a refused password wrote the file: %v", err)
+	}
+	if err := a.Set(pw); err != nil {
+		t.Fatal(err)
+	}
+	if req, err := a.SetupRequired(); req || err != nil {
+		t.Fatalf("after the first set: required %v err %v", req, err)
+	}
+	if err := a.Set("short"); !errors.Is(err, ErrPasswordLength) {
+		t.Fatalf("short over an existing password: %v", err)
+	}
+	id, err := a.Login("10.0.0.1", pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const next = "another long password"
+	if err := a.Set(next); err != nil {
+		t.Fatal(err)
+	}
+	if a.Valid(id) {
+		t.Fatal("a session survived the new password")
+	}
+	if _, err := a.Login("10.0.0.2", pw); !errors.Is(err, ErrWrongPassword) {
+		t.Fatalf("old password: %v", err)
+	}
+	if _, err := a.Login("10.0.0.3", next); err != nil {
+		t.Fatalf("new password: %v", err)
+	}
+}
+
+func TestSetRepairsAnUnreadableFile(t *testing.T) {
+	a, _ := newTestAuth(t)
+	os.WriteFile(a.path, []byte("garbage\n"), 0o600)
+	if !strings.Contains(a.Check().Error(), "ghr web set-password") {
+		t.Fatalf("the unreadable-file error should point at set-password: %v", a.Check())
+	}
+	if err := a.Set(pw); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Check(); err != nil {
+		t.Fatalf("after set: %v", err)
+	}
+	if _, err := a.Login("10.0.0.1", pw); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// As with a password change, Set holds the derivation slot until the new
+// gen is published, so a login queued behind it cannot keep a session.
+func TestLoginRacingASetCreatesNoSession(t *testing.T) {
+	a, _ := newTestAuth(t)
+	if _, err := a.Setup(pw); err != nil {
+		t.Fatal(err)
+	}
+	fillSlots(a)
+	set := make(chan error, 1)
+	go func() { set <- a.Set("another long secret") }()
+	time.Sleep(50 * time.Millisecond)
+	type result struct {
+		id  string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		id, err := a.Login("10.0.0.1", pw)
+		done <- result{id, err}
+	}()
+	time.Sleep(50 * time.Millisecond)
+	<-a.sem
+	if err := <-set; err != nil {
+		t.Fatal(err)
+	}
+	r := <-done
+	if r.err == nil || a.Valid(r.id) {
+		t.Fatalf("a login that read the old password outlived the set: id valid %v err %v", a.Valid(r.id), r.err)
+	}
+	<-a.sem
 }

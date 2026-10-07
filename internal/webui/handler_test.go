@@ -322,7 +322,7 @@ func TestUnreadablePasswordFile(t *testing.T) {
 		do(h, http.MethodPost, "/auth/setup", body(pw), nil),
 	} {
 		if rec.Code != http.StatusInternalServerError ||
-			!strings.Contains(rec.Body.String(), "web password file is unreadable; run ghr web reset-password") {
+			!strings.Contains(rec.Body.String(), "web password file is unreadable; run ghr web set-password") {
 			t.Errorf("%d %s", rec.Code, rec.Body.String())
 		}
 	}

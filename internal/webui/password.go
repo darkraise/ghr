@@ -32,7 +32,7 @@ const (
 )
 
 // ErrUnreadable means the password file exists but cannot be used.
-var ErrUnreadable = errors.New("web password file is unreadable; run ghr web reset-password")
+var ErrUnreadable = errors.New("web password file is unreadable; run ghr web set-password")
 
 type passwordHash struct {
 	iter int

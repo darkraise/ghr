@@ -283,6 +283,33 @@ func (a *Auth) ChangePassword(keep, current, next string) error {
 	return err
 }
 
+// Set replaces the password, or sets the first one, and ends every session.
+// It never reads the old file, so it also replaces an unreadable one.
+func (a *Auth) Set(password string) error {
+	if !validLength(password) {
+		return ErrPasswordLength
+	}
+	a.fileMu.Lock()
+	defer a.fileMu.Unlock()
+	var err error
+	// The slot is held until the change is published, so a login queued
+	// behind it sees the new gen.
+	a.derive(func() {
+		var h passwordHash
+		if h, err = newHash(password, a.rand, a.iter); err != nil {
+			return
+		}
+		if err = writeHash(a.path, h); err != nil {
+			return
+		}
+		a.mu.Lock()
+		a.gen++
+		clear(a.sessions)
+		a.mu.Unlock()
+	})
+	return err
+}
+
 // Reset forgets the password and ends every session; the next visitor sets a
 // new password.
 func (a *Auth) Reset() error {
