@@ -85,7 +85,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	if err := cli(ctx, newClient(), args, stdin, stdout); err != nil {
+	if err := cli(ctx, newClient(), args, stdin, stdout, stderr); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(stdout, usage)
 			return 0
@@ -127,5 +127,6 @@ const usage = `usage: ghr [command]
   prune [--scope <scope>]         standard (default), build-cache-keep,
                                   build-cache-all, dangling-images, unused-volumes
   web reset-password              forget the web UI password
+  web set-password                set the web UI password (prompts, or reads stdin)
   version
 `

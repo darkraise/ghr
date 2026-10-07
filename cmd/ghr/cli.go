@@ -51,7 +51,7 @@ func atoi(s string) (int, error) {
 // logPollInterval is how often `logs -f` polls.
 const logPollInterval = time.Second
 
-func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out io.Writer) error {
+func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out, errOut io.Writer) error {
 	switch args[0] {
 	case "status":
 		st, err := c.Status(ctx)
@@ -119,14 +119,29 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 	case "prune":
 		return pruneCmd(ctx, c, args[1:], out)
 	case "web":
-		if len(args) != 2 || args[1] != "reset-password" {
-			return usageError("usage: ghr web reset-password")
+		const webUsage = "usage: ghr web <reset-password|set-password>"
+		if len(args) != 2 {
+			return usageError(webUsage)
 		}
-		if err := c.ResetWebPassword(ctx); err != nil {
-			return err
+		switch args[1] {
+		case "reset-password":
+			if err := c.ResetWebPassword(ctx); err != nil {
+				return err
+			}
+			fmt.Fprintln(out, "web password removed; the next visitor to the web UI sets a new one")
+			return nil
+		case "set-password":
+			pw, err := readNewPassword(ctx, stdin, errOut)
+			if err != nil {
+				return err
+			}
+			if err := c.SetWebPassword(ctx, pw); err != nil {
+				return err
+			}
+			fmt.Fprintln(out, "web password set; every browser was logged out")
+			return nil
 		}
-		fmt.Fprintln(out, "web password removed; the next visitor to the web UI sets a new one")
-		return nil
+		return usageError(webUsage)
 	}
 	return usageError("unknown command " + args[0])
 }

@@ -238,12 +238,83 @@ func TestWebResetPassword(t *testing.T) {
 	}
 	for _, args := range [][]string{{"web"}, {"web", "reset"}, {"web", "reset-password", "now"}} {
 		code, _, errOut := runCLI(t, "", args...)
-		if code != 2 || !strings.Contains(errOut, "usage: ghr web reset-password") {
+		if code != 2 || !strings.Contains(errOut, "usage: ghr web <reset-password|set-password>") {
 			t.Errorf("%v: exit %d err %q", args, code, errOut)
 		}
 	}
 	_, out, _ = runCLI(t, "", "help")
-	if !strings.Contains(out, "web reset-password") {
-		t.Fatalf("usage lacks the command:\n%s", out)
+	for _, want := range []string{"web reset-password", "web set-password"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("usage lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// stubPasswordInput makes stdin look like a terminal, or not, and feeds the
+// no-echo reads from answers.
+func stubPasswordInput(t *testing.T, terminal bool, answers ...string) {
+	t.Helper()
+	oldTerm, oldRead := stdinIsTerminal, readPassword
+	stdinIsTerminal = func() bool { return terminal }
+	readPassword = func() ([]byte, error) {
+		if len(answers) == 0 {
+			return nil, io.EOF
+		}
+		a := answers[0]
+		answers = answers[1:]
+		return []byte(a), nil
+	}
+	t.Cleanup(func() { stdinIsTerminal, readPassword = oldTerm, oldRead })
+}
+
+func TestWebSetPasswordFromAPipe(t *testing.T) {
+	reqs := fakeDaemon(t)
+	stubPasswordInput(t, false)
+	code, out, errOut := runCLI(t, " a long secret \r\n", "web", "set-password")
+	if code != 0 || !strings.Contains(out, "web password set; every browser was logged out") {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+	last := (*reqs)[len(*reqs)-1]
+	if last.method != "POST" || last.path != "/web/set-password" || last.body != `{"password":" a long secret "}` {
+		t.Fatalf("request %+v", last)
+	}
+	runCLI(t, "secret one\n\n", "web", "set-password")
+	if last := (*reqs)[len(*reqs)-1]; last.body != `{"password":"secret one\n"}` {
+		t.Fatalf("only one line ending may be stripped: %+v", last)
+	}
+}
+
+func TestWebSetPasswordPromptsTwice(t *testing.T) {
+	reqs := fakeDaemon(t)
+	stubPasswordInput(t, true, "a long secret", "a long secret")
+	code, out, errOut := runCLI(t, "", "web", "set-password")
+	if code != 0 || !strings.Contains(out, "web password set; every browser was logged out") {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+	if errOut != "New web password: \nRepeat: \n" {
+		t.Fatalf("prompts %q", errOut)
+	}
+	if last := (*reqs)[len(*reqs)-1]; last.path != "/web/set-password" || last.body != `{"password":"a long secret"}` {
+		t.Fatalf("request %+v", last)
+	}
+
+	n := len(*reqs)
+	stubPasswordInput(t, true, "a long secret", "a different one")
+	code, _, errOut = runCLI(t, "", "web", "set-password")
+	if code != 1 || !strings.Contains(errOut, "ghr: passwords do not match") || len(*reqs) != n {
+		t.Fatalf("mismatch: exit %d err %q new requests %d", code, errOut, len(*reqs)-n)
+	}
+}
+
+func TestSetPasswordPromptStopsWhenCancelled(t *testing.T) {
+	stubPasswordInput(t, true, "a long secret", "a long secret")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var prompts bytes.Buffer
+	if _, err := readNewPassword(ctx, strings.NewReader(""), &prompts); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err %v", err)
+	}
+	if prompts.String() != "New web password: \n" {
+		t.Fatalf("asked again after the cancel: %q", prompts.String())
 	}
 }
