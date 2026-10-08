@@ -18,7 +18,7 @@ export function HistoryPage() {
   const [repo, setRepo] = useState("")
   const [conclusion, setConclusion] = useState("")
   const config = useConfig()
-  const history = useHistory(repo, conclusion)
+  const history = useHistory(repo, conclusion, "")
 
   const names = (config.data?.repos ?? []).map((r) => r.name)
   const repos = repo && !names.includes(repo) ? [...names, repo] : names

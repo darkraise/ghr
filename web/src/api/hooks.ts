@@ -13,9 +13,9 @@ export const keys = {
   status: ["status"] as const,
   config: ["config"] as const,
   metrics: ["metrics"] as const,
-  activity: (window: string, tz: string) => ["activity", window, tz] as const,
+  activity: (window: string, tz: string, repo: string) => ["activity", window, tz, repo] as const,
   events: (epoch: string) => ["events", epoch] as const,
-  history: (repo: string, conclusion: string) => ["history", repo, conclusion] as const,
+  history: (repo: string, conclusion: string, since: string) => ["history", repo, conclusion, since] as const,
   steps: (id: string) => ["steps", id] as const,
   containers: (id: string) => ["containers", id] as const,
   log: (id: string) => ["log", id] as const,
@@ -60,11 +60,11 @@ export function browserZone(): string {
 
 // The daemon aligns buckets to the zone it is given, so the browser sends its
 // own and the columns line up with the viewer's clock.
-export function useActivity(window: ActivityWindow) {
+export function useActivity(window: ActivityWindow, repo = "") {
   const tz = browserZone()
   return useQuery({
-    queryKey: keys.activity(window, tz),
-    queryFn: ({ signal }) => api.activity(window, tz, signal),
+    queryKey: keys.activity(window, tz, repo),
+    queryFn: ({ signal }) => api.activity(window, tz, repo, signal),
     refetchInterval: POLL_SLOW,
     // Keeps the panel and the repository strips drawn while a new window loads;
     // ActivityPanel reads lanes or buckets from the data's own window.
@@ -72,11 +72,17 @@ export function useActivity(window: ActivityWindow) {
   })
 }
 
-export function useHistory(repo: string, conclusion: string) {
+export const HISTORY_LIMIT = 500
+
+// History passes the from of its activity response as since, so the table
+// and the chart cover one span; the query waits until it is known.
+export function useHistory(repo: string, conclusion: string, since: string | undefined) {
   return useQuery({
-    queryKey: keys.history(repo, conclusion),
-    queryFn: ({ signal }) => api.history(repo, conclusion, 200, signal),
+    queryKey: keys.history(repo, conclusion, since ?? ""),
+    queryFn: ({ signal }) => api.history(repo, conclusion, since ?? "", HISTORY_LIMIT, signal),
+    enabled: since !== undefined,
     refetchInterval: POLL_SLOW,
+    placeholderData: keepPreviousData,
   })
 }
 
@@ -171,7 +177,7 @@ export function useStorage(status: Status | undefined) {
 export function useRepoActivity(name: string) {
   return useQuery({
     queryKey: keys.repoActivity(name),
-    queryFn: ({ signal }) => api.history(name, "", ACTIVITY_LIMIT, signal),
+    queryFn: ({ signal }) => api.history(name, "", "", ACTIVITY_LIMIT, signal),
     refetchInterval: POLL_SLOW,
   })
 }

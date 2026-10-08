@@ -22,7 +22,7 @@ describe("History page", () => {
     expect(screen.getByText("success")).toBeInTheDocument()
     expect(screen.getByText("failure")).toBeInTheDocument()
     expect(screen.getAllByRole("link", { name: "Open run" })).toHaveLength(1)
-    expect(calls.find((c) => c.path === "/api/history")?.search).toBe("?repo=&conclusion=&limit=200")
+    expect(calls.find((c) => c.path === "/api/history")?.search).toBe("?repo=&conclusion=&limit=500")
   })
 
   it("filters by repo", async () => {
@@ -31,7 +31,7 @@ describe("History page", () => {
     await screen.findByText("build")
     await user.click(screen.getByRole("combobox", { name: "Repo" }))
     await user.click(await screen.findByRole("option", { name: "darkmem" }))
-    await waitFor(() => expect(calls.some((c) => c.search === "?repo=darkmem&conclusion=&limit=200")).toBe(true))
+    await waitFor(() => expect(calls.some((c) => c.search === "?repo=darkmem&conclusion=&limit=500")).toBe(true))
   })
 
   it("filters by result", async () => {
@@ -40,7 +40,7 @@ describe("History page", () => {
     await screen.findByText("build")
     await user.click(screen.getByRole("combobox", { name: "Result" }))
     await user.click(await screen.findByRole("option", { name: "failure" }))
-    await waitFor(() => expect(calls.some((c) => c.search === "?repo=&conclusion=failure&limit=200")).toBe(true))
+    await waitFor(() => expect(calls.some((c) => c.search === "?repo=&conclusion=failure&limit=500")).toBe(true))
   })
 
   it("says when nothing has finished", async () => {

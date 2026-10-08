@@ -29,10 +29,12 @@ describe("api for the later pages", () => {
     expect(calls[0]).toMatchObject({ method, path, body, contentType: body === undefined ? undefined : "application/json" })
   })
 
-  it("asks for activity by window and zone", async () => {
+  it("asks for activity by window and zone, and by repo when given", async () => {
     const { calls } = mockApi({ "GET /api/activity": { window: "3h" } })
-    expect((await api.activity("3h", "Asia/Ho_Chi_Minh")).window).toBe("3h")
+    expect((await api.activity("3h", "Asia/Ho_Chi_Minh", "")).window).toBe("3h")
+    await api.activity("24h", "UTC", "darkmem")
     expect(calls[0]?.search).toBe("?window=3h&tz=Asia%2FHo_Chi_Minh")
+    expect(calls[1]?.search).toBe("?window=24h&tz=UTC&repo=darkmem")
   })
 
   it("sends a replacement token as plain text, unchanged", async () => {

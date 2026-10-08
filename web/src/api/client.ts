@@ -93,16 +93,16 @@ export const api = {
   status: (signal?: AbortSignal) => request<Status>("GET", "/api/status", undefined, signal),
   events: (after: number, signal?: AbortSignal) =>
     request<GhrEvent[]>("GET", `/api/events?${query({ after })}`, undefined, signal),
-  history: (repo: string, conclusion: string, limit: number, signal?: AbortSignal) =>
-    request<HistoryEntry[]>("GET", `/api/history?${query({ repo, conclusion, limit })}`, undefined, signal),
+  history: (repo: string, conclusion: string, since: string, limit: number, signal?: AbortSignal) =>
+    request<HistoryEntry[]>("GET", `/api/history?${query({ repo, conclusion, ...(since ? { since } : {}), limit })}`, undefined, signal),
   log: (id: string, cursor: string, signal?: AbortSignal) =>
     request<LogChunk>("GET", `/api/runners/${seg(id)}/log?${query({ cursor })}`, undefined, signal),
   steps: (id: string, signal?: AbortSignal) => request<Step[]>("GET", `/api/runners/${seg(id)}/steps`, undefined, signal),
   containers: (id: string, signal?: AbortSignal) =>
     request<Container[]>("GET", `/api/runners/${seg(id)}/containers`, undefined, signal),
   metrics: (signal?: AbortSignal) => request<Metrics>("GET", "/api/metrics", undefined, signal),
-  activity: (window: ActivityWindow, tz: string, signal?: AbortSignal) =>
-    request<Activity>("GET", `/api/activity?${query({ window, tz })}`, undefined, signal),
+  activity: (window: ActivityWindow, tz: string, repo: string, signal?: AbortSignal) =>
+    request<Activity>("GET", `/api/activity?${query({ window, tz, ...(repo ? { repo } : {}) })}`, undefined, signal),
   config: (signal?: AbortSignal) => request<Config>("GET", "/api/config", undefined, signal),
   stopRunner: (id: string) => send("DELETE", `/api/runners/${seg(id)}`),
   pauseAll: () => send("POST", "/api/pause-all"),

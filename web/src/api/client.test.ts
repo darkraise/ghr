@@ -57,10 +57,16 @@ describe("api client", () => {
   it("sends JSON bodies and builds query strings", async () => {
     const { calls } = mockApi({ "POST /auth/setup": () => noContent(), "GET /api/history": [] })
     await api.setup("correct horse battery")
-    await api.history("darkmem", "", 200)
+    await api.history("darkmem", "", "", 200)
     expect(calls[0]).toMatchObject({ method: "POST", body: { password: "correct horse battery" }, contentType: "application/json" })
     expect(calls[1]?.method).toBe("GET")
     expect(calls[1]?.search).toBe("?repo=darkmem&conclusion=&limit=200")
+  })
+
+  it("sends since only when it is set", async () => {
+    const { calls } = mockApi({ "GET /api/history": [] })
+    await api.history("", "failure", "2026-10-01T18:00:00+07:00", 500)
+    expect(calls[0]?.search).toBe("?repo=&conclusion=failure&since=2026-10-01T18%3A00%3A00%2B07%3A00&limit=500")
   })
 
   it("escapes runner IDs and cursors", async () => {

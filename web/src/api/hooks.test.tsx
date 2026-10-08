@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import { mockApi } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
-import { appendEvents, appendLog, browserZone, MAX_EVENTS, MAX_LOG, useActivity, useEvents, useLogTail } from "./hooks"
+import { appendEvents, appendLog, browserZone, MAX_EVENTS, MAX_LOG, useActivity, useEvents, useHistory, useLogTail } from "./hooks"
 import type { ActivityWindow, GhrEvent, LogChunk } from "./types"
 
 const ev = (seq: number): GhrEvent => ({ seq, time: "2026-10-03T14:05:00Z", level: "info", msg: `event ${seq}` })
@@ -98,6 +98,14 @@ describe("useActivity", () => {
     expect(calls[0]?.search).toBe("?window=3h&tz=UTC")
   })
 
+  it("asks for one repository when given", async () => {
+    const { calls } = mockApi({ "GET /api/activity": fixtures.activityBuckets })
+    const { wrapper } = withQuery()
+    const { result } = renderHook(() => useActivity("24h", "darkmem"), { wrapper })
+    await waitFor(() => expect(result.current.data?.window).toBe("24h"))
+    expect(calls[0]?.search).toBe("?window=24h&tz=UTC&repo=darkmem")
+  })
+
   it("keeps the last window's data while the next one loads", async () => {
     let release = () => {}
     const gate = new Promise<void>((resolve) => (release = resolve))
@@ -116,5 +124,21 @@ describe("useActivity", () => {
     expect(result.current.isPlaceholderData).toBe(true)
     release()
     await waitFor(() => expect(result.current.data?.window).toBe("24h"))
+  })
+})
+
+describe("useHistory", () => {
+  it("waits for since, then asks for up to 500 jobs since it", async () => {
+    const { calls } = mockApi({ "GET /api/history": fixtures.history })
+    const { wrapper } = withQuery()
+    const { result, rerender } = renderHook(({ since }: { since: string | undefined }) => useHistory("darkmem", "", since), {
+      wrapper,
+      initialProps: { since: undefined as string | undefined },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(calls).toHaveLength(0)
+    rerender({ since: "2026-10-03T00:00:00Z" })
+    await waitFor(() => expect(result.current.data).toHaveLength(2))
+    expect(calls[0]?.search).toBe("?repo=darkmem&conclusion=&since=2026-10-03T00%3A00%3A00Z&limit=500")
   })
 })
