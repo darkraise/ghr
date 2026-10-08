@@ -149,3 +149,24 @@ describe("ghr chrome styles", () => {
     expect(css).toMatch(/\.dr-brand-logo-label::after \{\s*content: var\(--ghr-host, ""\);/)
   })
 })
+
+describe("theme config", () => {
+  it("pins every axis and turns the switcher off", () => {
+    expect(themeConfig.switcher.enabled).toBe(false)
+    expect(Object.values(themeConfig.switcher.axes).every((on) => !on)).toBe(true)
+    expect(themeConfig.defaults).toMatchObject({
+      preset: "default",
+      density: "compact",
+      fontSize: "medium",
+      elevation: "low",
+      buttonElevation: "flat",
+      radius: "subtle",
+      controlDepth: "flush",
+      shellStyle: "classic",
+      backgroundStyle: "solid",
+      outerGlow: "none",
+      innerGlow: "none",
+      mode: "dark",
+    })
+  })
+})

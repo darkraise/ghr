@@ -1,49 +1,38 @@
 ;(function () {
-        var mode = localStorage.getItem("mode") || "system"
-        var resolved =
-          mode === "system"
-            ? window.matchMedia("(prefers-color-scheme: dark)").matches
-              ? "dark"
-              : "light"
-            : mode
-        document.documentElement.setAttribute("data-mode", resolved)
+  var root = document.documentElement
+  var mode = null
+  try {
+    var store = window.localStorage
+    // The old theme switcher saved every axis; a saved axis would override
+    // the pins in theme.config.ts, so they are cleared once.
+    if (!store.getItem("ghr-theme-v2")) {
+      for (var i = store.length - 1; i >= 0; i--) {
+        var key = store.key(i)
+        if (key && key.indexOf("theme-") === 0) store.removeItem(key)
+      }
+      store.setItem("ghr-theme-v2", "1")
+    }
+    mode = store.getItem("mode")
+  } catch (e) {
+    mode = null
+  }
+  var dark =
+    mode === "system" ? window.matchMedia("(prefers-color-scheme: dark)").matches : mode !== "light"
+  root.setAttribute("data-mode", dark ? "dark" : "light")
 
-        // Restore every attribute-driven theme axis before React mounts
-        // so the first paint matches the persisted theme. The
-        // attribute-name to localStorage-key map mirrors
-        // packages/ui/src/theme/theme-provider/ThemeProvider.tsx —
-        // note "theme-bg-style" / "theme-bg-intensity" are NOT just
-        // kebab-cased "background-*" keys.
-        var AXIS_LS_KEYS = {
-          "preset": "theme-preset",
-          "background-style": "theme-bg-style",
-          "background-intensity": "theme-bg-intensity",
-          "gradient-pattern": "theme-gradient-pattern",
-          "density": "theme-density",
-          "elevation": "theme-elevation",
-          "button-elevation": "theme-button-elevation",
-          "surface-intensity": "theme-surface-intensity",
-          "radius": "theme-radius",
-          "control-depth": "theme-control-depth",
-          "shell-style": "theme-shell-style",
-          "sidebar-active-bar": "theme-sidebar-active-bar",
-          "font-size": "theme-font-size",
-          "outer-glow": "theme-outer-glow",
-          "inner-glow": "theme-inner-glow",
-        }
-        // Presets that reinterpret an axis neutralise it rather than merely
-        // hiding its control, so restoring a stored value here would flash the
-        // wrong surface treatment before hydration corrects it. Mirrors
-        // NEUTRALISED_WHEN_HIDDEN + hiddenCommonAxes in the library.
-        var NEUTRALISED_BY_PRESET = {
-          glass: ["surface-intensity"],
-          scifi: ["surface-intensity"],
-        }
-        var activePreset = localStorage.getItem("theme-preset") || ""
-        var neutralised = NEUTRALISED_BY_PRESET[activePreset] || []
-        Object.keys(AXIS_LS_KEYS).forEach(function (axis) {
-          if (neutralised.indexOf(axis) !== -1) return
-          var v = localStorage.getItem(AXIS_LS_KEYS[axis])
-          if (v) document.documentElement.setAttribute("data-" + axis, v)
-        })
-      })()
+  // The attribute-driven pins from theme.config.ts that change the first
+  // paint; ThemeProvider sets the rest when React mounts.
+  var pinned = {
+    preset: "default",
+    "background-style": "solid",
+    density: "compact",
+    "font-size": "medium",
+    radius: "subtle",
+    elevation: "low",
+    "button-elevation": "flat",
+    "control-depth": "flush",
+    "shell-style": "classic",
+    "sidebar-active-bar": "ring",
+  }
+  for (var axis in pinned) root.setAttribute("data-" + axis, pinned[axis])
+})()
