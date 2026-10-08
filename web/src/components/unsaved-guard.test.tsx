@@ -93,4 +93,13 @@ describe("UnsavedGuard", () => {
     expect(await screen.findByText("form page")).toBeInTheDocument()
     expect(router.state.location.pathname).toBe("/")
   })
+
+  it("lets a navigation within the same page through", async () => {
+    const { router } = setup()
+    await screen.findByText("form page")
+    act(() => router.history.push("/#timing"))
+    await waitFor(() => expect(router.state.location.hash).toBe("timing"))
+    expect(screen.queryByText("You have 1 unsaved change on the Settings page.")).toBeNull()
+    expect(router.state.location.pathname).toBe("/")
+  })
 })

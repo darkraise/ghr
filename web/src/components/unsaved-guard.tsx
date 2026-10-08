@@ -23,7 +23,13 @@ export function UnsavedGuard({
   onSave: () => Promise<boolean>
   onDiscard: () => void
 }) {
-  const blocker = useBlocker({ shouldBlockFn: () => count > 0 || saving, enableBeforeUnload: count > 0, withResolver: true })
+  // A navigation inside the page (a hash change) never leaves the form, and
+  // blocking one makes the router undo it with a reload.
+  const blocker = useBlocker({
+    shouldBlockFn: ({ current, next }) => (count > 0 || saving) && next.pathname !== current.pathname,
+    enableBeforeUnload: count > 0,
+    withResolver: true,
+  })
   const [saved, setSaved] = useState(false)
   // Leaves only once the save has settled every change: an edit the save did
   // not carry keeps the page, with the save bar showing what is left.
