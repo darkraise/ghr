@@ -68,8 +68,12 @@ func (f *fakeBackend) CancelRunnerUpdate() error {
 	return f.updateErr
 }
 
-func (f *fakeBackend) Activity(_ context.Context, window string, loc *time.Location) (model.Activity, error) {
-	f.activityCalls = append(f.activityCalls, window+"|"+loc.String())
+func (f *fakeBackend) Activity(_ context.Context, window, repo string, loc *time.Location) (model.Activity, error) {
+	call := window + "|" + loc.String()
+	if repo != "" {
+		call += "|" + repo
+	}
+	f.activityCalls = append(f.activityCalls, call)
 	return f.activity, nil
 }
 
@@ -496,7 +500,10 @@ func TestActivityRoute(t *testing.T) {
 	if err := c.call(ctx, http.MethodGet, "/activity?window=24h", nil, &got); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(b.activityCalls, []string{"1h|Asia/Ho_Chi_Minh", "24h|Local"}) {
+	if err := c.call(ctx, http.MethodGet, "/activity?window=24h&repo=ghr", nil, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(b.activityCalls, []string{"1h|Asia/Ho_Chi_Minh", "24h|Local", "24h|Local|ghr"}) {
 		t.Fatalf("backend saw %v", b.activityCalls)
 	}
 	for _, q := range []string{"window=2h", "window=1h&tz=Mars/Olympus_Mons", ""} {
@@ -506,7 +513,7 @@ func TestActivityRoute(t *testing.T) {
 			t.Fatalf("%q: %v", q, err)
 		}
 	}
-	if len(b.activityCalls) != 2 {
+	if len(b.activityCalls) != 3 {
 		t.Fatalf("a bad request reached the backend: %v", b.activityCalls)
 	}
 }

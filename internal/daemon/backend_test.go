@@ -908,7 +908,7 @@ func TestActivityBuildsFromHistoryAndInstances(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.insts = []model.InstanceStatus{{ID: "r", Repo: "darkmem", State: "busy", Since: now.Add(-time.Minute)}}
-	a, err := b.Activity(context.Background(), "1h", time.UTC)
+	a, err := b.Activity(context.Background(), "1h", "", time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -932,20 +932,20 @@ func TestActivityCachesPerWindowAndZone(t *testing.T) {
 		}
 		return n
 	}
-	first, _ := b.Activity(ctx, "1h", time.UTC)
+	first, _ := b.Activity(ctx, "1h", "", time.UTC)
 	b.Hist.Append(model.HistoryEntry{ID: "a", Repo: "darkmem", RunID: 1, Conclusion: "success",
 		StartedAt: now.Add(-20 * time.Minute), FinishedAt: now.Add(-10 * time.Minute)})
-	if again, _ := b.Activity(ctx, "1h", time.UTC); runs(again) != runs(first) {
+	if again, _ := b.Activity(ctx, "1h", "", time.UTC); runs(again) != runs(first) {
 		t.Fatal("a second call within 5 s rebuilt the response")
 	}
-	if other, _ := b.Activity(ctx, "3h", time.UTC); runs(other) != 1 {
+	if other, _ := b.Activity(ctx, "3h", "", time.UTC); runs(other) != 1 {
 		t.Fatal("another window shared the cache entry")
 	}
-	if zoned, _ := b.Activity(ctx, "1h", time.FixedZone("ICT", 7*60*60)); zoned.TZ != "ICT" || runs(zoned) != 1 {
+	if zoned, _ := b.Activity(ctx, "1h", "", time.FixedZone("ICT", 7*60*60)); zoned.TZ != "ICT" || runs(zoned) != 1 {
 		t.Fatal("another zone shared the cache entry")
 	}
 	now = now.Add(6 * time.Second)
-	if later, _ := b.Activity(ctx, "1h", time.UTC); runs(later) != 1 {
+	if later, _ := b.Activity(ctx, "1h", "", time.UTC); runs(later) != 1 {
 		t.Fatal("the cache outlived 5 s")
 	}
 }
@@ -957,7 +957,7 @@ func TestActivitySlowWindowDoesNotBlockAnother(t *testing.T) {
 	defer held.mu.Unlock()
 	done := make(chan struct{})
 	go func() {
-		b.Activity(context.Background(), "1h", time.UTC)
+		b.Activity(context.Background(), "1h", "", time.UTC)
 		close(done)
 	}()
 	select {
@@ -972,9 +972,9 @@ func TestActivityCacheDropsExpiredEntries(t *testing.T) {
 	now := time.Date(2026, 10, 3, 14, 5, 0, 0, time.UTC)
 	b.Now = func() time.Time { return now }
 	ctx := context.Background()
-	b.Activity(ctx, "1h", time.UTC)
+	b.Activity(ctx, "1h", "", time.UTC)
 	now = now.Add(6 * time.Second)
-	b.Activity(ctx, "3h", time.UTC)
+	b.Activity(ctx, "3h", "", time.UTC)
 	b.activityMu.Lock()
 	_, kept := b.activity["1h|UTC"]
 	n := len(b.activity)
@@ -989,8 +989,30 @@ func TestActivityAllModeHasNoCapacity(t *testing.T) {
 	if _, err := b.Store.Update(func(c *config.Config) error { c.Mode = config.ModeAll; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	a, err := b.Activity(context.Background(), "24h", time.UTC)
+	a, err := b.Activity(context.Background(), "24h", "", time.UTC)
 	if err != nil || a.Window != "24h" || a.Capacity != nil {
 		t.Fatalf("window %q capacity %v err %v", a.Window, a.Capacity, err)
+	}
+}
+
+func TestActivityForOneRepo(t *testing.T) {
+	b, _, _ := newBackend(t)
+	now := time.Date(2026, 10, 3, 14, 5, 0, 0, time.UTC)
+	b.Now = func() time.Time { return now }
+	ctx := context.Background()
+	b.Hist.Append(model.HistoryEntry{ID: "a", Repo: "darkmem", RunID: 1, Conclusion: "success",
+		StartedAt: now.Add(-20 * time.Minute), FinishedAt: now.Add(-10 * time.Minute)})
+	all, _ := b.Activity(ctx, "24h", "", time.UTC)
+	one, err := b.Activity(ctx, "24h", "DarkMem", time.UTC)
+	if err != nil || all.Capacity == nil || one.Capacity != nil || len(one.Repos) != 1 || one.Repos[0].Repo != "darkmem" {
+		t.Fatalf("one repo %+v capacity %v err %v", one.Repos, one.Capacity, err)
+	}
+	b.Hist.Append(model.HistoryEntry{ID: "b", Repo: "darkmem", RunID: 2, Conclusion: "failure",
+		StartedAt: now.Add(-9 * time.Minute), FinishedAt: now.Add(-5 * time.Minute)})
+	if again, _ := b.Activity(ctx, "24h", "darkmem", time.UTC); again.Repos[0].Week.Failed != 0 {
+		t.Fatal("a differently cased name missed the cache entry")
+	}
+	if other, _ := b.Activity(ctx, "24h", "darkcloud", time.UTC); len(other.Repos) != 1 || other.Repos[0].Repo != "darkcloud" {
+		t.Fatalf("another repo shared the cache entry: %+v", other.Repos)
 	}
 }

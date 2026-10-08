@@ -121,11 +121,16 @@ type activityEntry struct {
 	val model.Activity
 }
 
-// Activity builds the Dashboard's activity view for window in loc, reusing
-// one built less than activityTTL ago. Each window and zone has its own
-// lock, so a slow 30d build never holds up a 1h poll.
-func (b *Backend) Activity(ctx context.Context, window string, loc *time.Location) (model.Activity, error) {
-	e := b.activityEntry(window + "|" + loc.String())
+// Activity builds the activity view for window in loc, narrowed to one
+// repository when repo is set, reusing one built less than activityTTL ago.
+// Each window, zone and repository has its own lock, so a slow 30d build
+// never holds up a 1h poll. Repository names match case-insensitively.
+func (b *Backend) Activity(ctx context.Context, window, repo string, loc *time.Location) (model.Activity, error) {
+	key := window + "|" + loc.String()
+	if repo != "" {
+		key += "|" + strings.ToLower(repo)
+	}
+	e := b.activityEntry(key)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	now := b.now()
@@ -138,7 +143,7 @@ func (b *Backend) Activity(ctx context.Context, window string, loc *time.Locatio
 		return model.Activity{}, err
 	}
 	in := activity.Input{
-		Window: window, Loc: loc, Now: now, Retention: cfg.HistoryRetention.D(),
+		Window: window, Loc: loc, Now: now, Retention: cfg.HistoryRetention.D(), Repo: repo,
 		History: hist, Instances: b.M.Status().Instances,
 	}
 	if cfg.Mode == config.ModeQueue {

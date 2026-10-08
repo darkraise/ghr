@@ -74,7 +74,7 @@ type Backend interface {
 	Reload() ([]string, error)
 	Prune() error
 	Metrics() model.Metrics
-	Activity(ctx context.Context, window string, loc *time.Location) (model.Activity, error)
+	Activity(ctx context.Context, window, repo string, loc *time.Location) (model.Activity, error)
 	Token() model.TokenStatus
 	StartLabelCheck(repo string) error
 	LabelCheck(repo string) (model.LabelCheck, error)
@@ -111,7 +111,7 @@ func NewServer(b Backend) http.Handler {
 			}
 			loc = l
 		}
-		a, err := b.Activity(r.Context(), window, loc)
+		a, err := b.Activity(r.Context(), window, q.Get("repo"), loc)
 		respond(w, a, err)
 	})
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.Status()) })
