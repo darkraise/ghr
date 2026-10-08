@@ -3,7 +3,7 @@ import { AccountCard } from "@/components/account-card"
 import { MaintenanceCard } from "@/components/maintenance-card"
 import { SaveBar } from "@/components/save-bar"
 import { SettingsSections } from "@/components/settings-form"
-import { TokenCard } from "@/components/token-card"
+import { TokenSection } from "@/components/token-section"
 import { UnsavedGuard } from "@/components/unsaved-guard"
 import { useSettingsForm } from "@/lib/settings-form"
 
@@ -18,7 +18,7 @@ export function SettingsPage() {
         <>
           <SettingsSections form={form} />
           <div className="mb-4 grid gap-4 lg:grid-cols-2">
-            <TokenCard />
+            <TokenSection />
             <MaintenanceCard />
             <AccountCard />
           </div>
