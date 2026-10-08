@@ -1,0 +1,1231 @@
+<title>ghr Design Directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a reading column for the brief, then one wide mock frame per direction behind tabs. */
+:root {
+  --bg: #f4f5f7; --surface: #ffffff; --fg: #15181d; --muted: #5f6672; --line: #dde0e5; --accent: #2c5cc5;
+  --font-ui: "Schibsted Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #0f1114; --surface: #171a1f; --fg: #e6e8eb; --muted: #9097a2; --line: #2a2e35; --accent: #8fb0ff; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #0f1114; --surface: #171a1f; --fg: #e6e8eb; --muted: #9097a2; --line: #2a2e35; --accent: #8fb0ff; color-scheme: dark; }
+
+body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 15px; line-height: 1.55; }
+.page { max-width: 1240px; margin: 0 auto; padding-inline: 20px; padding-block: 36px 64px; display: flex; flex-direction: column; gap: 28px; }
+.brief { max-width: 68ch; display: flex; flex-direction: column; gap: 10px; }
+.brief h1 { margin: 0; font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+.brief p { margin: 0; color: var(--muted); }
+.brief .note { font-size: 13px; }
+.common { display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+.common span { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 3px 10px; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid var(--line); }
+.tab { font: inherit; font-size: 14px; font-weight: 600; background: none; border: 0; color: var(--muted); padding: 10px 14px 12px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab small { display: block; font-weight: 400; font-size: 12px; }
+.tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.tab:focus-visible, .mode:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.direction { display: flex; flex-direction: column; gap: 16px; }
+.dir-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 12px; }
+.dir-head h2 { margin: 0; font-size: 22px; }
+.dir-head p { margin: 2px 0 0; color: var(--muted); max-width: 70ch; }
+.mode { font: inherit; font-size: 13px; background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+.frame { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.specs { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.spec { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.spec h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.spec ul { margin: 0; padding-left: 18px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.sw { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+.sw i { width: 44px; height: 30px; border-radius: 6px; border: 1px solid var(--line); display: block; }
+.type-specimen { display: flex; flex-direction: column; gap: 4px; }
+
+/* ---------- shared mock pieces ---------- */
+.mock { min-width: 1120px; font-size: 13px; line-height: 1.45; background: var(--m-bg); color: var(--m-fg); display: grid; }
+.mock * { box-sizing: border-box; }
+.mock .num { font-variant-numeric: tabular-nums; }
+.mock svg { display: block; }
+.led { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+
+/* ---------- A: Control Room ---------- */
+.mock-a { font-family: "IBM Plex Sans", ui-sans-serif, sans-serif; grid-template-columns: 196px 1fr; }
+.mock-a[data-mode="dark"] { --m-bg: #0b0f14; --m-panel: #111720; --m-panel2: #19212c; --m-line: #222c39; --m-fg: #d5dce5; --m-muted: #7b889a; --m-accent: #47c1d8; --m-ok: #45b860; --m-warn: #d9a23a; --m-bad: #ef6a5f; color-scheme: dark; }
+.mock-a[data-mode="light"] { --m-bg: #eceff3; --m-panel: #ffffff; --m-panel2: #e3e8ee; --m-line: #d3d9e1; --m-fg: #141c26; --m-muted: #5a6778; --m-accent: #0b7f97; --m-ok: #1f8a3c; --m-warn: #a86e00; --m-bad: #c4352b; }
+.a-side { background: var(--m-panel); border-right: 1px solid var(--m-line); padding: 14px 10px; display: flex; flex-direction: column; gap: 18px; }
+.a-brand { display: flex; align-items: center; gap: 9px; padding: 2px 6px; }
+.a-brand b { font-family: "IBM Plex Mono", monospace; font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }
+.a-brand span { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--m-muted); border: 1px solid var(--m-line); border-radius: 3px; padding: 0 4px; }
+.a-label { font-family: "IBM Plex Mono", monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--m-muted); padding: 0 8px 4px; }
+.a-nav { display: flex; flex-direction: column; gap: 1px; }
+.a-nav div { display: flex; justify-content: space-between; align-items: center; padding: 5px 8px; border-radius: 4px; color: var(--m-muted); }
+.a-nav div.on { background: var(--m-panel2); color: var(--m-fg); font-weight: 500; }
+.a-nav div.on::before { content: ""; }
+.a-nav em { font-style: normal; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--m-fg); background: var(--m-panel2); border-radius: 3px; padding: 0 5px; }
+.a-nav em.live { color: var(--m-accent); }
+.a-main { padding: 16px 20px 22px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.a-title { display: flex; align-items: baseline; justify-content: space-between; }
+.a-title h1 { margin: 0; font-size: 17px; font-weight: 600; }
+.a-title .acts { display: flex; gap: 6px; }
+.a-btn { font-family: "IBM Plex Sans", sans-serif; font-size: 12px; border: 1px solid var(--m-line); background: var(--m-panel); color: var(--m-fg); border-radius: 4px; padding: 4px 10px; }
+.a-btn.pri { background: var(--m-accent); border-color: var(--m-accent); color: var(--m-bg); font-weight: 600; }
+.a-bar { display: grid; grid-template-columns: repeat(6, auto); background: var(--m-panel); border: 1px solid var(--m-line); border-radius: 6px; }
+.a-bar > div { padding: 9px 14px; border-right: 1px solid var(--m-line); display: flex; flex-direction: column; gap: 4px; }
+.a-bar > div:last-child { border-right: 0; }
+.a-k { font-family: "IBM Plex Mono", monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--m-muted); }
+.a-v { font-family: "IBM Plex Mono", monospace; font-size: 15px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.gauge { display: inline-flex; gap: 3px; }
+.gauge i { width: 13px; height: 9px; border-radius: 2px; background: var(--m-line); }
+.gauge i.on { background: var(--m-accent); }
+.meter { position: relative; width: 84px; height: 6px; border-radius: 3px; background: var(--m-line); }
+.meter b { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--m-fg); opacity: 0.75; }
+.meter s { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--m-warn); }
+.a-v.warn { color: var(--m-warn); font-size: 13px; }
+.a-grid { display: grid; grid-template-columns: 1.65fr 1fr; gap: 14px; align-items: start; }
+.a-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.panel { background: var(--m-panel); border: 1px solid var(--m-line); border-radius: 6px; min-width: 0; }
+.panel-h { display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid var(--m-line); }
+.panel-h span:last-child { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--m-muted); }
+.slot { display: grid; grid-template-columns: 26px 14px 1fr 112px 64px; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--m-line); }
+.slot:last-child { border-bottom: 0; }
+.slot .no { font-family: "IBM Plex Mono", monospace; color: var(--m-muted); font-size: 12px; }
+.slot .what b { font-weight: 500; }
+.slot .what small { display: block; color: var(--m-muted); font-family: "IBM Plex Mono", monospace; font-size: 11px; }
+.slot .t { font-family: "IBM Plex Mono", monospace; text-align: right; }
+.slot.free .what { color: var(--m-muted); }
+.steps { display: flex; gap: 2px; }
+.steps i { flex: 1; height: 5px; border-radius: 1px; background: var(--m-line); }
+.steps i.d { background: var(--m-ok); }
+.steps i.r { background: var(--m-accent); }
+.led.busy { background: var(--m-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--m-accent) 25%, transparent); animation: pulse 1.6s ease-in-out infinite; }
+.led.idle { background: var(--m-ok); }
+.led.free { border: 1.5px solid var(--m-line); }
+.led.paused { background: var(--m-muted); }
+.led.err { background: var(--m-bad); }
+@keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--m-accent) 8%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .led.busy { animation: none; } }
+.a-table { width: 100%; border-collapse: collapse; }
+.a-table th { font-family: "IBM Plex Mono", monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--m-muted); font-weight: 400; text-align: left; padding: 8px 14px 6px; }
+.a-table td { padding: 7px 14px; border-top: 1px solid var(--m-line); vertical-align: middle; }
+.a-table td.m { font-family: "IBM Plex Mono", monospace; }
+.a-table .dim { color: var(--m-muted); }
+.ticks { display: inline-flex; gap: 2px; align-items: flex-end; }
+.ticks i { width: 4px; height: 14px; border-radius: 1px; background: var(--m-ok); }
+.ticks i.f { background: var(--m-bad); }
+.ticks i.c { background: var(--m-line); }
+.ok { color: var(--m-ok); } .bad { color: var(--m-bad); } .warn { color: var(--m-warn); } .acc { color: var(--m-accent); } .mut { color: var(--m-muted); }
+.log { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; padding: 8px 14px 10px; display: flex; flex-direction: column; gap: 5px; }
+.log div { display: grid; grid-template-columns: 58px 40px 1fr; gap: 6px; }
+.chart-a { padding: 10px 14px 12px; }
+.legend { display: flex; gap: 14px; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--m-muted); margin-bottom: 6px; }
+.legend b { color: var(--m-fg); font-weight: 500; }
+
+/* ---------- B: Precise ---------- */
+.mock-b { font-family: "Geist", ui-sans-serif, sans-serif; grid-template-columns: 216px 1fr; padding: 10px 10px 10px 0; }
+.mock-b[data-mode="light"] { --m-bg: #f3f4f7; --m-surface: #ffffff; --m-sunk: #f7f8fa; --m-line: #e3e6ec; --m-fg: #101627; --m-muted: #5e6779; --m-accent: #5443d6; --m-accent-soft: #eeebff; --m-ok: #1a8a4a; --m-ok-soft: #e5f5ec; --m-warn: #a86400; --m-warn-soft: #fdf1df; --m-bad: #c6372d; --m-bad-soft: #fdeceb; }
+.mock-b[data-mode="dark"] { --m-bg: #0c0e13; --m-surface: #14171e; --m-sunk: #191d25; --m-line: #262a35; --m-fg: #e8eaf1; --m-muted: #8d93a5; --m-accent: #9c8fff; --m-accent-soft: #241f45; --m-ok: #4cc27c; --m-ok-soft: #12291c; --m-warn: #e2a64a; --m-warn-soft: #2d2213; --m-bad: #f0776c; --m-bad-soft: #321816; color-scheme: dark; }
+.b-side { padding: 14px 12px; display: flex; flex-direction: column; gap: 16px; }
+.b-brand { display: flex; align-items: center; gap: 9px; padding: 4px 8px 8px; }
+.b-brand b { font-size: 17px; font-weight: 700; letter-spacing: -0.03em; }
+.b-group { display: flex; flex-direction: column; gap: 1px; }
+.b-group p { margin: 0 0 4px; padding: 0 8px; font-size: 11.5px; color: var(--m-muted); font-weight: 500; }
+.b-item { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 7px; color: var(--m-muted); font-size: 13.5px; }
+.b-item svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.b-item.on { background: var(--m-surface); color: var(--m-fg); font-weight: 600; box-shadow: 0 0 0 1px var(--m-line); }
+.b-item .new { margin-left: auto; font-size: 10.5px; color: var(--m-accent); background: var(--m-accent-soft); border-radius: 999px; padding: 0 7px; font-weight: 500; }
+.b-sheet { background: var(--m-surface); border: 1px solid var(--m-line); border-radius: 12px; padding: 26px 30px 30px; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.b-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.b-head h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+.b-head p { margin: 0; font-size: 15px; color: var(--m-muted); }
+.b-head p b { color: var(--m-fg); font-weight: 600; }
+.b-acts { display: flex; gap: 8px; }
+.b-btn { font-family: "Geist", sans-serif; font-size: 13px; font-weight: 500; border-radius: 8px; padding: 7px 13px; border: 1px solid var(--m-line); background: var(--m-surface); color: var(--m-fg); }
+.b-btn.pri { background: var(--m-accent); border-color: var(--m-accent); color: #fff; }
+.mock-b[data-mode="dark"] .b-btn.pri { color: #0c0e13; }
+.b-kpis { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--m-line); border-radius: 10px; }
+.b-kpis > div { padding: 14px 18px; border-right: 1px solid var(--m-line); display: flex; flex-direction: column; gap: 4px; }
+.b-kpis > div:last-child { border-right: 0; }
+.b-kpis label { font-size: 12.5px; color: var(--m-muted); }
+.b-kpis strong { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; display: flex; align-items: baseline; gap: 6px; }
+.b-kpis strong small { font-size: 13px; color: var(--m-muted); font-weight: 400; letter-spacing: 0; }
+.b-meter { height: 6px; border-radius: 3px; background: var(--m-sunk); box-shadow: inset 0 0 0 1px var(--m-line); position: relative; margin-top: 8px; }
+.b-meter b { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--m-accent); }
+.b-cols { display: grid; grid-template-columns: 1fr 300px; gap: 26px; align-items: start; }
+.b-sec { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.b-sec-h { display: flex; align-items: center; justify-content: space-between; }
+.b-sec-h h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.b-filters { display: flex; gap: 4px; }
+.b-filters span { font-size: 12px; padding: 3px 9px; border-radius: 999px; color: var(--m-muted); }
+.b-filters span.on { background: var(--m-sunk); color: var(--m-fg); box-shadow: inset 0 0 0 1px var(--m-line); }
+.b-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.b-card { border: 1px solid var(--m-line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.b-card.dim { background: var(--m-sunk); }
+.b-card-top { display: flex; align-items: center; justify-content: space-between; }
+.b-card-top b { font-size: 14px; font-weight: 600; }
+.pill { font-size: 11.5px; font-weight: 500; border-radius: 999px; padding: 1px 9px; display: inline-flex; align-items: center; gap: 5px; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill.ok { background: var(--m-ok-soft); color: var(--m-ok); }
+.pill.warn { background: var(--m-warn-soft); color: var(--m-warn); }
+.pill.bad { background: var(--m-bad-soft); color: var(--m-bad); }
+.pill.mut { background: var(--m-sunk); color: var(--m-muted); box-shadow: inset 0 0 0 1px var(--m-line); }
+.b-facts { display: flex; gap: 20px; font-size: 12.5px; color: var(--m-muted); }
+.b-facts b { color: var(--m-fg); font-weight: 500; }
+.dots { display: inline-flex; gap: 3px; vertical-align: middle; margin-right: 4px; }
+.dots i { width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--m-line); }
+.dots i.on { background: var(--m-accent); box-shadow: none; }
+.strip { display: flex; gap: 3px; }
+.strip i { flex: 1; height: 20px; border-radius: 3px; background: var(--m-ok); opacity: 0.85; }
+.strip i.f { background: var(--m-bad); }
+.strip i.c { background: var(--m-line); }
+.strip i.r { background: var(--m-accent); }
+.b-last { font-size: 12.5px; color: var(--m-muted); display: flex; gap: 6px; align-items: center; }
+.b-last b { color: var(--m-fg); font-weight: 500; }
+.b-now { border: 1px solid var(--m-line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; background: linear-gradient(var(--m-accent-soft), var(--m-surface) 70%); }
+.b-now .row { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--m-muted); }
+.b-now .row b { color: var(--m-fg); font-weight: 500; }
+.b-now h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.b-now small { color: var(--m-muted); font-family: "Geist Mono", monospace; font-size: 11.5px; }
+.b-feed { display: flex; flex-direction: column; }
+.b-feed div { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--m-line); font-size: 12.5px; }
+.b-feed div:last-child { border-bottom: 0; }
+.b-feed time { color: var(--m-muted); font-family: "Geist Mono", monospace; font-size: 11px; }
+.b-feed i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--m-muted); }
+
+/* ---------- D: Precise shell + Control Room dashboard ---------- */
+.d-bar { display: grid; grid-template-columns: repeat(6, auto); border: 1px solid var(--m-line); border-radius: 10px; }
+.d-bar > div { padding: 11px 16px; border-right: 1px solid var(--m-line); display: flex; flex-direction: column; gap: 5px; }
+.d-bar > div:last-child { border-right: 0; }
+.d-bar label { font-size: 12px; color: var(--m-muted); }
+.d-v { font-family: "Geist Mono", monospace; font-size: 16px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.d-v small { font-size: 11.5px; color: var(--m-muted); font-weight: 400; }
+.d-gauge { display: inline-flex; gap: 3px; }
+.d-gauge i { width: 13px; height: 9px; border-radius: 3px; background: var(--m-sunk); box-shadow: inset 0 0 0 1px var(--m-line); }
+.d-gauge i.on { background: var(--m-accent); box-shadow: none; }
+.d-meter { position: relative; width: 84px; height: 6px; border-radius: 3px; background: var(--m-sunk); box-shadow: inset 0 0 0 1px var(--m-line); }
+.d-meter b { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--m-accent); }
+.d-meter s { position: absolute; top: -3px; bottom: -3px; width: 1.5px; background: var(--m-warn); }
+.d-grid { display: grid; grid-template-columns: 1.65fr 1fr; gap: 18px; align-items: start; }
+.d-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.d-panel { border: 1px solid var(--m-line); border-radius: 10px; min-width: 0; }
+.d-panel-h { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--m-line); }
+.d-panel-h h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.d-panel-h span { font-size: 12px; color: var(--m-muted); }
+.d-slot { display: grid; grid-template-columns: 24px 12px 1fr 120px 60px; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--m-line); }
+.d-slot:last-child { border-bottom: 0; }
+.d-slot .no { font-family: "Geist Mono", monospace; font-size: 12px; color: var(--m-muted); }
+.d-slot .what b { font-weight: 600; }
+.d-slot .what small { display: block; color: var(--m-muted); font-size: 12px; }
+.d-slot .t { font-family: "Geist Mono", monospace; text-align: right; }
+.d-slot.free .what { color: var(--m-muted); }
+.d-steps { display: flex; gap: 2px; }
+.d-steps i { flex: 1; height: 6px; border-radius: 2px; background: var(--m-line); }
+.d-steps i.d { background: var(--m-ok); }
+.d-steps i.r { background: var(--m-accent); }
+.mock-d .led.busy { background: var(--m-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--m-accent) 22%, transparent); animation: pulse-d 1.6s ease-in-out infinite; }
+.mock-d .led.idle { background: var(--m-ok); }
+.mock-d .led.free { box-shadow: inset 0 0 0 1.5px var(--m-line); }
+.mock-d .led.paused { background: var(--m-muted); opacity: 0.6; }
+.mock-d .led.err { background: var(--m-bad); }
+@keyframes pulse-d { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--m-accent) 6%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .mock-d .led.busy { animation: none; } }
+.d-table { width: 100%; border-collapse: collapse; }
+.d-table th { font-size: 12px; color: var(--m-muted); font-weight: 500; text-align: left; padding: 9px 16px 7px; }
+.d-table td { padding: 9px 16px; border-top: 1px solid var(--m-line); vertical-align: middle; }
+.d-table td.m { font-family: "Geist Mono", monospace; }
+.d-table .dim { color: var(--m-muted); }
+.d-ticks { display: inline-flex; gap: 2px; }
+.d-ticks i { width: 5px; height: 16px; border-radius: 2px; background: var(--m-ok); opacity: 0.85; }
+.d-ticks i.f { background: var(--m-bad); }
+.d-ticks i.c { background: var(--m-line); }
+.mock-d .ok { color: var(--m-ok); } .mock-d .bad { color: var(--m-bad); } .mock-d .warn { color: var(--m-warn); } .mock-d .acc { color: var(--m-accent); } .mock-d .mut { color: var(--m-muted); }
+.d-chart { padding: 12px 16px 14px; }
+.d-legend { display: flex; gap: 16px; font-size: 12px; color: var(--m-muted); margin-bottom: 8px; }
+.d-legend b { color: var(--m-fg); font-weight: 600; font-family: "Geist Mono", monospace; }
+.d-log { padding: 6px 16px 10px; display: flex; flex-direction: column; }
+.d-log div { display: grid; grid-template-columns: 62px 10px 1fr; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--m-line); font-size: 12.5px; }
+.d-log div:last-child { border-bottom: 0; }
+.d-log time { font-family: "Geist Mono", monospace; font-size: 11.5px; color: var(--m-muted); }
+.d-log i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--m-muted); }
+
+/* ---------- E: chosen direction, anti-slop rules applied ---------- */
+/* Shell owns the colour (a petrol or cobalt rail); content sits on a tinted ground with no boxes,
+   except the one live element (runner slots). Radius rule: controls 6px, the slots surface 10px. */
+.mock-e { font-family: "Geist", ui-sans-serif, sans-serif; grid-template-columns: 228px 1fr; background: var(--m-ground); }
+.mock-e[data-palette="petrol"][data-mode="light"] { --m-ground: #f2f6f6; --m-surface: #ffffff; --m-shell: #0f2e33; --m-shell-hi: #1d4a51; --m-shell-fg: #e2eeef; --m-shell-muted: #8fb0b3; --m-shell-accent: #62d2dc; --m-shell-dim: #2a5258; --m-fg: #0f1d20; --m-muted: #55676a; --m-line: #d9e2e3; --m-sunk: #e8efef; --m-accent: #0a7682; --m-on-accent: #ffffff; --m-ok: #3b8526; --m-warn: #9a6200; --m-bad: #bf382d; }
+.mock-e[data-palette="petrol"][data-mode="dark"] { --m-ground: #0d1517; --m-surface: #131e21; --m-shell: #0b2226; --m-shell-hi: #17404a; --m-shell-fg: #d6e6e7; --m-shell-muted: #7f9da0; --m-shell-accent: #5fcfd9; --m-shell-dim: #24464c; --m-fg: #e2ebeb; --m-muted: #8fa2a4; --m-line: #22333a; --m-sunk: #18262a; --m-accent: #46bcc7; --m-on-accent: #061a1d; --m-ok: #79bd55; --m-warn: #e2a64c; --m-bad: #f0766a; color-scheme: dark; }
+.mock-e[data-palette="cobalt"][data-mode="light"] { --m-ground: #f2f3f8; --m-surface: #ffffff; --m-shell: #151d3b; --m-shell-hi: #26325f; --m-shell-fg: #e2e6f4; --m-shell-muted: #929bbd; --m-shell-accent: #93a9ff; --m-shell-dim: #303b66; --m-fg: #11162b; --m-muted: #586078; --m-line: #dce0ea; --m-sunk: #e9ecf4; --m-accent: #2e50cc; --m-on-accent: #ffffff; --m-ok: #3b8526; --m-warn: #9a6200; --m-bad: #bf382d; }
+.mock-e[data-palette="cobalt"][data-mode="dark"] { --m-ground: #0d1019; --m-surface: #131828; --m-shell: #0f1531; --m-shell-hi: #212c58; --m-shell-fg: #dde2f2; --m-shell-muted: #8790b2; --m-shell-accent: #8ea4ff; --m-shell-dim: #262f57; --m-fg: #e4e7f1; --m-muted: #8e95ad; --m-line: #242b40; --m-sunk: #181e30; --m-accent: #7f98f4; --m-on-accent: #0b1020; --m-ok: #79bd55; --m-warn: #e2a64c; --m-bad: #f0766a; color-scheme: dark; }
+.mock-e ::selection { background: color-mix(in srgb, var(--m-accent) 28%, transparent); }
+.mock-e .ic { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; display: inline-block; vertical-align: -3px; }
+.e-side { background: var(--m-shell); color: var(--m-shell-fg); padding: 16px 12px; display: flex; flex-direction: column; gap: 20px; }
+.e-brand { display: flex; align-items: center; gap: 9px; padding: 0 8px; }
+.e-brand b { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+.e-brand span { margin-left: auto; font-family: "Geist Mono", monospace; font-size: 11px; color: var(--m-shell-muted); }
+.e-cap { padding: 10px; border-radius: 6px; background: var(--m-shell-hi); display: flex; flex-direction: column; gap: 8px; }
+.e-cap-h { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--m-shell-muted); }
+.e-cap-h b { color: var(--m-shell-fg); font-weight: 600; font-family: "Geist Mono", monospace; font-size: 12px; }
+.e-seg { display: flex; gap: 4px; }
+.e-seg i { flex: 1; height: 8px; border-radius: 2px; background: var(--m-shell-dim); }
+.e-seg i.busy { background: var(--m-shell-accent); }
+.e-seg i.warm { background: transparent; box-shadow: inset 0 0 0 1.5px var(--m-shell-accent); }
+.e-group { display: flex; flex-direction: column; gap: 1px; }
+.e-group p { margin: 0 0 4px; padding: 0 8px; font-size: 12px; color: var(--m-shell-muted); }
+.e-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; color: var(--m-shell-fg); opacity: 0.82; font-size: 13.5px; }
+.e-item .ic { width: 16px; height: 16px; }
+.e-item.on { background: var(--m-shell-hi); opacity: 1; font-weight: 600; }
+.e-item em { margin-left: auto; font-style: normal; font-family: "Geist Mono", monospace; font-size: 11.5px; color: var(--m-shell-muted); }
+.e-item em.live { color: var(--m-shell-accent); }
+.e-foot { margin-top: auto; padding: 0 8px; font-size: 12.5px; color: var(--m-shell-muted); display: flex; justify-content: space-between; }
+.e-main { padding: 24px 28px 30px; display: flex; flex-direction: column; gap: 24px; color: var(--m-fg); min-width: 0; }
+.e-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.e-head h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+.e-head p { margin: 0; font-size: 15px; color: var(--m-muted); max-width: 62ch; }
+.e-head p b { color: var(--m-fg); font-weight: 600; }
+.e-acts { display: flex; gap: 8px; flex: none; }
+.e-btn { font-family: "Geist", sans-serif; font-size: 13px; font-weight: 500; border-radius: 6px; padding: 7px 13px; border: 1px solid var(--m-line); background: var(--m-surface); color: var(--m-fg); }
+.e-btn.pri { background: var(--m-accent); border-color: var(--m-accent); color: var(--m-on-accent); }
+.e-strip { display: flex; flex-wrap: wrap; gap: 0; border-top: 1px solid var(--m-line); border-bottom: 1px solid var(--m-line); }
+.e-strip > div { padding: 10px 22px 11px 0; margin-right: 22px; border-right: 1px solid var(--m-line); display: flex; flex-direction: column; gap: 3px; }
+.e-strip > div:last-child { border-right: 0; margin-right: 0; }
+.e-strip label { font-size: 12px; color: var(--m-muted); }
+.e-strip .v { font-size: 15px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.e-strip .v .mono { font-family: "Geist Mono", monospace; }
+.e-strip .v small { font-size: 12.5px; color: var(--m-muted); font-weight: 400; }
+.e-strip .v.warn { color: var(--m-warn); }
+.e-meter { position: relative; width: 80px; height: 6px; border-radius: 3px; background: var(--m-sunk); }
+.e-meter b { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--m-fg); opacity: 0.7; }
+.e-meter s { position: absolute; top: -3px; bottom: -3px; width: 1.5px; background: var(--m-warn); }
+.e-grid { display: grid; grid-template-columns: 1.75fr 1fr; gap: 32px; align-items: start; }
+.e-col { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+.e-sec { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.e-sec-h { display: flex; align-items: baseline; gap: 10px; }
+.e-sec-h h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.e-sec-h span { font-size: 12.5px; color: var(--m-muted); }
+.e-sec-h a { margin-left: auto; font-size: 12.5px; color: var(--m-accent); text-decoration: none; font-weight: 500; }
+.e-slots { background: var(--m-surface); border: 1px solid var(--m-line); border-radius: 10px; }
+.e-slot { display: grid; grid-template-columns: 10px 1.15fr 1fr 56px; align-items: center; gap: 14px; padding: 12px 16px; border-bottom: 1px solid var(--m-line); }
+.e-slot:last-child { border-bottom: 0; }
+.e-slot .job b { font-weight: 600; }
+.e-slot .job small, .e-slot .step small { display: block; color: var(--m-muted); font-size: 12.5px; }
+.e-slot .step { font-size: 12.5px; display: flex; flex-direction: column; gap: 6px; }
+.e-slot .step span { color: var(--m-muted); }
+.e-slot .mono { font-family: "Geist Mono", monospace; }
+.e-slot .t { font-family: "Geist Mono", monospace; text-align: right; font-size: 13px; }
+.e-slot.free .job b { font-weight: 500; color: var(--m-muted); }
+.e-steps { display: flex; gap: 2px; }
+.e-steps i { flex: 1; height: 5px; border-radius: 1px; background: var(--m-sunk); }
+.e-steps i.d { background: color-mix(in srgb, var(--m-accent) 45%, var(--m-sunk)); }
+.e-steps i.r { background: var(--m-accent); }
+.e-led { width: 9px; height: 9px; border-radius: 50%; }
+.e-led.busy { background: var(--m-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--m-accent) 20%, transparent); animation: pulse-e 1.8s cubic-bezier(0.16, 1, 0.3, 1) infinite; }
+.e-led.warm { box-shadow: inset 0 0 0 2px var(--m-accent); }
+.e-led.free { box-shadow: inset 0 0 0 1.5px var(--m-line); }
+@keyframes pulse-e { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--m-accent) 4%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .e-led.busy { animation: none; } }
+.e-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.e-table th { font-size: 12px; color: var(--m-muted); font-weight: 500; text-align: left; padding: 0 12px 8px 0; border-bottom: 1px solid var(--m-line); }
+.e-table td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--m-line); vertical-align: top; }
+.e-table tr:last-child td { border-bottom: 0; }
+.e-table td.mono { font-family: "Geist Mono", monospace; }
+.e-table .sub { display: block; font-size: 12px; color: var(--m-muted); margin-top: 2px; }
+.e-table .sub.bad { color: var(--m-bad); }
+.e-table .muted { color: var(--m-muted); }
+.e-table .state-bad { color: var(--m-bad); font-weight: 500; }
+.e-table .state-run { color: var(--m-accent); font-weight: 500; }
+.e-ok { color: var(--m-ok); } .e-bad { color: var(--m-bad); } .e-warn { color: var(--m-warn); }
+.e-ticks { display: inline-flex; gap: 2px; padding-top: 2px; }
+.e-ticks i { width: 5px; height: 15px; border-radius: 1px; background: var(--m-ok); opacity: 0.8; }
+.e-ticks i.f { background: var(--m-bad); opacity: 1; height: 15px; }
+.e-ticks i.c { background: var(--m-line); }
+.e-chart { display: flex; flex-direction: column; gap: 8px; }
+.e-legend { display: flex; gap: 18px; font-size: 12.5px; color: var(--m-muted); }
+.e-legend b { color: var(--m-fg); font-weight: 600; font-family: "Geist Mono", monospace; font-size: 12.5px; }
+.e-legend i { display: inline-block; width: 12px; height: 2px; vertical-align: 3px; margin-right: 5px; background: var(--m-accent); }
+.e-legend i.mem { background: none; border-top: 2px dashed var(--m-muted); height: 0; }
+.e-events { display: flex; flex-direction: column; font-size: 13px; }
+.e-events div { display: grid; grid-template-columns: 44px 18px 1fr; gap: 6px; align-items: start; padding: 7px 0; border-bottom: 1px solid var(--m-line); }
+.e-events div:last-child { border-bottom: 0; }
+.e-events time { font-family: "Geist Mono", monospace; font-size: 12px; color: var(--m-muted); padding-top: 1px; }
+.e-pal { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.e-pal button { font: inherit; font-size: 13px; border: 0; background: var(--surface); color: var(--muted); padding: 6px 12px; cursor: pointer; }
+.e-pal button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.e-pal button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.rules ul { margin: 0; padding-left: 18px; font-size: 14px; display: flex; flex-direction: column; gap: 5px; }
+
+/* ---------- F: Control Room, graphical ---------- */
+/* Dark rail in both modes; the last-hour flight recorder is the signature and spans the page. */
+.mock-f { font-family: "IBM Plex Sans", ui-sans-serif, sans-serif; grid-template-columns: 212px 1fr; background: var(--f-ground); color: var(--f-fg); }
+.mock-f[data-mode="dark"] { --f-ground: #0d1218; --f-shell: #090d12; --f-shell-hi: #17202b; --f-shell-fg: #c9d2dd; --f-shell-muted: #6f7c8d; --f-shell-dim: #222c38; --f-surface: #121a23; --f-sunk: #19222d; --f-line: #222d3a; --f-fg: #d9e0e8; --f-muted: #808c9c; --f-accent: #4cc3d6; --f-on-accent: #062027; --f-ok: #4fb36a; --f-bad: #ef6b5e; --f-warn: #e0a644; color-scheme: dark; }
+.mock-f[data-mode="light"] { --f-ground: #eef1f4; --f-shell: #131a22; --f-shell-hi: #232d3a; --f-shell-fg: #d5dce5; --f-shell-muted: #8794a5; --f-shell-dim: #2c3846; --f-surface: #ffffff; --f-sunk: #e5e9ee; --f-line: #d4dae2; --f-fg: #121a24; --f-muted: #586577; --f-accent: #0a7f93; --f-on-accent: #ffffff; --f-ok: #2f8a45; --f-bad: #c63a2f; --f-warn: #a26700; }
+.mock-f ::selection { background: color-mix(in srgb, var(--f-accent) 30%, transparent); }
+.mock-f .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+.mock-f .ic { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; display: inline-block; vertical-align: -3px; }
+.f-side { background: var(--f-shell); color: var(--f-shell-fg); padding: 16px 12px; display: flex; flex-direction: column; gap: 20px; border-right: 1px solid var(--f-shell-dim); }
+.f-brand { display: flex; align-items: center; gap: 9px; padding: 0 8px; }
+.f-brand b { font-family: "IBM Plex Mono", monospace; font-size: 17px; font-weight: 600; letter-spacing: -0.02em; }
+.f-brand span { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--f-shell-muted); }
+.f-cap { padding: 10px; border-radius: 6px; background: var(--f-shell-hi); display: flex; flex-direction: column; gap: 8px; }
+.f-cap-h { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--f-shell-muted); }
+.f-cap-h b { color: var(--f-shell-fg); font-weight: 500; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+.f-seg { display: flex; gap: 4px; }
+.f-seg i { flex: 1; height: 8px; border-radius: 2px; background: var(--f-shell-dim); }
+.f-seg i.busy { background: #4cc3d6; }
+.f-seg i.warm { background: transparent; box-shadow: inset 0 0 0 1.5px #4cc3d6; }
+.f-group { display: flex; flex-direction: column; gap: 1px; }
+.f-group p { margin: 0 0 4px; padding: 0 8px; font-size: 12px; color: var(--f-shell-muted); }
+.f-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; color: var(--f-shell-fg); opacity: 0.8; font-size: 13.5px; }
+.f-item .ic { width: 16px; height: 16px; }
+.f-item.on { background: var(--f-shell-hi); opacity: 1; font-weight: 600; }
+.f-item em { margin-left: auto; font-style: normal; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--f-shell-muted); }
+.f-item em.live { color: #4cc3d6; }
+.f-foot { margin-top: auto; padding: 0 8px; font-size: 12.5px; color: var(--f-shell-muted); display: flex; justify-content: space-between; }
+.f-main { padding: 22px 26px 28px; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.f-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.f-head h1 { margin: 0 0 4px; font-size: 21px; font-weight: 600; letter-spacing: -0.01em; }
+.f-head p { margin: 0; font-size: 14.5px; color: var(--f-muted); }
+.f-head p b { color: var(--f-fg); font-weight: 600; }
+.f-acts { display: flex; gap: 8px; flex: none; }
+.f-btn { font-family: "IBM Plex Sans", sans-serif; font-size: 13px; font-weight: 500; border-radius: 6px; padding: 6px 12px; border: 1px solid var(--f-line); background: var(--f-surface); color: var(--f-fg); }
+.f-btn.pri { background: var(--f-accent); border-color: var(--f-accent); color: var(--f-on-accent); font-weight: 600; }
+.f-strip { display: flex; flex-wrap: wrap; border-top: 1px solid var(--f-line); border-bottom: 1px solid var(--f-line); }
+.f-strip > div { padding: 9px 22px 10px 0; margin-right: 22px; border-right: 1px solid var(--f-line); display: flex; flex-direction: column; gap: 3px; }
+.f-strip > div:last-child { border-right: 0; margin-right: 0; }
+.f-strip label { font-size: 12px; color: var(--f-muted); }
+.f-strip .v { font-size: 14.5px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.f-strip .v small { font-size: 12.5px; color: var(--f-muted); font-weight: 400; }
+.f-strip .v.warn { color: var(--f-warn); }
+.f-budget { width: 72px; height: 5px; border-radius: 3px; background: var(--f-sunk); position: relative; }
+.f-budget b { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--f-fg); opacity: 0.7; }
+.f-sec { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.f-sec-h { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.f-sec-h h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.f-sec-h span { font-size: 12.5px; color: var(--f-muted); }
+.f-sec-h a { margin-left: auto; font-size: 12.5px; color: var(--f-accent); text-decoration: none; font-weight: 500; }
+.f-legend { margin-left: auto; display: flex; gap: 14px; font-size: 12px; color: var(--f-muted); flex-wrap: wrap; }
+.f-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.f-legend i { width: 14px; height: 9px; border-radius: 2px; display: inline-block; }
+.f-rec { background: var(--f-surface); border: 1px solid var(--f-line); border-radius: 10px; padding: 12px 14px 6px; }
+.f-rec svg text { font-family: "IBM Plex Sans", sans-serif; }
+.f-rec svg .ax { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: var(--f-muted); }
+.f-rec svg .lbl { font-size: 11.5px; fill: var(--f-muted); }
+.f-rec svg .bar-t { font-size: 11px; fill: var(--f-fg); }
+.f-rec svg .bar-t.on-acc { fill: var(--f-on-accent); font-weight: 600; }
+.f-run-edge { animation: f-edge 1.8s cubic-bezier(0.16, 1, 0.3, 1) infinite; }
+@keyframes f-edge { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .f-run-edge { animation: none; } }
+.f-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 30px; align-items: start; }
+.f-col { display: flex; flex-direction: column; gap: 26px; min-width: 0; }
+.f-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.f-table th { font-size: 12px; color: var(--f-muted); font-weight: 500; text-align: left; padding: 0 12px 8px 0; border-bottom: 1px solid var(--f-line); white-space: nowrap; }
+.f-table td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--f-line); vertical-align: middle; }
+.f-table tr:last-child td { border-bottom: 0; }
+.f-table .sub { display: block; font-size: 12px; color: var(--f-muted); margin-top: 2px; }
+.f-table .sub.bad { color: var(--f-bad); }
+.f-table .muted { color: var(--f-muted); }
+.f-table .run { color: var(--f-accent); font-weight: 500; }
+.f-table .err { color: var(--f-bad); font-weight: 500; }
+.f-ok { color: var(--f-ok); } .f-bad { color: var(--f-bad); } .f-warn { color: var(--f-warn); }
+.f-capcells { display: inline-flex; gap: 3px; vertical-align: -1px; margin-right: 6px; }
+.f-capcells i { width: 9px; height: 12px; border-radius: 2px; background: var(--f-sunk); box-shadow: inset 0 0 0 1px var(--f-line); }
+.f-capcells i.on { background: var(--f-accent); box-shadow: none; }
+.f-heat { display: inline-grid; grid-template-columns: repeat(24, 7px); gap: 2px; }
+.f-heat i { height: 16px; border-radius: 1.5px; background: var(--f-sunk); }
+.f-heat i.k1 { background: color-mix(in srgb, var(--f-ok) 40%, var(--f-sunk)); }
+.f-heat i.k2 { background: color-mix(in srgb, var(--f-ok) 70%, var(--f-sunk)); }
+.f-heat i.k3 { background: var(--f-ok); }
+.f-heat i.x { background: var(--f-bad); }
+.f-heat i.now { box-shadow: inset 0 0 0 1.5px var(--f-accent); }
+.f-heat-ax { display: flex; justify-content: space-between; font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--f-muted); width: 214px; margin-top: 3px; }
+.f-disk-n { display: flex; align-items: baseline; gap: 8px; }
+.f-disk-n b { font-family: "IBM Plex Mono", monospace; font-size: 22px; font-weight: 500; }
+.f-disk-n span { color: var(--f-muted); font-size: 13px; }
+.f-stack { position: relative; display: flex; height: 18px; border-radius: 4px; overflow: hidden; background: var(--f-sunk); }
+.f-stack i { height: 100%; }
+.f-stack i + i { box-shadow: inset 1px 0 0 var(--f-surface); }
+.f-mark { position: relative; height: 0; }
+.f-mark s { position: absolute; top: -22px; height: 26px; width: 2px; background: var(--f-warn); }
+.f-mark small { position: absolute; top: 6px; transform: translateX(-50%); font-size: 11px; color: var(--f-warn); white-space: nowrap; }
+.f-dlist { display: grid; grid-template-columns: 12px 1fr auto; gap: 6px 8px; align-items: center; font-size: 13px; margin-top: 14px; }
+.f-dlist i { width: 10px; height: 10px; border-radius: 2px; }
+.f-dlist span.mono { text-align: right; font-size: 12.5px; }
+.f-events { display: flex; flex-direction: column; font-size: 13px; }
+.f-events div { display: grid; grid-template-columns: 44px 18px 1fr; gap: 6px; align-items: start; padding: 7px 0; border-bottom: 1px solid var(--f-line); }
+.f-events div:last-child { border-bottom: 0; }
+.f-events time { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--f-muted); padding-top: 1px; }
+.f-note { font-size: 13px; color: var(--muted); }
+
+.f-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.f-stat { background: var(--f-surface); border: 1px solid var(--f-line); border-radius: 10px; padding: 12px 14px 13px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.f-stat label { font-size: 12.5px; color: var(--f-muted); display: flex; align-items: center; gap: 6px; }
+.f-stat .n { display: flex; align-items: baseline; gap: 7px; }
+.f-stat .n b { font-size: 26px; font-weight: 500; letter-spacing: -0.02em; line-height: 1; }
+.f-stat .n span { font-size: 13px; color: var(--f-muted); }
+.f-stat p { margin: 0; font-size: 12.5px; color: var(--f-muted); line-height: 1.4; }
+.f-stat.attn { border-color: color-mix(in srgb, var(--f-warn) 55%, var(--f-line)); }
+.f-stat.attn label { color: var(--f-warn); }
+.f-slots { display: flex; gap: 4px; height: 30px; align-items: stretch; }
+.f-slots i { flex: 1; border-radius: 4px; background: var(--f-sunk); }
+.f-slots i.busy { background: var(--f-accent); }
+.f-slots i.warm { background: transparent; box-shadow: inset 0 0 0 1.5px var(--f-accent); }
+.f-bar { height: 8px; border-radius: 4px; background: var(--f-sunk); position: relative; margin: 11px 0; }
+.f-bar b { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--f-fg); opacity: 0.7; }
+.f-btn.sm { align-self: flex-start; font-size: 12.5px; padding: 4px 10px; margin-top: auto; }
+.f-upd { margin-top: auto; border: 1px solid color-mix(in srgb, #e0a644 60%, var(--f-shell-dim)); border-radius: 8px; padding: 10px 11px; display: flex; flex-direction: column; gap: 7px; }
+.f-upd-h { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: #e0a644; }
+.f-upd p { margin: 0; font-size: 12.5px; line-height: 1.4; color: var(--f-shell-fg); }
+.f-upd p b { font-weight: 500; }
+.f-upd-btn { align-self: flex-start; font-size: 12.5px; font-weight: 500; padding: 4px 10px; border-radius: 6px; background: var(--f-shell-hi); color: var(--f-shell-fg); border: 1px solid var(--f-shell-dim); }
+.f-upd + .f-foot { margin-top: 0; }
+.f-win { margin-left: auto; display: inline-flex; border: 1px solid var(--f-line); border-radius: 6px; overflow: hidden; }
+.f-win button { font: inherit; font-family: "IBM Plex Mono", monospace; font-size: 12px; border: 0; background: var(--f-surface); color: var(--f-muted); padding: 4px 11px; cursor: pointer; }
+.f-win button + button { box-shadow: inset 1px 0 0 var(--f-line); }
+.f-win button[aria-pressed="true"] { background: var(--f-accent); color: var(--f-on-accent); font-weight: 600; }
+.f-win button:focus-visible { outline: 2px solid var(--f-accent); outline-offset: -2px; }
+.f-rec .f-legend { margin: 0 0 8px; justify-content: flex-end; }
+/* ---------- C: Workshop ---------- */
+.mock-c { font-family: "Barlow", ui-sans-serif, sans-serif; font-size: 13.5px; grid-template-rows: auto auto 1fr; }
+.mock-c[data-mode="light"] { --m-bg: #e2dfda; --m-surface: #f1efeb; --m-ink: #1e1c19; --m-fg: #1e1c19; --m-muted: #6c665c; --m-line: #b9b2a6; --m-accent: #1f4f9e; --m-on-accent: #ffffff; --m-ok: #2c7a39; --m-warn: #c88a00; --m-bad: #b0352a; }
+.mock-c[data-mode="dark"] { --m-bg: #181715; --m-surface: #22211e; --m-ink: #ebe6dd; --m-fg: #ebe6dd; --m-muted: #a0988b; --m-line: #3e3b35; --m-accent: #7ea8ee; --m-on-accent: #10141c; --m-ok: #63b56f; --m-warn: #e2aa30; --m-bad: #e4685c; color-scheme: dark; }
+.c-cond { font-family: "Barlow Condensed", "Barlow", sans-serif; text-transform: uppercase; letter-spacing: 0.08em; }
+.c-mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+.c-top { display: flex; align-items: center; gap: 20px; padding: 12px 22px; background: var(--m-surface); border-bottom: 1.5px solid var(--m-ink); }
+.c-plate { display: flex; align-items: center; gap: 10px; }
+.c-plate small { font-size: 11px; color: var(--m-muted); line-height: 1.1; }
+.c-read { margin-left: auto; display: flex; gap: 0; }
+.c-read div { padding: 2px 14px; border-left: 1px solid var(--m-line); display: flex; flex-direction: column; }
+.c-read span { font-size: 11px; color: var(--m-muted); }
+.c-read b { font-size: 14px; font-weight: 500; }
+.hazard { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; font-weight: 600; color: var(--m-ink); background: repeating-linear-gradient(-45deg, var(--m-warn) 0 8px, color-mix(in srgb, var(--m-warn) 70%, var(--m-bg)) 8px 16px); }
+.hazard span { background: var(--m-surface); padding: 0 6px; }
+.c-nav { display: flex; gap: 2px; padding: 0 22px; background: var(--m-surface); border-bottom: 1px solid var(--m-line); }
+.c-nav div { padding: 9px 12px 8px; font-size: 14.5px; font-weight: 600; color: var(--m-muted); border-bottom: 3px solid transparent; }
+.c-nav div.on { color: var(--m-ink); border-bottom-color: var(--m-accent); }
+.c-nav div sup { color: var(--m-accent); font-size: 10px; margin-left: 2px; }
+.c-body { padding: 18px 22px 24px; display: flex; flex-direction: column; gap: 20px; }
+.c-h { display: flex; align-items: baseline; gap: 12px; border-bottom: 1.5px solid var(--m-ink); padding-bottom: 5px; }
+.c-h h2 { margin: 0; font-size: 17px; font-weight: 700; }
+.c-h span { color: var(--m-muted); font-size: 14px; }
+.c-h .c-btns { margin-left: auto; display: flex; gap: 6px; }
+.c-btn { font-family: "Barlow Condensed", sans-serif; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; font-size: 13px; padding: 4px 12px; border: 1.5px solid var(--m-ink); background: var(--m-surface); color: var(--m-ink); }
+.c-btn.pri { background: var(--m-accent); border-color: var(--m-accent); color: var(--m-on-accent); }
+.bays { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.bay { border: 1.5px solid var(--m-ink); background: var(--m-surface); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; min-height: 158px; }
+.bay.open { border-style: dashed; border-color: var(--m-line); background: transparent; }
+.bay-top { display: flex; justify-content: space-between; align-items: flex-start; }
+.bay-no { font-family: "Barlow Condensed", sans-serif; font-weight: 700; font-size: 42px; line-height: 0.9; }
+.bay.open .bay-no { color: var(--m-line); }
+.stamp { font-family: "Barlow Condensed", sans-serif; font-weight: 700; letter-spacing: 0.1em; font-size: 13px; padding: 1px 8px; border: 1.5px solid currentColor; }
+.stamp.busy { background: var(--m-accent); border-color: var(--m-accent); color: var(--m-on-accent); }
+.stamp.warm { color: var(--m-ok); }
+.stamp.open { color: var(--m-muted); border-style: dashed; }
+.bay dl { margin: 0; display: grid; grid-template-columns: 54px 1fr; gap: 2px 8px; font-size: 13px; }
+.bay dt { color: var(--m-muted); font-family: "Barlow Condensed", sans-serif; text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; }
+.bay dd { margin: 0; }
+.segs { display: flex; gap: 3px; margin-top: auto; }
+.segs i { flex: 1; height: 8px; background: var(--m-line); }
+.segs i.d { background: var(--m-ink); }
+.segs i.r { background: var(--m-accent); }
+.bay.open p { margin: auto 0 0; color: var(--m-muted); font-size: 13px; }
+.c-table { width: 100%; border-collapse: collapse; background: var(--m-surface); border: 1.5px solid var(--m-ink); }
+.c-table th { font-family: "Barlow Condensed", sans-serif; text-transform: uppercase; letter-spacing: 0.08em; font-size: 12.5px; font-weight: 600; text-align: left; color: var(--m-muted); padding: 7px 12px; border-bottom: 1.5px solid var(--m-ink); }
+.c-table td { padding: 7px 12px; border-bottom: 1px solid var(--m-line); }
+.c-table tr:last-child td { border-bottom: 0; }
+.tag { font-family: "JetBrains Mono", monospace; font-size: 11px; border: 1px solid var(--m-line); padding: 0 5px; margin-right: 3px; }
+.c-two { display: grid; grid-template-columns: 1.1fr 1fr; gap: 20px; align-items: start; }
+.c-repos { display: flex; flex-direction: column; background: var(--m-surface); border: 1.5px solid var(--m-ink); }
+.c-repo { display: grid; grid-template-columns: 1fr 70px 92px; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--m-line); }
+.c-repo:last-child { border-bottom: 0; }
+.c-repo b { font-weight: 600; }
+.c-repo small { display: block; color: var(--m-muted); font-size: 12px; }
+.tagline { font-family: "Barlow Condensed", sans-serif; font-weight: 700; letter-spacing: 0.1em; font-size: 12.5px; text-align: center; padding: 1px 0; }
+.tagline.ok { color: var(--m-ok); border: 1.5px solid var(--m-ok); }
+.tagline.paused { color: var(--m-muted); background: repeating-linear-gradient(-45deg, transparent 0 5px, color-mix(in srgb, var(--m-line) 60%, transparent) 5px 10px); border: 1.5px solid var(--m-line); }
+.tagline.err { color: var(--m-surface); background: var(--m-bad); border: 1.5px solid var(--m-bad); }
+.c-log { background: var(--m-surface); border: 1.5px solid var(--m-ink); padding: 8px 12px; display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.c-log div { display: grid; grid-template-columns: 62px 1fr; gap: 8px; }
+</style>
+
+<div class="page">
+  <header class="brief">
+    <h1>Three directions for ghr</h1>
+    <p>The same Dashboard and the same data, drawn three ways. Each one is buildable on darkraise-ui with theme settings, a few token overrides and some ghr-specific components. Pick one, or tell me what to take from each.</p>
+    <p class="note">Example data, not your live runner. The sidebar already shows the new Actions page and the Toolchains page from today's change. Mocks are drawn at desktop width; on a phone, scroll the frame sideways.</p>
+    <div class="common" aria-label="Common to all three">
+      <span>New logo and wordmark</span><span>One fixed brand look; theme switcher cut to light / dark / system</span><span>Status colour reserved for meaning</span><span>Live runner slots instead of a plain table</span>
+    </div>
+  </header>
+
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M10 8.8v6.4l5.2-3.2z"/></symbol>
+      <symbol id="i-server" viewBox="0 0 24 24"><rect x="4" y="4.5" width="16" height="6" rx="1.5"/><rect x="4" y="13.5" width="16" height="6" rx="1.5"/><path d="M8 7.5h.01M8 16.5h.01"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+      <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="6" r="2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="8" r="2"/><path d="M7 8v8M17 10c0 4-10 2-10 6"/></symbol>
+      <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.5 5.5a4 4 0 0 0-5 5L4.5 15.5a2.1 2.1 0 0 0 3 3l5-5a4 4 0 0 0 5-5l-2.5 2.5-2.5-.5-.5-2.5z"/></symbol>
+      <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/></symbol>
+      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M5 7h9M18 7h1M5 17h3M12 17h7"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.8"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.5 9.5l5 5M14.5 9.5l-5 5"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4.5l8.5 15h-17z"/><path d="M12 10v4M12 17h.01"/></symbol>
+    </svg>
+  <div class="tabs" role="tablist" aria-label="Directions">
+    <button class="tab" role="tab" id="tab-f" aria-controls="control-room-graphical" aria-selected="true">A, graphical<small>dark recorder of the last hour</small></button>
+    <button class="tab" role="tab" id="tab-d" aria-controls="chosen" aria-selected="false">Chosen<small>B shell, A dashboard, rules applied</small></button>
+    <button class="tab" role="tab" id="tab-a" aria-controls="control-room" aria-selected="false">A · Control Room<small>dark, dense ops console</small></button>
+    <button class="tab" role="tab" id="tab-b" aria-controls="precise" aria-selected="false">B · Precise<small>calm, light product</small></button>
+    <button class="tab" role="tab" id="tab-c" aria-controls="workshop" aria-selected="false">C · Workshop<small>industrial, top navigation</small></button>
+  </div>
+
+  <!-- ===================== A, graphical ===================== -->
+  <section class="direction" id="control-room-graphical" role="tabpanel" aria-labelledby="tab-f">
+    <div class="dir-head">
+      <div>
+        <h2>Control Room, graphical</h2>
+        <p>Option A redrawn around pictures of real data. The centrepiece is a recorder of the last hour: which job ran in which runner slot, with waiting jobs and CPU on the same time axis underneath. Repositories get a 24-hour activity strip, and disk use is drawn by what fills it. Same anti-slop rules as the Chosen tab.</p>
+      </div>
+      <button class="mode" data-target="mock-f">Show light mode</button>
+    </div>
+    <div class="frame">
+      <div class="mock mock-f" id="mock-f" data-mode="dark">
+        <aside class="f-side">
+          <div class="f-brand">
+            <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect x="2" y="3.5" width="18" height="3.2" rx="1.6" fill="currentColor"/><rect x="2" y="9.4" width="12" height="3.2" rx="1.6" fill="currentColor" opacity=".62"/><rect x="2" y="15.3" width="6.5" height="3.2" rx="1.6" fill="currentColor" opacity=".38"/><circle cx="16.6" cy="16.9" r="2.6" fill="#4cc3d6"/></svg>
+            <b>ghr</b><span>lxc-99</span>
+          </div>
+          <div class="f-cap" aria-label="Runner capacity: 2 busy, 1 warm, 1 free">
+            <div class="f-cap-h"><span>Runners</span><b>2 of 4 busy</b></div>
+            <div class="f-seg"><i class="busy"></i><i class="busy"></i><i class="warm"></i><i></i></div>
+          </div>
+          <nav class="f-group" aria-label="Operate"><p>Operate</p>
+            <div class="f-item on"><svg class="ic"><use href="#i-grid"/></svg>Dashboard</div>
+            <div class="f-item"><svg class="ic"><use href="#i-play"/></svg>Actions<em class="live">3</em></div>
+            <div class="f-item"><svg class="ic"><use href="#i-server"/></svg>Runners<em>3</em></div>
+            <div class="f-item"><svg class="ic"><use href="#i-clock"/></svg>History</div>
+          </nav>
+          <nav class="f-group" aria-label="Configure"><p>Configure</p>
+            <div class="f-item"><svg class="ic"><use href="#i-branch"/></svg>Repositories<em>5</em></div>
+            <div class="f-item"><svg class="ic"><use href="#i-wrench"/></svg>Toolchains<em>9</em></div>
+            <div class="f-item"><svg class="ic"><use href="#i-db"/></svg>Storage</div>
+            <div class="f-item"><svg class="ic"><use href="#i-sliders"/></svg>Settings</div>
+          </nav>
+          <div class="f-upd" role="status">
+            <div class="f-upd-h"><svg class="ic"><use href="#i-alert"/></svg>Runner update</div>
+            <p><b class="mono">2.329.0</b> required by Oct 14, 6 days left.</p>
+            <span class="f-upd-btn">Queue update</span>
+          </div>
+          <div class="f-foot"><span>Owner</span><span>Log out</span></div>
+        </aside>
+        <main class="f-main">
+          <div class="f-head">
+            <div>
+              <h1>Dashboard</h1>
+              <p><b>2 of 4 runners busy.</b> 3 jobs are waiting in darkmem, and old-repo can't be reached on GitHub.</p>
+            </div>
+            <div class="f-acts"><span class="f-btn">Pause all</span><span class="f-btn pri">Add repository</span></div>
+          </div>
+          <div class="f-stats">
+            <div class="f-stat">
+              <label>Runners</label>
+              <div class="n"><b class="mono">2</b><span>of 4 busy</span></div>
+              <div class="f-slots" aria-label="2 busy, 1 warm, 1 free"><i class="busy"></i><i class="busy"></i><i class="warm"></i><i></i></div>
+            </div>
+            <div class="f-stat">
+              <label>Waiting jobs</label>
+              <div class="n"><b class="mono f-warn">3</b><span>oldest 3 min</span></div>
+              <svg viewBox="0 0 140 30" width="100%" height="30" aria-label="Waiting jobs over the last hour"><path d="M0 28 H37.3 V20 H49.0 V28 H105.0 V20 H121.3 V28 H133.0 V4 H140.0 V30 H0 Z" fill="color-mix(in srgb, var(--f-warn) 22%, transparent)"/><path d="M0 28 H37.3 V20 H49.0 V28 H105.0 V20 H121.3 V28 H133.0 V4 H140.0" fill="none" stroke="var(--f-warn)" stroke-width="1.4"/></svg>
+            </div>
+            <div class="f-stat">
+              <label>API budget</label>
+              <div class="n"><b class="mono">4,980</b><span>of 5,000</span></div>
+              <div class="f-bar"><b style="width:99.6%"></b></div>
+            </div>
+            <div class="f-stat">
+              <label>Host</label>
+              <div class="n"><b class="mono">23%</b><span>CPU</span></div>
+              <svg viewBox="0 0 140 30" width="100%" height="30" aria-label="CPU over the last hour"><polygon points="0,30 0.0,23.0 11.7,23.8 23.3,20.4 35.0,13.3 46.7,18.8 58.3,21.7 70.0,11.2 81.7,4.9 93.3,15.4 105.0,19.6 116.7,9.1 128.3,2.8 140.0,18.3 140,30" fill="color-mix(in srgb, var(--f-accent) 16%, transparent)"/><polyline points="0.0,23.0 11.7,23.8 23.3,20.4 35.0,13.3 46.7,18.8 58.3,21.7 70.0,11.2 81.7,4.9 93.3,15.4 105.0,19.6 116.7,9.1 128.3,2.8 140.0,18.3" fill="none" stroke="var(--f-accent)" stroke-width="1.4"/></svg>
+            </div>
+          </div>
+          <section class="f-sec">
+            <div class="f-sec-h"><h2>Activity</h2><span id="f-range">13:05 to 14:05</span><div class="f-win" role="group" aria-label="Time window"><button type="button" data-win="1h" data-range="13:05 to 14:05" data-kind="lanes" aria-pressed="true">1h</button><button type="button" data-win="3h" data-range="11:05 to 14:05" data-kind="lanes" aria-pressed="false">3h</button><button type="button" data-win="24h" data-range="Since 14:00 yesterday, per hour" data-kind="agg" aria-pressed="false">24h</button><button type="button" data-win="7d" data-range="Sep 27 to Oct 3, per 6 hours" data-kind="agg" aria-pressed="false">7d</button><button type="button" data-win="30d" data-range="Sep 4 to Oct 3, per day" data-kind="agg" aria-pressed="false">30d</button></div></div>
+            <div class="f-rec"><div class="f-legend" data-for="lanes">
+                <span><i style="background:color-mix(in srgb, var(--f-ok) 30%, var(--f-surface));box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"></i>Succeeded</span>
+                <span><i style="background:color-mix(in srgb, var(--f-bad) 32%, var(--f-surface));box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--f-bad) 70%, var(--f-surface))"></i>Failed</span>
+                <span><i style="background:var(--f-accent)"></i>Running</span>
+                <span><i style="box-shadow:inset 0 0 0 1.2px var(--f-accent)"></i>Warm</span>
+                <span><i style="background:color-mix(in srgb, var(--f-warn) 28%, transparent);box-shadow:inset 0 0 0 1px var(--f-warn)"></i>Waiting jobs</span>
+              </div><div class="f-legend" data-for="agg" hidden><span><i style="background:var(--f-accent)"></i>Busy slot time</span><span><i style="background:color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"></i>Succeeded</span><span><i style="background:var(--f-bad)"></i>Failed</span><span><i style="background:color-mix(in srgb, var(--f-warn) 28%, transparent);box-shadow:inset 0 0 0 1px var(--f-warn)"></i>Peak waiting</span><span><i style="background:color-mix(in srgb, var(--f-accent) 16%, transparent);box-shadow:inset 0 -2px 0 var(--f-accent)"></i>CPU average</span></div><div class="f-view" data-w="1h"><svg viewBox="0 0 900 268" width="100%" role="img" aria-label="Runner slots, waiting jobs and CPU over the last hour"><rect x="70" y="8" width="810" height="24" rx="3" fill="var(--f-sunk)" opacity="0.55"/><text class="lbl" x="0" y="24">Slot 1</text><rect x="70" y="40" width="810" height="24" rx="3" fill="var(--f-sunk)" opacity="0.55"/><text class="lbl" x="0" y="56">Slot 2</text><rect x="70" y="72" width="810" height="24" rx="3" fill="var(--f-sunk)" opacity="0.55"/><text class="lbl" x="0" y="88">Slot 3</text><rect x="70" y="104" width="810" height="24" rx="3" fill="var(--f-sunk)" opacity="0.55"/><text class="lbl" x="0" y="120">Slot 4</text><line x1="137.5" y1="4" x2="137.5" y2="248" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="137.5" y="262" text-anchor="middle">13:10</text><line x1="272.5" y1="4" x2="272.5" y2="248" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="272.5" y="262" text-anchor="middle">13:20</text><line x1="407.5" y1="4" x2="407.5" y2="248" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="407.5" y="262" text-anchor="middle">13:30</text><line x1="542.5" y1="4" x2="542.5" y2="248" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="542.5" y="262" text-anchor="middle">13:40</text><line x1="677.5" y1="4" x2="677.5" y2="248" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="677.5" y="262" text-anchor="middle">13:50</text><line x1="812.5" y1="4" x2="812.5" y2="248" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="812.5" y="262" text-anchor="middle">14:00</text><g><title>darkmem test #39 succeeded in 8 min</title><rect x="97.0" y="8" width="108.0" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkrouter e2e #88 failed after 11 min</title><rect x="299.5" y="8" width="148.5" height="24" rx="3" fill="color-mix(in srgb, var(--f-bad) 32%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-bad) 70%, var(--f-surface))"/><text class="bar-t" x="305.5" y="24">darkrouter e2e #88</text></g><g><title>darkmem test #42, running for 4 min</title><rect x="826.0" y="8" width="54.0" height="24" rx="3" fill="var(--f-accent)" stroke="var(--f-accent)"/><rect class="f-run-edge" x="877.0" y="8" width="3" height="24" rx="1.5" fill="var(--f-fg)" opacity="0.85"/></g><g><title>ghr ci #116 succeeded in 9 min</title><rect x="137.5" y="40" width="121.5" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><text class="bar-t" x="143.5" y="56">ghr ci #116</text></g><g><title>ghr release #117 succeeded in 7 min</title><rect x="542.5" y="40" width="94.5" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><text class="bar-t" x="548.5" y="56">release #117</text></g><g><title>ghr web #118, running for 48 s</title><rect x="869.2" y="40" width="10.8" height="24" rx="3" fill="var(--f-accent)" stroke="var(--f-accent)"/><rect class="f-run-edge" x="877.0" y="40" width="3" height="24" rx="1.5" fill="var(--f-fg)" opacity="0.85"/></g><g><title>darkmem lint #39 succeeded in 8 min</title><rect x="164.5" y="72" width="108.0" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkmem build #41 succeeded in 5 min</title><rect x="785.5" y="72" width="67.5" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><text class="bar-t" x="791.5" y="88">build #41</text></g><g><title>Warm runner ghr-bbbbbb, idle for 2 min</title><rect x="853.5" y="72.5" width="26.0" height="23" rx="3" fill="none" stroke="var(--f-accent)" stroke-dasharray="3 3" stroke-width="1.2"/></g><g><title>darkrouter unit #88 succeeded in 13 min</title><rect x="340.0" y="104" width="175.5" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><text class="bar-t" x="346.0" y="120">darkrouter unit #88</text></g><text class="lbl" x="0" y="168">Waiting</text><line x1="70" y1="180.5" x2="880" y2="180.5" stroke="var(--f-line)"/><path d="M70 180 V180.0 H83.5 V180.0 H97.0 V180.0 H110.5 V180.0 H124.0 V180.0 H137.5 V180.0 H151.0 V180.0 H164.5 V180.0 H178.0 V180.0 H191.5 V180.0 H205.0 V180.0 H218.5 V180.0 H232.0 V180.0 H245.5 V180.0 H259.0 V180.0 H272.5 V180.0 H286.0 V170.0 H299.5 V170.0 H313.0 V170.0 H326.5 V170.0 H340.0 V170.0 H353.5 V180.0 H367.0 V180.0 H380.5 V180.0 H394.0 V180.0 H407.5 V180.0 H421.0 V180.0 H434.5 V180.0 H448.0 V180.0 H461.5 V180.0 H475.0 V180.0 H488.5 V180.0 H502.0 V180.0 H515.5 V180.0 H529.0 V180.0 H542.5 V180.0 H556.0 V180.0 H569.5 V180.0 H583.0 V180.0 H596.5 V180.0 H610.0 V180.0 H623.5 V180.0 H637.0 V180.0 H650.5 V180.0 H664.0 V180.0 H677.5 V170.0 H691.0 V170.0 H704.5 V170.0 H718.0 V170.0 H731.5 V170.0 H745.0 V170.0 H758.5 V170.0 H772.0 V180.0 H785.5 V180.0 H799.0 V180.0 H812.5 V180.0 H826.0 V180.0 H839.5 V150.0 H853.0 V150.0 H866.5 V150.0 H880.0 V180 Z" fill="color-mix(in srgb, var(--f-warn) 28%, transparent)" stroke="var(--f-warn)" stroke-width="1.1"/><text class="lbl" x="0" y="222">CPU</text><line x1="70" y1="244.5" x2="880" y2="244.5" stroke="var(--f-line)"/><polygon points="70,244 70.0,238.0 137.5,239.0 205.0,235.0 272.5,226.5 340.0,233.0 407.5,236.5 475.0,224.0 542.5,216.5 610.0,229.0 677.5,234.0 745.0,221.5 812.5,214.0 880.0,232.5 880,244" fill="color-mix(in srgb, var(--f-accent) 16%, transparent)"/><polyline points="70.0,238.0 137.5,239.0 205.0,235.0 272.5,226.5 340.0,233.0 407.5,236.5 475.0,224.0 542.5,216.5 610.0,229.0 677.5,234.0 745.0,221.5 812.5,214.0 880.0,232.5" fill="none" stroke="var(--f-accent)" stroke-width="1.5"/><polyline points="70.0,226.0 205.0,225.5 340.0,225.0 475.0,224.5 610.0,225.0 745.0,224.5 880.0,224.5" fill="none" stroke="var(--f-muted)" stroke-width="1.2" stroke-dasharray="4 3"/><line x1="880" y1="2" x2="880" y2="248" stroke="var(--f-fg)" opacity="0.6"/><text class="ax" x="880" y="262" text-anchor="end" style="fill:var(--f-fg)">now</text></svg></div><div class="f-view" data-w="3h" hidden><svg viewBox="0 0 900 268" width="100%" role="img" aria-label="Runner slots, waiting jobs and CPU over the last 3 hours"><rect x="70" y="8" width="810" height="24" rx="3" fill="var(--f-sunk)" opacity="0.55"/><text class="lbl" x="0" y="24">Slot 1</text><rect x="70" y="40" width="810" height="24" rx="3" fill="var(--f-sunk)" opacity="0.55"/><text class="lbl" x="0" y="56">Slot 2</text><rect x="70" y="72" width="810" height="24" rx="3" fill="var(--f-sunk)" opacity="0.55"/><text class="lbl" x="0" y="88">Slot 3</text><rect x="70" y="104" width="810" height="24" rx="3" fill="var(--f-sunk)" opacity="0.55"/><text class="lbl" x="0" y="120">Slot 4</text><line x1="182.5" y1="4" x2="182.5" y2="248" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="182.5" y="262" text-anchor="middle">11:30</text><line x1="317.5" y1="4" x2="317.5" y2="248" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="317.5" y="262" text-anchor="middle">12:00</text><line x1="452.5" y1="4" x2="452.5" y2="248" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="452.5" y="262" text-anchor="middle">12:30</text><line x1="587.5" y1="4" x2="587.5" y2="248" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="587.5" y="262" text-anchor="middle">13:00</text><line x1="722.5" y1="4" x2="722.5" y2="248" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="722.5" y="262" text-anchor="middle">13:30</text><line x1="857.5" y1="4" x2="857.5" y2="248" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="857.5" y="262" text-anchor="middle">14:00</text><g><title>darkrouter e2e #39 succeeded in 5 min</title><rect x="87.5" y="8" width="24.8" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkrouter e2e #34 failed in 9 min</title><rect x="136.4" y="8" width="44.2" height="24" rx="3" fill="color-mix(in srgb, var(--f-bad) 32%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-bad) 70%, var(--f-surface))"/></g><g><title>darkrouter unit #37 succeeded in 6 min</title><rect x="241.1" y="8" width="28.8" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkrouter e2e #103 succeeded in 6 min</title><rect x="297.4" y="8" width="28.0" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkrouter e2e #67 succeeded in 6 min</title><rect x="344.5" y="8" width="27.9" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkrouter e2e #43 succeeded in 9 min</title><rect x="446.8" y="8" width="43.7" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkmem lint #37 succeeded in 9 min</title><rect x="90.1" y="40" width="42.6" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>ghr web #104 succeeded in 9 min</title><rect x="202.1" y="40" width="41.9" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkmem lint #61 failed in 6 min</title><rect x="298.2" y="40" width="29.2" height="24" rx="3" fill="color-mix(in srgb, var(--f-bad) 32%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-bad) 70%, var(--f-surface))"/></g><g><title>ghr release #87 succeeded in 8 min</title><rect x="374.7" y="40" width="40.3" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>ghr ci #73 succeeded in 5 min</title><rect x="538.7" y="40" width="23.3" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkrouter unit #73 succeeded in 10 min</title><rect x="72.1" y="72" width="48.1" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>ghr ci #41 succeeded in 9 min</title><rect x="200.6" y="72" width="44.1" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkmem lint #119 succeeded in 10 min</title><rect x="311.5" y="72" width="47.9" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>ghr web #79 succeeded in 10 min</title><rect x="437.9" y="72" width="48.7" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>ghr ci #57 succeeded in 10 min</title><rect x="89.2" y="104" width="45.5" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>ghr web #40 succeeded in 6 min</title><rect x="162.7" y="104" width="29.1" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkmem build #100 succeeded in 6 min</title><rect x="250.6" y="104" width="30.5" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>ghr ci #49 failed in 7 min</title><rect x="341.3" y="104" width="34.1" height="24" rx="3" fill="color-mix(in srgb, var(--f-bad) 32%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-bad) 70%, var(--f-surface))"/></g><g><title>darkmem build #105 succeeded in 10 min</title><rect x="406.0" y="104" width="47.6" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkrouter unit #108 succeeded in 5 min</title><rect x="498.8" y="104" width="24.6" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkmem test #39 succeeded in 8 min</title><rect x="619.0" y="8" width="36.0" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkrouter e2e #88 failed after 11 min</title><rect x="686.5" y="8" width="49.5" height="24" rx="3" fill="color-mix(in srgb, var(--f-bad) 32%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-bad) 70%, var(--f-surface))"/></g><g><title>darkmem test #42, running for 4 min</title><rect x="862.0" y="8" width="18.0" height="24" rx="3" fill="var(--f-accent)" stroke="var(--f-accent)"/><rect class="f-run-edge" x="877.0" y="8" width="3" height="24" rx="1.5" fill="var(--f-fg)" opacity="0.85"/></g><g><title>ghr ci #116 succeeded in 9 min</title><rect x="632.5" y="40" width="40.5" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>ghr release #117 succeeded in 7 min</title><rect x="767.5" y="40" width="31.5" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>ghr web #118, running for 48 s</title><rect x="876.4" y="40" width="3.6" height="24" rx="3" fill="var(--f-accent)" stroke="var(--f-accent)"/><rect class="f-run-edge" x="877.0" y="40" width="3" height="24" rx="1.5" fill="var(--f-fg)" opacity="0.85"/></g><g><title>darkmem lint #39 succeeded in 8 min</title><rect x="641.5" y="72" width="36.0" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>darkmem build #41 succeeded in 5 min</title><rect x="848.5" y="72" width="22.5" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Warm runner ghr-bbbbbb, idle for 2 min</title><rect x="871.5" y="72.5" width="8.0" height="23" rx="3" fill="none" stroke="var(--f-accent)" stroke-dasharray="3 3" stroke-width="1.2"/></g><g><title>darkrouter unit #88 succeeded in 13 min</title><rect x="700.0" y="104" width="58.5" height="24" rx="3" fill="color-mix(in srgb, var(--f-ok) 30%, var(--f-surface))" stroke="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><text class="lbl" x="0" y="168">Waiting</text><line x1="70" y1="180.5" x2="880" y2="180.5" stroke="var(--f-line)"/><path d="M70 180 V160.0 H83.5 V170.0 H97.0 V170.0 H110.5 V160.0 H124.0 V160.0 H137.5 V160.0 H151.0 V180.0 H164.5 V170.0 H178.0 V160.0 H191.5 V170.0 H205.0 V170.0 H218.5 V170.0 H232.0 V170.0 H245.5 V170.0 H259.0 V180.0 H272.5 V170.0 H286.0 V160.0 H299.5 V170.0 H313.0 V180.0 H326.5 V180.0 H340.0 V180.0 H353.5 V180.0 H367.0 V170.0 H380.5 V180.0 H394.0 V180.0 H407.5 V180.0 H421.0 V170.0 H434.5 V180.0 H448.0 V180.0 H461.5 V180.0 H475.0 V170.0 H488.5 V180.0 H502.0 V170.0 H515.5 V180.0 H529.0 V180.0 H542.5 V170.0 H556.0 V180.0 H569.5 V180.0 H583.0 V180.0 H596.5 V170.0 H610.0 V180.0 H623.5 V180.0 H637.0 V170.0 H650.5 V180.0 H664.0 V180.0 H677.5 V180.0 H691.0 V170.0 H704.5 V170.0 H718.0 V180.0 H731.5 V180.0 H745.0 V180.0 H758.5 V180.0 H772.0 V180.0 H785.5 V180.0 H799.0 V180.0 H812.5 V180.0 H826.0 V170.0 H839.5 V180.0 H853.0 V180.0 H866.5 V150.0 H880.0 V180 Z" fill="color-mix(in srgb, var(--f-warn) 28%, transparent)" stroke="var(--f-warn)" stroke-width="1.1"/><text class="lbl" x="0" y="222">CPU</text><line x1="70" y1="244.5" x2="880" y2="244.5" stroke="var(--f-line)"/><polygon points="70,244 70.0,228.0 92.5,235.5 115.0,220.0 137.5,232.0 160.0,229.0 182.5,221.0 205.0,228.5 227.5,225.0 250.0,236.5 272.5,236.5 295.0,224.5 317.5,225.5 340.0,225.0 362.5,225.0 385.0,230.5 407.5,237.5 430.0,235.5 452.5,237.0 475.0,229.5 497.5,232.0 520.0,225.0 542.5,235.0 565.0,223.5 587.5,239.5 610.0,238.0 632.5,239.0 655.0,235.0 677.5,226.5 700.0,233.0 722.5,236.5 745.0,224.0 767.5,216.5 790.0,229.0 812.5,234.0 835.0,221.5 857.5,214.0 880.0,232.5 880,244" fill="color-mix(in srgb, var(--f-accent) 16%, transparent)"/><polyline points="70.0,228.0 92.5,235.5 115.0,220.0 137.5,232.0 160.0,229.0 182.5,221.0 205.0,228.5 227.5,225.0 250.0,236.5 272.5,236.5 295.0,224.5 317.5,225.5 340.0,225.0 362.5,225.0 385.0,230.5 407.5,237.5 430.0,235.5 452.5,237.0 475.0,229.5 497.5,232.0 520.0,225.0 542.5,235.0 565.0,223.5 587.5,239.5 610.0,238.0 632.5,239.0 655.0,235.0 677.5,226.5 700.0,233.0 722.5,236.5 745.0,224.0 767.5,216.5 790.0,229.0 812.5,234.0 835.0,221.5 857.5,214.0 880.0,232.5" fill="none" stroke="var(--f-accent)" stroke-width="1.5"/><polyline points="70.0,226.0 115.0,223.5 160.0,225.0 205.0,226.5 250.0,223.5 295.0,227.5 340.0,223.5 385.0,225.5 430.0,227.0 475.0,225.5 520.0,223.5 565.0,225.0 610.0,226.0 655.0,225.5 700.0,225.0 745.0,224.5 790.0,225.0 835.0,224.5 880.0,224.5" fill="none" stroke="var(--f-muted)" stroke-width="1.2" stroke-dasharray="4 3"/><line x1="880" y1="2" x2="880" y2="248" stroke="var(--f-fg)" opacity="0.6"/><text class="ax" x="880" y="262" text-anchor="end" style="fill:var(--f-fg)">now</text></svg></div><div class="f-view" data-w="24h" hidden><svg viewBox="0 0 900 268" width="100%" role="img" aria-label="Runner use per hour over the last 24 hours"><text class="lbl" x="0" y="20">Busy slots</text><line x1="70" y1="8.5" x2="880" y2="8.5" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="66" y="12.0" text-anchor="end">100%</text><line x1="70" y1="54.5" x2="880" y2="54.5" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="66" y="58.0" text-anchor="end">50%</text><line x1="70" y1="100.5" x2="880" y2="100.5" stroke="var(--f-line)"/><rect x="71.5" y="16.3" width="30.8" height="83.7" rx="1.5" fill="var(--f-accent)" opacity="0.91"><title>14:00: 91% of slot time busy</title></rect><rect x="105.2" y="31.9" width="30.8" height="68.1" rx="1.5" fill="var(--f-accent)" opacity="0.85"><title>15:00: 74% of slot time busy</title></rect><rect x="139.0" y="41.1" width="30.8" height="58.9" rx="1.5" fill="var(--f-accent)" opacity="0.81"><title>16:00: 64% of slot time busy</title></rect><rect x="172.8" y="25.5" width="30.8" height="74.5" rx="1.5" fill="var(--f-accent)" opacity="0.87"><title>17:00: 81% of slot time busy</title></rect><rect x="206.5" y="28.2" width="30.8" height="71.8" rx="1.5" fill="var(--f-accent)" opacity="0.86"><title>18:00: 78% of slot time busy</title></rect><rect x="240.2" y="72.4" width="30.8" height="27.6" rx="1.5" fill="var(--f-accent)" opacity="0.67"><title>19:00: 30% of slot time busy</title></rect><rect x="274.0" y="68.7" width="30.8" height="31.3" rx="1.5" fill="var(--f-accent)" opacity="0.69"><title>20:00: 34% of slot time busy</title></rect><rect x="307.8" y="67.8" width="30.8" height="32.2" rx="1.5" fill="var(--f-accent)" opacity="0.69"><title>21:00: 35% of slot time busy</title></rect><rect x="341.5" y="73.3" width="30.8" height="26.7" rx="1.5" fill="var(--f-accent)" opacity="0.67"><title>22:00: 29% of slot time busy</title></rect><rect x="375.2" y="78.8" width="30.8" height="21.2" rx="1.5" fill="var(--f-accent)" opacity="0.64"><title>23:00: 23% of slot time busy</title></rect><rect x="409.0" y="98.2" width="30.8" height="1.8" rx="1.5" fill="var(--f-accent)" opacity="0.56"><title>00:00: 2% of slot time busy</title></rect><rect x="442.8" y="98.2" width="30.8" height="1.8" rx="1.5" fill="var(--f-accent)" opacity="0.56"><title>01:00: 2% of slot time busy</title></rect><rect x="476.5" y="96.3" width="30.8" height="3.7" rx="1.5" fill="var(--f-accent)" opacity="0.57"><title>02:00: 4% of slot time busy</title></rect><rect x="510.2" y="97.2" width="30.8" height="2.8" rx="1.5" fill="var(--f-accent)" opacity="0.56"><title>03:00: 3% of slot time busy</title></rect><rect x="544.0" y="97.2" width="30.8" height="2.8" rx="1.5" fill="var(--f-accent)" opacity="0.56"><title>04:00: 3% of slot time busy</title></rect><rect x="577.8" y="96.3" width="30.8" height="3.7" rx="1.5" fill="var(--f-accent)" opacity="0.57"><title>05:00: 4% of slot time busy</title></rect><rect x="611.5" y="97.2" width="30.8" height="2.8" rx="1.5" fill="var(--f-accent)" opacity="0.56"><title>06:00: 3% of slot time busy</title></rect><rect x="645.2" y="73.3" width="30.8" height="26.7" rx="1.5" fill="var(--f-accent)" opacity="0.67"><title>07:00: 29% of slot time busy</title></rect><rect x="679.0" y="78.8" width="30.8" height="21.2" rx="1.5" fill="var(--f-accent)" opacity="0.64"><title>08:00: 23% of slot time busy</title></rect><rect x="712.8" y="14.4" width="30.8" height="85.6" rx="1.5" fill="var(--f-accent)" opacity="0.92"><title>09:00: 93% of slot time busy</title></rect><rect x="746.5" y="46.6" width="30.8" height="53.4" rx="1.5" fill="var(--f-accent)" opacity="0.78"><title>10:00: 58% of slot time busy</title></rect><rect x="780.2" y="16.3" width="30.8" height="83.7" rx="1.5" fill="var(--f-accent)" opacity="0.91"><title>11:00: 91% of slot time busy</title></rect><rect x="814.0" y="30.1" width="30.8" height="69.9" rx="1.5" fill="var(--f-accent)" opacity="0.85"><title>12:00: 76% of slot time busy</title></rect><rect x="847.8" y="18.1" width="30.8" height="81.9" rx="1.5" fill="var(--f-accent)" opacity="0.91"><title>13:00: 89% of slot time busy</title></rect><text class="lbl" x="0" y="132">Runs</text><line x1="70" y1="160.5" x2="880" y2="160.5" stroke="var(--f-line)"/><g><title>14:00: 10 succeeded, 0 failed</title><rect x="71.5" y="126.2" width="30.8" height="33.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>15:00: 10 succeeded, 0 failed</title><rect x="105.2" y="126.2" width="30.8" height="33.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>16:00: 6 succeeded, 0 failed</title><rect x="139.0" y="139.7" width="30.8" height="20.3" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>17:00: 13 succeeded, 0 failed</title><rect x="172.8" y="116.0" width="30.8" height="44.0" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>18:00: 8 succeeded, 1 failed</title><rect x="206.5" y="132.9" width="30.8" height="27.1" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="206.5" y="129.5" width="30.8" height="3.4" fill="var(--f-bad)"/></g><g><title>19:00: 5 succeeded, 0 failed</title><rect x="240.2" y="143.1" width="30.8" height="16.9" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>20:00: 3 succeeded, 1 failed</title><rect x="274.0" y="149.8" width="30.8" height="10.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="274.0" y="146.5" width="30.8" height="3.4" fill="var(--f-bad)"/></g><g><title>21:00: 4 succeeded, 0 failed</title><rect x="307.8" y="146.5" width="30.8" height="13.5" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>22:00: 2 succeeded, 1 failed</title><rect x="341.5" y="153.2" width="30.8" height="6.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="341.5" y="149.8" width="30.8" height="3.4" fill="var(--f-bad)"/></g><g><title>23:00: 2 succeeded, 0 failed</title><rect x="375.2" y="153.2" width="30.8" height="6.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>00:00: 0 succeeded, 0 failed</title></g><g><title>01:00: 0 succeeded, 0 failed</title></g><g><title>02:00: 1 succeeded, 0 failed</title><rect x="476.5" y="156.6" width="30.8" height="3.4" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>03:00: 0 succeeded, 0 failed</title></g><g><title>04:00: 0 succeeded, 0 failed</title></g><g><title>05:00: 1 succeeded, 0 failed</title><rect x="577.8" y="156.6" width="30.8" height="3.4" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>06:00: 0 succeeded, 0 failed</title></g><g><title>07:00: 1 succeeded, 1 failed</title><rect x="645.2" y="156.6" width="30.8" height="3.4" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="645.2" y="153.2" width="30.8" height="3.4" fill="var(--f-bad)"/></g><g><title>08:00: 3 succeeded, 0 failed</title><rect x="679.0" y="149.8" width="30.8" height="10.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>09:00: 9 succeeded, 0 failed</title><rect x="712.8" y="129.5" width="30.8" height="30.5" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>10:00: 6 succeeded, 0 failed</title><rect x="746.5" y="139.7" width="30.8" height="20.3" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>11:00: 8 succeeded, 1 failed</title><rect x="780.2" y="132.9" width="30.8" height="27.1" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="780.2" y="129.5" width="30.8" height="3.4" fill="var(--f-bad)"/></g><g><title>12:00: 7 succeeded, 2 failed</title><rect x="814.0" y="136.3" width="30.8" height="23.7" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="814.0" y="129.5" width="30.8" height="6.8" fill="var(--f-bad)"/></g><g><title>13:00: 7 succeeded, 0 failed</title><rect x="847.8" y="136.3" width="30.8" height="23.7" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><text class="lbl" x="0" y="190">Waiting</text><line x1="70" y1="196.5" x2="880" y2="196.5" stroke="var(--f-line)"/><path d="M70 196 V190.0 H103.8 V196.0 H137.5 V172.0 H171.2 V190.0 H205.0 V172.0 H238.8 V196.0 H272.5 V190.0 H306.2 V190.0 H340.0 V190.0 H373.8 V190.0 H407.5 V196.0 H441.2 V196.0 H475.0 V196.0 H508.8 V196.0 H542.5 V196.0 H576.2 V196.0 H610.0 V196.0 H643.8 V184.0 H677.5 V196.0 H711.2 V190.0 H745.0 V196.0 H778.8 V190.0 H812.5 V190.0 H846.2 V178.0 H880.0 V196 Z" fill="color-mix(in srgb, var(--f-warn) 28%, transparent)" stroke="var(--f-warn)" stroke-width="1.1"/><text class="lbl" x="0" y="230">CPU</text><line x1="70" y1="244.5" x2="880" y2="244.5" stroke="var(--f-line)"/><polygon points="86.9,244 86.9,225.6 120.6,228.2 154.4,230.7 188.1,228.5 221.9,223.8 255.6,234.6 289.4,233.2 323.1,235.4 356.9,234.6 390.6,235.4 424.4,240.4 458.1,240.0 491.9,239.7 525.6,240.0 559.4,240.0 593.1,239.7 626.9,240.0 660.6,235.4 694.4,235.0 728.1,223.5 761.9,231.4 795.6,223.5 829.4,228.9 863.1,221.0 863.1,244" fill="color-mix(in srgb, var(--f-accent) 16%, transparent)"/><polyline points="86.9,225.6 120.6,228.2 154.4,230.7 188.1,228.5 221.9,223.8 255.6,234.6 289.4,233.2 323.1,235.4 356.9,234.6 390.6,235.4 424.4,240.4 458.1,240.0 491.9,239.7 525.6,240.0 559.4,240.0 593.1,239.7 626.9,240.0 660.6,235.4 694.4,235.0 728.1,223.5 761.9,231.4 795.6,223.5 829.4,228.9 863.1,221.0" fill="none" stroke="var(--f-accent)" stroke-width="1.5"/><line x1="103.8" y1="246" x2="103.8" y2="250" stroke="var(--f-muted)"/><text class="ax" x="103.8" y="262" text-anchor="middle">15:00</text><line x1="205.0" y1="246" x2="205.0" y2="250" stroke="var(--f-muted)"/><text class="ax" x="205.0" y="262" text-anchor="middle">18:00</text><line x1="306.2" y1="246" x2="306.2" y2="250" stroke="var(--f-muted)"/><text class="ax" x="306.2" y="262" text-anchor="middle">21:00</text><line x1="407.5" y1="246" x2="407.5" y2="250" stroke="var(--f-muted)"/><text class="ax" x="407.5" y="262" text-anchor="middle">00:00</text><line x1="508.8" y1="246" x2="508.8" y2="250" stroke="var(--f-muted)"/><text class="ax" x="508.8" y="262" text-anchor="middle">03:00</text><line x1="610.0" y1="246" x2="610.0" y2="250" stroke="var(--f-muted)"/><text class="ax" x="610.0" y="262" text-anchor="middle">06:00</text><line x1="711.2" y1="246" x2="711.2" y2="250" stroke="var(--f-muted)"/><text class="ax" x="711.2" y="262" text-anchor="middle">09:00</text><line x1="812.5" y1="246" x2="812.5" y2="250" stroke="var(--f-muted)"/><text class="ax" x="812.5" y="262" text-anchor="middle">12:00</text></svg></div><div class="f-view" data-w="7d" hidden><svg viewBox="0 0 900 268" width="100%" role="img" aria-label="Runner use per 6 hours over the last 7 days"><text class="lbl" x="0" y="20">Busy slots</text><line x1="70" y1="8.5" x2="880" y2="8.5" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="66" y="12.0" text-anchor="end">100%</text><line x1="70" y1="54.5" x2="880" y2="54.5" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="66" y="58.0" text-anchor="end">50%</text><line x1="70" y1="100.5" x2="880" y2="100.5" stroke="var(--f-line)"/><rect x="71.5" y="98.2" width="25.9" height="1.8" rx="1.5" fill="var(--f-accent)" opacity="0.56"><title>Sun 27 00-06: 2% of slot time busy</title></rect><rect x="100.4" y="82.5" width="25.9" height="17.5" rx="1.5" fill="var(--f-accent)" opacity="0.63"><title>Sun 27 06-12: 19% of slot time busy</title></rect><rect x="129.4" y="74.2" width="25.9" height="25.8" rx="1.5" fill="var(--f-accent)" opacity="0.66"><title>Sun 27 12-18: 28% of slot time busy</title></rect><rect x="158.3" y="89.0" width="25.9" height="11.0" rx="1.5" fill="var(--f-accent)" opacity="0.60"><title>Sun 27 18-24: 12% of slot time busy</title></rect><rect x="187.2" y="93.6" width="25.9" height="6.4" rx="1.5" fill="var(--f-accent)" opacity="0.58"><title>Mon 28 00-06: 7% of slot time busy</title></rect><rect x="216.1" y="44.8" width="25.9" height="55.2" rx="1.5" fill="var(--f-accent)" opacity="0.79"><title>Mon 28 06-12: 60% of slot time busy</title></rect><rect x="245.1" y="49.4" width="25.9" height="50.6" rx="1.5" fill="var(--f-accent)" opacity="0.77"><title>Mon 28 12-18: 55% of slot time busy</title></rect><rect x="274.0" y="72.4" width="25.9" height="27.6" rx="1.5" fill="var(--f-accent)" opacity="0.67"><title>Mon 28 18-24: 30% of slot time busy</title></rect><rect x="302.9" y="94.5" width="25.9" height="5.5" rx="1.5" fill="var(--f-accent)" opacity="0.57"><title>Tue 29 00-06: 6% of slot time busy</title></rect><rect x="331.9" y="48.5" width="25.9" height="51.5" rx="1.5" fill="var(--f-accent)" opacity="0.77"><title>Tue 29 06-12: 56% of slot time busy</title></rect><rect x="360.8" y="28.2" width="25.9" height="71.8" rx="1.5" fill="var(--f-accent)" opacity="0.86"><title>Tue 29 12-18: 78% of slot time busy</title></rect><rect x="389.7" y="69.6" width="25.9" height="30.4" rx="1.5" fill="var(--f-accent)" opacity="0.68"><title>Tue 29 18-24: 33% of slot time busy</title></rect><rect x="418.6" y="94.5" width="25.9" height="5.5" rx="1.5" fill="var(--f-accent)" opacity="0.57"><title>Wed 30 00-06: 6% of slot time busy</title></rect><rect x="447.6" y="30.1" width="25.9" height="69.9" rx="1.5" fill="var(--f-accent)" opacity="0.85"><title>Wed 30 06-12: 76% of slot time busy</title></rect><rect x="476.5" y="45.7" width="25.9" height="54.3" rx="1.5" fill="var(--f-accent)" opacity="0.79"><title>Wed 30 12-18: 59% of slot time busy</title></rect><rect x="505.4" y="68.7" width="25.9" height="31.3" rx="1.5" fill="var(--f-accent)" opacity="0.69"><title>Wed 30 18-24: 34% of slot time busy</title></rect><rect x="534.4" y="93.6" width="25.9" height="6.4" rx="1.5" fill="var(--f-accent)" opacity="0.58"><title>Thu 1 00-06: 7% of slot time busy</title></rect><rect x="563.3" y="45.7" width="25.9" height="54.3" rx="1.5" fill="var(--f-accent)" opacity="0.79"><title>Thu 1 06-12: 59% of slot time busy</title></rect><rect x="592.2" y="29.2" width="25.9" height="70.8" rx="1.5" fill="var(--f-accent)" opacity="0.86"><title>Thu 1 12-18: 77% of slot time busy</title></rect><rect x="621.1" y="69.6" width="25.9" height="30.4" rx="1.5" fill="var(--f-accent)" opacity="0.68"><title>Thu 1 18-24: 33% of slot time busy</title></rect><rect x="650.1" y="93.6" width="25.9" height="6.4" rx="1.5" fill="var(--f-accent)" opacity="0.58"><title>Fri 2 00-06: 7% of slot time busy</title></rect><rect x="679.0" y="24.6" width="25.9" height="75.4" rx="1.5" fill="var(--f-accent)" opacity="0.88"><title>Fri 2 06-12: 82% of slot time busy</title></rect><rect x="707.9" y="31.9" width="25.9" height="68.1" rx="1.5" fill="var(--f-accent)" opacity="0.85"><title>Fri 2 12-18: 74% of slot time busy</title></rect><rect x="736.9" y="74.2" width="25.9" height="25.8" rx="1.5" fill="var(--f-accent)" opacity="0.66"><title>Fri 2 18-24: 28% of slot time busy</title></rect><rect x="765.8" y="98.2" width="25.9" height="1.8" rx="1.5" fill="var(--f-accent)" opacity="0.56"><title>Sat 3 00-06: 2% of slot time busy</title></rect><rect x="794.7" y="76.1" width="25.9" height="23.9" rx="1.5" fill="var(--f-accent)" opacity="0.65"><title>Sat 3 06-12: 26% of slot time busy</title></rect><rect x="823.6" y="79.8" width="25.9" height="20.2" rx="1.5" fill="var(--f-accent)" opacity="0.64"><title>Sat 3 12-18: 22% of slot time busy</title></rect><rect x="852.6" y="89.0" width="25.9" height="11.0" rx="1.5" fill="var(--f-accent)" opacity="0.60"><title>Sat 3 18-24: 12% of slot time busy</title></rect><text class="lbl" x="0" y="132">Runs</text><line x1="70" y1="160.5" x2="880" y2="160.5" stroke="var(--f-line)"/><g><title>Sun 27 00-06: 0 succeeded, 0 failed</title></g><g><title>Sun 27 06-12: 2 succeeded, 0 failed</title><rect x="100.4" y="153.2" width="25.9" height="6.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Sun 27 12-18: 2 succeeded, 1 failed</title><rect x="129.4" y="153.2" width="25.9" height="6.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="129.4" y="149.8" width="25.9" height="3.4" fill="var(--f-bad)"/></g><g><title>Sun 27 18-24: 1 succeeded, 0 failed</title><rect x="158.3" y="156.6" width="25.9" height="3.4" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Mon 28 00-06: 1 succeeded, 0 failed</title><rect x="187.2" y="156.6" width="25.9" height="3.4" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Mon 28 06-12: 6 succeeded, 0 failed</title><rect x="216.1" y="139.7" width="25.9" height="20.3" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Mon 28 12-18: 6 succeeded, 1 failed</title><rect x="245.1" y="139.7" width="25.9" height="20.3" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="245.1" y="136.3" width="25.9" height="3.4" fill="var(--f-bad)"/></g><g><title>Mon 28 18-24: 3 succeeded, 0 failed</title><rect x="274.0" y="149.8" width="25.9" height="10.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Tue 29 00-06: 1 succeeded, 0 failed</title><rect x="302.9" y="156.6" width="25.9" height="3.4" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Tue 29 06-12: 4 succeeded, 2 failed</title><rect x="331.9" y="146.5" width="25.9" height="13.5" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="331.9" y="139.7" width="25.9" height="6.8" fill="var(--f-bad)"/></g><g><title>Tue 29 12-18: 8 succeeded, 1 failed</title><rect x="360.8" y="132.9" width="25.9" height="27.1" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="360.8" y="129.5" width="25.9" height="3.4" fill="var(--f-bad)"/></g><g><title>Tue 29 18-24: 3 succeeded, 0 failed</title><rect x="389.7" y="149.8" width="25.9" height="10.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Wed 30 00-06: 1 succeeded, 0 failed</title><rect x="418.6" y="156.6" width="25.9" height="3.4" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Wed 30 06-12: 6 succeeded, 3 failed</title><rect x="447.6" y="139.7" width="25.9" height="20.3" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="447.6" y="129.5" width="25.9" height="10.2" fill="var(--f-bad)"/></g><g><title>Wed 30 12-18: 8 succeeded, 1 failed</title><rect x="476.5" y="132.9" width="25.9" height="27.1" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="476.5" y="129.5" width="25.9" height="3.4" fill="var(--f-bad)"/></g><g><title>Wed 30 18-24: 5 succeeded, 0 failed</title><rect x="505.4" y="143.1" width="25.9" height="16.9" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Thu 1 00-06: 1 succeeded, 0 failed</title><rect x="534.4" y="156.6" width="25.9" height="3.4" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Thu 1 06-12: 5 succeeded, 0 failed</title><rect x="563.3" y="143.1" width="25.9" height="16.9" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Thu 1 12-18: 5 succeeded, 1 failed</title><rect x="592.2" y="143.1" width="25.9" height="16.9" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="592.2" y="139.7" width="25.9" height="3.4" fill="var(--f-bad)"/></g><g><title>Thu 1 18-24: 4 succeeded, 1 failed</title><rect x="621.1" y="146.5" width="25.9" height="13.5" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="621.1" y="143.1" width="25.9" height="3.4" fill="var(--f-bad)"/></g><g><title>Fri 2 00-06: 1 succeeded, 0 failed</title><rect x="650.1" y="156.6" width="25.9" height="3.4" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Fri 2 06-12: 10 succeeded, 3 failed</title><rect x="679.0" y="126.2" width="25.9" height="33.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="679.0" y="116.0" width="25.9" height="10.2" fill="var(--f-bad)"/></g><g><title>Fri 2 12-18: 7 succeeded, 1 failed</title><rect x="707.9" y="136.3" width="25.9" height="23.7" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="707.9" y="132.9" width="25.9" height="3.4" fill="var(--f-bad)"/></g><g><title>Fri 2 18-24: 2 succeeded, 0 failed</title><rect x="736.9" y="153.2" width="25.9" height="6.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Sat 3 00-06: 0 succeeded, 0 failed</title></g><g><title>Sat 3 06-12: 3 succeeded, 1 failed</title><rect x="794.7" y="149.8" width="25.9" height="10.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="794.7" y="146.5" width="25.9" height="3.4" fill="var(--f-bad)"/></g><g><title>Sat 3 12-18: 3 succeeded, 0 failed</title><rect x="823.6" y="149.8" width="25.9" height="10.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Sat 3 18-24: 2 succeeded, 0 failed</title><rect x="852.6" y="153.2" width="25.9" height="6.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><text class="lbl" x="0" y="190">Waiting</text><line x1="70" y1="196.5" x2="880" y2="196.5" stroke="var(--f-line)"/><path d="M70 196 V196.0 H98.9 V196.0 H127.9 V196.0 H156.8 V196.0 H185.7 V196.0 H214.6 V196.0 H243.6 V178.0 H272.5 V196.0 H301.4 V196.0 H330.4 V196.0 H359.3 V190.0 H388.2 V184.0 H417.1 V196.0 H446.1 V172.0 H475.0 V178.0 H503.9 V196.0 H532.9 V196.0 H561.8 V172.0 H590.7 V178.0 H619.6 V196.0 H648.6 V196.0 H677.5 V190.0 H706.4 V196.0 H735.4 V196.0 H764.3 V196.0 H793.2 V196.0 H822.1 V196.0 H851.1 V190.0 H880.0 V196 Z" fill="color-mix(in srgb, var(--f-warn) 28%, transparent)" stroke="var(--f-warn)" stroke-width="1.1"/><text class="lbl" x="0" y="230">CPU</text><line x1="70" y1="244.5" x2="880" y2="244.5" stroke="var(--f-line)"/><polygon points="84.5,244 84.5,240.4 113.4,236.8 142.3,234.3 171.2,238.6 200.2,239.0 229.1,226.4 258.0,231.4 287.0,233.2 315.9,239.7 344.8,231.8 373.8,223.1 402.7,232.5 431.6,239.0 460.5,226.7 489.5,231.4 518.4,232.8 547.3,239.0 576.2,230.3 605.2,227.1 634.1,234.3 663.0,239.3 692.0,228.9 720.9,222.4 749.8,235.4 778.7,240.0 807.7,236.1 836.6,235.4 865.5,238.6 865.5,244" fill="color-mix(in srgb, var(--f-accent) 16%, transparent)"/><polyline points="84.5,240.4 113.4,236.8 142.3,234.3 171.2,238.6 200.2,239.0 229.1,226.4 258.0,231.4 287.0,233.2 315.9,239.7 344.8,231.8 373.8,223.1 402.7,232.5 431.6,239.0 460.5,226.7 489.5,231.4 518.4,232.8 547.3,239.0 576.2,230.3 605.2,227.1 634.1,234.3 663.0,239.3 692.0,228.9 720.9,222.4 749.8,235.4 778.7,240.0 807.7,236.1 836.6,235.4 865.5,238.6" fill="none" stroke="var(--f-accent)" stroke-width="1.5"/><line x1="70.0" y1="246" x2="70.0" y2="250" stroke="var(--f-muted)"/><text class="ax" x="70.0" y="262" text-anchor="middle">Sun 27</text><line x1="185.7" y1="246" x2="185.7" y2="250" stroke="var(--f-muted)"/><text class="ax" x="185.7" y="262" text-anchor="middle">Mon 28</text><line x1="301.4" y1="246" x2="301.4" y2="250" stroke="var(--f-muted)"/><text class="ax" x="301.4" y="262" text-anchor="middle">Tue 29</text><line x1="417.1" y1="246" x2="417.1" y2="250" stroke="var(--f-muted)"/><text class="ax" x="417.1" y="262" text-anchor="middle">Wed 30</text><line x1="532.9" y1="246" x2="532.9" y2="250" stroke="var(--f-muted)"/><text class="ax" x="532.9" y="262" text-anchor="middle">Thu 1</text><line x1="648.6" y1="246" x2="648.6" y2="250" stroke="var(--f-muted)"/><text class="ax" x="648.6" y="262" text-anchor="middle">Fri 2</text><line x1="764.3" y1="246" x2="764.3" y2="250" stroke="var(--f-muted)"/><text class="ax" x="764.3" y="262" text-anchor="middle">Sat 3</text></svg></div><div class="f-view" data-w="30d" hidden><svg viewBox="0 0 900 268" width="100%" role="img" aria-label="Runner use per day over the last 30 days"><text class="lbl" x="0" y="20">Busy slots</text><line x1="70" y1="8.5" x2="880" y2="8.5" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="66" y="12.0" text-anchor="end">100%</text><line x1="70" y1="54.5" x2="880" y2="54.5" stroke="var(--f-line)" stroke-dasharray="2 4"/><text class="ax" x="66" y="58.0" text-anchor="end">50%</text><line x1="70" y1="100.5" x2="880" y2="100.5" stroke="var(--f-line)"/><rect x="71.5" y="15.4" width="24.0" height="84.6" rx="1.5" fill="var(--f-accent)" opacity="0.92"><title>Sep 4: 92% of slot time busy</title></rect><rect x="98.5" y="79.8" width="24.0" height="20.2" rx="1.5" fill="var(--f-accent)" opacity="0.64"><title>Sep 5: 22% of slot time busy</title></rect><rect x="125.5" y="81.6" width="24.0" height="18.4" rx="1.5" fill="var(--f-accent)" opacity="0.63"><title>Sep 6: 20% of slot time busy</title></rect><rect x="152.5" y="13.5" width="24.0" height="86.5" rx="1.5" fill="var(--f-accent)" opacity="0.93"><title>Sep 7: 94% of slot time busy</title></rect><rect x="179.5" y="42.0" width="24.0" height="58.0" rx="1.5" fill="var(--f-accent)" opacity="0.80"><title>Sep 8: 63% of slot time busy</title></rect><rect x="206.5" y="17.2" width="24.0" height="82.8" rx="1.5" fill="var(--f-accent)" opacity="0.91"><title>Sep 9: 90% of slot time busy</title></rect><rect x="233.5" y="35.6" width="24.0" height="64.4" rx="1.5" fill="var(--f-accent)" opacity="0.83"><title>Sep 10: 70% of slot time busy</title></rect><rect x="260.5" y="20.9" width="24.0" height="79.1" rx="1.5" fill="var(--f-accent)" opacity="0.89"><title>Sep 11: 86% of slot time busy</title></rect><rect x="287.5" y="73.3" width="24.0" height="26.7" rx="1.5" fill="var(--f-accent)" opacity="0.67"><title>Sep 12: 29% of slot time busy</title></rect><rect x="314.5" y="79.8" width="24.0" height="20.2" rx="1.5" fill="var(--f-accent)" opacity="0.64"><title>Sep 13: 22% of slot time busy</title></rect><rect x="341.5" y="26.4" width="24.0" height="73.6" rx="1.5" fill="var(--f-accent)" opacity="0.87"><title>Sep 14: 80% of slot time busy</title></rect><rect x="368.5" y="48.5" width="24.0" height="51.5" rx="1.5" fill="var(--f-accent)" opacity="0.77"><title>Sep 15: 56% of slot time busy</title></rect><rect x="395.5" y="42.0" width="24.0" height="58.0" rx="1.5" fill="var(--f-accent)" opacity="0.80"><title>Sep 16: 63% of slot time busy</title></rect><rect x="422.5" y="28.2" width="24.0" height="71.8" rx="1.5" fill="var(--f-accent)" opacity="0.86"><title>Sep 17: 78% of slot time busy</title></rect><rect x="449.5" y="15.4" width="24.0" height="84.6" rx="1.5" fill="var(--f-accent)" opacity="0.92"><title>Sep 18: 92% of slot time busy</title></rect><rect x="476.5" y="78.8" width="24.0" height="21.2" rx="1.5" fill="var(--f-accent)" opacity="0.64"><title>Sep 19: 23% of slot time busy</title></rect><rect x="503.5" y="80.7" width="24.0" height="19.3" rx="1.5" fill="var(--f-accent)" opacity="0.63"><title>Sep 20: 21% of slot time busy</title></rect><rect x="530.5" y="26.4" width="24.0" height="73.6" rx="1.5" fill="var(--f-accent)" opacity="0.87"><title>Sep 21: 80% of slot time busy</title></rect><rect x="557.5" y="22.7" width="24.0" height="77.3" rx="1.5" fill="var(--f-accent)" opacity="0.89"><title>Sep 22: 84% of slot time busy</title></rect><rect x="584.5" y="16.3" width="24.0" height="83.7" rx="1.5" fill="var(--f-accent)" opacity="0.91"><title>Sep 23: 91% of slot time busy</title></rect><rect x="611.5" y="41.1" width="24.0" height="58.9" rx="1.5" fill="var(--f-accent)" opacity="0.81"><title>Sep 24: 64% of slot time busy</title></rect><rect x="638.5" y="46.6" width="24.0" height="53.4" rx="1.5" fill="var(--f-accent)" opacity="0.78"><title>Sep 25: 58% of slot time busy</title></rect><rect x="665.5" y="79.8" width="24.0" height="20.2" rx="1.5" fill="var(--f-accent)" opacity="0.64"><title>Sep 26: 22% of slot time busy</title></rect><rect x="692.5" y="75.2" width="24.0" height="24.8" rx="1.5" fill="var(--f-accent)" opacity="0.66"><title>Sep 27: 27% of slot time busy</title></rect><rect x="719.5" y="39.3" width="24.0" height="60.7" rx="1.5" fill="var(--f-accent)" opacity="0.81"><title>Sep 28: 66% of slot time busy</title></rect><rect x="746.5" y="16.3" width="24.0" height="83.7" rx="1.5" fill="var(--f-accent)" opacity="0.91"><title>Sep 29: 91% of slot time busy</title></rect><rect x="773.5" y="40.2" width="24.0" height="59.8" rx="1.5" fill="var(--f-accent)" opacity="0.81"><title>Sep 30: 65% of slot time busy</title></rect><rect x="800.5" y="16.3" width="24.0" height="83.7" rx="1.5" fill="var(--f-accent)" opacity="0.91"><title>Oct 1: 91% of slot time busy</title></rect><rect x="827.5" y="24.6" width="24.0" height="75.4" rx="1.5" fill="var(--f-accent)" opacity="0.88"><title>Oct 2: 82% of slot time busy</title></rect><rect x="854.5" y="77.9" width="24.0" height="22.1" rx="1.5" fill="var(--f-accent)" opacity="0.65"><title>Oct 3: 24% of slot time busy</title></rect><text class="lbl" x="0" y="132">Runs</text><line x1="70" y1="160.5" x2="880" y2="160.5" stroke="var(--f-line)"/><g><title>Sep 4: 10 succeeded, 0 failed</title><rect x="71.5" y="126.2" width="24.0" height="33.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Sep 5: 3 succeeded, 0 failed</title><rect x="98.5" y="149.8" width="24.0" height="10.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Sep 6: 2 succeeded, 0 failed</title><rect x="125.5" y="153.2" width="24.0" height="6.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Sep 7: 9 succeeded, 2 failed</title><rect x="152.5" y="129.5" width="24.0" height="30.5" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="152.5" y="122.8" width="24.0" height="6.8" fill="var(--f-bad)"/></g><g><title>Sep 8: 6 succeeded, 0 failed</title><rect x="179.5" y="139.7" width="24.0" height="20.3" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Sep 9: 10 succeeded, 0 failed</title><rect x="206.5" y="126.2" width="24.0" height="33.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Sep 10: 10 succeeded, 1 failed</title><rect x="233.5" y="126.2" width="24.0" height="33.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="233.5" y="122.8" width="24.0" height="3.4" fill="var(--f-bad)"/></g><g><title>Sep 11: 5 succeeded, 1 failed</title><rect x="260.5" y="143.1" width="24.0" height="16.9" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="260.5" y="139.7" width="24.0" height="3.4" fill="var(--f-bad)"/></g><g><title>Sep 12: 1 succeeded, 1 failed</title><rect x="287.5" y="156.6" width="24.0" height="3.4" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="287.5" y="153.2" width="24.0" height="3.4" fill="var(--f-bad)"/></g><g><title>Sep 13: 2 succeeded, 1 failed</title><rect x="314.5" y="153.2" width="24.0" height="6.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="314.5" y="149.8" width="24.0" height="3.4" fill="var(--f-bad)"/></g><g><title>Sep 14: 11 succeeded, 1 failed</title><rect x="341.5" y="122.8" width="24.0" height="37.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="341.5" y="119.4" width="24.0" height="3.4" fill="var(--f-bad)"/></g><g><title>Sep 15: 6 succeeded, 0 failed</title><rect x="368.5" y="139.7" width="24.0" height="20.3" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Sep 16: 8 succeeded, 1 failed</title><rect x="395.5" y="132.9" width="24.0" height="27.1" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="395.5" y="129.5" width="24.0" height="3.4" fill="var(--f-bad)"/></g><g><title>Sep 17: 8 succeeded, 4 failed</title><rect x="422.5" y="132.9" width="24.0" height="27.1" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="422.5" y="119.4" width="24.0" height="13.5" fill="var(--f-bad)"/></g><g><title>Sep 18: 11 succeeded, 2 failed</title><rect x="449.5" y="122.8" width="24.0" height="37.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="449.5" y="116.0" width="24.0" height="6.8" fill="var(--f-bad)"/></g><g><title>Sep 19: 2 succeeded, 1 failed</title><rect x="476.5" y="153.2" width="24.0" height="6.8" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="476.5" y="149.8" width="24.0" height="3.4" fill="var(--f-bad)"/></g><g><title>Sep 20: 1 succeeded, 1 failed</title><rect x="503.5" y="156.6" width="24.0" height="3.4" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="503.5" y="153.2" width="24.0" height="3.4" fill="var(--f-bad)"/></g><g><title>Sep 21: 7 succeeded, 2 failed</title><rect x="530.5" y="136.3" width="24.0" height="23.7" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="530.5" y="129.5" width="24.0" height="6.8" fill="var(--f-bad)"/></g><g><title>Sep 22: 9 succeeded, 2 failed</title><rect x="557.5" y="129.5" width="24.0" height="30.5" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="557.5" y="122.8" width="24.0" height="6.8" fill="var(--f-bad)"/></g><g><title>Sep 23: 12 succeeded, 1 failed</title><rect x="584.5" y="119.4" width="24.0" height="40.6" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="584.5" y="116.0" width="24.0" height="3.4" fill="var(--f-bad)"/></g><g><title>Sep 24: 4 succeeded, 1 failed</title><rect x="611.5" y="146.5" width="24.0" height="13.5" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="611.5" y="143.1" width="24.0" height="3.4" fill="var(--f-bad)"/></g><g><title>Sep 25: 5 succeeded, 0 failed</title><rect x="638.5" y="143.1" width="24.0" height="16.9" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Sep 26: 3 succeeded, 0 failed</title><rect x="665.5" y="149.8" width="24.0" height="10.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Sep 27: 3 succeeded, 0 failed</title><rect x="692.5" y="149.8" width="24.0" height="10.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Sep 28: 6 succeeded, 4 failed</title><rect x="719.5" y="139.7" width="24.0" height="20.3" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="719.5" y="126.2" width="24.0" height="13.5" fill="var(--f-bad)"/></g><g><title>Sep 29: 6 succeeded, 1 failed</title><rect x="746.5" y="139.7" width="24.0" height="20.3" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="746.5" y="136.3" width="24.0" height="3.4" fill="var(--f-bad)"/></g><g><title>Sep 30: 8 succeeded, 1 failed</title><rect x="773.5" y="132.9" width="24.0" height="27.1" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="773.5" y="129.5" width="24.0" height="3.4" fill="var(--f-bad)"/></g><g><title>Oct 1: 11 succeeded, 2 failed</title><rect x="800.5" y="122.8" width="24.0" height="37.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/><rect x="800.5" y="116.0" width="24.0" height="6.8" fill="var(--f-bad)"/></g><g><title>Oct 2: 9 succeeded, 0 failed</title><rect x="827.5" y="129.5" width="24.0" height="30.5" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><g><title>Oct 3: 3 succeeded, 0 failed</title><rect x="854.5" y="149.8" width="24.0" height="10.2" fill="color-mix(in srgb, var(--f-ok) 60%, var(--f-surface))"/></g><text class="lbl" x="0" y="190">Waiting</text><line x1="70" y1="196.5" x2="880" y2="196.5" stroke="var(--f-line)"/><path d="M70 196 V172.0 H97.0 V196.0 H124.0 V190.0 H151.0 V184.0 H178.0 V190.0 H205.0 V184.0 H232.0 V184.0 H259.0 V178.0 H286.0 V190.0 H313.0 V196.0 H340.0 V190.0 H367.0 V190.0 H394.0 V172.0 H421.0 V190.0 H448.0 V190.0 H475.0 V190.0 H502.0 V190.0 H529.0 V178.0 H556.0 V184.0 H583.0 V184.0 H610.0 V196.0 H637.0 V178.0 H664.0 V196.0 H691.0 V196.0 H718.0 V190.0 H745.0 V190.0 H772.0 V178.0 H799.0 V172.0 H826.0 V190.0 H853.0 V196.0 H880.0 V196 Z" fill="color-mix(in srgb, var(--f-warn) 28%, transparent)" stroke="var(--f-warn)" stroke-width="1.1"/><text class="lbl" x="0" y="230">CPU</text><line x1="70" y1="244.5" x2="880" y2="244.5" stroke="var(--f-line)"/><polygon points="83.5,244 83.5,217.7 110.5,235.7 137.5,235.7 164.5,219.5 191.5,231.0 218.5,227.4 245.5,230.0 272.5,222.4 299.5,235.7 326.5,235.0 353.5,227.1 380.5,229.6 407.5,231.0 434.5,227.8 461.5,219.5 488.5,235.0 515.5,237.2 542.5,228.5 569.5,221.3 596.5,220.2 623.5,229.6 650.5,226.7 677.5,236.8 704.5,236.1 731.5,224.9 758.5,223.1 785.5,226.0 812.5,226.0 839.5,223.1 866.5,235.0 866.5,244" fill="color-mix(in srgb, var(--f-accent) 16%, transparent)"/><polyline points="83.5,217.7 110.5,235.7 137.5,235.7 164.5,219.5 191.5,231.0 218.5,227.4 245.5,230.0 272.5,222.4 299.5,235.7 326.5,235.0 353.5,227.1 380.5,229.6 407.5,231.0 434.5,227.8 461.5,219.5 488.5,235.0 515.5,237.2 542.5,228.5 569.5,221.3 596.5,220.2 623.5,229.6 650.5,226.7 677.5,236.8 704.5,236.1 731.5,224.9 758.5,223.1 785.5,226.0 812.5,226.0 839.5,223.1 866.5,235.0" fill="none" stroke="var(--f-accent)" stroke-width="1.5"/><line x1="151.0" y1="246" x2="151.0" y2="250" stroke="var(--f-muted)"/><text class="ax" x="151.0" y="262" text-anchor="middle">Sep 7</text><line x1="340.0" y1="246" x2="340.0" y2="250" stroke="var(--f-muted)"/><text class="ax" x="340.0" y="262" text-anchor="middle">Sep 14</text><line x1="529.0" y1="246" x2="529.0" y2="250" stroke="var(--f-muted)"/><text class="ax" x="529.0" y="262" text-anchor="middle">Sep 21</text><line x1="718.0" y1="246" x2="718.0" y2="250" stroke="var(--f-muted)"/><text class="ax" x="718.0" y="262" text-anchor="middle">Sep 28</text></svg></div></div>
+          </section>
+          <div class="f-grid">
+            <div class="f-col">
+              <section class="f-sec">
+                <div class="f-sec-h"><h2>Repositories</h2><span>5 configured</span><a href="#control-room-graphical">Manage</a></div>
+                <table class="f-table">
+                  <thead><tr><th>Repository</th><th>State</th><th>Runners</th><th>Waiting</th><th>Last 24 hours</th><th>Last job</th></tr></thead>
+                  <tbody>
+                    <tr><td><b>darkmem</b></td><td class="run">Running</td><td><span class="f-capcells"><i class="on"></i><i class="on"></i></span><span class="mono">2/2</span></td><td class="mono f-warn">3</td><td><span class="f-heat"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="k1"></i><i class="k2"></i><i class="k1"></i><i></i><i class="k2"></i><i class="k3"></i><i class="x"></i><i class="k1"></i><i class="k2"></i><i></i><i></i><i class="k1"></i><i class="k2"></i><i class="k3"></i><i class="k2"></i><i class="x"></i><i class="k3 now"></i></span><div class="f-heat-ax"><span>24 h ago</span><span>now</span></div></td><td><svg class="ic f-ok"><use href="#i-check"/></svg> build #41<span class="sub">2 min ago</span></td></tr>
+                    <tr><td><b>ghr</b></td><td class="run">Running</td><td><span class="f-capcells"><i class="on"></i><i></i></span><span class="mono">1/2</span></td><td></td><td><span class="f-heat"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="k1"></i><i class="k1"></i><i></i><i></i><i class="k2"></i><i class="k1"></i><i></i><i></i><i></i><i class="k1"></i><i class="k2"></i><i class="k1"></i><i></i><i class="k1"></i><i class="k2 now"></i></span><div class="f-heat-ax"><span>24 h ago</span><span>now</span></div></td><td><svg class="ic f-ok"><use href="#i-check"/></svg> release #117<span class="sub">23 min ago</span></td></tr>
+                    <tr><td><b>darkrouter</b></td><td>Idle</td><td><span class="f-capcells"><i></i></span><span class="mono">0/1</span></td><td></td><td><span class="f-heat"><i></i><i></i><i></i><i></i><i></i><i></i><i class="k1"></i><i class="x"></i><i></i><i></i><i class="k1"></i><i></i><i class="x"></i><i></i><i></i><i></i><i class="k1"></i><i class="x"></i><i class="k2"></i><i class="x"></i><i class="k1"></i><i></i><i></i><i class="x now"></i></span><div class="f-heat-ax"><span>24 h ago</span><span>now</span></div></td><td><svg class="ic f-bad"><use href="#i-x"/></svg> e2e #88<span class="sub">32 min ago</span></td></tr>
+                    <tr><td><b>darkcloud</b></td><td class="muted">Paused</td><td><span class="f-capcells"><i></i></span><span class="mono muted">0/1</span></td><td></td><td><span class="f-heat"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="now"></i></span><div class="f-heat-ax"><span>24 h ago</span><span>now</span></div></td><td><svg class="ic f-ok"><use href="#i-check"/></svg> ci #203<span class="sub">2 days ago</span></td></tr>
+                    <tr><td><b>old-repo</b><span class="sub bad">GitHub returned not found. Check the token can still see it.</span></td><td class="err">Error</td><td><span class="f-capcells"><i></i></span><span class="mono muted">0/1</span></td><td></td><td></td><td></td></tr>
+                  </tbody>
+                </table>
+              </section>
+            </div>
+            <div class="f-col">
+              <section class="f-sec">
+                <div class="f-sec-h"><h2>Disk</h2><span>/var/lib/docker</span><a href="#control-room-graphical">Storage</a></div>
+                <div class="f-disk-n"><b>61%</b><span>146 of 240 GB used, prunes at 80%</span></div>
+                <div class="f-stack" role="img" aria-label="Disk use by category">
+                  <i style="width:21.7%;background:var(--f-accent)" title="Build cache 52 GB"></i>
+                  <i style="width:17.1%;background:color-mix(in srgb, var(--f-accent) 62%, var(--f-sunk))" title="Images 41 GB"></i>
+                  <i style="width:8.75%;background:color-mix(in srgb, var(--f-accent) 40%, var(--f-sunk))" title="Package caches 21 GB"></i>
+                  <i style="width:7.5%;background:color-mix(in srgb, var(--f-accent) 24%, var(--f-sunk))" title="Toolchains 18 GB"></i>
+                  <i style="width:2.5%;background:color-mix(in srgb, var(--f-muted) 70%, var(--f-sunk))" title="Volumes 6 GB"></i>
+                  <i style="width:3.35%;background:color-mix(in srgb, var(--f-muted) 40%, var(--f-sunk))" title="Other 8 GB"></i>
+                </div>
+                <div class="f-mark"><s style="left:80%"></s><small style="left:80%">prune line</small></div>
+                <div class="f-dlist">
+                  <i style="background:var(--f-accent)"></i><span>Build cache</span><span class="mono">52 GB</span>
+                  <i style="background:color-mix(in srgb, var(--f-accent) 62%, var(--f-sunk))"></i><span>Images</span><span class="mono">41 GB</span>
+                  <i style="background:color-mix(in srgb, var(--f-accent) 40%, var(--f-sunk))"></i><span>Package caches</span><span class="mono">21 GB</span>
+                  <i style="background:color-mix(in srgb, var(--f-accent) 24%, var(--f-sunk))"></i><span>Toolchains</span><span class="mono">18 GB</span>
+                  <i style="background:color-mix(in srgb, var(--f-muted) 70%, var(--f-sunk))"></i><span>Volumes</span><span class="mono">6 GB</span>
+                  <i style="background:color-mix(in srgb, var(--f-muted) 40%, var(--f-sunk))"></i><span>Other</span><span class="mono">8 GB</span>
+                </div>
+              </section>
+              <section class="f-sec">
+                <div class="f-sec-h"><h2>Events</h2><span>live</span></div>
+                <div class="f-events">
+                  <div><time>14:05</time><span></span><span>Started web (ghr run 118) on ghr-cccccc</span></div>
+                  <div><time>14:03</time><svg class="ic f-ok"><use href="#i-check"/></svg><span>darkmem build #41 succeeded in 5 min</span></div>
+                  <div><time>14:01</time><span></span><span>Started test (darkmem run 42) on ghr-aaaaaa</span></div>
+                  <div><time>13:58</time><svg class="ic f-warn"><use href="#i-alert"/></svg><span>Runner 2.329.0 is required by Oct 14</span></div>
+                  <div><time>13:33</time><svg class="ic f-bad"><use href="#i-x"/></svg><span>darkrouter e2e #88 failed after 11 min</span></div>
+                  <div><time>13:12</time><svg class="ic f-bad"><use href="#i-x"/></svg><span>old-repo: GitHub returned not found</span></div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div class="rules">
+      <div class="spec"><h3>What makes it graphical</h3><ul>
+        <li>Last-hour recorder: each runner slot is a lane, each job a bar coloured by result, the running bar grows toward "now". Waiting jobs and CPU share the time axis, so a queue spike lines up with the slots that were full.</li>
+        <li>24-hour strip per repository: one cell per hour, darker for more runs, red for any failure, the current hour outlined.</li>
+        <li>Disk drawn by what fills it, with the prune line marked.</li>
+        <li>Capacity cells per repository and the capacity rail in the sidebar.</li>
+      </ul></div>
+      <div class="spec"><h3>Where the data comes from</h3><ul>
+        <li>1h and 3h draw one lane per slot from history (start, end and result of each job) and live runners. Jobs are packed into lanes in the browser, since history doesn't record the slot.</li><li>24h, 7d and 30d switch to buckets (hour, 6 hours, day): busy slot time and runs come from history, which ghr keeps for 30 days by default.</li><li>Waiting and CPU beyond the last hour need new storage: ghr keeps only 60 one-minute samples today. Keeping 3 hours of minutes plus hourly rollups for 30 days is about 900 small records.</li>
+        <li>24-hour strip: history, grouped by hour.</li>
+        <li>Disk breakdown: the existing Storage response (Docker rows, toolchains, package caches). The 240 GB total needs one new field.</li>
+        <li>API budget shows the current count only; ghr keeps no history of it.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ===================== Chosen ===================== -->
+  <section class="direction" id="chosen" role="tabpanel" aria-labelledby="tab-d" hidden>
+    <div class="dir-head">
+      <div>
+        <h2>Chosen direction, rules applied</h2>
+        <p>B's shell with A's dashboard, redrawn against the anti-slop rules from Impeccable, taste-skill and the VectorLab anti-slop skill. Colour now lives in the sidebar, the violet is gone, and decoration that carried no meaning has been removed.</p>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div class="e-pal" role="group" aria-label="Palette">
+          <button type="button" data-pal="petrol" aria-pressed="true">Petrol</button>
+          <button type="button" data-pal="cobalt" aria-pressed="false">Cobalt</button>
+        </div>
+        <button class="mode" data-target="mock-e">Show dark mode</button>
+      </div>
+    </div>
+    <div class="frame">
+      <div class="mock mock-e" id="mock-e" data-mode="light" data-palette="petrol">
+        <aside class="e-side">
+          <div class="e-brand">
+            <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect x="2" y="3.5" width="18" height="3.2" rx="1.6" fill="currentColor"/><rect x="2" y="9.4" width="12" height="3.2" rx="1.6" fill="currentColor" opacity=".62"/><rect x="2" y="15.3" width="6.5" height="3.2" rx="1.6" fill="currentColor" opacity=".38"/><circle cx="16.6" cy="16.9" r="2.6" fill="var(--m-shell-accent)"/></svg>
+            <b>ghr</b><span>lxc-99</span>
+          </div>
+          <div class="e-cap" aria-label="Runner capacity: 2 busy, 1 warm, 1 free">
+            <div class="e-cap-h"><span>Runners</span><b>2 of 4 busy</b></div>
+            <div class="e-seg"><i class="busy"></i><i class="busy"></i><i class="warm"></i><i></i></div>
+          </div>
+          <nav class="e-group" aria-label="Operate"><p>Operate</p>
+            <div class="e-item on"><svg class="ic"><use href="#i-grid"/></svg>Dashboard</div>
+            <div class="e-item"><svg class="ic"><use href="#i-play"/></svg>Actions<em class="live">3</em></div>
+            <div class="e-item"><svg class="ic"><use href="#i-server"/></svg>Runners<em>3</em></div>
+            <div class="e-item"><svg class="ic"><use href="#i-clock"/></svg>History</div>
+          </nav>
+          <nav class="e-group" aria-label="Configure"><p>Configure</p>
+            <div class="e-item"><svg class="ic"><use href="#i-branch"/></svg>Repositories<em>5</em></div>
+            <div class="e-item"><svg class="ic"><use href="#i-wrench"/></svg>Toolchains<em>9</em></div>
+            <div class="e-item"><svg class="ic"><use href="#i-db"/></svg>Storage</div>
+            <div class="e-item"><svg class="ic"><use href="#i-sliders"/></svg>Settings</div>
+          </nav>
+          <div class="e-foot"><span>Owner</span><span>Log out</span></div>
+        </aside>
+        <main class="e-main">
+          <div class="e-head">
+            <div>
+              <h1>Dashboard</h1>
+              <p><b>2 of 4 runners busy.</b> 3 jobs are waiting in darkmem, and old-repo can't be reached on GitHub.</p>
+            </div>
+            <div class="e-acts"><span class="e-btn">Pause all</span><span class="e-btn pri">Add repository</span></div>
+          </div>
+          <div class="e-strip">
+            <div><label>Mode</label><span class="v">Queue</span></div>
+            <div><label>Waiting</label><span class="v"><span class="mono">3</span> jobs <small>oldest 3 min</small></span></div>
+            <div><label>API budget</label><span class="v"><span class="mono">4,980</span> <small>of 5,000 left</small></span></div>
+            <div><label>Disk</label><span class="v"><span class="mono">61%</span><span class="e-meter"><b style="width:61%"></b><s style="left:80%"></s></span><small>prunes at 80%</small></span></div>
+            <div><label>Runner update</label><span class="v warn"><svg class="ic"><use href="#i-alert"/></svg>2.329.0 required by Oct 14</span></div>
+          </div>
+          <div class="e-grid">
+            <div class="e-col">
+              <section class="e-sec">
+                <div class="e-sec-h"><h2>Runner slots</h2><span>global max 4</span></div>
+                <div class="e-slots">
+                  <div class="e-slot"><span class="e-led busy" aria-label="busy"></span><span class="job"><b>test</b><small>darkmem, ci run 42</small></span><span class="step"><span>Step 5 of 9: go test -race</span><span class="e-steps"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="r"></i><i></i><i></i><i></i><i></i></span></span><span class="t">4:12</span></div>
+                  <div class="e-slot"><span class="e-led busy" aria-label="busy"></span><span class="job"><b>web</b><small>ghr, ci run 118</small></span><span class="step"><span>Step 2 of 6: npm ci</span><span class="e-steps"><i class="d"></i><i class="r"></i><i></i><i></i><i></i><i></i></span></span><span class="t">0:48</span></div>
+                  <div class="e-slot"><span class="e-led warm" aria-label="warm"></span><span class="job"><b>Warm runner</b><small>darkmem, waiting for a job</small></span><span class="step"><span class="mono">ghr-bbbbbb</span><small>idle since 14:03</small></span><span class="t" style="color:var(--m-muted)">2:00</span></div>
+                  <div class="e-slot free"><span class="e-led free" aria-label="free"></span><span class="job"><b>Free slot</b><small>Starts a runner when a matching job is queued</small></span><span></span><span></span></div>
+                </div>
+              </section>
+              <section class="e-sec">
+                <div class="e-sec-h"><h2>Repositories</h2><span>5 configured</span><a href="#chosen">Manage</a></div>
+                <table class="e-table">
+                  <thead><tr><th>Repository</th><th>State</th><th>Runners</th><th>Waiting</th><th>Last job</th><th>Recent runs</th></tr></thead>
+                  <tbody>
+                    <tr><td><b>darkmem</b></td><td class="state-run">Running</td><td class="mono">2 of 2</td><td class="mono e-warn">3</td><td><svg class="ic e-ok"><use href="#i-check"/></svg> build #41<span class="sub">25 min ago</span></td><td><span class="e-ticks" aria-label="10 passed, 2 failed"><i></i><i></i><i class="f"></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="f"></i><i></i><i></i></span></td></tr>
+                    <tr><td><b>ghr</b></td><td class="state-run">Running</td><td class="mono">1 of 2</td><td></td><td><svg class="ic e-ok"><use href="#i-check"/></svg> release #117<span class="sub">1 h ago</span></td><td><span class="e-ticks" aria-label="11 passed, 1 cancelled"><i></i><i></i><i></i><i></i><i></i><i></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i></span></td></tr>
+                    <tr><td><b>darkrouter</b></td><td>Idle</td><td class="mono">0 of 1</td><td></td><td><svg class="ic e-bad"><use href="#i-x"/></svg> e2e #88<span class="sub">3 h ago</span></td><td><span class="e-ticks" aria-label="8 passed, 4 failed"><i></i><i></i><i></i><i class="f"></i><i></i><i></i><i></i><i></i><i class="f"></i><i class="f"></i><i></i><i class="f"></i></span></td></tr>
+                    <tr><td><b>darkcloud</b></td><td class="muted">Paused</td><td class="mono muted">0 of 1</td><td></td><td><svg class="ic e-ok"><use href="#i-check"/></svg> ci #203<span class="sub">2 days ago</span></td><td><span class="e-ticks" aria-label="12 passed"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></td></tr>
+                    <tr><td><b>old-repo</b><span class="sub bad">GitHub returned not found. Check the token can still see it.</span></td><td class="state-bad">Error</td><td class="mono muted">0 of 1</td><td></td><td></td><td></td></tr>
+                  </tbody>
+                </table>
+              </section>
+            </div>
+            <div class="e-col">
+              <section class="e-sec">
+                <div class="e-sec-h"><h2>Host load</h2><span>last 10 min</span></div>
+                <div class="e-chart">
+                  <div class="e-legend"><span><i></i>CPU <b>23%</b></span><span><i class="mem"></i>Memory <b>3.1 of 8.0 GB</b></span></div>
+                  <svg viewBox="0 0 300 90" width="100%" height="90" role="img" aria-label="CPU and memory use over the last ten minutes">
+                    <line x1="0" y1="45" x2="300" y2="45" stroke="var(--m-line)"/>
+                    <line x1="0" y1="22.5" x2="300" y2="22.5" stroke="var(--m-line)"/>
+                    <line x1="0" y1="89.5" x2="300" y2="89.5" stroke="var(--m-line)"/>
+                    <text x="0" y="19" font-size="10" fill="var(--m-muted)" font-family="Geist Mono, monospace">75%</text>
+                    <text x="0" y="41.5" font-size="10" fill="var(--m-muted)" font-family="Geist Mono, monospace">50%</text>
+                    <path d="M0 75 L20 73 L40 71 L60 62 L80 43 L100 37 L120 49 L140 56 L160 41 L180 32 L200 47 L220 53 L240 45 L260 60 L280 64 L300 69 L300 90 L0 90 Z" fill="color-mix(in srgb, var(--m-accent) 13%, transparent)"/>
+                    <path d="M0 75 L20 73 L40 71 L60 62 L80 43 L100 37 L120 49 L140 56 L160 41 L180 32 L200 47 L220 53 L240 45 L260 60 L280 64 L300 69" fill="none" stroke="var(--m-accent)" stroke-width="1.8"/>
+                    <path d="M0 57 L40 56 L80 54 L120 53 L160 52 L200 53 L240 54 L300 55" fill="none" stroke="var(--m-muted)" stroke-width="1.4" stroke-dasharray="4 3"/>
+                    <circle cx="297" cy="69" r="3" fill="var(--m-accent)"/>
+                  </svg>
+                </div>
+              </section>
+              <section class="e-sec">
+                <div class="e-sec-h"><h2>Events</h2><span>live</span></div>
+                <div class="e-events">
+                  <div><time>14:05</time><span></span><span>Started web (ghr run 118) on ghr-cccccc</span></div>
+                  <div><time>14:04</time><span></span><span>Started runner ghr-cccccc for ghr</span></div>
+                  <div><time>14:03</time><svg class="ic e-ok"><use href="#i-check"/></svg><span>darkmem build #41 succeeded in 5 min</span></div>
+                  <div><time>14:01</time><span></span><span>Started test (darkmem run 42) on ghr-aaaaaa</span></div>
+                  <div><time>13:58</time><svg class="ic e-warn"><use href="#i-alert"/></svg><span>Runner 2.329.0 is required by Oct 14</span></div>
+                  <div><time>13:40</time><span></span><span>Pruned build cache and freed 1.2 GB</span></div>
+                  <div><time>13:12</time><svg class="ic e-bad"><use href="#i-x"/></svg><span>old-repo: GitHub returned not found</span></div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div class="rules">
+      <div class="spec"><h3>What the rules changed</h3><ul>
+        <li>Violet dropped: all three rule sets name purple as the most common AI fingerprint.</li>
+        <li>Colour moved into the shell: a petrol (or cobalt) sidebar, a tinted ground, and one accent for actions, selection and "running".</li>
+        <li>No nested boxes. The sheet and the panel cards are gone; only the runner slots, the live element, sit on a surface.</li>
+        <li>Status dots only where they carry live state (runner slots). Repository state is a word; events get an icon only for success, failure and warnings.</li>
+        <li>No pills around plain text, no Unicode check marks as icons, no "·" chains, no dashes in empty cells, no uppercase mono labels.</li>
+        <li>Signature: the capacity rail in the sidebar, on every page. Filled is busy, outlined is warm, dim is free.</li>
+      </ul></div>
+      <div class="spec"><h3>Rules the redesign adopts</h3><ul>
+        <li>One accent. Green, amber and red only for meaning, always with an icon or word as well.</li>
+        <li>Borders are the only elevation. No glow, glass, gradient text or coloured side borders.</li>
+        <li>Radius: controls 6px, surfaces 10px. Nothing pill-shaped except toggles.</li>
+        <li>Monospace only for numbers, times and IDs; tabular numerals everywhere.</li>
+        <li>Selection, focus rings and scrollbars themed from the palette.</li>
+        <li>Plain copy: buttons name their action, errors say what to do, no em-dashes.</li>
+        <li>One icon library (Tabler or Phosphor) in place of Lucide, the default AI pick.</li>
+      </ul></div>
+    </div>
+  </section>
+  <!-- ===================== A ===================== -->
+  <section class="direction" id="control-room" role="tabpanel" aria-labelledby="tab-a" hidden>
+    <div class="dir-head">
+      <div>
+        <h2>Control Room</h2>
+        <p>A console for a machine you own. Dark first, dense, monospace numbers, and status lights that pulse while a job runs. The top bar reads like an instrument panel: capacity, queue, API budget and disk at a glance.</p>
+      </div>
+      <button class="mode" data-target="mock-a">Show light mode</button>
+    </div>
+    <div class="frame">
+      <div class="mock mock-a" id="mock-a" data-mode="dark">
+        <aside class="a-side">
+          <div class="a-brand">
+            <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="1" width="20" height="20" rx="4" fill="none" stroke="var(--m-accent)" stroke-width="1.5"/><rect x="5" y="6" width="12" height="2" rx="1" fill="var(--m-accent)"/><rect x="5" y="10" width="8" height="2" rx="1" fill="var(--m-fg)"/><rect x="5" y="14" width="5" height="2" rx="1" fill="var(--m-muted)"/><circle cx="16" cy="15" r="1.6" fill="var(--m-accent)"/></svg>
+            <b>ghr</b><span>lxc-99</span>
+          </div>
+          <div>
+            <div class="a-label">Operate</div>
+            <nav class="a-nav">
+              <div class="on">Dashboard</div>
+              <div>Actions <em class="live">3 live</em></div>
+              <div>Runners <em>2</em></div>
+              <div>History</div>
+            </nav>
+          </div>
+          <div>
+            <div class="a-label">Configure</div>
+            <nav class="a-nav">
+              <div>Repositories <em>5</em></div>
+              <div>Toolchains <em>9</em></div>
+              <div>Storage</div>
+              <div>Settings</div>
+            </nav>
+          </div>
+        </aside>
+        <main class="a-main">
+          <div class="a-title">
+            <h1>Dashboard</h1>
+            <div class="acts"><span class="a-btn">Pause all</span><span class="a-btn pri">+ Repository</span></div>
+          </div>
+          <div class="a-bar">
+            <div><span class="a-k">Mode</span><span class="a-v">QUEUE</span></div>
+            <div><span class="a-k">Capacity</span><span class="a-v num">2/4 <span class="gauge"><i class="on"></i><i class="on"></i><i></i><i></i></span></span></div>
+            <div><span class="a-k">Waiting</span><span class="a-v num">3 <span class="mut" style="font-size:11px">jobs</span></span></div>
+            <div><span class="a-k">API budget</span><span class="a-v num">4,980<span class="mut" style="font-size:11px">/5k</span></span></div>
+            <div><span class="a-k">Disk</span><span class="a-v num">61% <span class="meter"><b style="width:61%"></b><s style="left:80%"></s></span></span></div>
+            <div><span class="a-k">Runner update</span><span class="a-v warn">2.329.0 · 6d left</span></div>
+          </div>
+          <div class="a-grid">
+            <div class="a-col">
+              <section class="panel">
+                <div class="panel-h"><span>Runner slots</span><span>global max 4</span></div>
+                <div class="slot"><span class="no">01</span><span class="led busy"></span><span class="what"><b>darkmem</b> · ci › test #42<small>ghr-aaaaaa · step 5 of 9: go test -race</small></span><span class="steps"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="r"></i><i></i><i></i><i></i><i></i></span><span class="t num">04:12</span></div>
+                <div class="slot"><span class="no">02</span><span class="led busy"></span><span class="what"><b>ghr</b> · ci › web #118<small>ghr-cccccc · step 2 of 6: npm ci</small></span><span class="steps"><i class="d"></i><i class="r"></i><i></i><i></i><i></i><i></i></span><span class="t num">00:48</span></div>
+                <div class="slot"><span class="no">03</span><span class="led idle"></span><span class="what"><b>darkmem</b> · warm, waiting for a job<small>ghr-bbbbbb · idle since 14:03</small></span><span></span><span class="t num mut">02:00</span></div>
+                <div class="slot free"><span class="no">04</span><span class="led free"></span><span class="what">free</span><span></span><span></span></div>
+              </section>
+              <section class="panel">
+                <div class="panel-h"><span>Repositories</span><span>5 configured</span></div>
+                <table class="a-table">
+                  <thead><tr><th></th><th>Repo</th><th>Runners</th><th>Queue</th><th>Last job</th><th>Last 12</th></tr></thead>
+                  <tbody>
+                    <tr><td><span class="led busy"></span></td><td>darkmem</td><td class="m num">2/2</td><td class="m num warn">3</td><td><span class="ok">✔</span> #41 build <span class="dim">25m</span></td><td><span class="ticks"><i></i><i></i><i class="f"></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="f"></i><i></i><i></i></span></td></tr>
+                    <tr><td><span class="led busy"></span></td><td>ghr</td><td class="m num">1/2</td><td class="m dim">–</td><td><span class="ok">✔</span> #117 release <span class="dim">1h</span></td><td><span class="ticks"><i></i><i></i><i></i><i></i><i></i><i></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i></span></td></tr>
+                    <tr><td><span class="led idle"></span></td><td>darkrouter</td><td class="m num">0/1</td><td class="m dim">–</td><td><span class="bad">✖</span> #88 e2e <span class="dim">3h</span></td><td><span class="ticks"><i></i><i></i><i></i><i class="f"></i><i></i><i></i><i></i><i></i><i class="f"></i><i class="f"></i><i></i><i class="f"></i></span></td></tr>
+                    <tr><td><span class="led paused"></span></td><td>darkcloud <span class="dim">paused</span></td><td class="m num dim">0/1</td><td class="m dim">–</td><td><span class="ok">✔</span> #203 ci <span class="dim">2d</span></td><td><span class="ticks"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></td></tr>
+                    <tr><td><span class="led err"></span></td><td>old-repo <span class="bad">GitHub: not found</span></td><td class="m num dim">0/1</td><td class="m dim">–</td><td class="dim">–</td><td></td></tr>
+                  </tbody>
+                </table>
+              </section>
+            </div>
+            <div class="a-col">
+              <section class="panel">
+                <div class="panel-h"><span>Host load</span><span>last 10 min</span></div>
+                <div class="chart-a">
+                  <div class="legend"><span>CPU <b class="num">23%</b></span><span>Memory <b class="num">3.1 / 8.0 GB</b></span></div>
+                  <svg viewBox="0 0 300 84" width="100%" height="84" role="img" aria-label="CPU and memory over the last ten minutes">
+                    <line x1="0" y1="21" x2="300" y2="21" stroke="var(--m-line)" stroke-dasharray="2 4"/>
+                    <line x1="0" y1="42" x2="300" y2="42" stroke="var(--m-line)" stroke-dasharray="2 4"/>
+                    <line x1="0" y1="63" x2="300" y2="63" stroke="var(--m-line)" stroke-dasharray="2 4"/>
+                    <path d="M0 70 L20 68 L40 66 L60 58 L80 40 L100 34 L120 46 L140 52 L160 38 L180 30 L200 44 L220 50 L240 42 L260 56 L280 60 L300 64 L300 84 L0 84 Z" fill="color-mix(in srgb, var(--m-accent) 18%, transparent)"/>
+                    <path d="M0 70 L20 68 L40 66 L60 58 L80 40 L100 34 L120 46 L140 52 L160 38 L180 30 L200 44 L220 50 L240 42 L260 56 L280 60 L300 64" fill="none" stroke="var(--m-accent)" stroke-width="1.6"/>
+                    <path d="M0 54 L40 53 L80 50 L120 49 L160 47 L200 48 L240 50 L300 52" fill="none" stroke="var(--m-muted)" stroke-width="1.4" stroke-dasharray="4 3"/>
+                    <circle cx="300" cy="64" r="3" fill="var(--m-accent)"/>
+                  </svg>
+                </div>
+              </section>
+              <section class="panel">
+                <div class="panel-h"><span>Event log</span><span>live</span></div>
+                <div class="log">
+                  <div><span class="mut">14:05:02</span><span class="acc">run</span><span>ghr #118 web started on ghr-cccccc</span></div>
+                  <div><span class="mut">14:04:40</span><span class="acc">spawn</span><span>ghr-cccccc for ghr</span></div>
+                  <div><span class="mut">14:03:11</span><span class="ok">ok</span><span>darkmem #41 build succeeded in 5m</span></div>
+                  <div><span class="mut">14:01:00</span><span class="acc">run</span><span>darkmem #42 test started on ghr-aaaaaa</span></div>
+                  <div><span class="mut">13:58:27</span><span class="warn">warn</span><span>runner 2.329.0 required by Oct 14</span></div>
+                  <div><span class="mut">13:40:09</span><span class="ok">ok</span><span>pruned build cache, freed 1.2 GB</span></div>
+                  <div><span class="mut">13:12:45</span><span class="bad">err</span><span>old-repo: GitHub: not found</span></div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div class="specs">
+      <div class="spec"><h3>Palette</h3><div class="swatches">
+        <span class="sw"><i style="background:#0b0f14"></i>ground</span><span class="sw"><i style="background:#111720"></i>panel</span><span class="sw"><i style="background:#d5dce5"></i>text</span><span class="sw"><i style="background:#47c1d8"></i>signal</span><span class="sw"><i style="background:#45b860"></i>ok</span><span class="sw"><i style="background:#ef6a5f"></i>fail</span>
+      </div></div>
+      <div class="spec"><h3>Type</h3><div class="type-specimen"><span style="font-family:'IBM Plex Sans';font-size:18px;font-weight:600">IBM Plex Sans for text</span><span style="font-family:'IBM Plex Mono';font-size:15px">IBM Plex Mono 04:12 · 2/4</span></div></div>
+      <div class="spec"><h3>On darkraise-ui</h3><ul>
+        <li>Dark mode default, compact density, subtle radius, low elevation</li>
+        <li>Cyan accent is a named hue; the blue-black ground is about 8 surface-token overrides</li>
+        <li>Sidebar active state overridden (no 3px left bar)</li>
+        <li>New components: instrument bar, runner slots, run ticks</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ===================== B ===================== -->
+  <section class="direction" id="precise" role="tabpanel" aria-labelledby="tab-b" hidden>
+    <div class="dir-head">
+      <div>
+        <h2>Precise</h2>
+        <p>A calm tool that explains itself. Light first, generous spacing, one violet accent, and a sentence that tells you the state before any number does. Repositories become cards with a GitHub-style strip of recent runs.</p>
+      </div>
+      <button class="mode" data-target="mock-b">Show dark mode</button>
+    </div>
+    <div class="frame">
+      <div class="mock mock-b" id="mock-b" data-mode="light">
+        <aside class="b-side">
+          <div class="b-brand">
+            <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="7" fill="var(--m-accent)"/><path d="M7 8.5 L11 12 L7 15.5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="15.5" cy="15.2" r="1.7" fill="#fff"/></svg>
+            <b>ghr</b>
+          </div>
+          <div class="b-group"><p>Operate</p>
+            <div class="b-item on"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>Dashboard</div>
+            <div class="b-item"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.5 5.5 L10.5 8 L6.5 10.5 Z"/></svg>Actions<span class="new">3 running</span></div>
+            <div class="b-item"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="4" rx="1"/><rect x="2" y="9" width="12" height="4" rx="1"/></svg>Runners</div>
+            <div class="b-item"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 5 V8 L10 9.5"/></svg>History</div>
+          </div>
+          <div class="b-group"><p>Configure</p>
+            <div class="b-item"><svg viewBox="0 0 16 16"><path d="M3 3 H13 V13 H3 Z"/><path d="M3 6.5 H13"/></svg>Repositories</div>
+            <div class="b-item"><svg viewBox="0 0 16 16"><path d="M10 2.5 a3 3 0 0 0 -3.5 4 L2.5 10.5 L5.5 13.5 L9.5 9.5 a3 3 0 0 0 4 -3.5 L11.5 8 L8 4.5 Z"/></svg>Toolchains</div>
+            <div class="b-item"><svg viewBox="0 0 16 16"><ellipse cx="8" cy="4" rx="5.5" ry="2"/><path d="M2.5 4 V12 a5.5 2 0 0 0 11 0 V4"/></svg>Storage</div>
+            <div class="b-item"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.8 V3.5 M8 12.5 V14.2 M1.8 8 H3.5 M12.5 8 H14.2 M3.6 3.6 L4.8 4.8 M11.2 11.2 L12.4 12.4 M3.6 12.4 L4.8 11.2 M11.2 4.8 L12.4 3.6"/></svg>Settings</div>
+          </div>
+        </aside>
+        <main class="b-sheet">
+          <div class="b-head">
+            <div>
+              <h1>Dashboard</h1>
+              <p><b>2 of 4 runners busy.</b> 3 jobs waiting in darkmem; 1 repository needs attention.</p>
+            </div>
+            <div class="b-acts"><span class="b-btn">Pause all</span><span class="b-btn pri">Add repository</span></div>
+          </div>
+          <div class="b-kpis">
+            <div><label>Running</label><strong class="num">2 <small>of 4</small></strong>
+              <svg viewBox="0 0 160 26" width="100%" height="26" aria-hidden="true"><path d="M0 20 L20 20 L30 13 L60 13 L70 6 L100 6 L110 13 L130 13 L140 6 L160 6" fill="none" stroke="var(--m-accent)" stroke-width="1.8"/></svg></div>
+            <div><label>Waiting jobs</label><strong class="num">3 <small>oldest 3 min</small></strong>
+              <svg viewBox="0 0 160 26" width="100%" height="26" aria-hidden="true"><path d="M0 24 L40 24 L50 18 L90 18 L100 12 L130 12 L140 6 L160 6" fill="none" stroke="var(--m-warn)" stroke-width="1.8"/></svg></div>
+            <div><label>Host CPU · memory</label><strong class="num">23% <small>3.1 / 8 GB</small></strong>
+              <svg viewBox="0 0 160 26" width="100%" height="26" aria-hidden="true"><path d="M0 20 L16 18 L32 16 L48 10 L64 7 L80 13 L96 9 L112 6 L128 12 L144 15 L160 16" fill="none" stroke="var(--m-muted)" stroke-width="1.8"/></svg></div>
+            <div><label>Disk</label><strong class="num">61% <small>prunes at 80%</small></strong><div class="b-meter"><b style="width:61%"></b></div></div>
+          </div>
+          <div class="b-cols">
+            <section class="b-sec">
+              <div class="b-sec-h"><h2>Repositories</h2><div class="b-filters"><span class="on">All 5</span><span>Running 2</span><span>Paused 1</span><span>Issues 1</span></div></div>
+              <div class="b-cards">
+                <div class="b-card">
+                  <div class="b-card-top"><b>darkmem</b><span class="pill warn">3 waiting</span></div>
+                  <div class="b-facts"><span><span class="dots"><i class="on"></i><i class="on"></i></span><b>2/2</b> runners</span><span>Labels <b>linux, docker</b></span></div>
+                  <div class="strip"><i></i><i></i><i class="f"></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="f"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="r"></i></div>
+                  <div class="b-last"><span style="color:var(--m-ok)">✔</span><b>#41 build</b> succeeded 25 min ago</div>
+                </div>
+                <div class="b-card">
+                  <div class="b-card-top"><b>ghr</b><span class="pill ok">Running</span></div>
+                  <div class="b-facts"><span><span class="dots"><i class="on"></i><i></i></span><b>1/2</b> runners</span><span>Labels <b>linux</b></span></div>
+                  <div class="strip"><i></i><i></i><i></i><i></i><i></i><i></i><i class="c"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="r"></i></div>
+                  <div class="b-last"><span style="color:var(--m-ok)">✔</span><b>#117 release</b> succeeded 1 h ago</div>
+                </div>
+                <div class="b-card">
+                  <div class="b-card-top"><b>darkrouter</b><span class="pill ok">Ready</span></div>
+                  <div class="b-facts"><span><span class="dots"><i></i></span><b>0/1</b> runners</span><span>Labels <b>linux</b></span></div>
+                  <div class="strip"><i></i><i></i><i></i><i class="f"></i><i></i><i></i><i></i><i></i><i class="f"></i><i class="f"></i><i></i><i class="f"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="f"></i></div>
+                  <div class="b-last"><span style="color:var(--m-bad)">✖</span><b>#88 e2e</b> failed 3 h ago</div>
+                </div>
+                <div class="b-card dim">
+                  <div class="b-card-top"><b>old-repo</b><span class="pill bad">GitHub: not found</span></div>
+                  <div class="b-facts"><span>Being removed. Check the token can still see this repository.</span></div>
+                </div>
+              </div>
+            </section>
+            <section class="b-sec">
+              <div class="b-now">
+                <div class="row"><span>Now running</span><b class="num">4m 12s</b></div>
+                <h3>darkmem · ci › test #42</h3>
+                <small>step 5 of 9 · go test -race</small>
+                <div class="strip" style="gap:2px"><i></i><i></i><i></i><i></i><i class="r"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i></div>
+                <div class="row"><span>on ghr-aaaaaa</span><span>+1 more running</span></div>
+              </div>
+              <div class="b-sec-h"><h2>Activity</h2></div>
+              <div class="b-feed">
+                <div><i style="background:var(--m-accent)"></i><span>ghr #118 web started</span><time>14:05</time></div>
+                <div><i style="background:var(--m-ok)"></i><span>darkmem #41 build succeeded</span><time>14:03</time></div>
+                <div><i style="background:var(--m-accent)"></i><span>darkmem #42 test started</span><time>14:01</time></div>
+                <div><i style="background:var(--m-warn)"></i><span>Runner 2.329.0 is required by Oct 14</span><time>13:58</time></div>
+                <div><i></i><span>Pruned build cache, freed 1.2 GB</span><time>13:40</time></div>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div class="specs">
+      <div class="spec"><h3>Palette</h3><div class="swatches">
+        <span class="sw"><i style="background:#f3f4f7"></i>ground</span><span class="sw"><i style="background:#ffffff"></i>sheet</span><span class="sw"><i style="background:#101627"></i>ink</span><span class="sw"><i style="background:#5443d6"></i>violet</span><span class="sw"><i style="background:#1a8a4a"></i>ok</span><span class="sw"><i style="background:#c6372d"></i>fail</span>
+      </div></div>
+      <div class="spec"><h3>Type</h3><div class="type-specimen"><span style="font-family:'Geist';font-size:18px;font-weight:600;letter-spacing:-0.02em">Geist for text</span><span style="font-family:'Geist Mono';font-size:15px">Geist Mono 4m 12s · #42</span></div></div>
+      <div class="spec"><h3>On darkraise-ui</h3><ul>
+        <li>Light mode default, comfortable density, rounded radius</li>
+        <li>Violet accent is a named hue; sidebar groups via NavGroup titles</li>
+        <li>Content on a raised "sheet" (shell style plus one surface override)</li>
+        <li>New components: summary sentence, repo cards, run strip, now-running card</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <!-- ===================== C ===================== -->
+  <section class="direction" id="workshop" role="tabpanel" aria-labelledby="tab-c" hidden>
+    <div class="dir-head">
+      <div>
+        <h2>Workshop</h2>
+        <p>ghr as a runner yard. Warm concrete greys, hard edges, condensed signage, and runner slots drawn as numbered bays. Navigation moves to a top bar, and the queue reads like a dispatch board.</p>
+      </div>
+      <button class="mode" data-target="mock-c">Show dark mode</button>
+    </div>
+    <div class="frame">
+      <div class="mock mock-c" id="mock-c" data-mode="light">
+        <header class="c-top">
+          <div class="c-plate">
+            <svg width="66" height="30" viewBox="0 0 66 30" aria-hidden="true"><rect x="1" y="1" width="64" height="28" fill="var(--m-ink)"/><circle cx="5.5" cy="5.5" r="1.4" fill="var(--m-bg)"/><circle cx="60.5" cy="5.5" r="1.4" fill="var(--m-bg)"/><circle cx="5.5" cy="24.5" r="1.4" fill="var(--m-bg)"/><circle cx="60.5" cy="24.5" r="1.4" fill="var(--m-bg)"/><text x="33" y="21.5" text-anchor="middle" font-family="Barlow Condensed, sans-serif" font-weight="700" font-size="18" letter-spacing="3" fill="var(--m-bg)">GHR</text></svg>
+            <small class="c-cond">Runner yard<br>lxc-99</small>
+          </div>
+          <div class="hazard c-cond"><span>Runner 2.329.0</span>update by Oct 14</div>
+          <div class="c-read">
+            <div><span class="c-cond">Mode</span><b class="c-mono">QUEUE</b></div>
+            <div><span class="c-cond">API</span><b class="c-mono num">4980</b></div>
+            <div><span class="c-cond">Disk</span><b class="c-mono num">61%</b></div>
+          </div>
+        </header>
+        <nav class="c-nav c-cond">
+          <div class="on">Dashboard</div><div>Actions<sup>3</sup></div><div>Runners</div><div>History</div><div>Repositories</div><div>Toolchains</div><div>Storage</div><div>Settings</div>
+        </nav>
+        <div class="c-body">
+          <section style="display:flex;flex-direction:column;gap:10px">
+            <div class="c-h c-cond"><h2>Bays</h2><span>2 of 4 occupied</span><div class="c-btns"><span class="c-btn">Pause all</span><span class="c-btn pri">Add repository</span></div></div>
+            <div class="bays">
+              <div class="bay"><div class="bay-top"><span class="bay-no">01</span><span class="stamp busy">BUSY</span></div>
+                <dl><dt>Repo</dt><dd><b>darkmem</b></dd><dt>Job</dt><dd>ci › test #42</dd><dt>Time</dt><dd class="c-mono num">04:12</dd></dl>
+                <div class="segs"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="r"></i><i></i><i></i><i></i><i></i></div></div>
+              <div class="bay"><div class="bay-top"><span class="bay-no">02</span><span class="stamp busy">BUSY</span></div>
+                <dl><dt>Repo</dt><dd><b>ghr</b></dd><dt>Job</dt><dd>ci › web #118</dd><dt>Time</dt><dd class="c-mono num">00:48</dd></dl>
+                <div class="segs"><i class="d"></i><i class="r"></i><i></i><i></i><i></i><i></i></div></div>
+              <div class="bay"><div class="bay-top"><span class="bay-no">03</span><span class="stamp warm">WARM</span></div>
+                <dl><dt>Repo</dt><dd><b>darkmem</b></dd><dt>Job</dt><dd>waiting for work</dd><dt>Idle</dt><dd class="c-mono num">02:00</dd></dl></div>
+              <div class="bay open"><div class="bay-top"><span class="bay-no">04</span><span class="stamp open">OPEN</span></div><p>Free. A runner starts here when a job matches.</p></div>
+            </div>
+          </section>
+          <section style="display:flex;flex-direction:column;gap:10px">
+            <div class="c-h c-cond"><h2>Dispatch board</h2><span>3 jobs waiting</span></div>
+            <table class="c-table">
+              <thead><tr><th>Waiting since</th><th>Repo</th><th>Workflow › job</th><th>Labels</th><th>Wait</th></tr></thead>
+              <tbody>
+                <tr><td class="c-mono num">14:02</td><td><b>darkmem</b></td><td>ci › lint #42</td><td><span class="tag">self-hosted</span><span class="tag">linux</span></td><td class="c-mono num">3m</td></tr>
+                <tr><td class="c-mono num">14:02</td><td><b>darkmem</b></td><td>ci › build-arm #42</td><td><span class="tag">self-hosted</span><span class="tag">linux</span></td><td class="c-mono num">3m</td></tr>
+                <tr><td class="c-mono num">14:04</td><td><b>darkmem</b></td><td>docs › pages #19</td><td><span class="tag">self-hosted</span></td><td class="c-mono num">1m</td></tr>
+              </tbody>
+            </table>
+          </section>
+          <div class="c-two">
+            <section style="display:flex;flex-direction:column;gap:10px">
+              <div class="c-h c-cond"><h2>Repositories</h2><span>5</span></div>
+              <div class="c-repos">
+                <div class="c-repo"><span><b>darkmem</b><small>#41 build ✔ 25 min ago</small></span><span class="c-mono num">2/2</span><span class="tagline ok">ACTIVE</span></div>
+                <div class="c-repo"><span><b>ghr</b><small>#117 release ✔ 1 h ago</small></span><span class="c-mono num">1/2</span><span class="tagline ok">ACTIVE</span></div>
+                <div class="c-repo"><span><b>darkrouter</b><small>#88 e2e ✖ 3 h ago</small></span><span class="c-mono num">0/1</span><span class="tagline ok">READY</span></div>
+                <div class="c-repo"><span><b>darkcloud</b><small>#203 ci ✔ 2 days ago</small></span><span class="c-mono num">0/1</span><span class="tagline paused">PAUSED</span></div>
+                <div class="c-repo"><span><b>old-repo</b><small>GitHub: not found</small></span><span class="c-mono num">0/1</span><span class="tagline err">ERROR</span></div>
+              </div>
+            </section>
+            <section style="display:flex;flex-direction:column;gap:10px">
+              <div class="c-h c-cond"><h2>Shift log</h2><span>live</span></div>
+              <div class="c-log">
+                <div><span class="c-mono">14:05:02</span><span>ghr #118 web started in bay 02</span></div>
+                <div><span class="c-mono">14:03:11</span><span>darkmem #41 build succeeded in 5m</span></div>
+                <div><span class="c-mono">14:01:00</span><span>darkmem #42 test started in bay 01</span></div>
+                <div><span class="c-mono">13:58:27</span><span>Runner 2.329.0 required by Oct 14</span></div>
+                <div><span class="c-mono">13:40:09</span><span>Pruned build cache, freed 1.2 GB</span></div>
+                <div><span class="c-mono">13:12:45</span><span>old-repo: GitHub: not found</span></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="specs">
+      <div class="spec"><h3>Palette</h3><div class="swatches">
+        <span class="sw"><i style="background:#e2dfda"></i>concrete</span><span class="sw"><i style="background:#f1efeb"></i>panel</span><span class="sw"><i style="background:#1e1c19"></i>ink</span><span class="sw"><i style="background:#1f4f9e"></i>enamel</span><span class="sw"><i style="background:#c88a00"></i>hazard</span><span class="sw"><i style="background:#b0352a"></i>fail</span>
+      </div></div>
+      <div class="spec"><h3>Type</h3><div class="type-specimen"><span style="font-family:'Barlow Condensed';font-size:20px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase">Barlow Condensed signage</span><span style="font-family:'Barlow';font-size:15px">Barlow for text, JetBrains Mono for numbers</span></div></div>
+      <div class="spec"><h3>On darkraise-ui</h3><ul>
+        <li>Top-nav layout (ships in darkraise-ui), sharp radius, no shadows</li>
+        <li>Warm grey ground needs a neutral-ramp override; it exists in the kit but isn't selectable</li>
+        <li>Enamel blue is an accent override (3 tokens)</li>
+        <li>New components: bays, dispatch board, hazard and stamp badges</li>
+      </ul></div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+  function show(id) {
+    tabs.forEach(function (t) {
+      var on = t.getAttribute('aria-controls') === id;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    });
+  }
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () {
+      var id = t.getAttribute('aria-controls');
+      show(id);
+      try { history.replaceState(null, '', '#' + id); } catch (e) {}
+    });
+  });
+  var h = (location.hash || '').slice(1);
+  if (h && document.getElementById(h) && h !== 'tab') show(h);
+
+  document.querySelectorAll('.mode').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var m = document.getElementById(b.getAttribute('data-target'));
+      var dark = m.getAttribute('data-mode') === 'dark';
+      m.setAttribute('data-mode', dark ? 'light' : 'dark');
+      b.textContent = dark ? 'Show dark mode' : 'Show light mode';
+    });
+  });
+  document.querySelectorAll('[data-pal]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.getElementById('mock-e').setAttribute('data-palette', b.getAttribute('data-pal'));
+      document.querySelectorAll('[data-pal]').forEach(function (o) { o.setAttribute('aria-pressed', o === b ? 'true' : 'false'); });
+    });
+  });
+  document.querySelectorAll('[data-win]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var w = b.getAttribute('data-win'), kind = b.getAttribute('data-kind');
+      document.querySelectorAll('[data-win]').forEach(function (o) { o.setAttribute('aria-pressed', o === b ? 'true' : 'false'); });
+      document.querySelectorAll('.f-view').forEach(function (v) { v.hidden = v.getAttribute('data-w') !== w; });
+      document.querySelectorAll('.f-rec .f-legend').forEach(function (l) { l.hidden = l.getAttribute('data-for') !== kind; });
+      document.getElementById('f-range').textContent = b.getAttribute('data-range');
+    });
+  });
+})();
+</script>
