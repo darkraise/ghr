@@ -86,10 +86,13 @@ func (c *Client) Events(ctx context.Context, after int64) ([]model.Event, error)
 	return e, err
 }
 
-func (c *Client) History(ctx context.Context, repo, conclusion string, limit int) ([]model.HistoryEntry, error) {
+func (c *Client) History(ctx context.Context, repo, conclusion string, since time.Time, limit int) ([]model.HistoryEntry, error) {
 	q := url.Values{}
 	q.Set("repo", repo)
 	q.Set("conclusion", conclusion)
+	if !since.IsZero() {
+		q.Set("since", since.Format(time.RFC3339Nano))
+	}
 	q.Set("limit", fmt.Sprint(limit))
 	var h []model.HistoryEntry
 	err := c.call(ctx, http.MethodGet, "/history?"+q.Encode(), nil, &h)

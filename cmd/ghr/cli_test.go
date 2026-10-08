@@ -205,13 +205,18 @@ func TestErrorsAndUsage(t *testing.T) {
 }
 
 func TestLogsAndHistory(t *testing.T) {
-	fakeDaemon(t)
+	reqs := fakeDaemon(t)
 	if code, out, _ := runCLI(t, "", "logs", "a3f9c1"); code != 0 || out != "hello log\nsecond chunk\n" {
 		t.Fatalf("logs %d %q", code, out)
 	}
 	code, out, _ := runCLI(t, "", "history", "--repo", "darkmem")
 	if code != 0 || !strings.Contains(out, "#88") || !strings.Contains(out, "failure") || !strings.Contains(out, "1m0s") {
 		t.Fatalf("history %d:\n%s", code, out)
+	}
+	for _, r := range *reqs {
+		if strings.HasPrefix(r.path, "/history") && strings.Contains(r.path, "since=") {
+			t.Fatalf("ghr history sent a since bound: %s", r.path)
+		}
 	}
 }
 

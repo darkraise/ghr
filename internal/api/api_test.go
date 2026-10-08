@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -173,7 +174,7 @@ func TestStatusEventsHistory(t *testing.T) {
 	if err != nil || ev == nil || len(ev) != 0 {
 		t.Fatalf("events after 1: %+v err %v", ev, err)
 	}
-	h, err := c.History(ctx, "darkmem", "failure", 5)
+	h, err := c.History(ctx, "darkmem", "failure", time.Time{}, 5)
 	if err != nil || h[0].Repo != "darkmem" || h[0].Conclusion != "failure" {
 		t.Fatalf("history %+v err %v", h, err)
 	}
@@ -527,5 +528,39 @@ func TestHistorySinceParameter(t *testing.T) {
 	var ae *Error
 	if !errors.As(err, &ae) || ae.Status != http.StatusBadRequest || len(b.historySince) != 3 {
 		t.Fatalf("unparsable since: %v, backend saw %d calls", err, len(b.historySince))
+	}
+}
+
+func TestClientHistorySendsSince(t *testing.T) {
+	c, b := setup(t)
+	ctx := context.Background()
+	since := time.Date(2026, 10, 1, 18, 0, 0, 500, time.FixedZone("ICT", 7*60*60))
+	if _, err := c.History(ctx, "", "", since, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.History(ctx, "", "", time.Time{}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.historySince) != 2 || !b.historySince[0].Equal(since) || !b.historySince[1].IsZero() {
+		t.Fatalf("backend saw %v", b.historySince)
+	}
+
+	// The zero time round-trips as zero, so only the raw query shows that it
+	// was left out rather than sent.
+	var raw []url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw = append(raw, r.URL.Query())
+		fmt.Fprint(w, "[]")
+	}))
+	defer srv.Close()
+	rc := &Client{Base: srv.URL, HTTP: srv.Client()}
+	if _, err := rc.History(ctx, "", "", time.Time{}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rc.History(ctx, "", "", since, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 2 || raw[0].Has("since") || raw[1].Get("since") != "2026-10-01T18:00:00.0000005+07:00" {
+		t.Fatalf("raw queries %v", raw)
 	}
 }

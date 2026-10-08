@@ -271,7 +271,7 @@ func historyCmd(ctx context.Context, c *api.Client, args []string, out io.Writer
 	if err := fs.Parse(args); err != nil {
 		return flagError(err)
 	}
-	h, err := c.History(ctx, *repo, *conclusion, *limit)
+	h, err := c.History(ctx, *repo, *conclusion, time.Time{}, *limit)
 	if err != nil {
 		return err
 	}
