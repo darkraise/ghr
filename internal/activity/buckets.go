@@ -8,6 +8,23 @@ import (
 	"github.com/darkraise/ghr/internal/model"
 )
 
+// wall returns the instant of local wall-clock y-mo-d h:00 in loc, which may
+// overflow into the next day. When that wall time falls in a spring-forward
+// gap, time.Date answers with an earlier instant (23:00 the day before for a
+// missing midnight), so it steps forward to the first real instant at or
+// after the gap.
+func wall(y int, mo time.Month, d, h int, loc *time.Location) time.Time {
+	t := time.Date(y, mo, d, h, 0, 0, 0, loc)
+	want := time.Date(y, mo, d, h, 0, 0, 0, time.UTC)
+	for {
+		got := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)
+		if !got.Before(want) {
+			return t
+		}
+		t = t.Add(time.Hour)
+	}
+}
+
 // floor returns the start of the bucket holding t, in loc.
 func floor(t time.Time, kind string, loc *time.Location) time.Time {
 	t = t.In(loc)
@@ -18,9 +35,9 @@ func floor(t time.Time, kind string, loc *time.Location) time.Time {
 		// DST hours on their own local hour boundaries.
 		return t.Add(-time.Duration(t.Minute())*time.Minute - time.Duration(t.Second())*time.Second - time.Duration(t.Nanosecond()))
 	case "6h":
-		return time.Date(y, mo, d, t.Hour()/6*6, 0, 0, 0, loc)
+		return wall(y, mo, d, t.Hour()/6*6, loc)
 	default:
-		return time.Date(y, mo, d, 0, 0, 0, 0, loc)
+		return wall(y, mo, d, 0, loc)
 	}
 }
 
@@ -33,9 +50,9 @@ func next(start time.Time, kind string, loc *time.Location) time.Time {
 	case "hour":
 		return start.Add(time.Hour)
 	case "6h":
-		return time.Date(y, mo, d, start.Hour()+6, 0, 0, 0, loc)
+		return wall(y, mo, d, (start.Hour()/6+1)*6, loc)
 	default:
-		return time.Date(y, mo, d+1, 0, 0, 0, 0, loc)
+		return wall(y, mo, d+1, 0, loc)
 	}
 }
 

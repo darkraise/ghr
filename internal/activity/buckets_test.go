@@ -144,3 +144,33 @@ func TestRepoHours(t *testing.T) {
 		t.Fatalf("13:00 %+v", hrs[22])
 	}
 }
+
+func TestMidnightDaylightSavingGap(t *testing.T) {
+	scl, err := time.LoadLocation("America/Santiago") // Sep 6 2026 00:00 jumps to 01:00
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		window string
+		now    time.Time
+	}{
+		{"30d", time.Date(2026, 9, 10, 15, 0, 0, 0, time.UTC)},
+		{"30d", time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)}, // the changeover day itself
+		{"7d", time.Date(2026, 9, 7, 1, 0, 0, 0, time.UTC)},
+		{"7d", time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)},
+	} {
+		a := Build(Input{Window: c.window, Loc: scl, Now: c.now})
+		for i, b := range a.Buckets {
+			if !b.End.After(b.Start) {
+				t.Fatalf("%s at %v: bucket %d is empty: %v to %v", c.window, c.now, i, b.Start, b.End)
+			}
+			if i > 0 && !b.Start.Equal(a.Buckets[i-1].End) {
+				t.Fatalf("%s at %v: gap before bucket %d: %v then %v", c.window, c.now, i, a.Buckets[i-1].End, b.Start)
+			}
+		}
+		last := a.Buckets[len(a.Buckets)-1]
+		if c.now.Before(last.Start) || !c.now.Before(last.End) {
+			t.Fatalf("%s: open bucket %v to %v misses now %v", c.window, last.Start, last.End, c.now)
+		}
+	}
+}
