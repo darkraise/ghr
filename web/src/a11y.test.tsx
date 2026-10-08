@@ -57,3 +57,18 @@ describe("Runners accessibility", () => {
     30_000,
   )
 })
+
+describe("History accessibility", () => {
+  it(
+    "has no axe violations with a bucket picked",
+    async () => {
+      mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
+      const { user } = renderApp("/history")
+      await screen.findByText("#7")
+      await user.click(await screen.findByRole("button", { name: /^13:00 to 14:00/ }))
+      await screen.findByText("Showing 13:00 to 14:00, Oct 3")
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})

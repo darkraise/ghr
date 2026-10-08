@@ -1,5 +1,6 @@
-import { screen, waitFor } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import type { HistoryEntry } from "@/api/types"
 import { json, mockApi } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
@@ -12,64 +13,147 @@ afterEach(() => {
   else Reflect.deleteProperty(window, "isSecureContext")
 })
 
+const SINCE = "?repo=&conclusion=&since=2026-10-02T14%3A00%3A00Z&limit=500"
+const historyCalls = (calls: { path: string; search: string }[]) => calls.filter((c) => c.path === "/api/history").map((c) => c.search)
+const activityCalls = (calls: { path: string; search: string }[]) => calls.filter((c) => c.path === "/api/activity").map((c) => c.search)
+
 describe("History page", () => {
-  it("lists finished jobs, newest first as served", async () => {
-    const { calls } = mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
+  it("lists finished jobs under day headings and sums them up", async () => {
+    mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
     renderApp("/history")
     expect(await screen.findByText("build")).toBeInTheDocument()
-    expect(screen.getByText("deploy")).toBeInTheDocument()
-    expect(screen.getByText("#41")).toBeInTheDocument()
-    expect(screen.getByText("success")).toBeInTheDocument()
-    expect(screen.getByText("failure")).toBeInTheDocument()
-    expect(screen.getAllByRole("link", { name: "Open run" })).toHaveLength(1)
-    expect(calls.find((c) => c.path === "/api/history")?.search).toBe("?repo=&conclusion=&limit=500")
+    const table = within(screen.getByRole("table"))
+    const today = table.getByText("Today")
+    expect(today.tagName).toBe("TH")
+    expect(today).toHaveAttribute("scope", "rowgroup")
+    expect(table.getByText("#7")).toBeInTheDocument()
+    expect(table.getAllByText("deploy")).toHaveLength(2)
+    expect(table.getByText("#41")).toBeInTheDocument()
+    expect(table.getByText("Succeeded")).toBeInTheDocument()
+    expect(table.getByText("Failed")).toBeInTheDocument()
+    expect(screen.getByText("2 jobs, 1 failed, median 3m15s")).toBeInTheDocument()
+    expect(screen.getAllByRole("link", { name: /^Open run/ })).toHaveLength(1)
   })
 
-  it("filters by repo", async () => {
+  it("reads the table from where the chart starts", async () => {
     const { calls } = mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
-    const { user } = renderApp("/history")
+    renderApp("/history")
     await screen.findByText("build")
-    await user.click(screen.getByRole("combobox", { name: "Repo" }))
+    expect(activityCalls(calls)[0]).toBe("?window=7d&tz=UTC")
+    expect(historyCalls(calls)[0]).toBe(SINCE)
+    expect(screen.getByRole("group", { name: "Jobs per bucket for the last 24 hours" })).toBeInTheDocument()
+  })
+
+  it("filters by repository through the URL", async () => {
+    const { calls } = mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
+    const { user, router } = renderApp("/history")
+    await screen.findByText("build")
+    await user.click(screen.getByRole("combobox", { name: "Repository" }))
     await user.click(await screen.findByRole("option", { name: "darkmem" }))
-    await waitFor(() => expect(calls.some((c) => c.search === "?repo=darkmem&conclusion=&limit=500")).toBe(true))
+    await waitFor(() => expect(router.state.location.search).toEqual({ repo: "darkmem" }))
+    await waitFor(() => expect(activityCalls(calls)).toContain("?window=7d&tz=UTC&repo=darkmem"))
+    await waitFor(() => expect(historyCalls(calls)).toContain("?repo=darkmem&conclusion=&since=2026-10-02T14%3A00%3A00Z&limit=500"))
   })
 
-  it("filters by result", async () => {
+  it("filters by result, and a second click goes back to all", async () => {
     const { calls } = mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
-    const { user } = renderApp("/history")
+    const { user, router } = renderApp("/history")
     await screen.findByText("build")
-    await user.click(screen.getByRole("combobox", { name: "Result" }))
-    await user.click(await screen.findByRole("option", { name: "failure" }))
-    await waitFor(() => expect(calls.some((c) => c.search === "?repo=&conclusion=failure&limit=500")).toBe(true))
+    await user.click(screen.getByRole("radio", { name: "Failed" }))
+    await waitFor(() => expect(router.state.location.search).toEqual({ result: "failure" }))
+    await waitFor(() => expect(historyCalls(calls)).toContain("?repo=&conclusion=failure&since=2026-10-02T14%3A00%3A00Z&limit=500"))
+    await user.click(screen.getByRole("radio", { name: "Failed" }))
+    await waitFor(() => expect(router.state.location.search).toEqual({}))
+    expect(screen.getByRole("radio", { name: "All" })).toBeChecked()
   })
 
-  it("says when nothing has finished", async () => {
+  it("changes the window", async () => {
+    const { calls } = mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
+    const { user, router } = renderApp("/history")
+    await screen.findByText("build")
+    await user.click(screen.getByRole("radio", { name: "24h" }))
+    await waitFor(() => expect(router.state.location.search).toEqual({ window: "24h" }))
+    await waitFor(() => expect(activityCalls(calls)).toContain("?window=24h&tz=UTC"))
+  })
+
+  it("restores its controls from the URL", async () => {
+    const { calls } = mockApi(authedRoutes({ "GET /api/history": [] }))
+    renderApp("/history?repo=old-repo&result=failure&window=30d")
+    await waitFor(() => expect(activityCalls(calls)).toContain("?window=30d&tz=UTC&repo=old-repo"))
+    expect(screen.getByRole("radio", { name: "Failed" })).toBeChecked()
+    expect(screen.getByRole("radio", { name: "30d" })).toBeChecked()
+    expect(screen.getByRole("combobox", { name: "Repository" })).toHaveTextContent("old-repo")
+  })
+
+  it("falls back to its defaults for values it does not know", async () => {
+    const { calls } = mockApi(authedRoutes({ "GET /api/history": [] }))
+    renderApp("/history?window=2h&result=bogus")
+    await waitFor(() => expect(activityCalls(calls)).toContain("?window=7d&tz=UTC"))
+    expect(screen.getByRole("radio", { name: "All" })).toBeChecked()
+    expect(screen.getByRole("radio", { name: "7d" })).toBeChecked()
+  })
+
+  it("narrows the table to a picked bucket, by mouse or keyboard", async () => {
+    mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
+    const { user } = renderApp("/history")
+    await screen.findByText("#7")
+    const bucket = await screen.findByRole("button", { name: /^13:00 to 14:00/ })
+    await user.click(bucket)
+    expect(bucket).toHaveAttribute("aria-pressed", "true")
+    expect(await screen.findByText("Showing 13:00 to 14:00, Oct 3")).toBeInTheDocument()
+    expect(screen.getByText("#41")).toBeInTheDocument()
+    expect(screen.queryByText("#7")).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Show whole window" }))
+    expect(await screen.findByText("#7")).toBeInTheDocument()
+    bucket.focus()
+    await user.keyboard("{Enter}")
+    expect(await screen.findByText("Showing 13:00 to 14:00, Oct 3")).toBeInTheDocument()
+    await user.keyboard(" ")
+    expect(await screen.findByText("#7")).toBeInTheDocument()
+  })
+
+  it("says when the 500-job cap cut the window short", async () => {
+    const [build] = fixtures.history as [HistoryEntry]
+    const many = Array.from({ length: 500 }, (_, i) => ({ ...build, id: `h${i}` }))
+    mockApi(authedRoutes({ "GET /api/history": many }))
+    renderApp("/history")
+    expect(await screen.findByText("Showing the newest 500 jobs in this window.")).toBeInTheDocument()
+  })
+
+  it("says when nothing finished in the window", async () => {
     mockApi(authedRoutes({ "GET /api/history": [] }))
     renderApp("/history")
-    expect(await screen.findByText("no finished jobs yet")).toBeInTheDocument()
+    expect(await screen.findByText("No finished jobs in the last 7 days")).toBeInTheDocument()
+  })
+
+  it("offers to clear filters that match nothing", async () => {
+    mockApi(authedRoutes({ "GET /api/history": [] }))
+    const { user, router } = renderApp("/history?result=failure")
+    expect(await screen.findByText("No jobs match these filters")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Clear filters" }))
+    await waitFor(() => expect(router.state.location.search).toEqual({}))
   })
 
   it("shows a failed read", async () => {
     mockApi(authedRoutes({ "GET /api/history": () => json({ error: "history file unreadable" }, 500) }))
     renderApp("/history")
-    expect(await screen.findByText("history file unreadable")).toBeInTheDocument()
+    expect(within(await screen.findByRole("alert")).getByText("history file unreadable")).toBeInTheDocument()
   })
 
-  it("shows loading until the first read answers", async () => {
-    mockApi(authedRoutes({ "GET /api/history": () => new Promise(() => {}) }))
+  it("shows loading until the chart's span is known", async () => {
+    mockApi(authedRoutes({ "GET /api/activity": () => new Promise(() => {}) }))
     renderApp("/history")
-    expect(await screen.findByText("loading…")).toBeInTheDocument()
-    expect(screen.queryByText("no finished jobs yet")).toBeNull()
+    expect((await screen.findAllByText("Loading")).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/^No finished jobs/)).toBeNull()
   })
 
   it("copies a run's URL", async () => {
     mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
     const { user } = renderApp("/history")
-    // userEvent.setup() (inside renderApp) installs its own clipboard stub, so the mock goes in after it.
     Object.defineProperty(window, "isSecureContext", { value: true, configurable: true })
     const writeText = vi.fn(async () => {})
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
-    await user.click(await screen.findByRole("button", { name: "Copy URL of build #41" }))
+    await user.click(await screen.findByRole("button", { name: "Copy run URL of build #41" }))
     expect(writeText).toHaveBeenCalledWith("https://github.com/darkraise/darkmem/actions/runs/101/job/1")
     expect((await screen.findAllByText("copied run URL")).length).toBeGreaterThan(0)
   })

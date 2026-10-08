@@ -56,6 +56,8 @@ const FILES = [
   "src/lib/use-media-query.ts",
   "src/lib/use-width.ts",
   "src/pages/dashboard.tsx",
+  "src/pages/history.tsx",
+  "src/router.tsx",
   "src/pages/login.tsx",
   "src/pages/runners.tsx",
   "src/pages/setup.tsx",

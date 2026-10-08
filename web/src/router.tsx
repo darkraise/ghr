@@ -13,6 +13,7 @@ import { RootLayout } from "./components/root-layout"
 import { RouteError } from "./components/route-error"
 import type { DetailTab } from "./components/runner-panel"
 import { Shell } from "./components/shell"
+import { parseHistorySearch, type HistorySearch } from "./lib/history"
 import { loginSearch, safeRedirect } from "./lib/redirect"
 import { DashboardPage } from "./pages/dashboard"
 import { HistoryPage } from "./pages/history"
@@ -94,7 +95,19 @@ const runnerRoute = createRoute({
   }),
   component: RunnerPage,
 })
-const historyRoute = createRoute({ getParentRoute: () => appRoute, path: "/history", component: HistoryPage })
+const historyRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/history",
+  // The router lays a child's validated search over its parent's raw one, so a
+  // value the parser dropped would come back; naming the keys overrides it.
+  validateSearch: (search: Record<string, unknown>): HistorySearch => ({
+    repo: undefined,
+    result: undefined,
+    window: undefined,
+    ...parseHistorySearch(search),
+  }),
+  component: HistoryPage,
+})
 const toolchainsRoute = createRoute({ getParentRoute: () => appRoute, path: "/toolchains", component: ToolchainsPage })
 const storageRoute = createRoute({ getParentRoute: () => appRoute, path: "/storage", component: StoragePage })
 const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings", component: SettingsPage })
