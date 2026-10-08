@@ -25,7 +25,8 @@ export function useOperationToasts(storage: Storage | undefined) {
       if (o.outcome === "ok" || o.outcome === "skipped") good.push(text)
       else bad.push(text)
     }
-    const text = [...bad, ...good].join(" · ")
+    const joined = [...bad, ...good].join("; ")
+    const text = joined.charAt(0).toUpperCase() + joined.slice(1)
     if (bad.length > 0) toast.error(text)
     else toast.success(text)
   }, [storage])

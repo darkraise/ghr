@@ -121,3 +121,17 @@ describe("Toolchains accessibility", () => {
     30_000,
   )
 })
+
+describe("Storage accessibility", () => {
+  it(
+    "has no axe violations",
+    async () => {
+      mockApi(authedRoutes())
+      renderApp("/storage")
+      await screen.findByText("cleared NuGet (3.6 GB freed)")
+      await screen.findByText("Last prune: manual build-cache-all at 13:16, ok")
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})

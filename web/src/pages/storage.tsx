@@ -5,8 +5,8 @@ import { useConfig, useStatus, useStorage } from "@/api/hooks"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ErrorLine } from "@/components/page/error-line"
 import { PruneSection } from "@/components/prune-section"
-import { OperationsCard, PackageCachesCard } from "@/components/storage-cards"
 import { DiskSection } from "@/components/storage-disk"
+import { OperationsSection, PackageCachesSection } from "@/components/storage-tables"
 import { standardPrune, storageSummary } from "@/lib/storage"
 import { useOperationToasts } from "@/lib/use-operation-toasts"
 import { usePrune } from "@/lib/use-prune"
@@ -49,12 +49,8 @@ export function StoragePage() {
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
           <DiskSection storage={data} status={st} highWater={highWater} className={PLACE.disk} />
           <PruneSection storage={data} status={st} config={config.data} disabled={disabled} className={PLACE.prune} />
-          <div className={PLACE.caches}>
-            <PackageCachesCard storage={data} status={st} offline={offline} />
-          </div>
-          <div className={PLACE.operations}>
-            <OperationsCard storage={data} />
-          </div>
+          <PackageCachesSection storage={data} status={st} offline={offline} className={PLACE.caches} />
+          <OperationsSection storage={data} className={PLACE.operations} />
         </div>
       ) : (
         !storage.isError && <Spinner label="Loading" />
