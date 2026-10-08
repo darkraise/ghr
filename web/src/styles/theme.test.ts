@@ -97,3 +97,55 @@ describe("ghr palette", () => {
     expect(css).toMatch(/\.sidebar-gradient-overlay::before,\s*\.header-gradient-overlay::before,\s*main\[data-content\]::before \{\s*background: none !important;/)
   })
 })
+
+describe("ghr chrome styles", () => {
+  it("keeps the light-mode rail readable with the dark palette", () => {
+    const light = tokens("light")
+    const rail = { ...light, ...block(':root[data-mode="light"] .dr-mobile-drawer-content') }
+    const shell = light["--surface-sidebar"]
+    const checks: [string, number][] = [
+      ["--foreground", 4.5],
+      ["--muted-foreground", 4.5],
+      ["--warning", 4.5],
+      ["--destructive", 4.5],
+      ["--success", 4.5],
+      ["--primary", 3],
+    ]
+    for (const [fg, min] of checks) {
+      expect(contrast(rail[fg], shell), `${fg} on the rail`).toBeGreaterThanOrEqual(min)
+      expect(contrast(rail[fg], rail["--card"]), `${fg} on a rail card`).toBeGreaterThanOrEqual(min)
+    }
+  })
+
+  it("recomputes the kit's surface fills inside the rail", () => {
+    // bg-card paints var(--surface-card-fill), which the kit computes on
+    // <html>; without these the rail's cards stay the light-mode white.
+    const rail = block(':root[data-mode="light"] .dr-mobile-drawer-content')
+    expect(rail["--surface-card-fill"]).toBe("hsl(var(--card))")
+    expect(rail["--surface-popover-fill"]).toBe("hsl(var(--popover))")
+    expect(rail["--surface-raised-fill"]).toBe("hsl(var(--surface-raised))")
+    expect(rail["--surface-overlay-fill"]).toBe("hsl(var(--surface-overlay))")
+  })
+
+  it("hides the header bar at 768px and wider", () => {
+    expect(css).toMatch(/@media \(min-width: 768px\) \{\s*\.dr-sidebar-layout > \.dr-layout-header \{\s*display: none;/)
+  })
+
+  it("pins two radii: 6px on controls and 10px on surfaces", () => {
+    expect(block(":root[data-radius]")).toEqual({ "--radius": "10px", "--radius-button": "6px" })
+    expect(css).toMatch(/--radius-md: 6px;/)
+  })
+
+  it("stops the pulse when motion is reduced", () => {
+    expect(css).toMatch(/\.ghr-pulse \{\s*animation: ghr-pulse 1\.8s ease-out infinite;/)
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.ghr-pulse \{\s*animation: none;/)
+  })
+
+  it("draws every Lucide icon at one stroke width", () => {
+    expect(css).toMatch(/\.lucide \{\s*stroke-width: 1\.75;/)
+  })
+
+  it("appends the host to the brand label", () => {
+    expect(css).toMatch(/\.dr-brand-logo-label::after \{\s*content: var\(--ghr-host, ""\);/)
+  })
+})

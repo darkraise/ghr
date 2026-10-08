@@ -133,3 +133,186 @@
 main[data-content]::before {
   background: none !important;
 }
+
+/* The rail is dark in both modes. Kit controls inside it read the page
+   tokens, so in light mode the rail rebinds them to the dark palette over
+   the light-mode shell colour. */
+:root[data-mode="light"] .dr-sidebar-layout-aside,
+:root[data-mode="light"] .dr-mobile-drawer-content {
+  --background: 212.0 28.3% 10.4%;
+  --card: 211.8 32.1% 10.4%;
+  --popover: 211.8 32.1% 10.4%;
+  --surface-raised: 211.8 32.1% 10.4%;
+  --surface-overlay: 211.8 32.1% 10.4%;
+  --muted: 213.0 28.6% 13.7%;
+  --secondary: 213.0 28.6% 13.7%;
+  --accent: 213.0 28.6% 13.7%;
+  --surface-sunken: 213.0 28.6% 13.7%;
+  --control-well-subtle: 213.0 28.6% 13.7%;
+  --control-well-deep: 213.0 28.6% 13.7%;
+  --border: 212.5 26.1% 18.0%;
+  --input: 212.5 26.1% 18.0%;
+  --border-default: 212.5 26.1% 18.0%;
+  --border-subtle: 212.5 26.1% 14.0%;
+  --border-strong: 212.5 26.1% 22.0%;
+  --foreground: 212.0 24.6% 88.0%;
+  --card-foreground: 212.0 24.6% 88.0%;
+  --popover-foreground: 212.0 24.6% 88.0%;
+  --secondary-foreground: 212.0 24.6% 88.0%;
+  --accent-foreground: 212.0 24.6% 88.0%;
+  --muted-foreground: 214.3 12.4% 55.7%;
+  --legend: 214.3 12.4% 55.7%;
+  --primary: 188.3 62.7% 56.9%;
+  --primary-fill: 188.3 62.7% 56.9%;
+  --ring: 188.3 62.7% 56.9%;
+  --focus-ring: 188.3 62.7% 56.9%;
+  --info: 188.3 62.7% 56.9%;
+  --primary-foreground: 192.7 73.3% 8.8%;
+  --info-foreground: 192.7 73.3% 8.8%;
+  --success: 136.2 39.7% 50.6%;
+  --success-foreground: 212.7 29.7% 7.3%;
+  --destructive: 5.4 81.9% 65.3%;
+  --destructive-foreground: 212.7 29.7% 7.3%;
+  --warning: 37.7 71.6% 57.3%;
+  --warning-foreground: 212.7 29.7% 7.3%;
+  /* The kit computes these fills once on <html> from the root tokens, so
+     they must be redeclared here to pick up the rebound values above. */
+  --surface-card-fill: hsl(var(--card));
+  --surface-card-fill-opaque: hsl(var(--card));
+  --surface-popover-fill: hsl(var(--popover));
+  --surface-raised-fill: hsl(var(--surface-raised));
+  --surface-overlay-fill: hsl(var(--surface-overlay));
+  --surface-overlay-base: hsl(var(--popover));
+  --surface-overlay-border: hsl(var(--border));
+}
+
+@theme inline {
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 10px;
+}
+
+:root[data-radius] {
+  --radius: 10px;
+  --radius-button: 6px;
+}
+
+body {
+  font-variant-numeric: tabular-nums;
+}
+
+.lucide {
+  stroke-width: 1.75;
+}
+
+.dr-sidebar-nav-icon,
+.dr-sidebar-nav-icon-svg {
+  width: 16px;
+  height: 16px;
+}
+
+.dr-sidebar-nav-item.active,
+.dr-sidebar-nav-item[data-status="active"] {
+  background: hsl(var(--sidebar-hover-bg));
+  box-shadow: none;
+  font-weight: 600;
+}
+
+.dr-sidebar-nav-badge {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: hsl(var(--sidebar-foreground-muted));
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: var(--text-xs);
+}
+
+.dr-brand-logo-label {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-weight: 600;
+}
+
+.dr-brand-logo-label::after {
+  content: var(--ghr-host, "");
+  margin-left: 0.5rem;
+  color: hsl(var(--sidebar-foreground-muted));
+  font-size: var(--text-xs);
+  font-weight: 400;
+}
+
+.dr-sidebar-layout-aside[data-collapsed="true"] .ghr-rail-wide {
+  display: none;
+}
+
+.dr-layout-header {
+  border-color: hsl(var(--border));
+}
+
+/* A page's summary sentence reads at the base size, not the kit's small. */
+.dr-page-header-description {
+  font-size: var(--text-base);
+}
+
+@media (min-width: 768px) {
+  .dr-sidebar-layout > .dr-layout-header {
+    display: none;
+  }
+}
+
+::selection {
+  background: hsl(var(--primary) / 0.3);
+  color: hsl(var(--foreground));
+}
+
+input,
+textarea {
+  caret-color: hsl(var(--primary));
+}
+
+* {
+  scrollbar-color: hsl(var(--border-strong)) transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border-strong));
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground));
+}
+
+.ghr-mark {
+  outline: none;
+}
+
+.ghr-mark:focus-visible .ghr-mark-box {
+  stroke: hsl(var(--focus-ring));
+  stroke-width: 2px;
+}
+
+@keyframes ghr-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.ghr-pulse {
+  animation: ghr-pulse 1.8s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ghr-pulse {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0s !important;
+  }
+}
