@@ -18,6 +18,7 @@ const FILES = [
   "src/components/disk-breakdown.tsx",
   "src/components/event-list.tsx",
   "src/components/install-dialog.tsx",
+  "src/components/label-check-group.tsx",
   "src/components/lanes-chart.tsx",
   "src/components/log-view.tsx",
   "src/components/mode-control.tsx",

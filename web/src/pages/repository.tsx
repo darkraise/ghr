@@ -12,7 +12,7 @@ import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useStatus } from "@/api/hooks"
 import type { Config, RepoConfig, RepoPatch } from "@/api/types"
 import { ActivitySummary, RepoSummary } from "@/components/repo-summary"
-import { LabelCheckCard } from "@/components/label-check-card"
+import { LabelCheckGroup } from "@/components/label-check-group"
 import { RegistrationsCard } from "@/components/registrations-card"
 import { RejectedAlert, SaveBar } from "@/components/save-bar"
 import { TagField } from "@/components/tag-field"
@@ -260,7 +260,7 @@ function RepositoryForm({ name }: { name: string }) {
         </Card>
       </div>
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <LabelCheckCard name={name} effective={effective} degraded={degraded} degradedReason={status.data?.degraded_reason} disabled={locked} onAddLabel={addLabel} />
+        <LabelCheckGroup name={name} effective={effective} degraded={degraded} degradedReason={status.data?.degraded_reason} disabled={locked} onAddLabel={addLabel} />
         <RegistrationsCard name={name} degraded={degraded} degradedReason={status.data?.degraded_reason} disabled={locked} />
       </div>
       <SaveBar count={changed.length} saving={saving} disabled={status.isError} onSave={() => void save()} onDiscard={discard} />
