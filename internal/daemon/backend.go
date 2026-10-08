@@ -321,7 +321,8 @@ func (b *Backend) fetchSteps(ctx context.Context, id string) ([]model.Step, erro
 		}
 		steps := make([]model.Step, 0, len(j.Steps))
 		for _, s := range j.Steps {
-			steps = append(steps, model.Step{Number: s.Number, Name: s.Name, Status: s.Status, Conclusion: s.Conclusion})
+			steps = append(steps, model.Step{Number: s.Number, Name: s.Name, Status: s.Status, Conclusion: s.Conclusion,
+				StartedAt: s.StartedAt, CompletedAt: s.CompletedAt})
 		}
 		return steps, nil
 	}

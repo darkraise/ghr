@@ -127,6 +127,9 @@ type Step struct {
 	Name       string `json:"name"`
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
+	// A pending step has neither time, and a running step only StartedAt.
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 // LogChunk is the next part of a runner's _diag logs. Next is an opaque cursor

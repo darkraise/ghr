@@ -610,3 +610,20 @@ func TestRunnerLabelsDecoded(t *testing.T) {
 		t.Fatalf("runners %+v", rs)
 	}
 }
+
+func TestJobStepTimes(t *testing.T) {
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"jobs":[{"id":7,"steps":[`+
+			`{"number":1,"name":"checkout","status":"completed","conclusion":"success","started_at":"2026-10-05T12:00:00Z","completed_at":"2026-10-05T12:00:04Z"},`+
+			`{"number":2,"name":"test","status":"queued","conclusion":null,"started_at":null,"completed_at":null}]}]}`)
+	})
+	jobs, err := c.ListJobs(context.Background(), "r", 5)
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("jobs %+v err %v", jobs, err)
+	}
+	s := jobs[0].Steps
+	if len(s) != 2 || s[0].StartedAt == nil || s[0].CompletedAt == nil ||
+		!s[0].CompletedAt.Equal(time.Date(2026, 10, 5, 12, 0, 4, 0, time.UTC)) || s[1].StartedAt != nil || s[1].CompletedAt != nil {
+		t.Fatalf("steps %+v", s)
+	}
+}

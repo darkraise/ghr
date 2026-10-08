@@ -111,6 +111,13 @@ describe("type fixtures", () => {
     expect(metrics.samples).toHaveLength(3)
   })
 
+  it("steps carry their times when GitHub reports them", () => {
+    expect(steps[0]?.started_at).toBe("2026-10-03T14:01:00Z")
+    expect(steps[0]?.completed_at).toBe("2026-10-03T14:01:06Z")
+    expect(steps[1]).not.toHaveProperty("completed_at")
+    expect(steps[2]).not.toHaveProperty("started_at")
+  })
+
   it("config durations arrive as strings", () => {
     expect(config.poll_interval).toBe("10s")
     expect(config.history_retention).toBe("30d")

@@ -46,10 +46,12 @@ type Run struct {
 }
 
 type Step struct {
-	Number     int    `json:"number"`
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
+	Number      int        `json:"number"`
+	Name        string     `json:"name"`
+	Status      string     `json:"status"`
+	Conclusion  string     `json:"conclusion"`
+	StartedAt   *time.Time `json:"started_at"`
+	CompletedAt *time.Time `json:"completed_at"`
 }
 
 type Job struct {

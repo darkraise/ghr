@@ -111,6 +111,8 @@ export interface Step {
   name: string
   status: string
   conclusion: string
+  started_at?: string
+  completed_at?: string
 }
 
 export interface LogChunk {

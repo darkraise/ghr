@@ -97,8 +97,9 @@ func fixtureValues() map[string]any {
 			Next: "Worker_1.log:96;Runner_1.log:52",
 		},
 		"steps": []model.Step{
-			{Number: 1, Name: "Set up job", Status: "completed", Conclusion: "success"},
-			{Number: 2, Name: "Run tests", Status: "in_progress"},
+			{Number: 1, Name: "Set up job", Status: "completed", Conclusion: "success",
+				StartedAt: ptr(at(-4 * time.Minute)), CompletedAt: ptr(at(-4*time.Minute + 6*time.Second))},
+			{Number: 2, Name: "Run tests", Status: "in_progress", StartedAt: ptr(at(-4*time.Minute + 6*time.Second))},
 			{Number: 3, Name: "Post checkout", Status: "queued"},
 		},
 		"containers": []model.Container{{ID: "c0ffee12", Name: "ghr-aaaaaa-db-1", Image: "postgres:17", State: "running", Project: "ghr-aaaaaa"}},

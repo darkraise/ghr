@@ -1016,3 +1016,19 @@ func TestActivityForOneRepo(t *testing.T) {
 		t.Fatalf("another repo shared the cache entry: %+v", other.Repos)
 	}
 }
+
+func TestRunnerStepsCarryTimes(t *testing.T) {
+	b, m, gh := newBackend(t)
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa"}}
+	start := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	end := start.Add(4 * time.Second)
+	gh.jobs = map[int64][]github.Job{55: {{RunnerName: "ghr-darkcloud-aaaaaa", Steps: []github.Step{
+		{Number: 1, Name: "checkout", Status: "completed", Conclusion: "success", StartedAt: &start, CompletedAt: &end},
+		{Number: 2, Name: "test", Status: "queued"},
+	}}}}
+	s, err := b.RunnerSteps(context.Background(), "aaaaaa")
+	if err != nil || len(s) != 2 || s[0].StartedAt == nil || !s[0].StartedAt.Equal(start) || s[0].CompletedAt == nil ||
+		!s[0].CompletedAt.Equal(end) || s[1].StartedAt != nil || s[1].CompletedAt != nil {
+		t.Fatalf("steps %+v err %v", s, err)
+	}
+}

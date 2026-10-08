@@ -3,13 +3,16 @@
     "number": 1,
     "name": "Set up job",
     "status": "completed",
-    "conclusion": "success"
+    "conclusion": "success",
+    "started_at": "2026-10-03T14:01:00Z",
+    "completed_at": "2026-10-03T14:01:06Z"
   },
   {
     "number": 2,
     "name": "Run tests",
     "status": "in_progress",
-    "conclusion": ""
+    "conclusion": "",
+    "started_at": "2026-10-03T14:01:06Z"
   },
   {
     "number": 3,
