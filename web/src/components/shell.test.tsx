@@ -43,6 +43,12 @@ describe("shell", () => {
     await waitFor(() => expect(screen.queryByText(/Daemon unreachable/)).toBeNull(), { timeout: 3000 })
   })
 
+  it("reads a rate-limited status failure as one sentence in the banner", async () => {
+    mockApi(authedRoutes({ "GET /api/status": () => json({ error: "GitHub rate limit", retry_at: "2026-10-06T14:20:00Z" }, 429) }))
+    renderApp("/")
+    expect(await screen.findByText("Daemon unreachable: GitHub rate limit. Retry after 14:20. Retrying.")).toBeInTheDocument()
+  })
+
   it("shows why the daemon is degraded", async () => {
     mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, degraded: true, degraded_reason: "GitHub rejected the token" } }))
     renderApp("/")

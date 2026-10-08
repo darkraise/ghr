@@ -32,6 +32,7 @@ const FILES = [
   "src/lib/activity-view.ts",
   "src/lib/capacity.ts",
   "src/lib/disk.ts",
+  "src/lib/draft.ts",
   "src/lib/format.ts",
   "src/lib/status.ts",
   "src/lib/summary.ts",
@@ -41,6 +42,7 @@ const FILES = [
   "src/pages/dashboard.tsx",
   "src/pages/login.tsx",
   "src/pages/setup.tsx",
+  "src/query.ts",
   "src/styles/ghr-theme.css",
   "src/theme.config.ts",
 ]

@@ -24,5 +24,5 @@ export function rejected(message: string): { lines: string[]; more: number } {
 }
 
 export function unsavedText(n: number): string {
-  return n === 1 ? "● 1 unsaved change" : `● ${n} unsaved changes`
+  return n === 1 ? "1 unsaved change" : `${n} unsaved changes`
 }

@@ -49,7 +49,7 @@ describe("Settings page", () => {
     await user.clear(screen.getByLabelText("Memory max"))
     await user.type(screen.getByLabelText("Memory max"), "8G")
     await user.type(screen.getByRole("textbox", { name: "Global labels" }), "gpu{Enter}")
-    expect(screen.getByText("● 4 unsaved changes")).toBeInTheDocument()
+    expect(screen.getByText("4 unsaved changes")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true))
     expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({

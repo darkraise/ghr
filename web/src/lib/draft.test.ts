@@ -37,7 +37,7 @@ describe("rejected", () => {
 
 describe("unsavedText", () => {
   it("counts the changes", () => {
-    expect(unsavedText(1)).toBe("● 1 unsaved change")
-    expect(unsavedText(4)).toBe("● 4 unsaved changes")
+    expect(unsavedText(1)).toBe("1 unsaved change")
+    expect(unsavedText(4)).toBe("4 unsaved changes")
   })
 })

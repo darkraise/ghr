@@ -85,7 +85,7 @@ describe("App", () => {
     const poll = await screen.findByLabelText("Poll interval")
     await user.clear(poll)
     await user.type(poll, "15s")
-    expect(await screen.findByText("● 1 unsaved change")).toBeInTheDocument()
+    expect(await screen.findByText("1 unsaved change")).toBeInTheDocument()
     expired = true
     await act(async () => {
       await api.status().catch(() => undefined)
@@ -96,9 +96,10 @@ describe("App", () => {
 })
 
 describe("errorText", () => {
-  it("adds the retry time of a rate-limited request", () => {
+  it("adds the retry time of a rate-limited request as its own sentence", () => {
     const err = new ApiError(429, "GitHub rate limit; API calls are paused", new Date("2026-10-06T14:20:00Z"))
-    expect(errorText(err)).toBe("GitHub rate limit; API calls are paused — retry after 14:20")
+    expect(errorText(err)).toBe("GitHub rate limit; API calls are paused. Retry after 14:20")
+    expect(errorText(new ApiError(429, "Paused.", new Date("2026-10-06T14:20:00Z")))).toBe("Paused. Retry after 14:20")
   })
   it("passes other errors through", () => {
     expect(errorText(new Error("boom"))).toBe("boom")

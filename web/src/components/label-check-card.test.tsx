@@ -44,7 +44,7 @@ describe("Workflow labels card", () => {
     ).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "+ add big" }))
     expect(screen.getByRole("button", { name: "Remove big" })).toBeInTheDocument()
-    expect(screen.getByText("● 1 unsaved change")).toBeInTheDocument()
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
     expect(calls.some((c) => c.method !== "GET")).toBe(false)
   })
 

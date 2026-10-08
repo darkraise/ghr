@@ -3,9 +3,12 @@ import { toast } from "darkraise-ui/components/sonner"
 import { ApiError } from "./api/client"
 import { hhmm } from "./lib/format"
 
+// The retry time is its own sentence, so callers can end the text with their
+// own punctuation ("…. Retrying.") without doubling a period.
 export function errorText(err: unknown): string {
-  if (err instanceof ApiError && err.retryAt) return `${err.message} — retry after ${hhmm(err.retryAt)}`
-  return err instanceof Error ? err.message : String(err)
+  const text = err instanceof Error ? err.message : String(err)
+  if (err instanceof ApiError && err.retryAt) return `${text.replace(/\.$/, "")}. Retry after ${hhmm(err.retryAt)}`
+  return text
 }
 
 // Polls do not retry: the next poll is the retry. A failed

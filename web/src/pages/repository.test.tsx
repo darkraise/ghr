@@ -41,11 +41,11 @@ describe("repository page", () => {
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     await user.type(max, "3")
-    expect(screen.getByText("● 1 unsaved change")).toBeInTheDocument()
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     expect((await screen.findAllByText("Repositories saved")).length).toBeGreaterThan(0)
     expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ repos: { darkmem: { max: 3 } } })
-    await waitFor(() => expect(screen.queryByText("● 1 unsaved change")).toBeNull())
+    await waitFor(() => expect(screen.queryByText("1 unsaved change")).toBeNull())
     expect(screen.queryByText(/daemon did not apply/)).toBeNull()
   })
 
@@ -105,7 +105,7 @@ describe("repository page", () => {
     expect(screen.getByText("✖ darkmem: needs at least one label in labels or repo labels")).toBeInTheDocument()
     expect(screen.getByText("… and 1 more")).toBeInTheDocument()
     expect((await screen.findAllByText("repositories not saved")).length).toBeGreaterThan(0)
-    expect(screen.getByText("● 1 unsaved change")).toBeInTheDocument()
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
   })
 
   it("blocks a save while warm exceeds max", async () => {
@@ -147,7 +147,7 @@ describe("repository page", () => {
     await user.type(max, "5")
     await user.click(screen.getByRole("button", { name: "Discard" }))
     expect(screen.getByLabelText("Max")).toHaveValue(2)
-    expect(screen.queryByText("● 1 unsaved change")).toBeNull()
+    expect(screen.queryByText("1 unsaved change")).toBeNull()
   })
 
   it("asks before leaving with unsaved edits", async () => {
