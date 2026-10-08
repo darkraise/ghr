@@ -47,6 +47,7 @@ const FILES = [
   "src/lib/disk.ts",
   "src/lib/draft.ts",
   "src/lib/format.ts",
+  "src/lib/history.ts",
   "src/lib/status.ts",
   "src/lib/steps.ts",
   "src/lib/summary.ts",
