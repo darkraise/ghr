@@ -3,6 +3,7 @@ import { screen, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import type { Status } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
+import { setViewport } from "@/test/media"
 import { renderRoutes } from "@/test/routes"
 import { RunnerList } from "./runner-list"
 
@@ -46,7 +47,18 @@ describe("RunnerList", () => {
     expect(await link("bbbbbb")).toHaveAttribute("tabindex", "-1")
   })
 
+  it("only moves focus with the arrow keys below 1024px", async () => {
+    setViewport(390)
+    const { router, user } = draw()
+    const first = await link("aaaaaa")
+    first.focus()
+    await user.keyboard("{ArrowDown}")
+    expect(document.activeElement).toBe(await link("bbbbbb"))
+    expect(router.state.location.pathname).toBe("/runners/aaaaaa")
+  })
+
   it("moves with the arrow, Home and End keys without adding history", async () => {
+    setViewport(1280)
     const { router, user } = draw()
     const first = await link("aaaaaa")
     first.focus()

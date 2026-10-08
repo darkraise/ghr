@@ -138,7 +138,9 @@ export function appendLog(prev: LogTail, chunk: LogChunk): LogTail {
   return { text: text.length > MAX_LOG ? text.slice(-MAX_LOG) : text, next: chunk.next }
 }
 
-export function useLogTail(id: string, enabled: boolean) {
+// A runner that has ended writes no more log, so the caller stops the polling
+// with poll=false while the text already read stays on screen.
+export function useLogTail(id: string, enabled: boolean, poll = true) {
   const queryClient = useQueryClient()
   const key = keys.log(id)
   return useQuery({
@@ -148,7 +150,7 @@ export function useLogTail(id: string, enabled: boolean) {
       return appendLog(prev, await api.log(id, prev.next, signal))
     },
     enabled,
-    refetchInterval: enabled ? POLL_FAST : false,
+    refetchInterval: enabled && poll ? POLL_FAST : false,
   })
 }
 

@@ -114,7 +114,7 @@ export function RunnerPanel({ id, tab, backLink }: { id: string; tab: DetailTab;
 
   const steps = useSteps(id, live)
   const containers = useContainers(id, live)
-  const log = useLogTail(id, tab === "log")
+  const log = useLogTail(id, tab === "log", live)
 
   const inst = current ?? kept
   const job = inst?.job
@@ -188,7 +188,11 @@ export function RunnerPanel({ id, tab, backLink }: { id: string; tab: DetailTab;
             <Label htmlFor="follow">Follow</Label>
           </div>
           {log.isError && <ErrorLine>{errorText(log.error)}</ErrorLine>}
-          <LogView text={log.data?.text ?? ""} follow={follow} onFollowChange={setFollow} className="h-[calc(100vh-24rem)] min-h-64" />
+          {log.data ? (
+            <LogView text={log.data.text} follow={follow} onFollowChange={setFollow} className="h-[calc(100vh-24rem)] min-h-64" />
+          ) : (
+            !log.isError && <Spinner label="Loading" />
+          )}
         </TabsContent>
         <TabsContent value="containers">
           <Containers containers={containers} />

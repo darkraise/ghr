@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import type { Activity, ActivityBucket } from "@/api/types"
@@ -115,6 +115,16 @@ describe("BucketsChart", () => {
     await user.keyboard(" ")
     expect(onPick).toHaveBeenCalledTimes(3)
     expect(onPick.mock.calls[0]?.[0].start).toBe("2026-10-03T13:00:00Z")
+  })
+
+  it("ignores the repeats of a held key", () => {
+    const onPick = vi.fn<(b: ActivityBucket) => void>()
+    draw({}, { tracks: "jobs", onPick })
+    const first = screen.getAllByRole("button")[0] as HTMLElement
+    fireEvent.keyDown(first, { key: "Enter" })
+    fireEvent.keyDown(first, { key: "Enter", repeat: true })
+    fireEvent.keyDown(first, { key: " ", repeat: true })
+    expect(onPick).toHaveBeenCalledTimes(1)
   })
 
   it("keeps image buckets without onPick", () => {

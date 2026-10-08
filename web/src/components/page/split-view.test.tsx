@@ -1,4 +1,5 @@
-import { act, render, renderHook, screen } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react"
+import { useState } from "react"
 import { describe, expect, it } from "vitest"
 import { useMediaQuery, WIDE, WIDEST } from "@/lib/use-media-query"
 import { setViewport } from "@/test/media"
@@ -37,6 +38,21 @@ describe("SplitView", () => {
     render(view(null))
     expect(screen.getByText("list")).toBeInTheDocument()
     expect(screen.queryByText("narrow")).toBeNull()
+  })
+
+  it("keeps a child's state when the width crosses 1024px", () => {
+    function Counter() {
+      const [n, setN] = useState(0)
+      return <button onClick={() => setN(n + 1)}>{`count ${n}`}</button>
+    }
+    const media = setViewport(390)
+    render(<SplitView list={<p>list</p>} panel={<Counter />} narrow={<Counter />} />)
+    fireEvent.click(screen.getByRole("button", { name: "count 0" }))
+    expect(screen.getByRole("button", { name: "count 1" })).toBeInTheDocument()
+    act(() => media.resize(1280))
+    expect(screen.getByRole("button", { name: "count 1" })).toBeInTheDocument()
+    act(() => media.resize(390))
+    expect(screen.getByRole("button", { name: "count 1" })).toBeInTheDocument()
   })
 
   it("follows the width when it changes", () => {

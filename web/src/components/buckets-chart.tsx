@@ -164,7 +164,8 @@ export function BucketsChart({
             onKeyDown={
               onPick
                 ? (e) => {
-                    if (e.key === "Enter" || e.key === " ") {
+                    // A held key repeats keydown, which would toggle the pick on and off.
+                    if (!e.repeat && (e.key === "Enter" || e.key === " ")) {
                       e.preventDefault()
                       onPick(b)
                     }

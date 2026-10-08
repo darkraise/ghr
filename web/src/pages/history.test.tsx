@@ -55,6 +55,35 @@ describe("History page", () => {
     await waitFor(() => expect(historyCalls(calls)).toContain("?repo=darkmem&conclusion=&since=2026-10-02T14%3A00%3A00Z&limit=500"))
   })
 
+  it("hides the previous filter's rows while the next ones load", { timeout: 10_000 }, async () => {
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    let reads = 0
+    mockApi(
+      authedRoutes({
+        "GET /api/history": async () => {
+          reads += 1
+          if (reads > 1) await gate
+          return fixtures.history
+        },
+      }),
+    )
+    const { user } = renderApp("/history")
+    await screen.findByText("#7")
+    await user.click(screen.getByRole("combobox", { name: "Repository" }))
+    await user.click(await screen.findByRole("option", { name: "darkmem" }))
+    await waitFor(() => expect(screen.queryByText("#7")).toBeNull())
+    expect(screen.queryByText("2 jobs, 1 failed, median 3m15s")).toBeNull()
+    release()
+    expect(await screen.findByText("#7")).toBeInTheDocument()
+  })
+
+  it("says the table waits for the chart when the chart cannot load", async () => {
+    mockApi(authedRoutes({ "GET /api/activity": () => json({ error: "activity unavailable" }, 500) }))
+    renderApp("/history")
+    expect(await screen.findByText("The table loads once the chart does.")).toBeInTheDocument()
+  })
+
   it("filters by result, and a second click goes back to all", async () => {
     const { calls } = mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
     const { user, router } = renderApp("/history")

@@ -66,6 +66,33 @@ describe("RunnerPanel", () => {
     await waitFor(() => expect(screen.getByRole("switch", { name: "Follow" })).toHaveAttribute("aria-checked", "false"))
   })
 
+  it("does not claim an empty log while it loads", async () => {
+    mockApi(routes({ "GET /api/runners/aaaaaa/log": () => new Promise(() => {}) }))
+    draw("/runners/aaaaaa?tab=log")
+    expect((await screen.findAllByText("Loading")).length).toBeGreaterThan(0)
+    expect(screen.queryByText("No log output yet")).toBeNull()
+  })
+
+  it("stops polling a finished runner's log and keeps what it read", { timeout: 15_000 }, async () => {
+    let gone = false
+    const { calls } = mockApi(
+      routes({
+        "GET /api/status": () =>
+          gone ? { ...fixtures.status, instances: fixtures.status.instances.filter((i) => i.id !== "aaaaaa") } : fixtures.status,
+      }),
+    )
+    draw("/runners/aaaaaa?tab=log")
+    await screen.findByText(/Listening for Jobs/)
+    gone = true
+    await screen.findByText("This runner has finished")
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    const logCalls = () => calls.filter((c) => c.path === "/api/runners/aaaaaa/log").length
+    const before = logCalls()
+    await new Promise((resolve) => setTimeout(resolve, 2500))
+    expect(logCalls()).toBe(before)
+    expect(screen.getByText(/Listening for Jobs/)).toBeInTheDocument()
+  })
+
   it("lists the containers with their project", async () => {
     mockApi(routes())
     draw("/runners/aaaaaa?tab=containers")

@@ -5,6 +5,7 @@ import type { Status } from "@/api/types"
 import type { DetailTab } from "@/components/runner-panel"
 import { elapsed } from "@/lib/format"
 import { waitingRepos } from "@/lib/status"
+import { useMediaQuery, WIDE } from "@/lib/use-media-query"
 
 // The light shows capacity like the shell's bar: busy pulses, warm is an
 // outline, starting is faint.
@@ -28,6 +29,7 @@ export function RunnerList({
   now: number
 }) {
   const navigate = useNavigate()
+  const wide = useMediaQuery(WIDE)
   const links = useRef(new Map<string, HTMLAnchorElement>())
   if (!status) return <Spinner label="Waiting for the daemon" />
 
@@ -46,7 +48,8 @@ export function RunnerList({
   const tabbable = selected !== undefined && ids.includes(selected) ? selected : ids[0]
 
   // Arrowing replaces the URL, so Back leaves the page instead of walking
-  // through every runner passed on the way.
+  // through every runner passed on the way. Below the split width the list
+  // and a runner's panel are separate screens, so there arrows only move focus.
   function onKeyDown(e: KeyboardEvent<HTMLUListElement>) {
     const at = ids.indexOf((document.activeElement as HTMLElement | null)?.dataset.runner ?? "")
     let next: number
@@ -59,7 +62,7 @@ export function RunnerList({
     const id = ids[next]
     if (id === undefined) return
     links.current.get(id)?.focus()
-    void navigate({ to: "/runners/$id", params: { id }, search: { tab }, replace: true })
+    if (wide) void navigate({ to: "/runners/$id", params: { id }, search: { tab }, replace: true })
   }
 
   return (

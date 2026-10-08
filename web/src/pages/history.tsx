@@ -116,20 +116,23 @@ export function HistoryPage() {
   const navigate = useNavigate()
   const repo = search.repo ?? ""
   const result: HistoryResult | "" = search.result ?? ""
-  const window: HistoryWindow = search.window ?? "7d"
+  const span: HistoryWindow = search.window ?? "7d"
   const config = useConfig()
-  const activity = useActivity(window, repo)
+  const activity = useActivity(span, repo)
   // The table covers what the chart covers: it waits for this window's
   // response and starts at its from.
   const since = activity.data && !activity.isPlaceholderData ? activity.data.from : undefined
   const history = useHistory(repo, result, since)
+  // Rows kept from the previous filter while the next ones load would sit
+  // under the wrong controls.
+  const settled = history.isPlaceholderData ? undefined : history.data
   const now = useNow()
   const [ref, width] = useWidth<HTMLDivElement>(960)
   const [pick, setPick] = useState<ActivityBucket | null>(null)
 
   function update(next: { repo?: string; result?: HistoryResult | ""; window?: HistoryWindow }) {
     setPick(null)
-    const merged = { repo, result, window, ...next }
+    const merged = { repo, result, window: span, ...next }
     const out: HistorySearch = {}
     if (merged.repo) out.repo = merged.repo
     if (merged.result) out.result = merged.result
@@ -139,17 +142,20 @@ export function HistoryPage() {
 
   const names = (config.data?.repos ?? []).map((r) => r.name)
   const repos = repo && !names.includes(repo) ? [...names, repo] : names
-  const all = history.data ?? []
-  const rows = pick ? inBucket(all, pick) : all
+  const all = settled ?? []
+  // A picked bucket that has rolled out of the window no longer filters.
+  const picked = pick && activity.data?.buckets.some((b) => b.start === pick.start) ? pick : null
+  const rows = picked ? inBucket(all, picked) : all
   const groups = groupByDay(rows, now)
   const longest = Math.max(1, ...rows.map(took))
   const filtered = repo !== "" || result !== ""
 
   let body
   if (history.isError) body = <ErrorLine>{errorText(history.error)}</ErrorLine>
-  else if (!history.data) body = activity.isError ? null : <Spinner label="Loading" />
-  else if (rows.length === 0) {
-    body = pick ? (
+  else if (!settled) {
+    body = activity.isError ? <p className="text-sm text-muted-foreground">The table loads once the chart does.</p> : <Spinner label="Loading" />
+  } else if (rows.length === 0) {
+    body = picked ? (
       <p className="text-sm text-muted-foreground">No jobs finished in this span.</p>
     ) : filtered ? (
       <div className="flex flex-col items-start gap-2">
@@ -159,7 +165,7 @@ export function HistoryPage() {
         </Button>
       </div>
     ) : (
-      <p className="text-sm text-muted-foreground">{`No finished jobs in ${windowWords(window)}`}</p>
+      <p className="text-sm text-muted-foreground">{`No finished jobs in ${windowWords(span)}`}</p>
     )
   } else {
     body = (
@@ -197,7 +203,7 @@ export function HistoryPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader title="History" description={history.data ? historySummary(rows) : undefined} />
+      <PageHeader title="History" description={settled ? historySummary(rows) : undefined} />
       <div className="flex flex-wrap items-center gap-3">
         <Select value={repo || ALL} onValueChange={(v) => update({ repo: v === ALL ? "" : v })}>
           <SelectTrigger aria-label="Repository" className="w-52">
@@ -228,7 +234,7 @@ export function HistoryPage() {
           ))}
         </ToggleGroup>
         <div className="ml-auto">
-          <WindowControl value={window} onChange={(w) => update({ window: w })} options={HISTORY_WINDOWS} />
+          <WindowControl value={span} onChange={(w) => update({ window: w })} options={HISTORY_WINDOWS} />
         </div>
       </div>
       <Section title="Jobs" aside={<Legend />}>
@@ -240,7 +246,7 @@ export function HistoryPage() {
               now={now}
               width={width}
               tracks="jobs"
-              picked={pick?.start ?? null}
+              picked={picked?.start ?? null}
               onPick={(b) => setPick((p) => (p?.start === b.start ? null : b))}
             />
           ) : (
@@ -249,9 +255,9 @@ export function HistoryPage() {
         </div>
       </Section>
       <Section title="Finished jobs">
-        {pick && (
+        {picked && (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-            <span>{pickText(pick)}</span>
+            <span>{pickText(picked)}</span>
             <Button size="sm" variant="outline" onClick={() => setPick(null)}>
               Show whole window
             </Button>
