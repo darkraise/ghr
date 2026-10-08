@@ -269,11 +269,12 @@ func (d Docker) RemoveVolumesByLabel(ctx context.Context, label string) error {
 }
 
 // DiskUsage is the data-root filesystem's use: the percentage as df rounds
-// it, and bytes.
+// it, bytes, and the data root path.
 type DiskUsage struct {
 	Pct   int
 	Used  int64
 	Total int64
+	Root  string
 }
 
 // DataRootUsage returns the used percentage of the filesystem holding Docker's data root.
@@ -283,13 +284,14 @@ func (d Docker) DataRootUsage(ctx context.Context) (int, error) {
 }
 
 // DataRootBytes returns the used percentage, used bytes and size of the
-// filesystem holding Docker's data root.
+// filesystem holding Docker's data root, and the data root path.
 func (d Docker) DataRootBytes(ctx context.Context) (DiskUsage, error) {
-	root, err := d.Run(ctx, "docker", "info", "--format", "{{.DockerRootDir}}")
+	out, err := d.Run(ctx, "docker", "info", "--format", "{{.DockerRootDir}}")
 	if err != nil {
 		return DiskUsage{}, err
 	}
-	out, err := d.Run(ctx, "df", "-B1", "--output=pcent,used,size", strings.TrimSpace(string(root)))
+	root := strings.TrimSpace(string(out))
+	out, err = d.Run(ctx, "df", "-B1", "--output=pcent,used,size", root)
 	if err != nil {
 		return DiskUsage{}, err
 	}
@@ -307,7 +309,7 @@ func (d Docker) DataRootBytes(ctx context.Context) (DiskUsage, error) {
 	if err1 != nil || err2 != nil || err3 != nil {
 		return DiskUsage{}, fmt.Errorf("unexpected df output %q", out)
 	}
-	return DiskUsage{Pct: pct, Used: used, Total: total}, nil
+	return DiskUsage{Pct: pct, Used: used, Total: total, Root: root}, nil
 }
 
 func (d Docker) PruneBuildCacheOlderThan(ctx context.Context, hours int) (string, error) {

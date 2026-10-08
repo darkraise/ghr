@@ -443,7 +443,7 @@ func (m *Manager) Status() model.Status {
 		Now: m.Now(), Epoch: m.epoch, Mode: cfg.Mode, GlobalMax: cfg.GlobalMax,
 		Degraded: m.degraded, DegradedReason: m.degradedReason,
 		RateRemaining: m.GH.RateRemaining(),
-		DiskPct:       m.disk.Pct, DiskUsedBytes: m.disk.Used, DiskTotalBytes: m.disk.Total,
+		DiskPct:       m.disk.Pct, DiskUsedBytes: m.disk.Used, DiskTotalBytes: m.disk.Total, DiskRoot: m.disk.Root,
 		Repos: []model.RepoStatus{}, Instances: []model.InstanceStatus{},
 		Maintenance: m.maint, RunnerUpdate: m.runnerUpdate(),
 	}

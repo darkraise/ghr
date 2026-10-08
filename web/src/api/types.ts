@@ -80,6 +80,7 @@ export interface Status {
   disk_pct: number
   disk_used_bytes: number
   disk_total_bytes: number
+  disk_root?: string
   repos: RepoStatus[]
   instances: InstanceStatus[]
   maintenance: MaintenanceStatus

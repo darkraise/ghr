@@ -9,6 +9,7 @@
   "disk_pct": 61,
   "disk_used_bytes": 146000000000,
   "disk_total_bytes": 240000000000,
+  "disk_root": "/var/lib/docker",
   "repos": [
     {
       "name": "darkmem",

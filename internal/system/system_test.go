@@ -125,7 +125,7 @@ func TestDockerParsing(t *testing.T) {
 		t.Fatalf("pct = %d err = %v", pct, err)
 	}
 	du, err := d.DataRootBytes(ctx)
-	if err != nil || du != (DiskUsage{Pct: 81, Used: 81000000000, Total: 100000000000}) {
+	if err != nil || du != (DiskUsage{Pct: 81, Used: 81000000000, Total: 100000000000, Root: "/var/lib/docker"}) {
 		t.Fatalf("bytes = %+v err = %v", du, err)
 	}
 	freed, err := d.PruneBuildCacheTo(ctx, "20GB")

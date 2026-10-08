@@ -59,6 +59,8 @@ describe("type fixtures", () => {
     expect(status.rate_limit).toBe(5000)
     expect(status.disk_used_bytes).toBe(146_000_000_000)
     expect(status.disk_total_bytes).toBe(240_000_000_000)
+    expect(status.disk_root).toBe("/var/lib/docker")
+    expect(degraded).not.toHaveProperty("disk_root")
     expect(status.repos[0]?.oldest_queued_at).toBe("2026-10-03T14:02:00Z")
     expect(degraded).not.toHaveProperty("rate_limit")
     expect(degraded.disk_used_bytes).toBe(0)

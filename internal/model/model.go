@@ -16,12 +16,14 @@ type Status struct {
 	RateLimit int `json:"rate_limit,omitempty"`
 	DiskPct   int `json:"disk_pct"`
 	// DiskUsedBytes and DiskTotalBytes are 0 until the first measurement.
-	DiskUsedBytes  int64             `json:"disk_used_bytes"`
-	DiskTotalBytes int64             `json:"disk_total_bytes"`
-	Repos          []RepoStatus      `json:"repos"`
-	Instances      []InstanceStatus  `json:"instances"`
-	Maintenance    MaintenanceStatus `json:"maintenance"`
-	RunnerUpdate   RunnerUpdate      `json:"runner_update"`
+	DiskUsedBytes  int64 `json:"disk_used_bytes"`
+	DiskTotalBytes int64 `json:"disk_total_bytes"`
+	// DiskRoot is Docker's data root path, empty until measured in bytes.
+	DiskRoot     string            `json:"disk_root,omitempty"`
+	Repos        []RepoStatus      `json:"repos"`
+	Instances    []InstanceStatus  `json:"instances"`
+	Maintenance  MaintenanceStatus `json:"maintenance"`
+	RunnerUpdate RunnerUpdate      `json:"runner_update"`
 	// WebSetupRequired is true while the web UI listens with no password set.
 	WebSetupRequired bool `json:"web_setup_required"`
 	// Unconfigured is true while ghr has no owner or token; an older daemon

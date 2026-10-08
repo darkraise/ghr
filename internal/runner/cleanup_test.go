@@ -354,20 +354,20 @@ type bytesDocker struct{ *fakeDocker }
 
 func (b bytesDocker) DataRootBytes(ctx context.Context) (system.DiskUsage, error) {
 	pct, err := b.DataRootUsage(ctx)
-	return system.DiskUsage{Pct: pct, Used: int64(pct) * 1_000_000_000, Total: 100_000_000_000}, err
+	return system.DiskUsage{Pct: pct, Used: int64(pct) * 1_000_000_000, Total: 100_000_000_000, Root: "/var/lib/docker"}, err
 }
 
 func TestStatusCarriesDiskBytes(t *testing.T) {
 	h := newHarness(t)
 	h.docker.usage = []int{61}
 	h.m.checkDisk(context.Background(), h.cfg)
-	if st := h.m.Status(); st.DiskPct != 61 || st.DiskUsedBytes != 0 || st.DiskTotalBytes != 0 {
-		t.Fatalf("percent-only docker: %d %d %d", st.DiskPct, st.DiskUsedBytes, st.DiskTotalBytes)
+	if st := h.m.Status(); st.DiskPct != 61 || st.DiskUsedBytes != 0 || st.DiskTotalBytes != 0 || st.DiskRoot != "" {
+		t.Fatalf("percent-only docker: %d %d %d %q", st.DiskPct, st.DiskUsedBytes, st.DiskTotalBytes, st.DiskRoot)
 	}
 	h.m.Docker = bytesDocker{h.docker}
 	h.docker.usage = []int{62}
 	h.m.checkDisk(context.Background(), h.cfg)
-	if st := h.m.Status(); st.DiskPct != 62 || st.DiskUsedBytes != 62_000_000_000 || st.DiskTotalBytes != 100_000_000_000 {
-		t.Fatalf("bytes docker: %d %d %d", st.DiskPct, st.DiskUsedBytes, st.DiskTotalBytes)
+	if st := h.m.Status(); st.DiskPct != 62 || st.DiskUsedBytes != 62_000_000_000 || st.DiskTotalBytes != 100_000_000_000 || st.DiskRoot != "/var/lib/docker" {
+		t.Fatalf("bytes docker: %d %d %d %q", st.DiskPct, st.DiskUsedBytes, st.DiskTotalBytes, st.DiskRoot)
 	}
 }
