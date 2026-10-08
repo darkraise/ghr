@@ -3,6 +3,15 @@
    values are HSL triplets because the kit reads them as hsl(var(--token));
    --chart-* and --sf-hue* are whole colours. */
 
+/* The kit declares its fonts in @theme inline, which Tailwind folds into the
+   utilities at build time; redeclaring them here is what reaches font-mono
+   and every @apply font-sans in the kit's own CSS. */
+@theme inline {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 :root {
   --shadow-card: none !important;
   --shadow-dropdown: none !important;
