@@ -135,3 +135,18 @@ describe("Storage accessibility", () => {
     30_000,
   )
 })
+
+describe("Settings accessibility", () => {
+  it(
+    "has no axe violations at 1280px",
+    async () => {
+      setViewport(1280)
+      mockApi(authedRoutes({ "GET /api/token": fixtures.token }))
+      renderApp("/settings")
+      await screen.findByRole("navigation", { name: "Sections" })
+      await screen.findByText("4,980 of 5,000, resets 14:45")
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})

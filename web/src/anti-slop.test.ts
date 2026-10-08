@@ -10,6 +10,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 // each page it redesigns, until this list is all of src.
 const FILES = [
   "public/theme-init.js",
+  "src/components/account-section.tsx",
   "src/components/activity-panel.tsx",
   "src/components/add-repo-dialog.tsx",
   "src/components/brand.tsx",
@@ -85,6 +86,7 @@ const FILES = [
   "src/pages/repositories.tsx",
   "src/pages/repository.tsx",
   "src/pages/runners.tsx",
+  "src/pages/settings.tsx",
   "src/pages/setup.tsx",
   "src/pages/storage.tsx",
   "src/pages/toolchains.tsx",

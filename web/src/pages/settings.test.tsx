@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { Config } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
+import { setViewport } from "@/test/media"
 import { renderApp } from "@/test/render"
 
 function routes(over: Record<string, unknown> = {}) {
@@ -265,5 +266,97 @@ describe("Settings page", () => {
     await user.type(poll, "15s")
     expect(within(screen.getByRole("region", { name: "Timing" })).getByText("Changed")).toHaveClass("text-warning")
     expect(screen.queryByText("●")).toBeNull()
+  })
+})
+
+describe("Settings page layout", () => {
+  it("sums up the config in the header", async () => {
+    mockApi(routes())
+    renderApp("/settings")
+    expect(await screen.findByText("Serving darkraise in queue mode")).toBeInTheDocument()
+  })
+
+  it("indexes every section at 1280px", async () => {
+    setViewport(1280)
+    mockApi(routes())
+    renderApp("/settings")
+    const nav = within(await screen.findByRole("navigation", { name: "Sections" }))
+    expect(nav.getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "General",
+      "Timing",
+      "Disk and retention",
+      "Runner defaults",
+      "GitHub token",
+      "Runner and config",
+      "Account",
+    ])
+  })
+
+  it("counts only config fields in the save bar", async () => {
+    mockApi(routes())
+    const { user } = renderApp("/settings")
+    await user.type(await screen.findByLabelText("Current password"), "old password 1")
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
+  })
+})
+
+describe("Account section", () => {
+  async function fill(user: ReturnType<typeof renderApp>["user"], current: string, next: string, again: string) {
+    await user.type(await screen.findByLabelText("Current password"), current)
+    await user.type(screen.getByLabelText("New password"), next)
+    await user.type(screen.getByLabelText("Confirm new password"), again)
+    await user.click(screen.getByRole("button", { name: "Change password" }))
+  }
+
+  it("changes the password", async () => {
+    const { calls } = mockApi(routes({ "POST /auth/password": () => noContent() }))
+    const { user } = renderApp("/settings")
+    await fill(user, "old password 1", "new password 12", "new password 12")
+    await waitFor(() => expect(calls.some((c) => c.path === "/auth/password")).toBe(true))
+    expect(calls.find((c) => c.path === "/auth/password")?.body).toEqual({ current: "old password 1", new: "new password 12" })
+    expect((await screen.findAllByText("Password changed")).length).toBeGreaterThan(0)
+    expect(screen.getByLabelText("Current password")).toHaveValue("")
+  })
+
+  it("checks the new password before sending", async () => {
+    const { calls } = mockApi(routes())
+    const { user } = renderApp("/settings")
+    await fill(user, "old password 1", "short", "short")
+    expect(await screen.findByText("Password must be 12 to 1024 bytes")).toBeInTheDocument()
+    await user.clear(screen.getByLabelText("New password"))
+    await user.type(screen.getByLabelText("New password"), "new password 12")
+    await user.click(screen.getByRole("button", { name: "Change password" }))
+    expect(await screen.findByText("The passwords do not match")).toBeInTheDocument()
+    expect(calls.some((c) => c.path === "/auth/password")).toBe(false)
+  })
+
+  it("says when the current password is wrong", async () => {
+    mockApi(routes({ "POST /auth/password": () => json({ error: "wrong password" }, 401) }))
+    const { user, router } = renderApp("/settings")
+    await fill(user, "bad password 1", "new password 12", "new password 12")
+    expect(await screen.findByRole("alert")).toHaveTextContent("The current password is wrong")
+    expect(router.state.location.pathname).toBe("/settings")
+  })
+
+  it("leaves Log out to the shell, which leaves without asking about unsaved edits", async () => {
+    let authenticated = true
+    mockApi(
+      routes({
+        "GET /auth/state": () => ({ setup_required: false, authenticated }),
+        "POST /auth/logout": () => {
+          authenticated = false
+          return noContent()
+        },
+      }),
+    )
+    const { user, router } = renderApp("/settings")
+    const account = within(await screen.findByRole("region", { name: "Account" }))
+    expect(account.queryByRole("button", { name: "Log out" })).toBeNull()
+    const poll = await screen.findByLabelText("Poll interval")
+    await user.clear(poll)
+    await user.type(poll, "15s")
+    await user.click(screen.getByRole("button", { name: "Log out" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
   })
 })
