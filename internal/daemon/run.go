@@ -232,7 +232,6 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, epoch 
 	return &running{m: m, space: space, b: b, sampled: sampled, wake: wake}, nil
 }
 
-// notConfigured is the start-up warning while ghr has no owner or token.
 // loadMetrics restores the metrics rings; an unreadable file starts them
 // empty with a warning, because losing graphs must not stop the daemon.
 func loadMetrics(s *metrics.Sampler, ev *events.Ring) {
@@ -241,6 +240,7 @@ func loadMetrics(s *metrics.Sampler, ev *events.Ring) {
 	}
 }
 
+// notConfigured is the start-up warning while ghr has no owner or token.
 func notConfigured(webLn net.Listener) string {
 	const cli = "run: ghr setup github --owner <owner>"
 	if webLn == nil {

@@ -990,7 +990,7 @@ func TestActivityAllModeHasNoCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, err := b.Activity(context.Background(), "24h", time.UTC)
-	if err != nil || a.Capacity != nil {
-		t.Fatalf("capacity %v err %v", a.Capacity, err)
+	if err != nil || a.Window != "24h" || a.Capacity != nil {
+		t.Fatalf("window %q capacity %v err %v", a.Window, a.Capacity, err)
 	}
 }
