@@ -187,3 +187,46 @@ func TestEmptySlicesMarshalAsArrays(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoFilter(t *testing.T) {
+	hist := []model.HistoryEntry{
+		job("mine", at(13, 10), at(13, 20), "success"),
+		{ID: "theirs", Repo: "ghr", Conclusion: "success", StartedAt: at(13, 10), FinishedAt: at(13, 20)},
+	}
+	insts := []model.InstanceStatus{
+		{ID: "r1", Repo: "DarkMem", State: "busy", Since: at(14, 0)},
+		{ID: "r2", Repo: "ghr", State: "busy", Since: at(14, 0)},
+	}
+	minutes := []model.MetricSample{{At: at(14, 0), Queued: 2, CPU: ptr(10.0)}}
+	hours := []model.MetricRollup{{At: at(13, 0), Samples: 60, QueuedMax: 3, CPUAvg: ptr(20.0)}}
+
+	lanes := Build(Input{Window: "1h", Now: now, Repo: "darkmem", Capacity: ptr(4), Repos: []string{"DarkMem", "ghr"},
+		History: hist, Instances: insts, Minutes: minutes, Hours: hours})
+	ids := laneIDs(lanes)
+	if lanes.Capacity != nil || len(ids) != 1 || strings.Join(ids[0], ",") != "mine,r1" {
+		t.Fatalf("lanes %v capacity %v", ids, lanes.Capacity)
+	}
+	if len(lanes.Waiting) != 0 || len(lanes.CPU) != 0 {
+		t.Fatalf("host figures kept: waiting %v cpu %v", lanes.Waiting, lanes.CPU)
+	}
+	if len(lanes.Repos) != 1 || lanes.Repos[0].Repo != "DarkMem" {
+		t.Fatalf("repos %+v", lanes.Repos)
+	}
+
+	b := Build(Input{Window: "24h", Now: now, Repo: "darkmem", Capacity: ptr(4), Repos: []string{"DarkMem"},
+		History: hist, Hours: hours})
+	for _, bk := range b.Buckets {
+		if bk.BusyPct != nil || bk.WaitingMax != nil || bk.CPUAvg != nil {
+			t.Fatalf("bucket %v kept host figures: %+v", bk.Start, bk)
+		}
+	}
+	if bk := bucketAt(t, b, at(13, 0)); bk.Succeeded != 1 || bk.BusyMinutes != 10 {
+		t.Fatalf("13:00 bucket %+v", bk)
+	}
+
+	gone := Build(Input{Window: "24h", Now: now, Repo: "removed-repo", Repos: []string{"DarkMem"},
+		History: []model.HistoryEntry{{ID: "old", Repo: "removed-repo", Conclusion: "failure", StartedAt: at(13, 0), FinishedAt: at(13, 5)}}})
+	if len(gone.Repos) != 0 || bucketAt(t, gone, at(13, 0)).Failed != 1 {
+		t.Fatalf("removed repo: repos %+v", gone.Repos)
+	}
+}

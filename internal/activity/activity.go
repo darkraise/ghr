@@ -5,6 +5,7 @@ package activity
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/darkraise/ghr/internal/model"
@@ -42,10 +43,15 @@ type Input struct {
 	Repos     []string // configured repository names
 	Minutes   []model.MetricSample
 	Hours     []model.MetricRollup
+	// Repo, when set, narrows the view to that repository; see forRepo.
+	Repo string
 }
 
 // Build assembles the activity view for in.Window, which must be Valid.
 func Build(in Input) model.Activity {
+	if in.Repo != "" {
+		in = forRepo(in)
+	}
 	loc := in.Loc
 	if loc == nil {
 		loc = time.UTC
@@ -91,6 +97,34 @@ func finishedState(conclusion string) string {
 	default:
 		return "failed"
 	}
+}
+
+// forRepo keeps one repository's history and live instances, matching names
+// as repoHours does, and its configured name if it has one. Capacity and the
+// host metrics belong to the whole host, so they are dropped: buckets then
+// carry no busy percentage, waiting or CPU, and lanes are not padded.
+func forRepo(in Input) Input {
+	var hist []model.HistoryEntry
+	for _, h := range in.History {
+		if strings.EqualFold(h.Repo, in.Repo) {
+			hist = append(hist, h)
+		}
+	}
+	var insts []model.InstanceStatus
+	for _, i := range in.Instances {
+		if strings.EqualFold(i.Repo, in.Repo) {
+			insts = append(insts, i)
+		}
+	}
+	var repos []string
+	for _, r := range in.Repos {
+		if strings.EqualFold(r, in.Repo) {
+			repos = append(repos, r)
+		}
+	}
+	in.History, in.Instances, in.Repos = hist, insts, repos
+	in.Capacity, in.Minutes, in.Hours = nil, nil, nil
+	return in
 }
 
 // runs builds one run per runner instance: a finished job from history, or
