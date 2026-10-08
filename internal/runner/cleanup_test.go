@@ -348,3 +348,26 @@ func TestRunnerLogMarksFileSwitchesAcrossChunks(t *testing.T) {
 		t.Fatalf("switch back %q", c.Data)
 	}
 }
+
+// bytesDocker is a Docker that also reports the data root in bytes.
+type bytesDocker struct{ *fakeDocker }
+
+func (b bytesDocker) DataRootBytes(ctx context.Context) (system.DiskUsage, error) {
+	pct, err := b.DataRootUsage(ctx)
+	return system.DiskUsage{Pct: pct, Used: int64(pct) * 1_000_000_000, Total: 100_000_000_000}, err
+}
+
+func TestStatusCarriesDiskBytes(t *testing.T) {
+	h := newHarness(t)
+	h.docker.usage = []int{61}
+	h.m.checkDisk(context.Background(), h.cfg)
+	if st := h.m.Status(); st.DiskPct != 61 || st.DiskUsedBytes != 0 || st.DiskTotalBytes != 0 {
+		t.Fatalf("percent-only docker: %d %d %d", st.DiskPct, st.DiskUsedBytes, st.DiskTotalBytes)
+	}
+	h.m.Docker = bytesDocker{h.docker}
+	h.docker.usage = []int{62}
+	h.m.checkDisk(context.Background(), h.cfg)
+	if st := h.m.Status(); st.DiskPct != 62 || st.DiskUsedBytes != 62_000_000_000 || st.DiskTotalBytes != 100_000_000_000 {
+		t.Fatalf("bytes docker: %d %d %d", st.DiskPct, st.DiskUsedBytes, st.DiskTotalBytes)
+	}
+}

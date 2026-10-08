@@ -100,7 +100,7 @@ func TestDockerParsing(t *testing.T) {
 		"docker network ls":                                                             "n1\nn2\n",
 		"docker volume ls":                                                              "",
 		"docker info":                                                                   "/var/lib/docker\n",
-		"df --output=pcent /var/lib/docker":                                             "Use%\n 81%\n",
+		"df -B1 --output=pcent,used,size /var/lib/docker":                               "Use%         Used    1B-blocks\n 81% 81000000000 100000000000\n",
 		"docker builder prune --help":                                                   "Options:\n      --reserved-space bytes   Amount of disk space always allowed to keep for cache\n",
 		"docker builder prune -f --reserved-space":                                      "ID\nTotal:\t6.2GB\n",
 	})
@@ -123,6 +123,10 @@ func TestDockerParsing(t *testing.T) {
 	pct, err := d.DataRootUsage(ctx)
 	if err != nil || pct != 81 {
 		t.Fatalf("pct = %d err = %v", pct, err)
+	}
+	du, err := d.DataRootBytes(ctx)
+	if err != nil || du != (DiskUsage{Pct: 81, Used: 81000000000, Total: 100000000000}) {
+		t.Fatalf("bytes = %+v err = %v", du, err)
 	}
 	freed, err := d.PruneBuildCacheTo(ctx, "20GB")
 	if err != nil || freed != "6.2GB" {

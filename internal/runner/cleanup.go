@@ -166,12 +166,13 @@ func (m *Manager) RunnerContainers(ctx context.Context, id string) ([]model.Cont
 // checkDisk prunes Docker build cache and dangling images above disk_high_water.
 // A failed usage read keeps the last good measurement; every failure is reported.
 func (m *Manager) checkDisk(ctx context.Context, cfg *config.Config) {
-	pct, err := m.Docker.DataRootUsage(ctx)
+	u, err := m.dataRoot(ctx)
 	if err != nil {
 		m.Events.Add("warn", "", "disk usage: %v", err)
 		return
 	}
-	m.setDisk(pct)
+	m.setDisk(u)
+	pct := u.Pct
 	if pct <= cfg.DiskHighWater {
 		return
 	}
@@ -206,12 +207,12 @@ func (m *Manager) checkDisk(ctx context.Context, cfg *config.Config) {
 		freedImages = "0B"
 	}
 	nowPct := "unknown"
-	if after, err := m.Docker.DataRootUsage(ctx); err != nil {
+	if after, err := m.dataRoot(ctx); err != nil {
 		m.recordStep("disk usage", "", err)
 		notes = append(notes, fmt.Sprintf("disk usage after pruning failed: %v", err))
 	} else {
 		m.setDisk(after)
-		nowPct = strconv.Itoa(after) + "%"
+		nowPct = strconv.Itoa(after.Pct) + "%"
 	}
 	outcome := "ok"
 	switch {
@@ -261,10 +262,26 @@ func (m *Manager) pruneDone() {
 	}
 }
 
-func (m *Manager) setDisk(pct int) {
+func (m *Manager) setDisk(u system.DiskUsage) {
 	m.mu.Lock()
-	m.diskPct = pct
+	m.disk = u
 	m.mu.Unlock()
+}
+
+// diskBytes is a Docker that can also report the data root in bytes. The
+// check is optional so the Docker interface and its fakes stay as they are.
+type diskBytes interface {
+	DataRootBytes(ctx context.Context) (system.DiskUsage, error)
+}
+
+// dataRoot measures the data-root filesystem, with bytes when the Docker
+// can report them.
+func (m *Manager) dataRoot(ctx context.Context) (system.DiskUsage, error) {
+	if d, ok := m.Docker.(diskBytes); ok {
+		return d.DataRootBytes(ctx)
+	}
+	pct, err := m.Docker.DataRootUsage(ctx)
+	return system.DiskUsage{Pct: pct}, err
 }
 
 // prune drops history lines and archived logs older than history_retention,
@@ -341,13 +358,13 @@ func (m *Manager) forcedPrune(ctx context.Context, scope string) {
 		}
 	}
 	if ctx.Err() == nil {
-		if pct, err := m.Docker.DataRootUsage(ctx); err != nil {
+		if u, err := m.dataRoot(ctx); err != nil {
 			failed = true
 			m.recordStep("disk usage", "", err)
 			m.Events.Add("warn", "", "prune: disk usage: %v", err)
 		} else {
-			m.setDisk(pct)
-			m.Events.Add("info", "", "prune: disk %d%% used", pct)
+			m.setDisk(u)
+			m.Events.Add("info", "", "prune: disk %d%% used", u.Pct)
 		}
 	}
 	outcome, level, msg := "ok", "ok", "prune finished"

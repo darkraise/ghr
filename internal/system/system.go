@@ -268,21 +268,46 @@ func (d Docker) RemoveVolumesByLabel(ctx context.Context, label string) error {
 	return err
 }
 
+// DiskUsage is the data-root filesystem's use: the percentage as df rounds
+// it, and bytes.
+type DiskUsage struct {
+	Pct   int
+	Used  int64
+	Total int64
+}
+
 // DataRootUsage returns the used percentage of the filesystem holding Docker's data root.
 func (d Docker) DataRootUsage(ctx context.Context) (int, error) {
+	u, err := d.DataRootBytes(ctx)
+	return u.Pct, err
+}
+
+// DataRootBytes returns the used percentage, used bytes and size of the
+// filesystem holding Docker's data root.
+func (d Docker) DataRootBytes(ctx context.Context) (DiskUsage, error) {
 	root, err := d.Run(ctx, "docker", "info", "--format", "{{.DockerRootDir}}")
 	if err != nil {
-		return 0, err
+		return DiskUsage{}, err
 	}
-	out, err := d.Run(ctx, "df", "--output=pcent", strings.TrimSpace(string(root)))
+	out, err := d.Run(ctx, "df", "-B1", "--output=pcent,used,size", strings.TrimSpace(string(root)))
 	if err != nil {
-		return 0, err
+		return DiskUsage{}, err
 	}
 	l := lines(out)
-	if len(l) < 2 {
-		return 0, fmt.Errorf("unexpected df output %q", out)
+	var f []string
+	if len(l) >= 2 {
+		f = strings.Fields(l[len(l)-1])
 	}
-	return strconv.Atoi(strings.TrimSuffix(strings.TrimSpace(l[len(l)-1]), "%"))
+	if len(f) != 3 {
+		return DiskUsage{}, fmt.Errorf("unexpected df output %q", out)
+	}
+	pct, err1 := strconv.Atoi(strings.TrimSuffix(f[0], "%"))
+	used, err2 := strconv.ParseInt(f[1], 10, 64)
+	total, err3 := strconv.ParseInt(f[2], 10, 64)
+	if err1 != nil || err2 != nil || err3 != nil {
+		return DiskUsage{}, fmt.Errorf("unexpected df output %q", out)
+	}
+	return DiskUsage{Pct: pct, Used: used, Total: total}, nil
 }
 
 func (d Docker) PruneBuildCacheOlderThan(ctx context.Context, hours int) (string, error) {

@@ -6,6 +6,8 @@
   "degraded": false,
   "rate_remaining": 4980,
   "disk_pct": 61,
+  "disk_used_bytes": 146000000000,
+  "disk_total_bytes": 240000000000,
   "repos": [
     {
       "name": "darkmem",

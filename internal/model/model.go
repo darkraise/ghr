@@ -6,13 +6,16 @@ import "time"
 type Status struct {
 	Now time.Time `json:"now"`
 	// Epoch changes on every daemon start; event sequence numbers restart with it.
-	Epoch          string            `json:"epoch"`
-	Mode           string            `json:"mode"`
-	GlobalMax      int               `json:"global_max"`
-	Degraded       bool              `json:"degraded"`
-	DegradedReason string            `json:"degraded_reason,omitempty"`
-	RateRemaining  int               `json:"rate_remaining"`
-	DiskPct        int               `json:"disk_pct"`
+	Epoch          string `json:"epoch"`
+	Mode           string `json:"mode"`
+	GlobalMax      int    `json:"global_max"`
+	Degraded       bool   `json:"degraded"`
+	DegradedReason string `json:"degraded_reason,omitempty"`
+	RateRemaining  int    `json:"rate_remaining"`
+	DiskPct        int    `json:"disk_pct"`
+	// DiskUsedBytes and DiskTotalBytes are 0 until the first measurement.
+	DiskUsedBytes  int64             `json:"disk_used_bytes"`
+	DiskTotalBytes int64             `json:"disk_total_bytes"`
 	Repos          []RepoStatus      `json:"repos"`
 	Instances      []InstanceStatus  `json:"instances"`
 	Maintenance    MaintenanceStatus `json:"maintenance"`

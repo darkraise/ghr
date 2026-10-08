@@ -7,6 +7,8 @@
   "degraded_reason": "GitHub rejected the token: 401 Bad credentials",
   "rate_remaining": 0,
   "disk_pct": 91,
+  "disk_used_bytes": 0,
+  "disk_total_bytes": 0,
   "repos": [
     {
       "name": "darkmem",

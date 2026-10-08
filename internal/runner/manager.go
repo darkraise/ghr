@@ -170,7 +170,7 @@ type Manager struct {
 	degradedReason string
 	authCheckAt    time.Time
 	pauseUntil     time.Time
-	diskPct        int
+	disk           system.DiskUsage
 	ticks          int
 	lastPrune      time.Time
 	pruning        bool                    // a manual or automatic prune holds the reservation; guarded by mu
@@ -442,7 +442,8 @@ func (m *Manager) Status() model.Status {
 	st := model.Status{
 		Now: m.Now(), Epoch: m.epoch, Mode: cfg.Mode, GlobalMax: cfg.GlobalMax,
 		Degraded: m.degraded, DegradedReason: m.degradedReason,
-		RateRemaining: m.GH.RateRemaining(), DiskPct: m.diskPct,
+		RateRemaining: m.GH.RateRemaining(),
+		DiskPct:       m.disk.Pct, DiskUsedBytes: m.disk.Used, DiskTotalBytes: m.disk.Total,
 		Repos: []model.RepoStatus{}, Instances: []model.InstanceStatus{},
 		Maintenance: m.maint, RunnerUpdate: m.runnerUpdate(),
 	}
