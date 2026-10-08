@@ -130,7 +130,7 @@ describe("setup wizard", () => {
     const { user } = renderApp("/setup")
     expect(await screen.findByRole("heading", { name: "Repositories", level: 2 })).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Dashboard" })).toBeNull()
-    await user.click(screen.getByRole("button", { name: "+ Add repository" }))
+    await user.click(screen.getByRole("button", { name: "Add repository" }))
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
   })
 

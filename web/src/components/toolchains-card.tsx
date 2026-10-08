@@ -93,7 +93,7 @@ export function ToolchainsCard({ storage, status, offline }: { storage: Storage;
         <RefusedHint what="Remove" status={status} />
         <div className="flex flex-wrap gap-2">
           <Button disabled={offline} onClick={() => setInstalling(true)}>
-            Install…
+            Install
           </Button>
           <Button
             variant="secondary"

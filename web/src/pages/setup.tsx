@@ -139,7 +139,7 @@ function RepositoriesStep() {
         </ul>
       )}
       <Button variant="outline" onClick={() => setAdding(true)}>
-        + Add repository
+        Add repository
       </Button>
       <AddRepoDialog open={adding} onClose={() => setAdding(false)} />
     </div>

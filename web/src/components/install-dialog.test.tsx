@@ -15,7 +15,7 @@ const routes = (over: Record<string, unknown> = {}) =>
   })
 
 async function openDialog(user: ReturnType<typeof renderApp>["user"]) {
-  await user.click(await screen.findByRole("button", { name: "Install…" }))
+  await user.click(await screen.findByRole("button", { name: "Install" }))
   return within(await screen.findByRole("dialog"))
 }
 
@@ -25,14 +25,14 @@ describe("Install toolchain dialog", () => {
     const { user } = renderApp("/toolchains")
     const dialog = await openDialog(user)
     expect(dialog.getByText("Install toolchain")).toBeInTheDocument()
-    expect(dialog.getByText("pick one below, or type a version")).toBeInTheDocument()
-    expect(await dialog.findByText("lts")).toBeInTheDocument()
+    expect(dialog.getByText("Pick one below, or type a version")).toBeInTheDocument()
+    expect(await dialog.findByText("lts")).toHaveClass("text-muted-foreground")
     await user.click(dialog.getByRole("button", { name: /^22\.11\.0/ }))
     await user.click(dialog.getByRole("button", { name: "Install" }))
     await waitFor(() =>
       expect(calls.find((c) => c.method === "POST" && c.path === "/api/toolchains")?.body).toEqual({ tool: "node", version: "22.11.0" }),
     )
-    expect((await screen.findAllByText("queued: install node 22.11.0")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Queued: install node 22.11.0")).length).toBeGreaterThan(0)
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
@@ -45,7 +45,7 @@ describe("Install toolchain dialog", () => {
     expect(await dialog.findByRole("button", { name: /^1\.23\.4/ })).toBeInTheDocument()
     expect(calls.some((c) => c.path === "/api/toolchains/available" && c.search === "?tool=go")).toBe(true)
     await user.type(dialog.getByRole("textbox", { name: "Version" }), "1.22")
-    expect(dialog.getByText("no match")).toBeInTheDocument()
+    expect(dialog.getByText("No match")).toBeInTheDocument()
     await user.click(dialog.getByRole("button", { name: "Install" }))
     await waitFor(() =>
       expect(calls.find((c) => c.method === "POST" && c.path === "/api/toolchains")?.body).toEqual({ tool: "go", version: "1.22" }),
@@ -56,8 +56,8 @@ describe("Install toolchain dialog", () => {
     mockApi(routes({ "GET /api/toolchains/available": () => json({ error: "upstream down" }, 502) }))
     const { user } = renderApp("/toolchains")
     const dialog = await openDialog(user)
-    expect(await dialog.findByText("✖ upstream down")).toBeInTheDocument()
-    expect(dialog.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    expect(await dialog.findByText("upstream down")).toBeInTheDocument()
+    expect(dialog.getByRole("button", { name: "Try again" })).toBeInTheDocument()
     expect(dialog.getByRole("button", { name: "Install" })).toBeDisabled()
   })
 
@@ -67,7 +67,7 @@ describe("Install toolchain dialog", () => {
     const dialog = await openDialog(user)
     await user.type(dialog.getByRole("textbox", { name: "Version" }), "24")
     await user.click(dialog.getByRole("button", { name: "Install" }))
-    expect(await dialog.findByText('✖ unknown toolchain "node"')).toBeInTheDocument()
+    expect(await dialog.findByText('unknown toolchain "node"')).toBeInTheDocument()
     expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
 
@@ -75,7 +75,7 @@ describe("Install toolchain dialog", () => {
     mockApi(routes({ "GET /api/status": () => json({ error: "connection refused" }, 502) }))
     renderApp("/toolchains")
     await waitFor(() => expect(screen.getAllByText(/Daemon unreachable/).length).toBeGreaterThan(0))
-    expect(await screen.findByRole("button", { name: "Install…" })).toBeDisabled()
+    expect(await screen.findByRole("button", { name: "Install" })).toBeDisabled()
   })
 
   it("sends Install after the daemon went unreachable and shows the request's error", { timeout: 10_000 }, async () => {
@@ -92,7 +92,7 @@ describe("Install toolchain dialog", () => {
     down = true
     await waitFor(() => expect(screen.getAllByText(/Daemon unreachable/).length).toBeGreaterThan(0), { timeout: 4000 })
     await user.click(dialog.getByRole("button", { name: "Install" }))
-    expect(await dialog.findByText("✖ connection refused")).toBeInTheDocument()
+    expect(await dialog.findByText("connection refused")).toBeInTheDocument()
     expect(calls.some((c) => c.method === "POST" && c.path === "/api/toolchains")).toBe(true)
   })
 })

@@ -1,13 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { Badge } from "darkraise-ui/components/badge"
 import { Button } from "darkraise-ui/components/button"
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "darkraise-ui/components/dialog"
 import { Input } from "darkraise-ui/components/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "darkraise-ui/components/select"
 import { toast } from "darkraise-ui/components/sonner"
+import { Spinner } from "darkraise-ui/components/spinner"
 import { useState } from "react"
 import { api } from "@/api/client"
 import { keys, useToolchainChoices } from "@/api/hooks"
+import { ErrorLine } from "@/components/page/error-line"
 import { errorText } from "@/query"
 
 const TOOLS = [
@@ -48,7 +49,7 @@ function InstallForm({ onClose }: { onClose: () => void }) {
     setBusy(true)
     try {
       await api.installToolchain(tool, target)
-      toast.success(`queued: install ${tool} ${target}`)
+      toast.success(`Queued: install ${tool} ${target}`)
       void queryClient.invalidateQueries({ queryKey: keys.storage })
       onClose()
     } catch (err) {
@@ -85,11 +86,11 @@ function InstallForm({ onClose }: { onClose: () => void }) {
           </SelectContent>
         </Select>
         <p className="text-sm">
-          {target ? <strong>{target}</strong> : <span className="text-muted-foreground">pick one below, or type a version</span>}
+          {target ? <strong className="font-mono">{target}</strong> : <span className="text-muted-foreground">Pick one below, or type a version</span>}
         </p>
         <Input
           aria-label="Version"
-          placeholder="type to filter"
+          placeholder="Type to filter"
           value={filter}
           onChange={(e) => {
             setFilter(e.target.value)
@@ -97,16 +98,11 @@ function InstallForm({ onClose }: { onClose: () => void }) {
           }}
         />
         {choices.isPending ? (
-          <p className="text-sm text-muted-foreground">loading versions…</p>
+          <Spinner label="Loading versions" />
         ) : choices.isError ? (
-          <div className="flex items-center gap-2">
-            <p className="text-sm text-destructive">✖ {errorText(choices.error)}</p>
-            <Button size="sm" variant="outline" onClick={() => void choices.refetch()}>
-              Retry
-            </Button>
-          </div>
+          <ErrorLine onRetry={() => void choices.refetch()}>{errorText(choices.error)}</ErrorLine>
         ) : shown.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{all.length === 0 ? "nothing to pick" : "no match"}</p>
+          <p className="text-sm text-muted-foreground">{all.length === 0 ? "Nothing to pick" : "No match"}</p>
         ) : (
           <ul className="flex max-h-48 flex-col overflow-auto">
             {shown.map((c) => (
@@ -117,25 +113,21 @@ function InstallForm({ onClose }: { onClose: () => void }) {
                   className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted ${picked === c.spec ? "bg-muted" : ""}`}
                   onClick={() => setPicked(c.spec)}
                 >
-                  {c.version}
-                  {c.lts && (
-                    <Badge variant="secondary" size="sm">
-                      lts
-                    </Badge>
-                  )}
+                  <span className="font-mono">{c.version}</span>
+                  {c.lts && <span className="text-xs text-muted-foreground">lts</span>}
                 </button>
               </li>
             ))}
           </ul>
         )}
-        {error && <p className="text-sm text-destructive">✖ {error}</p>}
+        {error && <ErrorLine>{error}</ErrorLine>}
       </DialogBody>
       <DialogFooter>
-        <Button variant="secondary" onClick={onClose}>
+        <Button variant="outline" onClick={onClose}>
           Cancel
         </Button>
-        <Button disabled={busy || target === ""} onClick={() => void submit()}>
-          {busy ? "Queuing…" : "Install"}
+        <Button loading={busy} disabled={busy || target === ""} onClick={() => void submit()}>
+          Install
         </Button>
       </DialogFooter>
     </>

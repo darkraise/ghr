@@ -29,7 +29,7 @@ export function RepositoriesPage() {
   const offline = status.isError
   const addButton = (
     <Button disabled={offline} onClick={() => setAdding(true)}>
-      + Add repository
+      Add repository
     </Button>
   )
   return (

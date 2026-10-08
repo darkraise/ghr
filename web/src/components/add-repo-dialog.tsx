@@ -1,5 +1,4 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { Badge } from "darkraise-ui/components/badge"
 import { Button } from "darkraise-ui/components/button"
 import {
   Dialog,
@@ -12,11 +11,14 @@ import {
 import { Input } from "darkraise-ui/components/input"
 import { Label } from "darkraise-ui/components/label"
 import { toast } from "darkraise-ui/components/sonner"
+import { Spinner } from "darkraise-ui/components/spinner"
 import { Switch } from "darkraise-ui/components/switch"
+import { TriangleAlert } from "lucide-react"
 import { useState, type KeyboardEvent } from "react"
 import { api } from "@/api/client"
 import { keys, useAvailableRepos, useStatus } from "@/api/hooks"
 import type { AddRepoRequest } from "@/api/types"
+import { ErrorLine } from "@/components/page/error-line"
 import { TagField } from "@/components/tag-field"
 import { errorText } from "@/query"
 
@@ -69,7 +71,7 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false)
 
   async function add() {
-    if (!picked) return setError("pick a repository first")
+    if (!picked) return setError("Pick a repository first")
     const req: AddRepoRequest = { name: picked, allow_public: allowPublic }
     if (max.trim() !== "" && Number.isFinite(Number(max))) req.max = clampMax(max)
     if (labels.length > 0) req.labels = labels
@@ -83,7 +85,7 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
     } finally {
       setBusy(false)
     }
-    toast.success(`added ${picked}`)
+    toast.success(`Added ${picked}`)
     void queryClient.invalidateQueries({ queryKey: keys.status })
     void queryClient.invalidateQueries({ queryKey: keys.config })
     onClose()
@@ -94,22 +96,15 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
   const tabStop = items.find((r) => r.name === picked && !r.configured)?.name ?? items.find((r) => !r.configured)?.name
   let picker
   if (repos.isError) {
-    picker = (
-      <div className="flex items-center gap-2 text-sm">
-        <span className="text-destructive">✖ {errorText(repos.error)}</span>
-        <Button size="sm" variant="outline" onClick={() => void repos.refetch()}>
-          Retry
-        </Button>
-      </div>
-    )
+    picker = <ErrorLine onRetry={() => void repos.refetch()}>{errorText(repos.error)}</ErrorLine>
   } else if (!repos.data) {
-    picker = <p className="text-sm text-muted-foreground">loading repositories…</p>
+    picker = <Spinner label="Loading repositories" />
   } else {
     picker = (
       <div className="flex flex-col gap-2">
-        <Input aria-label="Filter repositories" placeholder="type to filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        {repos.data.length === 0 && <p className="text-sm text-muted-foreground">nothing to pick</p>}
-        {repos.data.length > 0 && items.length === 0 && <p className="text-sm text-muted-foreground">no match</p>}
+        <Input aria-label="Filter repositories" placeholder="Type to filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        {repos.data.length === 0 && <p className="text-sm text-muted-foreground">Nothing to pick</p>}
+        {repos.data.length > 0 && items.length === 0 && <p className="text-sm text-muted-foreground">No match</p>}
         {items.length > 0 && (
           <div role="listbox" aria-label="Repositories" className="max-h-64 overflow-auto rounded-md border" onKeyDown={moveFocus}>
             {items.map((r) => (
@@ -124,9 +119,7 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
                 className="flex w-full items-center gap-2 px-2 py-1 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:opacity-50 aria-selected:bg-muted"
               >
                 <span>{r.name}</span>
-                <Badge variant={r.private ? "secondary" : "amber"} size="sm">
-                  {r.private ? "private" : "public"}
-                </Badge>
+                {!r.private && <span className="text-muted-foreground">public</span>}
                 {r.configured && <span className="text-muted-foreground">added</span>}
               </button>
             ))}
@@ -144,7 +137,7 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
       <DialogBody className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
           <span className="text-sm font-medium">Repository</span>
-          {picked ? <strong>{picked}</strong> : <span className="text-sm text-muted-foreground">pick one below</span>}
+          {picked ? <strong>{picked}</strong> : <span className="text-sm text-muted-foreground">Pick one below</span>}
         </div>
         {picker}
         <div className="flex flex-col gap-1">
@@ -167,19 +160,18 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
           <Switch id="allow-public" checked={allowPublic} onCheckedChange={setAllowPublic} />
           <Label htmlFor="allow-public">Allow public repo</Label>
         </div>
-        <p className="text-sm text-amber-600">⚠ self-hosted runners on a public repo can run anyone's code</p>
-        {error && (
-          <p role="alert" className="text-sm text-destructive">
-            ✖ {error}
-          </p>
-        )}
+        <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <TriangleAlert size={15} aria-hidden="true" className="shrink-0 text-warning" />
+          Self-hosted runners on a public repo can run anyone's code
+        </p>
+        {error && <ErrorLine>{error}</ErrorLine>}
       </DialogBody>
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>
           Cancel
         </Button>
-        <Button disabled={!picked || busy} onClick={() => void add()}>
-          {busy ? "Adding…" : "Add"}
+        <Button loading={busy} disabled={!picked || busy} onClick={() => void add()}>
+          Add
         </Button>
       </DialogFooter>
     </>

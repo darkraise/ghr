@@ -11,11 +11,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const FILES = [
   "public/theme-init.js",
   "src/components/activity-panel.tsx",
+  "src/components/add-repo-dialog.tsx",
   "src/components/brand.tsx",
   "src/components/buckets-chart.tsx",
   "src/components/capacity-bar.tsx",
   "src/components/disk-breakdown.tsx",
   "src/components/event-list.tsx",
+  "src/components/install-dialog.tsx",
   "src/components/lanes-chart.tsx",
   "src/components/log-view.tsx",
   "src/components/mode-control.tsx",
