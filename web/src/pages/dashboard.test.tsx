@@ -1,151 +1,124 @@
 import { screen, waitFor, within } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it } from "vitest"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
+const region = (name: string) => within(screen.getByRole("region", { name }))
+
 describe("Dashboard page", () => {
-  it("shows the metric tiles", async () => {
+  beforeEach(() => localStorage.clear())
+
+  it("sums up the daemon in one sentence", async () => {
     mockApi(authedRoutes())
     renderApp("/")
-    expect(await screen.findByText("2 / 2")).toBeInTheDocument()
-    expect(await screen.findByText("31%")).toBeInTheDocument()
-    expect(screen.getByText("3.0G / 16.0G")).toBeInTheDocument()
-    expect(screen.getByRole("img", { name: "running" })).toBeInTheDocument()
+    expect(await screen.findByText("1 of 2 runners busy. 3 jobs are waiting in darkmem. old-repo: GitHub: not found.")).toBeInTheDocument()
   })
 
-  it("shows repos, runners and the activity feed", async () => {
+  it("shows the stat cards", async () => {
     mockApi(authedRoutes())
     renderApp("/")
-    expect(await screen.findByText("old-repo")).toBeInTheDocument()
-    expect(screen.getByText("GitHub: not found")).toBeInTheDocument()
-    expect(screen.getByText("paused")).toBeInTheDocument()
-    expect(screen.getByText(/#41 build/)).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "aaaaaa" })).toBeInTheDocument()
-    expect(await screen.findByText("runner aaaaaa started")).toBeInTheDocument()
+    await screen.findByRole("region", { name: "Runners" })
+    expect(region("Runners").getByText("of 2 busy")).toBeInTheDocument()
+    expect(region("Waiting jobs").getByText("oldest 3 min")).toBeInTheDocument()
+    expect(region("API budget").getByText("4,980")).toBeInTheDocument()
+    await waitFor(() => expect(region("Host").getByText("31%")).toBeInTheDocument())
   })
 
-  it("pauses every repo", async () => {
+  it("asks for the remembered activity window in the browser's zone", async () => {
+    localStorage.setItem("ghr-activity-window", "24h")
+    const { calls } = mockApi(authedRoutes())
+    renderApp("/")
+    expect(await screen.findByRole("group", { name: "Activity per bucket for the last 24 hours" })).toBeInTheDocument()
+    expect(calls.find((c) => c.path === "/api/activity")?.search).toBe("?window=24h&tz=UTC")
+  })
+
+  it("switches the activity window and remembers it", async () => {
+    const { calls } = mockApi(authedRoutes())
+    const { user } = renderApp("/")
+    await screen.findByRole("group", { name: "Runner lanes for the last hour" })
+    await user.click(screen.getByRole("radio", { name: "7d" }))
+    await waitFor(() => expect(calls.some((c) => c.search === "?window=7d&tz=UTC")).toBe(true))
+    expect(localStorage.getItem("ghr-activity-window")).toBe("7d")
+  })
+
+  it("opens a runner from its running bar", async () => {
+    mockApi(authedRoutes())
+    const { user, router } = renderApp("/")
+    await user.click(await screen.findByRole("link", { name: /^darkmem, ci, test, run 42, running/ }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/runners/aaaaaa"))
+  })
+
+  it("lists repositories and opens one", async () => {
+    mockApi(authedRoutes())
+    const { user, router } = renderApp("/")
+    await screen.findByRole("region", { name: "Repositories" })
+    expect(region("Repositories").getByText("Running")).toBeInTheDocument()
+    expect(region("Repositories").getByText("2 configured")).toBeInTheDocument()
+    expect(region("Repositories").getByRole("link", { name: "Manage" })).toHaveAttribute("href", "/repositories")
+    await user.click(region("Repositories").getByRole("link", { name: "darkcloud" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/repositories/darkcloud"))
+  })
+
+  it("pauses every repository", async () => {
     const { calls } = mockApi(authedRoutes({ "POST /api/pause-all": () => noContent() }))
     const { user } = renderApp("/")
     await user.click(await screen.findByRole("button", { name: "Pause all" }))
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/pause-all")).toBe(true))
-    expect((await screen.findAllByText("paused all repos (drain)")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Paused all repositories. Running jobs finish first.")).length).toBeGreaterThan(0)
   })
 
-  it("resumes when every live repo is paused", async () => {
+  it("resumes when every live repository is paused", async () => {
     const repos = fixtures.status.repos.map((r) => ({ ...r, paused: true }))
-    const { calls } = mockApi(
-      authedRoutes({ "GET /api/status": { ...fixtures.status, repos }, "POST /api/resume-all": () => noContent() }),
-    )
+    const { calls } = mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, repos }, "POST /api/resume-all": () => noContent() }))
     const { user } = renderApp("/")
     await user.click(await screen.findByRole("button", { name: "Resume all" }))
     await waitFor(() => expect(calls.some((c) => c.path === "/api/resume-all")).toBe(true))
   })
 
-  it("shows a metrics failure in the tiles", async () => {
-    mockApi(authedRoutes({ "GET /api/metrics": () => json({ error: "boom" }, 500) }))
+  it("shows disk use", async () => {
+    mockApi(authedRoutes())
     renderApp("/")
-    expect((await screen.findAllByText("✖ boom")).length).toBe(2)
+    await screen.findByRole("region", { name: "Disk" })
+    await waitFor(() => expect(region("Disk").getByText("146.0 GB of 240.0 GB used, prunes at 80%")).toBeInTheDocument())
+    expect(region("Disk").getByRole("link", { name: "Storage" })).toHaveAttribute("href", "/storage")
+    await waitFor(() => expect(region("Disk").getByText("Images")).toBeInTheDocument())
+  })
+
+  it("shows the latest events", async () => {
+    mockApi(authedRoutes())
+    renderApp("/")
+    expect(await screen.findByText("runner aaaaaa started")).toBeInTheDocument()
   })
 
   it("shows the empty states", async () => {
     mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, repos: [], instances: [] }, "GET /api/events": [] }))
     renderApp("/")
-    expect(await screen.findByText("no repos configured")).toBeInTheDocument()
-    expect(screen.getByText("no runners — they start when jobs are queued")).toBeInTheDocument()
-    expect(screen.getByText("no activity yet")).toBeInTheDocument()
+    expect(await screen.findByText("No repositories yet")).toBeInTheDocument()
+    expect(screen.getByText("No events yet.")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Activity" })).toBeInTheDocument()
   })
 
   it("waits for the daemon while it cannot be reached", async () => {
     mockApi(authedRoutes({ "GET /api/status": () => json({ error: "connection refused" }, 502) }))
     renderApp("/")
-    expect(await screen.findByText("waiting for the daemon…")).toBeInTheDocument()
+    expect(await screen.findByText("Waiting for the daemon")).toBeInTheDocument()
   })
 
-  it("names the status glyphs", async () => {
-    mockApi(authedRoutes())
-    renderApp("/")
-    expect(await screen.findByRole("img", { name: "succeeded" })).toHaveTextContent("✔")
-    expect(screen.getByRole("img", { name: "queued" })).toHaveTextContent("⧗")
-    expect((await screen.findAllByRole("img", { name: "warning" }))[0]).toHaveTextContent("⚠")
-  })
-
-  it("marks a cancelled last job with its own icon", async () => {
-    const repos = fixtures.status.repos.map((r) => (r.last_job ? { ...r, last_job: { ...r.last_job, conclusion: "cancelled" } } : r))
-    mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, repos } }))
-    renderApp("/")
-    expect(await screen.findByRole("img", { name: "cancelled" })).toHaveTextContent("⊘")
-  })
-
-  it("switches the mode and steps the global max", async () => {
-    const { calls } = mockApi(authedRoutes({ "PATCH /api/config": () => noContent() }))
-    const { user } = renderApp("/")
-    await user.click(await screen.findByRole("button", { name: "Switch to ALL" }))
-    await waitFor(() => expect(calls.some((c) => c.method === "PATCH" && JSON.stringify(c.body) === '{"mode":"all"}')).toBe(true))
-    await waitFor(() => expect(screen.getByRole("button", { name: "Raise global max" })).toBeEnabled())
-    await user.click(screen.getByRole("button", { name: "Raise global max" }))
-    await waitFor(() => expect(calls.some((c) => c.method === "PATCH" && JSON.stringify(c.body) === '{"global_max":3}')).toBe(true))
-    expect((await screen.findAllByText("global max 3")).length).toBeGreaterThan(0)
-  })
-
-  it("lowers the global max no further than 1", async () => {
-    mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, global_max: 1 } }))
-    renderApp("/")
-    expect(await screen.findByRole("button", { name: "Lower global max" })).toBeDisabled()
-  })
-
-  it("steps a repo's max, except an unlimited one", async () => {
-    const repos = fixtures.status.repos.map((r) => (r.name === "darkcloud" ? { ...r, max: 0 } : r))
-    const { calls } = mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, repos }, "PATCH /api/config": () => noContent() }))
-    const { user } = renderApp("/")
-    expect(await screen.findByRole("button", { name: "Raise max for darkcloud" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Lower max for darkcloud" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Lower max for old-repo" })).toBeDisabled()
-    await user.click(screen.getByRole("button", { name: "Raise max for darkmem" }))
-    await waitFor(() =>
-      expect(calls.some((c) => c.method === "PATCH" && JSON.stringify(c.body) === '{"repos":{"darkmem":{"max":3}}}')).toBe(true),
-    )
-  })
-
-  it("disables the controls while the daemon is unreachable", async () => {
+  it("disables its actions while the daemon is unreachable", async () => {
     let fail = false
     mockApi(authedRoutes({ "GET /api/status": () => (fail ? json({ error: "connection refused" }, 502) : fixtures.status) }))
     renderApp("/")
-    const names = [
-      "Switch to ALL",
-      "Raise global max",
-      "Pause all",
-      "+ Add repository",
-      "Raise max for darkmem",
-      "Pause darkmem",
-      "Remove darkmem",
-    ]
-    for (const name of names) expect(await screen.findByRole("button", { name })).toBeEnabled()
+    for (const name of ["Pause all", "Add repository"]) expect(await screen.findByRole("button", { name })).toBeEnabled()
     fail = true
     await waitFor(() => expect(screen.getByRole("button", { name: "Pause all" })).toBeDisabled(), { timeout: 3000 })
-    for (const name of names) expect(screen.getByRole("button", { name })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Add repository" })).toBeDisabled()
   })
 
-  it("adds, edits, pauses and removes repos, and acts on runners", async () => {
-    const { calls } = mockApi(
-      authedRoutes({
-        "GET /api/repos/available": fixtures.availableRepos,
-        "POST /api/repos/darkmem/pause": () => noContent(),
-        "DELETE /api/repos/darkmem": () => noContent(),
-      }),
-    )
+  it("opens the add repository dialog", async () => {
+    mockApi(authedRoutes({ "GET /api/repos/available": fixtures.availableRepos }))
     const { user } = renderApp("/")
-    expect(await screen.findByRole("link", { name: "Edit darkmem" })).toHaveAttribute("href", "/repositories/darkmem")
-    expect(screen.getByRole("button", { name: "Stop runner aaaaaa" })).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Pause darkmem" }))
-    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/repos/darkmem/pause")).toBe(true))
-    await user.click(screen.getByRole("button", { name: "Remove darkmem" }))
-    const ask = within(await screen.findByRole("alertdialog"))
-    expect(calls.some((c) => c.method === "DELETE")).toBe(false)
-    await user.click(ask.getByRole("button", { name: "Remove" }))
-    await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/repos/darkmem")).toBe(true))
-    await user.click(screen.getByRole("button", { name: "+ Add repository" }))
+    await user.click(await screen.findByRole("button", { name: "Add repository" }))
     expect(await screen.findByRole("heading", { name: "Add repository" })).toBeInTheDocument()
   })
 })

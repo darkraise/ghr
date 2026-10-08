@@ -75,6 +75,9 @@ export function authedRoutes(over: Record<string, unknown> = {}): Record<string,
     "GET /api/config": fixtures.config,
     "GET /api/metrics": fixtures.metrics,
     "GET /api/events": fixtures.events,
+    "GET /api/activity": ({ url }: { url: URL }) =>
+      ["1h", "3h"].includes(url.searchParams.get("window") ?? "") ? fixtures.activityLanes : fixtures.activityBuckets,
+    "GET /api/storage": fixtures.storage,
     ...over,
   }
 }
