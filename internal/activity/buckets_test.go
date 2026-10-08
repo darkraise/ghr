@@ -174,3 +174,26 @@ func TestMidnightDaylightSavingGap(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoWeek(t *testing.T) {
+	week := 7 * 24 * time.Hour
+	entry := func(id, repo string, end time.Time, conclusion string) model.HistoryEntry {
+		return model.HistoryEntry{ID: id, Repo: repo, Conclusion: conclusion, StartedAt: end.Add(-time.Minute), FinishedAt: end}
+	}
+	a := Build(Input{Window: "24h", Now: now, Repos: []string{"darkmem", "darkcloud"}, History: []model.HistoryEntry{
+		entry("edge", "darkmem", now.Add(-week), "success"),
+		entry("old", "darkmem", now.Add(-week-time.Second), "success"),
+		entry("f", "darkmem", now.Add(-time.Hour), "failure"),
+		entry("t", "darkmem", now.Add(-time.Hour), "timed_out"),
+		entry("c", "darkmem", now.Add(-time.Hour), "cancelled"),
+		entry("s", "darkmem", now.Add(-time.Hour), "skipped"),
+		entry("cased", "DarkMem", now.Add(-time.Minute), "success"),
+		entry("other", "ghr", now.Add(-time.Minute), "success"),
+	}})
+	if got := a.Repos[0].Week; got != (model.ActivityWeek{Succeeded: 2, Failed: 2, Cancelled: 2}) {
+		t.Fatalf("darkmem week %+v", got)
+	}
+	if got := a.Repos[1].Week; got != (model.ActivityWeek{}) {
+		t.Fatalf("darkcloud week %+v", got)
+	}
+}

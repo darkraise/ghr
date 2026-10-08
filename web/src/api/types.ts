@@ -405,6 +405,13 @@ export interface ActivityHour {
 export interface ActivityRepo {
   repo: string
   hours: ActivityHour[]
+  week: ActivityWeek
+}
+
+export interface ActivityWeek {
+  succeeded: number
+  failed: number
+  cancelled: number
 }
 
 export interface Activity {

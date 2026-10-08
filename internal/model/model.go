@@ -328,6 +328,15 @@ type ActivityCPU struct {
 type ActivityRepo struct {
 	Repo  string         `json:"repo"`
 	Hours []ActivityHour `json:"hours"`
+	// Week counts the runs that finished in the 7 days ending now, whatever
+	// the window.
+	Week ActivityWeek `json:"week"`
+}
+
+type ActivityWeek struct {
+	Succeeded int `json:"succeeded"`
+	Failed    int `json:"failed"`
+	Cancelled int `json:"cancelled"`
 }
 
 type ActivityHour struct {

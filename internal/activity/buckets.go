@@ -152,9 +152,11 @@ func buckets(in Input, sp spec, rs []model.ActivityRun, loc *time.Location) (tim
 }
 
 // repoHours counts each configured repository's runs by finish time over
-// the last 24 local hours, oldest first, the last one in progress.
+// the last 24 local hours, oldest first, the last one in progress, and over
+// the 7 days ending now.
 func repoHours(in Input, loc *time.Location) []model.ActivityRepo {
 	ss := starts(in.Now, "hour", loc, 23)
+	weekFrom := in.Now.Add(-7 * 24 * time.Hour)
 	out := []model.ActivityRepo{}
 	for _, name := range in.Repos {
 		r := model.ActivityRepo{Repo: name, Hours: make([]model.ActivityHour, len(ss))}
@@ -167,6 +169,11 @@ func repoHours(in Input, loc *time.Location) []model.ActivityRepo {
 				}
 			}
 			r.Hours[i] = hr
+		}
+		for _, h := range in.History {
+			if strings.EqualFold(h.Repo, name) && !h.FinishedAt.Before(weekFrom) && !h.FinishedAt.After(in.Now) {
+				tally(h.Conclusion, &r.Week.Succeeded, &r.Week.Failed, &r.Week.Cancelled)
+			}
 		}
 		out = append(out, r)
 	}

@@ -433,7 +433,12 @@
           "failed": 0,
           "cancelled": 0
         }
-      ]
+      ],
+      "week": {
+        "succeeded": 1,
+        "failed": 1,
+        "cancelled": 0
+      }
     }
   ]
 }

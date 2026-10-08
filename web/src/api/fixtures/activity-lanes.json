@@ -250,7 +250,12 @@
           "failed": 0,
           "cancelled": 0
         }
-      ]
+      ],
+      "week": {
+        "succeeded": 1,
+        "failed": 1,
+        "cancelled": 0
+      }
     },
     {
       "repo": "darkcloud",
@@ -399,7 +404,12 @@
           "failed": 0,
           "cancelled": 0
         }
-      ]
+      ],
+      "week": {
+        "succeeded": 0,
+        "failed": 0,
+        "cancelled": 0
+      }
     }
   ]
 }
