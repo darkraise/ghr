@@ -1,9 +1,12 @@
 package metrics
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -245,5 +248,143 @@ func TestHourRingKeepsThirtyDays(t *testing.T) {
 	}
 	if n := len(h.s.Hours()); n != 30*24+1 { // 720 closed and the open one
 		t.Fatalf("hours = %d", n)
+	}
+}
+
+func sameJSON(t *testing.T, a, b any) bool {
+	t.Helper()
+	x, err1 := json.Marshal(a)
+	y, err2 := json.Marshal(b)
+	if err1 != nil || err2 != nil {
+		t.Fatal(err1, err2)
+	}
+	return bytes.Equal(x, y)
+}
+
+func TestSaveAndLoadRoundTrip(t *testing.T) {
+	h := newHost(t)
+	h.write(t, "cpu.stat", "usage_usec 0\n")
+	h.s.Path = filepath.Join(h.dir, "state", "metrics.json")
+	for i := 0; i < 90; i++ { // 12:00 to 13:29: one closed hour and an open one
+		h.s.Sample()
+		h.now = h.now.Add(time.Minute)
+	}
+	if err := h.s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" {
+		if fi, err := os.Stat(h.s.Path); err != nil || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("file %v %v", fi, err)
+		}
+	}
+	back := NewSampler(h.s.Counts, h.s.Disk)
+	back.Now = func() time.Time { return h.now }
+	back.Path = h.s.Path
+	if err := back.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if !sameJSON(t, back.Minutes(), h.s.Minutes()) || !sameJSON(t, back.Hours(), h.s.Hours()) {
+		t.Fatalf("round trip lost data:\n%+v\n%+v", back.Hours(), h.s.Hours())
+	}
+	back.Sample() // 13:30 keeps adding to the resumed open hour
+	if hrs := back.Hours(); len(hrs) != 2 || hrs[1].Samples != 31 {
+		t.Fatalf("resumed hour %+v", hrs)
+	}
+}
+
+func TestLoadDropsStaleAndClosesAnOldOpenHour(t *testing.T) {
+	h := newHost(t)
+	h.write(t, "cpu.stat", "usage_usec 0\n")
+	h.s.Path = filepath.Join(h.dir, "metrics.json")
+	for i := 0; i < 30; i++ { // 12:00 to 12:29, the hour still open
+		h.s.Sample()
+		h.now = h.now.Add(time.Minute)
+	}
+	if err := h.s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	h.now = h.now.Add(4 * time.Hour) // 16:30: every minute is older than three hours
+	back := NewSampler(h.s.Counts, h.s.Disk)
+	back.Now = func() time.Time { return h.now }
+	back.Path = h.s.Path
+	if err := back.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(back.Minutes()); n != 0 {
+		t.Fatalf("minutes = %d", n)
+	}
+	hrs := back.Hours()
+	if len(hrs) != 1 || hrs[0].Samples != 30 || !hrs[0].At.Equal(time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)) {
+		t.Fatalf("hours %+v", hrs)
+	}
+	back.Sample()
+	if hrs := back.Hours(); len(hrs) != 2 || hrs[0].Samples != 30 || hrs[1].Samples != 1 {
+		t.Fatalf("after a new sample %+v", hrs)
+	}
+}
+
+func TestLoadMissingAndMalformed(t *testing.T) {
+	s := NewSampler(func() Snapshot { return Snapshot{} }, func() int { return 0 })
+	s.Path = filepath.Join(t.TempDir(), "metrics.json")
+	if err := s.Load(); err != nil {
+		t.Fatalf("missing file: %v", err)
+	}
+	if err := os.WriteFile(s.Path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Load(); err == nil {
+		t.Fatal("malformed file loaded")
+	}
+	if len(s.Minutes()) != 0 || len(s.Hours()) != 0 {
+		t.Fatal("malformed file left data behind")
+	}
+}
+
+func TestSaveDue(t *testing.T) {
+	h := newHost(t) // 12:00
+	h.write(t, "cpu.stat", "usage_usec 0\n")
+	if !h.s.saveDue() {
+		t.Fatal("nothing saved yet, but no save due")
+	}
+	h.s.Sample()
+	h.s.save() // no Path: only records the time
+	if h.s.saveDue() {
+		t.Fatal("due right after a save")
+	}
+	h.now = h.now.Add(14 * time.Minute)
+	if h.s.saveDue() {
+		t.Fatal("due after 14 minutes")
+	}
+	h.now = h.now.Add(time.Minute)
+	if !h.s.saveDue() {
+		t.Fatal("not due after 15 minutes")
+	}
+	h.now = h.now.Add(44 * time.Minute) // 12:59
+	h.s.save()
+	h.now = h.now.Add(2 * time.Minute) // 13:01: two minutes after a save, the next sample closes 12:00
+	h.s.Sample()
+	if !h.s.saveDue() {
+		t.Fatal("not due after an hour closed")
+	}
+	h.s.save()
+	if h.s.saveDue() {
+		t.Fatal("the closed flag survived a save")
+	}
+}
+
+func TestRunSavesOnStop(t *testing.T) {
+	h := newHost(t)
+	h.write(t, "cpu.stat", "usage_usec 0\n")
+	h.s.Path = filepath.Join(h.dir, "metrics.json")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { h.s.Run(ctx, time.Hour); close(done) }()
+	for i := 0; len(h.s.Minutes()) == 0 && i < 400; i++ {
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if _, err := os.Stat(h.s.Path); err != nil {
+		t.Fatalf("not saved on stop: %v", err)
 	}
 }

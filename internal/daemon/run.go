@@ -37,6 +37,8 @@ type Options struct {
 	TokenPath   string
 	Socket      string
 	HistoryPath string
+	// MetricsPath keeps the metrics rings across restarts; empty keeps them in memory.
+	MetricsPath string
 	// WebPasswordPath holds the web UI's password hash.
 	WebPasswordPath string
 	// SetupPendingPath marks an unfinished first-run setup and
@@ -71,6 +73,7 @@ func DefaultOptions() Options {
 		TokenPath:             "/etc/ghr/token",
 		Socket:                api.DefaultSocket,
 		HistoryPath:           "/var/lib/ghr/history.jsonl",
+		MetricsPath:           "/var/lib/ghr/metrics.json",
 		WebPasswordPath:       "/etc/ghr/web-password",
 		SetupPendingPath:      "/var/lib/ghr/setup-pending",
 		ToolchainsPendingPath: "/var/lib/ghr/toolchains-pending",
@@ -202,6 +205,8 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, epoch 
 		}
 		return s
 	}, func() int { return m.Status().DiskPct })
+	sampler.Path = o.MetricsPath
+	loadMetrics(sampler, ev)
 	sampled := make(chan struct{})
 	go func() { sampler.Run(ctx, time.Minute); close(sampled) }()
 
@@ -228,6 +233,14 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, epoch 
 }
 
 // notConfigured is the start-up warning while ghr has no owner or token.
+// loadMetrics restores the metrics rings; an unreadable file starts them
+// empty with a warning, because losing graphs must not stop the daemon.
+func loadMetrics(s *metrics.Sampler, ev *events.Ring) {
+	if err := s.Load(); err != nil {
+		ev.Add("warn", "", "metrics history unreadable, starting empty: %v", err)
+	}
+}
+
 func notConfigured(webLn net.Listener) string {
 	const cli = "run: ghr setup github --owner <owner>"
 	if webLn == nil {

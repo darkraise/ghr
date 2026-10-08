@@ -4,7 +4,11 @@ package metrics
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -20,6 +24,16 @@ const (
 	keepHours   = 30 * 24
 )
 
+// saveEvery bounds what a crash loses.
+const saveEvery = 15 * time.Minute
+
+// state is the persisted form of the rings.
+type state struct {
+	Minutes []model.MetricSample `json:"minutes"`
+	Hours   []model.MetricRollup `json:"hours"`
+	Open    *openHour            `json:"open,omitempty"`
+}
+
 // Snapshot is the runner counts at one moment, as the Dashboard tiles show them.
 type Snapshot struct{ Live, Queued int }
 
@@ -31,16 +45,19 @@ type Sampler struct {
 	NumCPU  func() int
 	Counts  func() Snapshot
 	Disk    func() int
+	// Path is where Save and Load keep the rings; empty keeps them in memory only.
+	Path string
 
-	mu      sync.Mutex
-	samples []model.MetricSample
-	hours   []model.MetricRollup
-	open    *openHour
-	closed  bool // an hour closed since the last save
-	cur     model.Metrics
-	lastCPU int64
-	lastAt  time.Time
-	haveCPU bool
+	mu       sync.Mutex
+	samples  []model.MetricSample
+	hours    []model.MetricRollup
+	open     *openHour
+	closed   bool // an hour closed since the last save
+	lastSave time.Time
+	cur      model.Metrics
+	lastCPU  int64
+	lastAt   time.Time
+	haveCPU  bool
 }
 
 func NewSampler(counts func() Snapshot, disk func() int) *Sampler {
@@ -48,7 +65,8 @@ func NewSampler(counts func() Snapshot, disk func() int) *Sampler {
 		MemInfo: "/proc/meminfo", NumCPU: runtime.NumCPU, Counts: counts, Disk: disk}
 }
 
-// Run samples at once and then every interval until ctx ends.
+// Run samples at once and then every interval until ctx ends. It saves when
+// an hour closes, every saveEvery, and on the way out.
 func (s *Sampler) Run(ctx context.Context, every time.Duration) {
 	s.Sample()
 	t := time.NewTicker(every)
@@ -56,11 +74,119 @@ func (s *Sampler) Run(ctx context.Context, every time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
+			s.save()
 			return
 		case <-t.C:
 			s.Sample()
+			if s.saveDue() {
+				s.save()
+			}
 		}
 	}
+}
+
+// saveDue reports whether an hour closed or saveEvery passed since the last save.
+func (s *Sampler) saveDue() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed || s.Now().Sub(s.lastSave) >= saveEvery
+}
+
+func (s *Sampler) save() {
+	if err := s.Save(); err != nil {
+		log.Printf("metrics: save %s: %v", s.Path, err)
+	}
+	s.mu.Lock()
+	s.lastSave, s.closed = s.Now(), false
+	s.mu.Unlock()
+}
+
+// Save writes the rings and the open hour to Path, atomically and readable
+// by root only. An empty Path saves nothing.
+func (s *Sampler) Save() error {
+	if s.Path == "" {
+		return nil
+	}
+	s.mu.Lock()
+	data, err := json.Marshal(state{Minutes: s.samples, Hours: s.hours, Open: s.open})
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(s.Path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".metrics-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), s.Path)
+}
+
+// Load restores what Save wrote, dropping minutes older than three hours and
+// rollups older than 30 days. A saved open hour resumes when it is the
+// current UTC hour and is closed as it stands otherwise. A missing file is an
+// empty start; a malformed one returns an error and changes nothing.
+func (s *Sampler) Load() error {
+	if s.Path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(s.Path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var st state
+	if err := json.Unmarshal(data, &st); err != nil {
+		return fmt.Errorf("%s: %w", s.Path, err)
+	}
+	now := s.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.samples = nil
+	for _, m := range st.Minutes {
+		if now.Sub(m.At) <= keepMinutes*time.Minute {
+			s.samples = append(s.samples, m)
+		}
+	}
+	if len(s.samples) > keepMinutes {
+		s.samples = s.samples[len(s.samples)-keepMinutes:]
+	}
+	s.hours = nil
+	for _, r := range st.Hours {
+		if now.Sub(r.At) <= keepHours*time.Hour {
+			s.hours = append(s.hours, r)
+		}
+	}
+	s.open = nil
+	if o := st.Open; o != nil {
+		current := now.UTC().Truncate(time.Hour)
+		switch {
+		case o.At.Equal(current):
+			s.open = o
+		case o.At.Before(current) && now.Sub(o.At) <= keepHours*time.Hour:
+			s.hours = append(s.hours, o.rollup())
+		}
+	}
+	if len(s.hours) > keepHours {
+		s.hours = s.hours[len(s.hours)-keepHours:]
+	}
+	return nil
 }
 
 // Sample records one sample now. CPU is the cgroup's usage growth since the
