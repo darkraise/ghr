@@ -17,7 +17,7 @@ describe("Storage page", () => {
       "manual build-cache-all · 13:16 · ok — all build cache 6.8 MB",
     )
     expect(screen.getByRole("button", { name: "Build cache to 20GB" })).toBeEnabled()
-    expect(screen.getByText("Unused volumes: refused while 1 jobs run")).toBeInTheDocument()
+    expect(screen.getByText("Unused volumes: refused while 1 job runs")).toBeInTheDocument()
   })
 
   it("leaves toolchains to the Toolchains page", async () => {

@@ -17,7 +17,7 @@ describe("Package caches card", () => {
     expect(screen.getByText("not present")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Clear Cargo" })).toBeNull()
     expect(screen.getByText("measured 14:03")).toBeInTheDocument()
-    expect(screen.getByText("Clear: refused while 1 jobs run")).toBeInTheDocument()
+    expect(screen.getByText("Clear: refused while 1 job runs")).toBeInTheDocument()
   })
 
   it("clears a cache only once confirmed", async () => {
