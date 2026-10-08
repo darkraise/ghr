@@ -147,7 +147,7 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
             type="number"
             min={0}
             max={99}
-            placeholder={status.data?.mode === "all" ? "∞ (default)" : "1 (default)"}
+            placeholder={status.data?.mode === "all" ? "No limit (default)" : "1 (default)"}
             value={max}
             onChange={(e) => setMax(e.target.value)}
           />

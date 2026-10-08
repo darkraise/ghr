@@ -81,7 +81,7 @@ function styleViolations(text: string): string[] {
 
 // TagField's removable chips are controls, so they keep the kit's Badge.
 const BADGE_ALLOWED = "src/components/tag-field.tsx"
-const RETIRED = /darkraise-ui\/components\/badge|@\/components\/(?:glyph|state-badge)["/]/
+const RETIRED = /darkraise-ui\/components\/badge|import\s*\{[^}]*\bBadge\b[^}]*\}\s*from\s*"darkraise-ui"|@\/components\/(?:glyph|state-badge)["/]/
 
 describe("anti-slop rules", () => {
   it("catch what they are meant to catch", () => {
@@ -99,6 +99,8 @@ describe("anti-slop rules", () => {
     expect(styleViolations('className="bg-conic-180 from-primary"')).toHaveLength(1)
     expect(styleViolations('className="bg-card bg-muted bg-primary/45"')).toEqual([])
     expect(RETIRED.test('import { Badge } from "darkraise-ui/components/badge"')).toBe(true)
+    expect(RETIRED.test('import { Card, Badge } from "darkraise-ui"')).toBe(true)
+    expect(RETIRED.test('import { Button } from "darkraise-ui"')).toBe(false)
     expect(RETIRED.test('import { StateBadge } from "@/components/state-badge"')).toBe(true)
     expect(RETIRED.test('import { Glyph } from "@/components/glyph"')).toBe(true)
     expect(RETIRED.test('import { ResultIcon } from "@/components/result-icon"')).toBe(false)

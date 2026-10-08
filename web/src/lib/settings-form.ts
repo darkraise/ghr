@@ -69,6 +69,8 @@ const patchKey = (key: string) => (isLimit(key) ? `runner_limits.${key}` : key)
 
 export interface SettingsForm {
   config: Config | undefined
+  configError: string
+  retryConfig: () => void
   values: Values
   changed: string[]
   errors: Record<string, string>
@@ -139,5 +141,5 @@ export function useSettingsForm(): SettingsForm {
     return true
   }
 
-  return { config: config.data, values, changed, errors, offline, saving, rejection, set, save, discard }
+  return { config: config.data, configError: config.isError ? errorText(config.error) : "", retryConfig: () => void config.refetch(), values, changed, errors, offline, saving, rejection, set, save, discard }
 }

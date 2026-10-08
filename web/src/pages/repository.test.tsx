@@ -178,6 +178,14 @@ describe("repository page", () => {
     expect(screen.getByText("Being removed. Running jobs finish first, and settings are read-only.")).toBeInTheDocument()
   })
 
+  it("shows a failed config read with a retry instead of loading forever", async () => {
+    mockApi(routes({ "GET /api/config": () => json({ error: "config unreadable" }, 500) }))
+    renderApp("/repositories/darkmem")
+    expect(await screen.findByRole("alert")).toHaveTextContent("config unreadable")
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
+    expect(screen.queryByText("Loading")).toBeNull()
+  })
+
   it("says when the repo is not configured", async () => {
     mockApi(routes())
     renderApp("/repositories/nope")

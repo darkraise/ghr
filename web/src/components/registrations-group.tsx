@@ -36,7 +36,7 @@ export function RegistrationsGroup({
   })
 
   let body: ReactNode
-  if (degraded) body = <ErrorLine>{`GitHub is rejecting the token: ${degradedReason ?? ""}`}</ErrorLine>
+  if (degraded) body = <p className="text-sm text-destructive">{`GitHub is rejecting the token: ${degradedReason ?? ""}`}</p>
   else if (regs.isError) body = <ErrorLine>{errorText(regs.error)}</ErrorLine>
   else if (!regs.data) body = <Spinner label="Loading" />
   else if (regs.data.length === 0) {

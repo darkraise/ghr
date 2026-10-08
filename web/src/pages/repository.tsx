@@ -14,6 +14,7 @@ import { keys, useConfig, useStatus } from "@/api/hooks"
 import type { Config, RepoConfig, RepoPatch, RepoStatus } from "@/api/types"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { LabelCheckGroup } from "@/components/label-check-group"
+import { ErrorLine } from "@/components/page/error-line"
 import { Field, FieldGroup } from "@/components/page/field"
 import { SectionNav } from "@/components/page/section-nav"
 import { RegistrationsGroup } from "@/components/registrations-group"
@@ -212,7 +213,7 @@ function RepositoryForm({ name }: { name: string }) {
     return (
       <div className="flex flex-col gap-4">
         <PageHeader breadcrumbs={breadcrumbs} title={name} />
-        <Spinner label="Loading" />
+        {config.isError ? <ErrorLine onRetry={() => void config.refetch()}>{errorText(config.error)}</ErrorLine> : <Spinner label="Loading" />}
       </div>
     )
   }

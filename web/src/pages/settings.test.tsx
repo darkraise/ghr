@@ -270,6 +270,14 @@ describe("Settings page", () => {
 })
 
 describe("Settings page layout", () => {
+  it("shows a failed config read with a retry instead of loading forever", async () => {
+    mockApi(routes({ "GET /api/config": () => json({ error: "config unreadable" }, 500) }))
+    renderApp("/settings")
+    expect(await screen.findByRole("alert")).toHaveTextContent("config unreadable")
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
+    expect(screen.queryByText("Loading")).toBeNull()
+  })
+
   it("sums up the config in the header", async () => {
     mockApi(routes())
     renderApp("/settings")

@@ -106,7 +106,7 @@ export function RepoTable({
       <TableBody>
         {repos.map((r) => {
           const word = repoStateWord(r)
-          const seen = activity?.find((a) => a.repo === r.name)
+          const seen = activity?.find((a) => a.repo.toLowerCase() === r.name.toLowerCase())
           const cfg = config?.repos?.find((c) => c.name === r.name)
           const rate = weekRate(seen?.week)
           return (

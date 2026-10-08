@@ -1,6 +1,7 @@
 import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { AccountSection } from "@/components/account-section"
+import { ErrorLine } from "@/components/page/error-line"
 import { SectionNav } from "@/components/page/section-nav"
 import { RunnerSection } from "@/components/runner-section"
 import { SaveBar } from "@/components/save-bar"
@@ -28,7 +29,7 @@ export function SettingsPage() {
     <div className="flex flex-col gap-4">
       <PageHeader title="Settings" description={c ? `Serving ${c.owner} in ${c.mode} mode` : undefined} />
       {!c ? (
-        <Spinner label="Loading" />
+        form.configError ? <ErrorLine onRetry={form.retryConfig}>{form.configError}</ErrorLine> : <Spinner label="Loading" />
       ) : (
         <>
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_12rem]">
