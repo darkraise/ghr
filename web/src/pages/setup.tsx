@@ -313,35 +313,39 @@ export function SetupPage() {
       )
   }
 
+  // darkraise-ui locks html and body to the viewport with overflow hidden and
+  // leaves scrolling to its layouts; the wizard renders outside the Shell's.
   return (
-    <div className="mx-auto max-w-4xl p-4 sm:p-8">
-      <h1 className="mb-1 text-2xl font-semibold">Set up ghr</h1>
-      <p className="mb-6 text-sm text-muted-foreground">Each step saves as you go; this page stays open to you until you finish.</p>
-      <ol className="mb-6 flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="Setup steps">
-        {STEPS.map((name, i) => {
-          const done = i === 0 || (i === 1 && s.configured) || i < current
-          return (
-            <li
-              key={name}
-              aria-current={i === current ? "step" : undefined}
-              className={i === current ? "font-semibold" : "text-muted-foreground"}
-            >
-              {done ? "✓" : `${i + 1}.`} {name}
-            </li>
-          )
-        })}
-      </ol>
-      <section aria-labelledby="setup-step">
-        <h2 id="setup-step" className="mb-4 text-lg font-medium">
-          {STEPS[current]}
-        </h2>
-        {body}
-        {finishError && (
-          <p role="alert" className="mt-3 text-sm text-destructive">
-            {finishError}
-          </p>
-        )}
-      </section>
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-4xl p-4 sm:p-8">
+        <h1 className="mb-1 text-2xl font-semibold">Set up ghr</h1>
+        <p className="mb-6 text-sm text-muted-foreground">Each step saves as you go; this page stays open to you until you finish.</p>
+        <ol className="mb-6 flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="Setup steps">
+          {STEPS.map((name, i) => {
+            const done = i === 0 || (i === 1 && s.configured) || i < current
+            return (
+              <li
+                key={name}
+                aria-current={i === current ? "step" : undefined}
+                className={i === current ? "font-semibold" : "text-muted-foreground"}
+              >
+                {done ? "✓" : `${i + 1}.`} {name}
+              </li>
+            )
+          })}
+        </ol>
+        <section aria-labelledby="setup-step">
+          <h2 id="setup-step" className="mb-4 text-lg font-medium">
+            {STEPS[current]}
+          </h2>
+          {body}
+          {finishError && (
+            <p role="alert" className="mt-3 text-sm text-destructive">
+              {finishError}
+            </p>
+          )}
+        </section>
+      </div>
     </div>
   )
 }

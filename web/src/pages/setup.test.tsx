@@ -134,6 +134,15 @@ describe("setup wizard", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
   })
 
+  // darkraise-ui sets html and body to overflow hidden, so without its own
+  // scroll container the wizard's lower steps are cut off.
+  it("scrolls inside its own container", async () => {
+    mockApi(authedRoutes({ "GET /api/setup": { ...base, configured: true } }))
+    renderApp("/setup")
+    const title = await screen.findByRole("heading", { name: "Set up ghr" })
+    expect(title.closest(".overflow-y-auto")).toHaveClass("h-full")
+  })
+
   it("finishes without toolchains when the rest is skipped", async () => {
     let finished: unknown
     mockApi(
