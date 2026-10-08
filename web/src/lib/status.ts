@@ -38,3 +38,10 @@ export function running(status: Status): number {
 export function capText(status: Status): string {
   return status.mode === "all" ? "∞" : String(status.global_max)
 }
+
+export function repoStateWord(r: RepoStatus): "Error" | "Removing" | "Paused" | "Running" | "Idle" {
+  if (r.error) return "Error"
+  if (r.removing) return "Removing"
+  if (r.paused) return "Paused"
+  return r.active > 0 ? "Running" : "Idle"
+}
