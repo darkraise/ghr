@@ -450,6 +450,12 @@ func (m *Manager) Status() model.Status {
 	for _, r := range cfg.Repos {
 		rs := model.RepoStatus{Name: r.Name, Paused: r.Paused, Removing: r.Removing, Max: cfg.EffectiveMax(r),
 			Queued: len(m.demand[r.Name]), Error: m.repoErr[r.Name]}
+		for _, q := range m.demand[r.Name] {
+			if rs.OldestQueuedAt == nil || q.CreatedAt.Before(*rs.OldestQueuedAt) {
+				at := q.CreatedAt
+				rs.OldestQueuedAt = &at
+			}
+		}
 		for _, i := range m.insts {
 			if strings.EqualFold(i.Repo, r.Name) {
 				rs.Active++

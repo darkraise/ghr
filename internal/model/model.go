@@ -12,7 +12,9 @@ type Status struct {
 	Degraded       bool   `json:"degraded"`
 	DegradedReason string `json:"degraded_reason,omitempty"`
 	RateRemaining  int    `json:"rate_remaining"`
-	DiskPct        int    `json:"disk_pct"`
+	// RateLimit is the token's hourly request limit, absent until GitHub has answered.
+	RateLimit int `json:"rate_limit,omitempty"`
+	DiskPct   int `json:"disk_pct"`
 	// DiskUsedBytes and DiskTotalBytes are 0 until the first measurement.
 	DiskUsedBytes  int64             `json:"disk_used_bytes"`
 	DiskTotalBytes int64             `json:"disk_total_bytes"`
@@ -68,14 +70,17 @@ type RunnerUpdate struct {
 }
 
 type RepoStatus struct {
-	Name     string        `json:"name"`
-	Paused   bool          `json:"paused"`
-	Removing bool          `json:"removing,omitempty"`
-	Max      int           `json:"max"` // 0 = unlimited
-	Active   int           `json:"active"`
-	Queued   int           `json:"queued"`
-	Error    string        `json:"error,omitempty"`
-	LastJob  *HistoryEntry `json:"last_job,omitempty"`
+	Name     string `json:"name"`
+	Paused   bool   `json:"paused"`
+	Removing bool   `json:"removing,omitempty"`
+	Max      int    `json:"max"` // 0 = unlimited
+	Active   int    `json:"active"`
+	Queued   int    `json:"queued"`
+	// OldestQueuedAt is when the repo's longest-waiting matching job was queued,
+	// as of the scheduler's last successful poll.
+	OldestQueuedAt *time.Time    `json:"oldest_queued_at,omitempty"`
+	Error          string        `json:"error,omitempty"`
+	LastJob        *HistoryEntry `json:"last_job,omitempty"`
 }
 
 type InstanceStatus struct {

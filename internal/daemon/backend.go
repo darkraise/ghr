@@ -124,6 +124,11 @@ func (b *Backend) Status() model.Status {
 	if b.SetupPending != nil {
 		st.SetupPending = b.SetupPending()
 	}
+	if b.GH != nil {
+		if l := b.GH.TokenMeta().RateLimit; l != nil {
+			st.RateLimit = *l
+		}
+	}
 	return st
 }
 func (b *Backend) EventsAfter(seq int64) []model.Event { return b.Events.After(seq) }

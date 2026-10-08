@@ -5,6 +5,7 @@
   "global_max": 2,
   "degraded": false,
   "rate_remaining": 4980,
+  "rate_limit": 5000,
   "disk_pct": 61,
   "disk_used_bytes": 146000000000,
   "disk_total_bytes": 240000000000,
@@ -15,6 +16,7 @@
       "max": 2,
       "active": 1,
       "queued": 3,
+      "oldest_queued_at": "2026-10-03T14:02:00Z",
       "last_job": {
         "id": "h1",
         "repo": "darkmem",

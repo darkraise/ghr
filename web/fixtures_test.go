@@ -52,9 +52,9 @@ func fixtureValues() map[string]any {
 		HTMLURL: "https://github.com/darkraise/darkmem/actions/runs/101/job/1"}
 	return map[string]any{
 		"status": model.Status{
-			Now: fixtureTime, Epoch: "lz3k9a", Mode: "queue", GlobalMax: 2, RateRemaining: 4980, DiskPct: 61, DiskUsedBytes: 146_000_000_000, DiskTotalBytes: 240_000_000_000,
+			Now: fixtureTime, Epoch: "lz3k9a", Mode: "queue", GlobalMax: 2, RateRemaining: 4980, RateLimit: 5000, DiskPct: 61, DiskUsedBytes: 146_000_000_000, DiskTotalBytes: 240_000_000_000,
 			Repos: []model.RepoStatus{
-				{Name: "darkmem", Max: 2, Active: 1, Queued: 3, LastJob: &lastJob},
+				{Name: "darkmem", Max: 2, Active: 1, Queued: 3, OldestQueuedAt: ptr(at(-3 * time.Minute)), LastJob: &lastJob},
 				{Name: "darkcloud", Paused: true, Max: 1},
 				{Name: "old-repo", Paused: true, Removing: true, Max: 1, Error: "GitHub: not found"},
 			},

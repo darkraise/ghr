@@ -886,3 +886,15 @@ func TestStatusReportsWebSetupRequired(t *testing.T) {
 		t.Fatal("after a password is set: want false")
 	}
 }
+
+func TestStatusCarriesTheRateLimit(t *testing.T) {
+	b, _, gh := newBackend(t)
+	if st := b.Status(); st.RateLimit != 0 {
+		t.Fatalf("before any response: %d", st.RateLimit)
+	}
+	n := 15000
+	gh.meta = github.TokenMeta{RateLimit: &n}
+	if st := b.Status(); st.RateLimit != 15000 {
+		t.Fatalf("rate limit = %d", st.RateLimit)
+	}
+}

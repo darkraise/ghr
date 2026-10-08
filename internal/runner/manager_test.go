@@ -115,3 +115,26 @@ func TestInitKeepsAGivenEpoch(t *testing.T) {
 		t.Fatalf("epoch %q", got)
 	}
 }
+
+func TestStatusCarriesTheOldestQueuedJob(t *testing.T) {
+	h := newHarness(t)
+	early := h.now.Add(-5 * time.Minute)
+	h.m.mu.Lock()
+	h.m.demand = map[string][]sched.QueuedJob{"darkmem": {
+		{Repo: "darkmem", ID: 1, CreatedAt: h.now.Add(-time.Minute)},
+		{Repo: "darkmem", ID: 2, CreatedAt: early},
+	}}
+	h.m.mu.Unlock()
+	for _, r := range h.m.Status().Repos {
+		switch r.Name {
+		case "darkmem":
+			if r.OldestQueuedAt == nil || !r.OldestQueuedAt.Equal(early) {
+				t.Fatalf("darkmem oldest = %v", r.OldestQueuedAt)
+			}
+		case "darkcloud":
+			if r.OldestQueuedAt != nil {
+				t.Fatalf("darkcloud oldest = %v", r.OldestQueuedAt)
+			}
+		}
+	}
+}
