@@ -102,7 +102,7 @@ describe("runner detail page", () => {
     mockApi(detailRoutes({ "GET /api/status": () => json({ error: "connection refused" }, 502) }))
     renderApp("/runners/aaaaaa")
     expect(await screen.findByRole("heading", { name: "aaaaaa" })).toBeInTheDocument()
-    expect(await screen.findByText("daemon unreachable: connection refused — retrying")).toBeInTheDocument()
+    expect(await screen.findByText("Daemon unreachable: connection refused. Retrying.")).toBeInTheDocument()
     expect(screen.queryByText("This runner has finished")).toBeNull()
     expect(screen.getByRole("button", { name: "Stop runner" })).toBeDisabled()
   })

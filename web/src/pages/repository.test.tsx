@@ -156,7 +156,7 @@ describe("repository page", () => {
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     await user.type(max, "5")
-    await user.click(screen.getByRole("link", { name: "Runners" }))
+    await user.click(screen.getByRole("link", { name: /^Runners/ }))
     expect(await screen.findByText("You have 1 unsaved change on the Repositories page.")).toBeInTheDocument()
   })
 

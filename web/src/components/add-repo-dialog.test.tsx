@@ -41,7 +41,7 @@ describe("Add repository dialog", () => {
     const { dialog, user } = await open()
     await user.click(dialog.getByRole("option", { name: /new-repo/ }))
     down = true
-    await waitFor(() => expect(screen.getAllByText(/daemon unreachable/).length).toBeGreaterThan(0), { timeout: 4000 })
+    await waitFor(() => expect(screen.getAllByText(/Daemon unreachable/).length).toBeGreaterThan(0), { timeout: 4000 })
     await user.click(dialog.getByRole("button", { name: "Add" }))
     expect(await dialog.findByText("✖ connection refused")).toBeInTheDocument()
     expect(calls.some((c) => c.method === "POST")).toBe(true)

@@ -74,7 +74,7 @@ describe("Install toolchain dialog", () => {
   it("is not offered while the daemon is unreachable", async () => {
     mockApi(routes({ "GET /api/status": () => json({ error: "connection refused" }, 502) }))
     renderApp("/toolchains")
-    await waitFor(() => expect(screen.getAllByText(/daemon unreachable/).length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText(/Daemon unreachable/).length).toBeGreaterThan(0))
     expect(await screen.findByRole("button", { name: "Install…" })).toBeDisabled()
   })
 
@@ -90,7 +90,7 @@ describe("Install toolchain dialog", () => {
     const dialog = await openDialog(user)
     await user.click(await dialog.findByRole("button", { name: /^22\.11\.0/ }))
     down = true
-    await waitFor(() => expect(screen.getAllByText(/daemon unreachable/).length).toBeGreaterThan(0), { timeout: 4000 })
+    await waitFor(() => expect(screen.getAllByText(/Daemon unreachable/).length).toBeGreaterThan(0), { timeout: 4000 })
     await user.click(dialog.getByRole("button", { name: "Install" }))
     expect(await dialog.findByText("✖ connection refused")).toBeInTheDocument()
     expect(calls.some((c) => c.method === "POST" && c.path === "/api/toolchains")).toBe(true)

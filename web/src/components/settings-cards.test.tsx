@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import type { RunnerUpdate } from "@/api/types"
 import { dateTime } from "@/lib/format"
@@ -33,7 +33,7 @@ describe("Maintenance card", () => {
     const { user } = renderApp("/settings")
     expect(await screen.findByText("update available")).toBeInTheDocument()
     expect(screen.getByText(`update by ${dateTime(deadline).slice(0, 10)} (20 days)`)).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Queue update" }))
+    await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Queue update" }))
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/runner-update")).toBe(true))
     expect((await screen.findAllByText("runner update queued")).length).toBeGreaterThan(0)
   })
@@ -145,7 +145,7 @@ describe("Account card", () => {
     const poll = await screen.findByLabelText("Poll interval")
     await user.clear(poll)
     await user.type(poll, "15s")
-    await user.click(screen.getByRole("button", { name: "Log out" }))
+    await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Log out" }))
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
     expect(screen.queryByText("Unsaved changes")).toBeNull()
   })
