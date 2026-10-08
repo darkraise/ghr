@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "./client"
-import type { GhrEvent, LogChunk, Status, Storage } from "./types"
+import type { ActivityWindow, GhrEvent, LogChunk, Status, Storage } from "./types"
 
 export const POLL_FAST = 1000
 export const POLL_SLOW = 5000
@@ -13,6 +13,7 @@ export const keys = {
   status: ["status"] as const,
   config: ["config"] as const,
   metrics: ["metrics"] as const,
+  activity: (window: string, tz: string) => ["activity", window, tz] as const,
   events: (epoch: string) => ["events", epoch] as const,
   history: (repo: string, conclusion: string) => ["history", repo, conclusion] as const,
   steps: (id: string) => ["steps", id] as const,
@@ -51,6 +52,21 @@ export function useConfig() {
 
 export function useMetrics() {
   return useQuery({ queryKey: keys.metrics, queryFn: ({ signal }) => api.metrics(signal), refetchInterval: POLL_SLOW })
+}
+
+export function browserZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
+// The daemon aligns buckets to the zone it is given, so the browser sends its
+// own and the columns line up with the viewer's clock.
+export function useActivity(window: ActivityWindow) {
+  const tz = browserZone()
+  return useQuery({
+    queryKey: keys.activity(window, tz),
+    queryFn: ({ signal }) => api.activity(window, tz, signal),
+    refetchInterval: POLL_SLOW,
+  })
 }
 
 export function useHistory(repo: string, conclusion: string) {

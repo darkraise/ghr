@@ -29,6 +29,12 @@ describe("api for the later pages", () => {
     expect(calls[0]).toMatchObject({ method, path, body, contentType: body === undefined ? undefined : "application/json" })
   })
 
+  it("asks for activity by window and zone", async () => {
+    const { calls } = mockApi({ "GET /api/activity": { window: "3h" } })
+    expect((await api.activity("3h", "Asia/Ho_Chi_Minh")).window).toBe("3h")
+    expect(calls[0]?.search).toBe("?window=3h&tz=Asia%2FHo_Chi_Minh")
+  })
+
   it("sends a replacement token as plain text, unchanged", async () => {
     const { calls } = mockApi({ "PUT /api/token": ok })
     await api.replaceToken("github_pat_abc")

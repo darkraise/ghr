@@ -1,4 +1,6 @@
 import type {
+  Activity,
+  ActivityWindow,
   AddRepoRequest,
   AuthState,
   AvailableRepo,
@@ -99,6 +101,8 @@ export const api = {
   containers: (id: string, signal?: AbortSignal) =>
     request<Container[]>("GET", `/api/runners/${seg(id)}/containers`, undefined, signal),
   metrics: (signal?: AbortSignal) => request<Metrics>("GET", "/api/metrics", undefined, signal),
+  activity: (window: ActivityWindow, tz: string, signal?: AbortSignal) =>
+    request<Activity>("GET", `/api/activity?${query({ window, tz })}`, undefined, signal),
   config: (signal?: AbortSignal) => request<Config>("GET", "/api/config", undefined, signal),
   stopRunner: (id: string) => send("DELETE", `/api/runners/${seg(id)}`),
   pauseAll: () => send("POST", "/api/pause-all"),

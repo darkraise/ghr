@@ -1,8 +1,9 @@
 import { renderHook, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { mockApi } from "@/test/api"
+import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
-import { appendEvents, appendLog, MAX_EVENTS, MAX_LOG, useEvents, useLogTail } from "./hooks"
+import { appendEvents, appendLog, browserZone, MAX_EVENTS, MAX_LOG, useActivity, useEvents, useLogTail } from "./hooks"
 import type { GhrEvent, LogChunk } from "./types"
 
 const ev = (seq: number): GhrEvent => ({ seq, time: "2026-10-03T14:05:00Z", level: "info", msg: `event ${seq}` })
@@ -84,5 +85,16 @@ describe("useLogTail", () => {
     renderHook(() => useLogTail("aaaaaa", false), { wrapper })
     await new Promise((r) => setTimeout(r, 1200))
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe("useActivity", () => {
+  it("asks for the window in the browser's zone", async () => {
+    const { calls } = mockApi({ "GET /api/activity": fixtures.activityLanes })
+    const { wrapper } = withQuery()
+    const { result } = renderHook(() => useActivity("3h"), { wrapper })
+    await waitFor(() => expect(result.current.data?.capacity).toBe(2))
+    expect(browserZone()).toBe("UTC")
+    expect(calls[0]?.search).toBe("?window=3h&tz=UTC")
   })
 })
