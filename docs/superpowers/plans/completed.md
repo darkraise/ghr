@@ -12,3 +12,4 @@
 - 2026-10-08 `docs/superpowers/plans/2026-10-07-ghr-first-run-setup.md` — merged into `master` at 41c90e6 (ghr repository; homelab part at homelab 25729ed, since moved to ghr deploy/); released as v0.1.16 and deployed to the runner LXC
 - 2026-10-08 `docs/superpowers/plans/2026-10-08-ghr-web-ui-1-backend.md` — merged into `master` at c349fec (ghr repository, fast-forwarded; not pushed or released)
 - 2026-10-08 `docs/superpowers/plans/2026-10-08-ghr-web-ui-2-identity-dashboard.md` — merged into `master` at 5cdd9af (ghr repository, fast-forwarded; not pushed or released)
+- 2026-10-08 `docs/superpowers/plans/2026-10-08-ghr-web-ui-pages-1-backend.md` — merged into `master` at ba37e0f (ghr repository, fast-forwarded; not pushed or released)
