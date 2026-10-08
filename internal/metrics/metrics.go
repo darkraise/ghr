@@ -1,5 +1,5 @@
-// Package metrics keeps an hour of one-minute samples of the runner counts
-// and the container's CPU and memory use.
+// Package metrics keeps three hours of one-minute samples of the runner
+// counts and the container's CPU and memory use, and 30 days of hourly rollups.
 package metrics
 
 import (
@@ -14,8 +14,11 @@ import (
 	"github.com/darkraise/ghr/internal/model"
 )
 
-// keep is how many samples the ring holds: an hour at one a minute.
-const keep = 60
+const (
+	keepMinutes = 180 // three hours at one a minute
+	showMinutes = 60  // what GET /metrics serves
+	keepHours   = 30 * 24
+)
 
 // Snapshot is the runner counts at one moment, as the Dashboard tiles show them.
 type Snapshot struct{ Live, Queued int }
@@ -31,6 +34,9 @@ type Sampler struct {
 
 	mu      sync.Mutex
 	samples []model.MetricSample
+	hours   []model.MetricRollup
+	open    *openHour
+	closed  bool // an hour closed since the last save
 	cur     model.Metrics
 	lastCPU int64
 	lastAt  time.Time
@@ -83,18 +89,104 @@ func (s *Sampler) Sample() {
 		s.cur.MemUsed, s.cur.MemTotal = &used, &total
 	}
 	s.samples = append(s.samples, smp)
-	if len(s.samples) > keep {
-		s.samples = s.samples[len(s.samples)-keep:]
+	if len(s.samples) > keepMinutes {
+		s.samples = s.samples[len(s.samples)-keepMinutes:]
 	}
+	s.addToHour(smp)
 }
 
-// Metrics returns a copy of the samples and the current figures.
+// Metrics returns a copy of the last hour of samples and the current figures.
 func (s *Sampler) Metrics() model.Metrics {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m := s.cur
-	m.Samples = append([]model.MetricSample{}, s.samples...)
+	start := max(len(s.samples)-showMinutes, 0)
+	m.Samples = append([]model.MetricSample{}, s.samples[start:]...)
 	return m
+}
+
+// Minutes returns a copy of every kept minute sample, oldest first.
+func (s *Sampler) Minutes() []model.MetricSample {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]model.MetricSample{}, s.samples...)
+}
+
+// Hours returns a copy of the closed hourly rollups, oldest first, followed
+// by the hour in progress.
+func (s *Sampler) Hours() []model.MetricRollup {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := append([]model.MetricRollup{}, s.hours...)
+	if s.open != nil {
+		out = append(out, s.open.rollup())
+	}
+	return out
+}
+
+// openHour accumulates the samples of the UTC hour in progress.
+type openHour struct {
+	At        time.Time `json:"at"`
+	Samples   int       `json:"samples"`
+	QueuedMax int       `json:"queued_max"`
+	CPUSum    float64   `json:"cpu_sum"`
+	CPUN      int       `json:"cpu_n"`
+	MemSum    float64   `json:"mem_sum"`
+	MemN      int       `json:"mem_n"`
+}
+
+func (o *openHour) add(smp model.MetricSample) {
+	o.Samples++
+	o.QueuedMax = max(o.QueuedMax, smp.Queued)
+	if smp.CPU != nil {
+		o.CPUSum += *smp.CPU
+		o.CPUN++
+	}
+	if smp.Mem != nil {
+		o.MemSum += float64(*smp.Mem)
+		o.MemN++
+	}
+}
+
+func (o *openHour) rollup() model.MetricRollup {
+	r := model.MetricRollup{At: o.At, Samples: o.Samples, QueuedMax: o.QueuedMax}
+	if o.CPUN > 0 {
+		v := o.CPUSum / float64(o.CPUN)
+		r.CPUAvg = &v
+	}
+	if o.MemN > 0 {
+		v := int64(o.MemSum / float64(o.MemN))
+		r.MemAvg = &v
+	}
+	return r
+}
+
+// addToHour folds smp into the open UTC hour, closing it when smp belongs to
+// a later one. Rollups are keyed on UTC so every one spans 60 minutes; a
+// sample from before the open hour (a backwards clock step) is left out.
+// The caller holds s.mu.
+func (s *Sampler) addToHour(smp model.MetricSample) {
+	hour := smp.At.UTC().Truncate(time.Hour)
+	if s.open != nil && hour.Before(s.open.At) {
+		return
+	}
+	if s.open != nil && hour.After(s.open.At) {
+		s.closeHour()
+	}
+	if s.open == nil {
+		s.open = &openHour{At: hour}
+	}
+	s.open.add(smp)
+}
+
+// closeHour moves the open hour into the rollup ring. The caller holds s.mu.
+func (s *Sampler) closeHour() {
+	s.hours = append(s.hours, s.open.rollup())
+	if len(s.hours) > keepHours {
+		s.hours = s.hours[len(s.hours)-keepHours:]
+	}
+	s.open = nil
+	s.closed = true
 }
 
 // cpus is the cgroup's CPU quota, or the CPU count when cpu.max says "max".

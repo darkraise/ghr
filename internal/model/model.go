@@ -227,6 +227,16 @@ type MetricSample struct {
 	Mem    *int64    `json:"mem,omitempty"`
 }
 
+// MetricRollup is one UTC hour of metric samples. CPUAvg and MemAvg are
+// absent when no sample in the hour carried them.
+type MetricRollup struct {
+	At        time.Time `json:"at"`
+	Samples   int       `json:"samples"`
+	QueuedMax int       `json:"queued_max"`
+	CPUAvg    *float64  `json:"cpu_avg,omitempty"`
+	MemAvg    *int64    `json:"mem_avg,omitempty"`
+}
+
 // Metrics is the host load history and gauges, served by GET /metrics.
 type Metrics struct {
 	Samples  []MetricSample `json:"samples"`

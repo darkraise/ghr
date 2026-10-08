@@ -169,3 +169,81 @@ func TestRunSamplesUntilCancelled(t *testing.T) {
 		t.Fatal("sampling continued after Run returned")
 	}
 }
+
+func TestMinuteRingKeepsThreeHoursAndServesOne(t *testing.T) {
+	h := newHost(t)
+	h.write(t, "cpu.stat", "usage_usec 0\n")
+	for i := 0; i < 200; i++ {
+		h.s.Sample()
+		h.now = h.now.Add(time.Minute)
+	}
+	mins := h.s.Minutes()
+	if len(mins) != 180 {
+		t.Fatalf("minutes = %d", len(mins))
+	}
+	m := h.s.Metrics()
+	if len(m.Samples) != 60 || !m.Samples[59].At.Equal(mins[179].At) || !m.Samples[0].At.Equal(mins[120].At) {
+		t.Fatalf("metrics serves %d samples ending %v", len(m.Samples), m.Samples[len(m.Samples)-1].At)
+	}
+}
+
+func TestHourlyRollups(t *testing.T) {
+	h := newHost(t) // 12:00 UTC
+	queued := 0
+	h.s.Counts = func() Snapshot { return Snapshot{Live: 1, Queued: queued} }
+	usage := int64(0)
+	for i := 0; i < 60; i++ { // 12:00 to 12:59
+		queued = i % 7
+		usage += 30_000_000 // 30 s of CPU a minute on 2 CPUs is 25%
+		h.write(t, "cpu.stat", "usage_usec "+strconv.FormatInt(usage, 10)+"\n")
+		h.s.Sample()
+		h.now = h.now.Add(time.Minute)
+	}
+	if hrs := h.s.Hours(); len(hrs) != 1 || hrs[0].Samples != 60 {
+		t.Fatalf("open hour %+v", hrs)
+	}
+	h.s.Sample() // 13:00 closes 12:00
+	hrs := h.s.Hours()
+	if len(hrs) != 2 {
+		t.Fatalf("hours %+v", hrs)
+	}
+	r := hrs[0]
+	if !r.At.Equal(time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)) || r.Samples != 60 || r.QueuedMax != 6 {
+		t.Fatalf("closed hour %+v", r)
+	}
+	if r.CPUAvg == nil || *r.CPUAvg != 25 || r.MemAvg == nil || *r.MemAvg != (8388608-8204288)*1024 {
+		t.Fatalf("averages %+v", r)
+	}
+	if hrs[1].Samples != 1 || !hrs[1].At.Equal(time.Date(2026, 10, 5, 13, 0, 0, 0, time.UTC)) {
+		t.Fatalf("new open hour %+v", hrs[1])
+	}
+}
+
+func TestClockJumps(t *testing.T) {
+	h := newHost(t)
+	h.write(t, "cpu.stat", "usage_usec 0\n")
+	h.s.Sample()                     // 12:00
+	h.now = h.now.Add(3 * time.Hour) // 15:00: 12:00 closes, 13:00 and 14:00 stay absent
+	h.s.Sample()
+	h.now = h.now.Add(-2 * time.Hour) // 13:00: a backwards clock step
+	h.s.Sample()
+	hrs := h.s.Hours()
+	if len(hrs) != 2 || hrs[0].At.Hour() != 12 || hrs[1].At.Hour() != 15 || hrs[1].Samples != 1 {
+		t.Fatalf("hours %+v", hrs)
+	}
+	if n := len(h.s.Minutes()); n != 3 {
+		t.Fatalf("minutes = %d", n)
+	}
+}
+
+func TestHourRingKeepsThirtyDays(t *testing.T) {
+	h := newHost(t)
+	h.write(t, "cpu.stat", "usage_usec 0\n")
+	for i := 0; i < 30*24+5; i++ {
+		h.s.Sample()
+		h.now = h.now.Add(time.Hour)
+	}
+	if n := len(h.s.Hours()); n != 30*24+1 { // 720 closed and the open one
+		t.Fatalf("hours = %d", n)
+	}
+}
