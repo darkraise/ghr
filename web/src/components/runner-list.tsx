@@ -2,10 +2,9 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { useRef, type KeyboardEvent } from "react"
 import type { Status } from "@/api/types"
+import type { DetailTab } from "@/components/runner-panel"
 import { elapsed } from "@/lib/format"
 import { waitingRepos } from "@/lib/status"
-
-type DetailTab = "steps" | "log" | "containers"
 
 // The light shows capacity like the shell's bar: busy pulses, warm is an
 // outline, starting is faint.

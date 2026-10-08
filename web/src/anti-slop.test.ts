@@ -29,6 +29,7 @@ const FILES = [
   "src/components/repo-actions.tsx",
   "src/components/repo-table.tsx",
   "src/components/runner-list.tsx",
+  "src/components/runner-panel.tsx",
   "src/components/result-icon.tsx",
   "src/components/save-bar.tsx",
   "src/components/shell.tsx",
