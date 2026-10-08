@@ -2,8 +2,18 @@ import { screen } from "@testing-library/react"
 import axe from "axe-core"
 import { beforeEach, describe, expect, it } from "vitest"
 import { mockApi } from "@/test/api"
-import { authedRoutes } from "@/test/fixtures"
+import { authedRoutes, fixtures } from "@/test/fixtures"
+import { setViewport } from "@/test/media"
 import { renderApp } from "@/test/render"
+
+async function violations(): Promise<string[]> {
+  const main = document.getElementById("main-content")
+  if (!main) throw new Error("no main content")
+  // jsdom computes no layout or colour, so contrast is checked by the
+  // palette test in src/styles/theme.test.ts instead.
+  const results = await axe.run(main, { rules: { "color-contrast": { enabled: false } } })
+  return results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)
+}
 
 describe("Dashboard accessibility", () => {
   beforeEach(() => localStorage.clear())
@@ -19,12 +29,30 @@ describe("Dashboard accessibility", () => {
       renderApp("/")
       await screen.findByRole("group", { name: chart })
       await screen.findByText("146.0 GB of 240.0 GB used, prunes at 80%")
-      const main = document.getElementById("main-content")
-      if (!main) throw new Error("no main content")
-      // jsdom computes no layout or colour, so contrast is checked by the
-      // palette test in src/styles/theme.test.ts instead.
-      const results = await axe.run(main, { rules: { "color-contrast": { enabled: false } } })
-      expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([])
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})
+
+describe("Runners accessibility", () => {
+  it.each([
+    [1280, "the split view"],
+    [390, "the narrow panel"],
+  ])(
+    "has no axe violations at %ipx (%s)",
+    async (width) => {
+      setViewport(width)
+      mockApi(
+        authedRoutes({
+          "GET /api/runners/aaaaaa/steps": fixtures.steps,
+          "GET /api/runners/aaaaaa/containers": fixtures.containers,
+        }),
+      )
+      renderApp("/runners/aaaaaa")
+      await screen.findByRole("heading", { name: "aaaaaa", level: 2 })
+      await screen.findByText("Run tests")
+      expect(await violations()).toEqual([])
     },
     30_000,
   )
