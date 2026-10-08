@@ -421,11 +421,10 @@ Persistence:
 
 ### 4.3 Status additions
 
-- **Disk bytes.** `DataRootUsage` on the `runner.Manager` interface (`internal/runner/manager.go`) returns `system.DiskUsage{Pct, Used, Total}` instead of an `int`.
-  - `system.Docker` implements it from `df --output=pcent,used,size`.
-  - The runner and daemon test fakes, the three call sites in `cleanup.go` and `setDisk` change with it.
-  - `model.Status` gains `disk_used_bytes` and `disk_total_bytes`, which are 0 until the first measurement.
-- **Rate limit.** `model.Status` gains `rate_limit`, from the GitHub client's last seen `X-RateLimit-Limit`, which the client already records. It is omitted until known.
+- **Disk bytes.** `system.Docker` gains `DataRootBytes`, which runs `df -B1 --output=pcent,used,size` and returns `system.DiskUsage{Pct, Used, Total}`. `DataRootUsage` keeps its signature and calls it.
+  - The manager measures through a `dataRoot` helper that uses `DataRootBytes` when its `Docker` provides it and falls back to the percentage otherwise. The `runner.Docker` interface and its test fakes are unchanged.
+  - The manager stores the whole `DiskUsage`. `model.Status` gains `disk_used_bytes` and `disk_total_bytes`, which are 0 until the first measurement or when the Docker can't report bytes.
+- **Rate limit.** `model.Status` gains `rate_limit`. The daemon's `Backend.Status()` fills it from the GitHub client's `TokenMeta().RateLimit` (the last seen `X-RateLimit-Limit`), so the runner's `GitHub` interface is unchanged. It is omitted until known.
 - **Oldest waiting job.** `model.RepoStatus` gains `oldest_queued_at`: the earliest `CreatedAt` among that repository's queued jobs, which `repoDemand` already reads. It is omitted when nothing is queued.
 
 Each new field is added to the TypeScript mirrors and the shared JSON fixtures, so the existing fixture drift test covers it.
