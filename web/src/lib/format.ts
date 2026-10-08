@@ -42,10 +42,6 @@ export function fmtMem(bytes: number): string {
   return bytes >= 2 ** 30 ? `${(bytes / 2 ** 30).toFixed(1)}G` : `${Math.floor(bytes / 2 ** 20)}M`
 }
 
-export function maxText(n: number): string {
-  return n === 0 ? "∞" : String(n)
-}
-
 export function isZeroTime(iso: string | undefined): boolean {
   return !iso || iso.startsWith("0001-01-01")
 }

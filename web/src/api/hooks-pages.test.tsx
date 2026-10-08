@@ -4,7 +4,7 @@ import type { LabelCheck, Status, Storage } from "@/api/types"
 import { mockApi } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
-import { storageBusy, useLabelCheck, useRepoActivity } from "./hooks"
+import { storageBusy, useLabelCheck } from "./hooks"
 
 const idle: Storage = {
   ...fixtures.storage,
@@ -52,15 +52,5 @@ describe("useLabelCheck", () => {
     renderHook(() => useLabelCheck("darkmem", false), { wrapper })
     await new Promise((r) => setTimeout(r, 300))
     expect(calls).toHaveLength(0)
-  })
-})
-
-describe("useRepoActivity", () => {
-  it("reads up to 500 history entries for the repo", async () => {
-    const { calls } = mockApi({ "GET /api/history": fixtures.history })
-    const { wrapper } = withQuery()
-    const { result } = renderHook(() => useRepoActivity("darkmem"), { wrapper })
-    await waitFor(() => expect(result.current.data).toHaveLength(2))
-    expect(calls[0]?.search).toBe("?repo=darkmem&conclusion=&limit=500")
   })
 })

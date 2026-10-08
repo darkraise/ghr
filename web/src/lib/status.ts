@@ -24,13 +24,6 @@ export function stateVariant(state: string): BadgeVariant {
   return variants[state] ?? "secondary"
 }
 
-export function repoState(r: RepoStatus): string {
-  if (r.error) return "error"
-  if (r.removing) return "removing"
-  if (r.paused) return "paused"
-  return "active"
-}
-
 export function running(status: Status): number {
   return status.instances.filter((i) => i.state !== "cleaning").length
 }

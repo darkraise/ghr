@@ -4,7 +4,7 @@ import { keys } from "@/api/hooks"
 import type { InstanceStatus, MetricSample } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
-import { ago, clock, dateTime, dateTimeSec, dur, elapsed, fmtMem, hhmm, humanBytes, isZeroTime, maxText, monthDay, plural, series, startedAt } from "./format"
+import { ago, clock, dateTime, dateTimeSec, dur, elapsed, fmtMem, hhmm, humanBytes, isZeroTime, monthDay, plural, series, startedAt } from "./format"
 import { clockOffset, useNow } from "./use-now"
 
 const statusFixture = fixtures.status
@@ -50,10 +50,6 @@ describe("small formatters", () => {
   it("fmtMem prints binary G or M", () => {
     expect(fmtMem(3 * 2 ** 30)).toBe("3.0G")
     expect(fmtMem(512 * 2 ** 20)).toBe("512M")
-  })
-  it("maxText shows 0 as unlimited", () => {
-    expect(maxText(0)).toBe("∞")
-    expect(maxText(3)).toBe("3")
   })
   it("isZeroTime spots Go's zero time", () => {
     expect(isZeroTime("0001-01-01T00:00:00Z")).toBe(true)

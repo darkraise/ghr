@@ -22,7 +22,6 @@ export const keys = {
   token: ["token"] as const,
   storage: ["storage"] as const,
   availableRepos: ["available-repos"] as const,
-  repoActivity: (name: string) => ["repo-activity", name] as const,
   labelCheck: (name: string) => ["label-check", name] as const,
   registrations: (name: string) => ["registrations", name] as const,
   toolchainChoices: (tool: string) => ["toolchain-choices", tool] as const,
@@ -154,8 +153,6 @@ export function useLogTail(id: string, enabled: boolean, poll = true) {
   })
 }
 
-export const ACTIVITY_LIMIT = 500
-
 export function useToken() {
   return useQuery({ queryKey: keys.token, queryFn: ({ signal }) => api.token(signal), refetchInterval: POLL_SLOW })
 }
@@ -173,14 +170,6 @@ export function useStorage(status: Status | undefined) {
     queryKey: keys.storage,
     queryFn: ({ signal }) => api.storage(signal),
     refetchInterval: (q) => (storageBusy(q.state.data, status) ? POLL_FAST : POLL_SLOW),
-  })
-}
-
-export function useRepoActivity(name: string) {
-  return useQuery({
-    queryKey: keys.repoActivity(name),
-    queryFn: ({ signal }) => api.history(name, "", "", ACTIVITY_LIMIT, signal),
-    refetchInterval: POLL_SLOW,
   })
 }
 
