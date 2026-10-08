@@ -1,63 +1,13 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "darkraise-ui/components/card"
 import { Input } from "darkraise-ui/components/input"
-import { Label } from "darkraise-ui/components/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "darkraise-ui/components/select"
-import type { ReactNode } from "react"
+import { Field, FieldGroup } from "@/components/page/field"
 import { RejectedAlert } from "@/components/save-bar"
 import { TagField } from "@/components/tag-field"
 import type { SettingsForm } from "@/lib/settings-form"
 
 const MODES: Record<string, string> = {
-  queue: "start runners only for queued jobs, up to the global max",
-  all: "keep warm runners per repo, up to each repo's max",
-}
-
-function Section({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
-  return (
-    <Card className="mb-4">
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        {note && <CardDescription>{note}</CardDescription>}
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">{children}</CardContent>
-    </Card>
-  )
-}
-
-function Field({
-  label,
-  htmlFor,
-  desc,
-  changed,
-  error,
-  children,
-}: {
-  label: string
-  htmlFor?: string
-  desc: string
-  changed?: boolean
-  error?: string
-  children: ReactNode
-}) {
-  return (
-    <div className="grid gap-1 sm:grid-cols-[12rem_1fr] sm:items-start">
-      <Label htmlFor={htmlFor} className="sm:pt-2">
-        {label}
-      </Label>
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2">
-          {children}
-          {changed && (
-            <span className="text-amber-600" title="changed">
-              ●
-            </span>
-          )}
-        </div>
-        {error && <p className="text-sm text-destructive">✖ {error}</p>}
-        <p className="text-xs text-muted-foreground">{desc}</p>
-      </div>
-    </div>
-  )
+  queue: "Start runners only for queued jobs, up to the global max",
+  all: "Keep warm runners per repo, up to each repo's max",
 }
 
 export function SettingsSections({ form }: { form: SettingsForm }) {
@@ -67,27 +17,19 @@ export function SettingsSections({ form }: { form: SettingsForm }) {
   const toNum = (s: string) => (s === "" ? Number.NaN : Number(s))
   const is = (key: string) => changed.includes(key)
 
-  function duration(key: string, label: string, desc: string) {
+  function textField(key: string, label: string, help: string) {
     return (
-      <Field label={label} htmlFor={key} desc={desc} changed={is(key)} error={errors[key]}>
-        <Input id={key} className="w-40" value={text(key)} disabled={offline} onChange={(e) => set(key)(e.target.value)} />
-      </Field>
-    )
-  }
-
-  function plain(key: string, label: string, desc: string) {
-    return (
-      <Field label={label} htmlFor={key} desc={desc} changed={is(key)}>
+      <Field label={label} htmlFor={key} help={help} changed={is(key)} error={errors[key]}>
         <Input id={key} className="w-40" value={text(key)} disabled={offline} onChange={(e) => set(key)(e.target.value)} />
       </Field>
     )
   }
 
   return (
-    <>
+    <div className="flex flex-col gap-6">
       {form.rejection && <RejectedAlert message={form.rejection} />}
-      <Section title="General">
-        <Field label="Mode" desc={MODES[text("mode")] ?? ""} changed={is("mode")}>
+      <FieldGroup id="general" title="General">
+        <Field label="Mode" help={MODES[text("mode")]} changed={is("mode")}>
           <Select value={text("mode")} onValueChange={set("mode")} disabled={offline}>
             <SelectTrigger aria-label="Mode" className="w-40">
               <SelectValue />
@@ -101,7 +43,7 @@ export function SettingsSections({ form }: { form: SettingsForm }) {
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Global max" htmlFor="global_max" desc="applies in queue mode" changed={is("global_max")} error={errors.global_max}>
+        <Field label="Global max" htmlFor="global_max" help="Applies in queue mode" changed={is("global_max")} error={errors.global_max}>
           <Input
             id="global_max"
             type="number"
@@ -114,23 +56,17 @@ export function SettingsSections({ form }: { form: SettingsForm }) {
             onChange={(e) => set("global_max")(toNum(e.target.value))}
           />
         </Field>
-        <Field label="Owner" desc="change in config.yaml and restart the daemon">
+        <Field label="Owner" help="Change it in config.yaml and restart the daemon">
           <span className="font-mono text-sm">{form.config?.owner}</span>
         </Field>
-      </Section>
-      <Section title="Timing">
-        {duration("poll_interval", "Poll interval", "how often GitHub is checked (at least 5s)")}
-        {duration("start_timeout", "Start timeout", "a runner not online by then is replaced")}
-        {duration("idle_timeout", "Idle timeout", "idle runners beyond warm stop after this")}
-      </Section>
-      <Section title="Disk and retention">
-        <Field
-          label="Disk high-water"
-          htmlFor="disk_high_water"
-          desc="disk use that triggers pruning"
-          changed={is("disk_high_water")}
-          error={errors.disk_high_water}
-        >
+      </FieldGroup>
+      <FieldGroup id="timing" title="Timing">
+        {textField("poll_interval", "Poll interval", "How often GitHub is checked (at least 5s)")}
+        {textField("start_timeout", "Start timeout", "A runner not online by then is replaced")}
+        {textField("idle_timeout", "Idle timeout", "Idle runners beyond warm stop after this")}
+      </FieldGroup>
+      <FieldGroup id="disk" title="Disk and retention">
+        <Field label="Disk high-water" htmlFor="disk_high_water" help="Disk use that triggers pruning" changed={is("disk_high_water")} error={errors.disk_high_water}>
           <Input
             id="disk_high_water"
             type="number"
@@ -144,16 +80,16 @@ export function SettingsSections({ form }: { form: SettingsForm }) {
             onChange={(e) => set("disk_high_water")(toNum(e.target.value))}
           />
         </Field>
-        {plain("build_cache_keep", "Build cache keep", "build cache kept when pruning, e.g. 20GB")}
-        {duration("history_retention", "History retention", "history and logs older than this are removed (at least 1d)")}
-      </Section>
-      <Section title="Runner defaults" note="limits apply to newly started runners">
-        <Field label="Global labels" desc="added to every runner" changed={is("labels")}>
+        {textField("build_cache_keep", "Build cache keep", "Build cache kept when pruning. For example 20GB")}
+        {textField("history_retention", "History retention", "History and logs older than this are removed (at least 1d)")}
+      </FieldGroup>
+      <FieldGroup id="runner-defaults" title="Runner defaults" note="Limits apply to newly started runners.">
+        <Field label="Global labels" help="Added to every runner" changed={is("labels")}>
           <TagField label="Global labels" value={values.labels as string[]} onChange={set("labels")} disabled={offline} />
         </Field>
-        {plain("memory_max", "Memory max", "per runner, e.g. 6G, 50% or infinity")}
-        {plain("cpu_quota", "CPU quota", "per runner, e.g. 200%")}
-      </Section>
-    </>
+        {textField("memory_max", "Memory max", "Per runner. For example 6G, 50% or infinity")}
+        {textField("cpu_quota", "CPU quota", "Per runner. For example 200%")}
+      </FieldGroup>
+    </div>
   )
 }

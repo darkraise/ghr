@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import type { Config } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
@@ -33,8 +33,8 @@ describe("Settings page", () => {
     expect(screen.getByLabelText("Memory max")).toHaveValue("6G")
     expect(screen.getByText("darkraise")).toBeInTheDocument()
     expect(screen.getByText("homelab")).toBeInTheDocument()
-    expect(screen.getByText("start runners only for queued jobs, up to the global max")).toBeInTheDocument()
-    expect(screen.getByText("limits apply to newly started runners")).toBeInTheDocument()
+    expect(screen.getByText("Start runners only for queued jobs, up to the global max")).toBeInTheDocument()
+    expect(screen.getByText("Limits apply to newly started runners.")).toBeInTheDocument()
     expect(screen.queryByText(/unsaved change/)).toBeNull()
   })
 
@@ -61,7 +61,7 @@ describe("Settings page", () => {
     expect((await screen.findAllByText("Settings saved")).length).toBeGreaterThan(0)
     await waitFor(() => expect(screen.queryByText(/unsaved change/)).toBeNull())
     expect(screen.getByLabelText("Poll interval")).toHaveValue("15s")
-    expect(screen.queryByText(/daemon did not apply/)).toBeNull()
+    expect(screen.queryByText(/Daemon did not apply/)).toBeNull()
   })
 
   it("disables the fields while the daemon is unreachable", async () => {
@@ -77,7 +77,7 @@ describe("Settings page", () => {
     await screen.findByLabelText("Poll interval")
     await user.click(screen.getByRole("combobox", { name: "Mode" }))
     await user.click(await screen.findByRole("option", { name: "all" }))
-    expect(screen.getByText("keep warm runners per repo, up to each repo's max")).toBeInTheDocument()
+    expect(screen.getByText("Keep warm runners per repo, up to each repo's max")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ mode: "all" }))
   })
@@ -97,11 +97,11 @@ describe("Settings page", () => {
     const poll = await screen.findByLabelText("Poll interval")
     await user.clear(poll)
     await user.type(poll, "2s")
-    expect(screen.getByText("✖ poll_interval must be at least 5s")).toBeInTheDocument()
+    expect(screen.getByText("poll_interval must be at least 5s")).toBeInTheDocument()
     await user.clear(screen.getByLabelText("Global max"))
-    expect(screen.getByText("✖ global_max must be >= 1")).toBeInTheDocument()
+    expect(screen.getByText("global_max must be >= 1")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Save changes" }))
-    expect((await screen.findAllByText("fix the highlighted settings first")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Fix the highlighted settings first")).length).toBeGreaterThan(0)
     expect(calls.some((c) => c.method === "PATCH")).toBe(false)
   })
 
@@ -123,7 +123,7 @@ describe("Settings page", () => {
     expect(await screen.findByText("Save rejected")).toBeInTheDocument()
     expect(screen.getByText("build_cache_keep must look like 20GB")).toBeInTheDocument()
     expect(screen.getByText("runner_limits.cpu_quota must be a positive percentage such as 200%")).toBeInTheDocument()
-    expect((await screen.findAllByText("settings not saved")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Settings not saved")).length).toBeGreaterThan(0)
     expect(screen.getByLabelText("Build cache keep")).toHaveValue("lots")
   })
 
@@ -134,7 +134,7 @@ describe("Settings page", () => {
     await user.clear(max)
     await user.type(max, "3")
     await user.click(screen.getByRole("button", { name: "Save changes" }))
-    expect((await screen.findAllByText("settings not saved: ghr is shutting down")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Settings not saved: ghr is shutting down")).length).toBeGreaterThan(0)
     expect(screen.queryByText("Save rejected")).toBeNull()
   })
 
@@ -147,7 +147,7 @@ describe("Settings page", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     expect((await screen.findAllByText("Settings saved")).length).toBeGreaterThan(0)
     await waitFor(() => expect(screen.queryByText(/unsaved change/)).toBeNull())
-    expect(screen.queryByText(/daemon did not apply/)).toBeNull()
+    expect(screen.queryByText(/Daemon did not apply/)).toBeNull()
   })
 
   it("says when the daemon did not apply a saved field", async () => {
@@ -157,7 +157,7 @@ describe("Settings page", () => {
     await user.clear(max)
     await user.type(max, "3")
     await user.click(screen.getByRole("button", { name: "Save changes" }))
-    expect((await screen.findAllByText("daemon did not apply global_max; is it older than this ghr?")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Daemon did not apply global_max; is it older than this ghr?")).length).toBeGreaterThan(0)
   })
 
   it("does not count a space around a loaded value as a change", async () => {
@@ -184,7 +184,7 @@ describe("Settings page", () => {
     await user.clear(poll)
     await user.type(poll, "15s")
     await user.click(screen.getByRole("button", { name: "Save changes" }))
-    expect((await screen.findAllByText("saved, but re-reading the config failed: ghr is restarting")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Saved, but re-reading the config failed: ghr is restarting")).length).toBeGreaterThan(0)
     expect(screen.getByLabelText("Poll interval")).toHaveValue("15s")
     expect(screen.queryByText(/unsaved change/)).toBeNull()
   })
@@ -223,8 +223,8 @@ describe("Settings page", () => {
     await user.clear(poll)
     await user.type(poll, "15s")
     await user.click(screen.getByRole("button", { name: "Save changes" }))
-    expect((await screen.findAllByText("daemon did not apply global_max; is it older than this ghr?")).length).toBeGreaterThan(0)
-    expect(screen.queryByText(/daemon did not apply poll_interval/)).toBeNull()
+    expect((await screen.findAllByText("Daemon did not apply global_max; is it older than this ghr?")).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/Daemon did not apply poll_interval/)).toBeNull()
   })
 
   it("discards the edits", async () => {
@@ -248,5 +248,22 @@ describe("Settings page", () => {
     expect(await screen.findByText("You have 1 unsaved change on the Settings page.")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Stay" }))
     expect(router.state.location.pathname).toBe("/settings")
+  })
+
+  it("groups the fields into sections and marks a changed one", async () => {
+    mockApi(routes())
+    const { user } = renderApp("/settings")
+    const poll = await screen.findByLabelText("Poll interval")
+    for (const name of ["General", "Timing", "Disk and retention", "Runner defaults"]) {
+      expect(screen.getByRole("region", { name })).toBeInTheDocument()
+    }
+    expect(screen.getByText("How often GitHub is checked (at least 5s)")).toHaveClass("text-muted-foreground")
+    expect(screen.getByText("Build cache kept when pruning. For example 20GB")).toBeInTheDocument()
+    expect(screen.getByText("Change it in config.yaml and restart the daemon")).toBeInTheDocument()
+    expect(screen.getByText("darkraise")).toHaveClass("font-mono")
+    await user.clear(poll)
+    await user.type(poll, "15s")
+    expect(within(screen.getByRole("region", { name: "Timing" })).getByText("Changed")).toHaveClass("text-warning")
+    expect(screen.queryByText("●")).toBeNull()
   })
 })

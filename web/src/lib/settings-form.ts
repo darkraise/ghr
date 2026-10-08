@@ -105,7 +105,7 @@ export function useSettingsForm(): SettingsForm {
     if (changed.length === 0) return true
     if (saving) return false
     if (Object.keys(errors).length > 0) {
-      toast.error("fix the highlighted settings first")
+      toast.error("Fix the highlighted settings first")
       return false
     }
     const sent = Object.fromEntries(changed.map((k) => [k, values[k]]))
@@ -117,9 +117,9 @@ export function useSettingsForm(): SettingsForm {
       setSaving(false)
       if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
         setRejection(err.message)
-        toast.error("settings not saved")
+        toast.error("Settings not saved")
       } else {
-        toast.error(`settings not saved: ${errorText(err)}`)
+        toast.error(`Settings not saved: ${errorText(err)}`)
       }
       return false
     }
@@ -129,9 +129,9 @@ export function useSettingsForm(): SettingsForm {
         await queryClient.fetchQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), staleTime: 0 }),
       )
       const missed = Object.keys(sent).find((key) => !equal(key, fresh[key], sent[key]))
-      if (missed) toast.error(`daemon did not apply ${patchKey(missed)}; is it older than this ghr?`)
+      if (missed) toast.error(`Daemon did not apply ${patchKey(missed)}; is it older than this ghr?`)
     } catch (err) {
-      toast.error(`saved, but re-reading the config failed: ${errorText(err)}`)
+      toast.error(`Saved, but re-reading the config failed: ${errorText(err)}`)
       queryClient.setQueryData<Config>(keys.config, (c) => c && withPatch(c, toPatch(sent)))
     }
     setDraft((d) => settle(d, sent, equal))
