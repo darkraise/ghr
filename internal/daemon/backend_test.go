@@ -898,3 +898,99 @@ func TestStatusCarriesTheRateLimit(t *testing.T) {
 		t.Fatalf("rate limit = %d", st.RateLimit)
 	}
 }
+
+func TestActivityBuildsFromHistoryAndInstances(t *testing.T) {
+	b, m, _ := newBackend(t)
+	now := time.Date(2026, 10, 3, 14, 5, 0, 0, time.UTC)
+	b.Now = func() time.Time { return now }
+	if err := b.Hist.Append(model.HistoryEntry{ID: "a", Repo: "darkmem", RunID: 1, Conclusion: "success",
+		StartedAt: now.Add(-50 * time.Minute), FinishedAt: now.Add(-40 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	m.insts = []model.InstanceStatus{{ID: "r", Repo: "darkmem", State: "busy", Since: now.Add(-time.Minute)}}
+	a, err := b.Activity(context.Background(), "1h", time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Capacity == nil || *a.Capacity != 2 || len(a.Lanes) != 2 || !a.HistoryFrom.Equal(now.Add(-30*24*time.Hour)) {
+		t.Fatalf("activity %+v", a)
+	}
+	if len(a.Repos) != 2 || a.Repos[0].Repo != "darkcloud" || a.Repos[1].Repo != "darkmem" {
+		t.Fatalf("repos %+v", a.Repos)
+	}
+}
+
+func TestActivityCachesPerWindowAndZone(t *testing.T) {
+	b, _, _ := newBackend(t)
+	now := time.Date(2026, 10, 3, 14, 5, 0, 0, time.UTC)
+	b.Now = func() time.Time { return now }
+	ctx := context.Background()
+	runs := func(a model.Activity) int {
+		n := 0
+		for _, l := range a.Lanes {
+			n += len(l.Runs)
+		}
+		return n
+	}
+	first, _ := b.Activity(ctx, "1h", time.UTC)
+	b.Hist.Append(model.HistoryEntry{ID: "a", Repo: "darkmem", RunID: 1, Conclusion: "success",
+		StartedAt: now.Add(-20 * time.Minute), FinishedAt: now.Add(-10 * time.Minute)})
+	if again, _ := b.Activity(ctx, "1h", time.UTC); runs(again) != runs(first) {
+		t.Fatal("a second call within 5 s rebuilt the response")
+	}
+	if other, _ := b.Activity(ctx, "3h", time.UTC); runs(other) != 1 {
+		t.Fatal("another window shared the cache entry")
+	}
+	if zoned, _ := b.Activity(ctx, "1h", time.FixedZone("ICT", 7*60*60)); zoned.TZ != "ICT" || runs(zoned) != 1 {
+		t.Fatal("another zone shared the cache entry")
+	}
+	now = now.Add(6 * time.Second)
+	if later, _ := b.Activity(ctx, "1h", time.UTC); runs(later) != 1 {
+		t.Fatal("the cache outlived 5 s")
+	}
+}
+
+func TestActivitySlowWindowDoesNotBlockAnother(t *testing.T) {
+	b, _, _ := newBackend(t)
+	held := b.activityEntry("30d|UTC")
+	held.mu.Lock()
+	defer held.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		b.Activity(context.Background(), "1h", time.UTC)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a 1h build waited for a 30d build")
+	}
+}
+
+func TestActivityCacheDropsExpiredEntries(t *testing.T) {
+	b, _, _ := newBackend(t)
+	now := time.Date(2026, 10, 3, 14, 5, 0, 0, time.UTC)
+	b.Now = func() time.Time { return now }
+	ctx := context.Background()
+	b.Activity(ctx, "1h", time.UTC)
+	now = now.Add(6 * time.Second)
+	b.Activity(ctx, "3h", time.UTC)
+	b.activityMu.Lock()
+	_, kept := b.activity["1h|UTC"]
+	n := len(b.activity)
+	b.activityMu.Unlock()
+	if kept || n != 1 {
+		t.Fatalf("expired entry kept: %v, %d entries", kept, n)
+	}
+}
+
+func TestActivityAllModeHasNoCapacity(t *testing.T) {
+	b, _, _ := newBackend(t)
+	if _, err := b.Store.Update(func(c *config.Config) error { c.Mode = config.ModeAll; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	a, err := b.Activity(context.Background(), "24h", time.UTC)
+	if err != nil || a.Capacity != nil {
+		t.Fatalf("capacity %v err %v", a.Capacity, err)
+	}
+}

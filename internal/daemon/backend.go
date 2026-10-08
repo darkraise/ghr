@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/darkraise/ghr/internal/activity"
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/events"
@@ -94,6 +95,9 @@ type Backend struct {
 	stepsMu    sync.Mutex
 	steps      map[string]stepsEntry
 	stepsCalls map[string]*stepsCall
+
+	activityMu sync.Mutex
+	activity   map[string]*activityEntry
 }
 
 var _ api.Backend = (*Backend)(nil)
@@ -104,6 +108,77 @@ func (b *Backend) Metrics() model.Metrics {
 		return model.Metrics{Samples: []model.MetricSample{}}
 	}
 	return b.Sampler.Metrics()
+}
+
+// activityTTL is how long a built activity response is reused, so several
+// open Dashboards polling every 5 s read the history file once between them.
+const activityTTL = 5 * time.Second
+
+type activityEntry struct {
+	mu  sync.Mutex
+	at  time.Time
+	ok  bool
+	val model.Activity
+}
+
+// Activity builds the Dashboard's activity view for window in loc, reusing
+// one built less than activityTTL ago. Each window and zone has its own
+// lock, so a slow 30d build never holds up a 1h poll.
+func (b *Backend) Activity(ctx context.Context, window string, loc *time.Location) (model.Activity, error) {
+	e := b.activityEntry(window + "|" + loc.String())
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	now := b.now()
+	if e.ok && now.Sub(e.at) < activityTTL {
+		return e.val, nil
+	}
+	cfg := b.Store.Config()
+	hist, err := b.Hist.Query("", "", 0)
+	if err != nil {
+		return model.Activity{}, err
+	}
+	in := activity.Input{
+		Window: window, Loc: loc, Now: now, Retention: cfg.HistoryRetention.D(),
+		History: hist, Instances: b.M.Status().Instances,
+	}
+	if cfg.Mode == config.ModeQueue {
+		c := cfg.GlobalMax
+		in.Capacity = &c
+	}
+	for _, r := range cfg.Repos {
+		in.Repos = append(in.Repos, r.Name)
+	}
+	if b.Sampler != nil {
+		in.Minutes, in.Hours = b.Sampler.Minutes(), b.Sampler.Hours()
+	}
+	e.val, e.at, e.ok = activity.Build(in), now, true
+	return e.val, nil
+}
+
+// activityEntry returns key's cache entry, creating it if needed. Creating
+// one also drops expired entries nobody holds, so a client cycling through
+// zones does not keep 30-day responses alive.
+func (b *Backend) activityEntry(key string) *activityEntry {
+	b.activityMu.Lock()
+	defer b.activityMu.Unlock()
+	if b.activity == nil {
+		b.activity = map[string]*activityEntry{}
+	}
+	e, ok := b.activity[key]
+	if !ok {
+		now := b.now()
+		for k, o := range b.activity {
+			if o.mu.TryLock() {
+				if !o.ok || now.Sub(o.at) >= activityTTL {
+					delete(b.activity, k)
+				}
+				o.mu.Unlock()
+			}
+		}
+		e = &activityEntry{}
+		b.activity[key] = e
+	}
+	return e
 }
 
 func (b *Backend) now() time.Time {
