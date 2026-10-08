@@ -41,6 +41,7 @@ export interface RepoStatus {
   max: number
   active: number
   queued: number
+  oldest_queued_at?: string
   error?: string
   last_job?: HistoryEntry
 }
@@ -75,7 +76,10 @@ export interface Status {
   degraded: boolean
   degraded_reason?: string
   rate_remaining: number
+  rate_limit?: number
   disk_pct: number
+  disk_used_bytes: number
+  disk_total_bytes: number
   repos: RepoStatus[]
   instances: InstanceStatus[]
   maintenance: MaintenanceStatus
@@ -345,3 +349,74 @@ export interface AddRepoRequest {
 }
 
 export type PruneScope = "standard" | "build-cache-keep" | "build-cache-all" | "dangling-images" | "unused-volumes"
+
+export type ActivityWindow = "1h" | "3h" | "24h" | "7d" | "30d"
+
+export interface ActivitySegment {
+  state: string
+  from: string
+  to: string | null
+}
+
+export interface ActivityRun {
+  instance_id: string
+  repo: string
+  workflow?: string
+  job?: string
+  run_number?: string
+  segments: ActivitySegment[]
+  html_url?: string
+}
+
+export interface ActivityLane {
+  runs: ActivityRun[]
+}
+
+export interface ActivityBucket {
+  start: string
+  end: string
+  busy_minutes: number
+  busy_pct: number | null
+  succeeded: number
+  failed: number
+  cancelled: number
+  waiting_max: number | null
+  cpu_avg: number | null
+}
+
+export interface ActivityPoint {
+  at: string
+  value: number
+}
+
+export interface ActivityCPU {
+  at: string
+  cpu: number | null
+  mem: number | null
+}
+
+export interface ActivityHour {
+  start: string
+  succeeded: number
+  failed: number
+  cancelled: number
+}
+
+export interface ActivityRepo {
+  repo: string
+  hours: ActivityHour[]
+}
+
+export interface Activity {
+  window: string
+  tz: string
+  from: string
+  to: string
+  capacity: number | null
+  history_from: string
+  lanes: ActivityLane[]
+  buckets: ActivityBucket[]
+  waiting: ActivityPoint[]
+  cpu: ActivityCPU[]
+  repos: ActivityRepo[]
+}

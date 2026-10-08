@@ -1,3 +1,5 @@
+import activityBucketsJson from "@/api/fixtures/activity-buckets.json"
+import activityLanesJson from "@/api/fixtures/activity-lanes.json"
 import availableReposJson from "@/api/fixtures/available-repos.json"
 import configJson from "@/api/fixtures/config.json"
 import containersJson from "@/api/fixtures/containers.json"
@@ -13,6 +15,7 @@ import storageJson from "@/api/fixtures/storage.json"
 import tokenJson from "@/api/fixtures/token.json"
 import choicesJson from "@/api/fixtures/toolchain-choices.json"
 import type {
+  Activity,
   AvailableRepo,
   Config,
   Container,
@@ -43,6 +46,8 @@ const labelCheck: LabelCheck = labelCheckJson
 const registrations: Registration[] = registrationsJson
 const availableRepos: AvailableRepo[] = availableReposJson
 const toolchainChoices: ToolchainChoice[] = choicesJson
+const activityLanes: Activity = activityLanesJson
+const activityBuckets: Activity = activityBucketsJson
 
 export const fixtures = {
   status,
@@ -59,6 +64,8 @@ export const fixtures = {
   registrations,
   availableRepos,
   toolchainChoices,
+  activityLanes,
+  activityBuckets,
 }
 
 export function authedRoutes(over: Record<string, unknown> = {}): Record<string, unknown> {

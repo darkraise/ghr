@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest"
+import activityBucketsJson from "./fixtures/activity-buckets.json"
+import activityLanesJson from "./fixtures/activity-lanes.json"
 import availableReposJson from "./fixtures/available-repos.json"
 import choicesJson from "./fixtures/toolchain-choices.json"
 import configJson from "./fixtures/config.json"
@@ -15,6 +17,7 @@ import stepsJson from "./fixtures/steps.json"
 import storageJson from "./fixtures/storage.json"
 import tokenJson from "./fixtures/token.json"
 import type {
+  Activity,
   AvailableRepo,
   Config,
   Container,
@@ -48,8 +51,31 @@ const labelCheck: LabelCheck = labelCheckJson
 const registrations: Registration[] = registrationsJson
 const availableRepos: AvailableRepo[] = availableReposJson
 const choices: ToolchainChoice[] = choicesJson
+const lanes: Activity = activityLanesJson
+const buckets: Activity = activityBucketsJson
 
 describe("type fixtures", () => {
+  it("status carries the Dashboard fields", () => {
+    expect(status.rate_limit).toBe(5000)
+    expect(status.disk_used_bytes).toBe(146_000_000_000)
+    expect(status.disk_total_bytes).toBe(240_000_000_000)
+    expect(status.repos[0]?.oldest_queued_at).toBe("2026-10-03T14:02:00Z")
+    expect(degraded).not.toHaveProperty("rate_limit")
+    expect(degraded.disk_used_bytes).toBe(0)
+    expect(degraded.repos[0]).not.toHaveProperty("oldest_queued_at")
+  })
+
+  it("activity parses as lanes and as buckets", () => {
+    expect(lanes.capacity).toBe(2)
+    expect(lanes.lanes[0]?.runs[2]?.segments[0]?.to).toBeNull()
+    expect(lanes.lanes[0]?.runs[0]).not.toHaveProperty("html_url")
+    expect(lanes.cpu[2]?.cpu).toBeNull()
+    expect(buckets.capacity).toBeNull()
+    expect(buckets.buckets).toHaveLength(25)
+    expect(buckets.buckets[0]?.busy_pct).toBeNull()
+    expect(buckets.repos[0]?.hours).toHaveLength(24)
+  })
+
   it("status carries the fields the UI reads", () => {
     expect(status.epoch).toBe("lz3k9a")
     expect(status.instances[0]?.job?.run_number).toBe("42")
