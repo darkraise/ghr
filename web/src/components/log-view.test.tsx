@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { LogView } from "./log-view"
 
@@ -55,5 +55,12 @@ describe("LogView", () => {
     fireEvent.scroll(pre)
     expect(onFollowChange).toHaveBeenLastCalledWith(true)
     expect(onFollowChange).toHaveBeenCalledTimes(2)
+  })
+
+  it("says when there is no output yet, outside the log itself", () => {
+    const { container } = render(<LogView text="" follow />)
+    const note = screen.getByText("No log output yet")
+    expect(note.tagName).toBe("P")
+    expect(container.querySelector("pre")).toBeEmptyDOMElement()
   })
 })

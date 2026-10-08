@@ -29,12 +29,15 @@ export function LogView({
   }
 
   return (
-    <pre
-      ref={ref}
-      onScroll={onScroll}
-      className={`${className} overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-mono text-xs`}
-    >
-      {text || "no log output yet"}
-    </pre>
+    <>
+      {!text && <p className="mb-2 text-sm text-muted-foreground">No log output yet</p>}
+      <pre
+        ref={ref}
+        onScroll={onScroll}
+        className={`${className} overflow-auto whitespace-pre-wrap rounded-[6px] bg-muted p-3 font-mono text-xs`}
+      >
+        {text}
+      </pre>
+    </>
   )
 }
