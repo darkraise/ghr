@@ -4,30 +4,19 @@ import { Button } from "darkraise-ui/components/button"
 import { toast } from "darkraise-ui/components/sonner"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
-import { useState, type ReactNode } from "react"
+import { useState } from "react"
 import { api } from "@/api/client"
 import { keys, useActivity, useConfig, useEvents, useMetrics, useStatus, useStorage } from "@/api/hooks"
 import { ActivityPanel } from "@/components/activity-panel"
 import { AddRepoDialog } from "@/components/add-repo-dialog"
 import { DiskBreakdown } from "@/components/disk-breakdown"
 import { EventList } from "@/components/event-list"
+import { Section } from "@/components/page/section"
 import { RepoTable } from "@/components/repo-table"
 import { StatCards } from "@/components/stat-card"
 import { allPaused, dashboardSummary } from "@/lib/summary"
 import { useActivityWindow } from "@/lib/use-activity-window"
 import { useNow } from "@/lib/use-now"
-
-function Section({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
-  return (
-    <section aria-label={title} className="min-w-0 rounded-[10px] border border-border bg-card p-4">
-      <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="text-base font-semibold">{title}</h2>
-        {aside}
-      </div>
-      {children}
-    </section>
-  )
-}
 
 export function DashboardPage() {
   const status = useStatus()

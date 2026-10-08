@@ -18,6 +18,8 @@ const FILES = [
   "src/components/event-list.tsx",
   "src/components/lanes-chart.tsx",
   "src/components/mode-control.tsx",
+  "src/components/page/section.tsx",
+  "src/components/page/state-text.tsx",
   "src/components/repo-activity-strip.tsx",
   "src/components/repo-actions.tsx",
   "src/components/repo-table.tsx",
