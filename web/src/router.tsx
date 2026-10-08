@@ -23,6 +23,7 @@ import { RunnersPage } from "./pages/runners"
 import { SettingsPage } from "./pages/settings"
 import { SetupPage } from "./pages/setup"
 import { StoragePage } from "./pages/storage"
+import { ToolchainsPage } from "./pages/toolchains"
 
 // staleTime 0: every navigation into or out of the gated pages asks the
 // daemon again, so a logout or an expired session is seen at once.
@@ -94,6 +95,7 @@ const runnerRoute = createRoute({
   component: RunnerDetailPage,
 })
 const historyRoute = createRoute({ getParentRoute: () => appRoute, path: "/history", component: HistoryPage })
+const toolchainsRoute = createRoute({ getParentRoute: () => appRoute, path: "/toolchains", component: ToolchainsPage })
 const storageRoute = createRoute({ getParentRoute: () => appRoute, path: "/storage", component: StoragePage })
 const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings", component: SettingsPage })
 
@@ -107,6 +109,7 @@ const routeTree = rootRoute.addChildren([
     runnersRoute,
     runnerRoute,
     historyRoute,
+    toolchainsRoute,
     storageRoute,
     settingsRoute,
   ]),

@@ -12,7 +12,6 @@ import type { Config, DockerDisk, PruneScope, Status, Storage } from "@/api/type
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { RefusedHint } from "@/components/refused-hint"
 import { OperationsCard, PackageCachesCard } from "@/components/storage-cards"
-import { ToolchainsCard } from "@/components/toolchains-card"
 import { hhmm, humanBytes } from "@/lib/format"
 import { useOperationToasts } from "@/lib/use-operation-toasts"
 import { errorText } from "@/query"
@@ -181,7 +180,6 @@ export function StoragePage() {
       {data ? (
         <div className="grid gap-4 xl:grid-cols-2">
           <DockerCard storage={data} status={status.data} config={config.data} offline={offline} />
-          <ToolchainsCard storage={data} status={status.data} offline={offline} />
           <PackageCachesCard storage={data} status={status.data} offline={offline} />
           <OperationsCard storage={data} />
         </div>

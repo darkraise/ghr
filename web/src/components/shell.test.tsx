@@ -6,10 +6,10 @@ import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
 describe("shell", () => {
-  it("lists the six pages in the sidebar", async () => {
+  it("lists the seven pages in the sidebar", async () => {
     mockApi(authedRoutes())
     renderApp("/")
-    for (const label of ["Dashboard", "Repositories", "Runners", "History", "Storage", "Settings"]) {
+    for (const label of ["Dashboard", "Repositories", "Runners", "History", "Toolchains", "Storage", "Settings"]) {
       expect((await screen.findAllByRole("link", { name: label })).length).toBeGreaterThan(0)
     }
   })

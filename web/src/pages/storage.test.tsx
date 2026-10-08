@@ -20,6 +20,13 @@ describe("Storage page", () => {
     expect(screen.getByText("Unused volumes: refused while 1 jobs run")).toBeInTheDocument()
   })
 
+  it("leaves toolchains to the Toolchains page", async () => {
+    mockApi(routes())
+    renderApp("/storage")
+    expect(await screen.findByText("61% used · prunes above 80%")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Install popular set" })).toBeNull()
+  })
+
   it("disables pruning while the daemon is unreachable", { timeout: 10_000 }, async () => {
     let reads = 0
     mockApi(routes({ "GET /api/status": () => (++reads === 1 ? fixtures.status : json({ error: "connection refused" }, 502)) }))

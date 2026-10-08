@@ -31,7 +31,7 @@ describe("queueText", () => {
 describe("Toolchains card", () => {
   it("lists toolchains, other folders and the queue", async () => {
     mockApi(routes())
-    renderApp("/storage")
+    renderApp("/toolchains")
     expect(await screen.findByText("node 22.11.0")).toBeInTheDocument()
     expect(screen.getByText("190.0 MB")).toBeInTheDocument()
     expect(screen.getByText("installed 2026-09-30")).toBeInTheDocument()
@@ -43,13 +43,13 @@ describe("Toolchains card", () => {
 
   it("says when the tool cache is empty", async () => {
     mockApi(routes({ "GET /api/storage": { ...fixtures.storage, toolchains: null, other_tool_cache: [] } }))
-    renderApp("/storage")
+    renderApp("/toolchains")
     expect(await screen.findByText("the tool cache is empty")).toBeInTheDocument()
   })
 
   it("removes a toolchain only once confirmed", async () => {
     const { calls } = mockApi(routes({ "DELETE /api/toolchains/node/22.11.0": () => noContent() }))
-    const { user } = renderApp("/storage")
+    const { user } = renderApp("/toolchains")
     await user.click(await screen.findByRole("button", { name: "Remove node 22.11.0" }))
     expect(await screen.findByText("Remove node 22.11.0 (190.0 MB)?")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Cancel" }))
@@ -65,7 +65,7 @@ describe("Toolchains card", () => {
   it("warns when removing the last .NET SDK of a major", async () => {
     const storage = { ...fixtures.storage, toolchains: [sdk("8.0.404")] }
     mockApi(routes({ "GET /api/storage": storage }))
-    const { user } = renderApp("/storage")
+    const { user } = renderApp("/toolchains")
     await user.click(await screen.findByRole("button", { name: "Remove dotnet 8.0.404" }))
     expect(
       await screen.findByText("Remove dotnet 8.0.404 (1 B)? It is the last .NET 8 SDK, so this also removes the 8.0 runtimes and packs."),
@@ -74,7 +74,7 @@ describe("Toolchains card", () => {
 
   it("installs the popular set only once confirmed", async () => {
     const { calls } = mockApi(routes({ "POST /api/toolchains": () => noContent() }))
-    const { user } = renderApp("/storage")
+    const { user } = renderApp("/toolchains")
     await user.click(await screen.findByRole("button", { name: "Install popular set" }))
     const question =
       "Install the popular set? node 22, node 24, dotnet 8.0, dotnet 10.0, python 3.13, python 3.14, go latest, java 21, java 25. Versions already installed are skipped."

@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { Link, Outlet, useNavigate } from "@tanstack/react-router"
 import { Alert, AlertDescription, AlertTitle } from "darkraise-ui/components/alert"
 import { SidebarLayout, useBrandStore, type NavGroup } from "darkraise-ui/layout"
-import { Boxes, GitBranch, HardDrive, HistoryIcon, LayoutDashboard, Settings } from "lucide-react"
+import { Boxes, GitBranch, HardDrive, HistoryIcon, LayoutDashboard, Settings, Wrench } from "lucide-react"
 import { useEffect, useRef } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useEvents, useMetrics, useStatus } from "@/api/hooks"
@@ -16,6 +16,7 @@ const nav: NavGroup[] = [
       { label: "Repositories", href: "/repositories", icon: GitBranch },
       { label: "Runners", href: "/runners", icon: Boxes },
       { label: "History", href: "/history", icon: HistoryIcon },
+      { label: "Toolchains", href: "/toolchains", icon: Wrench },
       { label: "Storage", href: "/storage", icon: HardDrive },
       { label: "Settings", href: "/settings", icon: Settings },
     ],

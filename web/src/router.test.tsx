@@ -44,6 +44,7 @@ describe("routes", () => {
     ["/runners", "Runners"],
     ["/history", "History"],
     ["/repositories", "Repositories"],
+    ["/toolchains", "Toolchains"],
     ["/storage", "Storage"],
     ["/settings", "Settings"],
     ["/runners/aaaaaa", "aaaaaa"],

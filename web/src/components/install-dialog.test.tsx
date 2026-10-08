@@ -22,7 +22,7 @@ async function openDialog(user: ReturnType<typeof renderApp>["user"]) {
 describe("Install toolchain dialog", () => {
   it("lists a tool's versions and installs the picked one", async () => {
     const { calls } = mockApi(routes({ "POST /api/toolchains": () => noContent() }))
-    const { user } = renderApp("/storage")
+    const { user } = renderApp("/toolchains")
     const dialog = await openDialog(user)
     expect(dialog.getByText("Install toolchain")).toBeInTheDocument()
     expect(dialog.getByText("pick one below, or type a version")).toBeInTheDocument()
@@ -38,7 +38,7 @@ describe("Install toolchain dialog", () => {
 
   it("switches the tool and installs a typed version", async () => {
     const { calls } = mockApi(routes({ "POST /api/toolchains": () => noContent() }))
-    const { user } = renderApp("/storage")
+    const { user } = renderApp("/toolchains")
     const dialog = await openDialog(user)
     await user.click(dialog.getByRole("combobox", { name: "Tool" }))
     await user.click(await screen.findByRole("option", { name: "Go" }))
@@ -54,7 +54,7 @@ describe("Install toolchain dialog", () => {
 
   it("offers a retry when the versions cannot be read", async () => {
     mockApi(routes({ "GET /api/toolchains/available": () => json({ error: "upstream down" }, 502) }))
-    const { user } = renderApp("/storage")
+    const { user } = renderApp("/toolchains")
     const dialog = await openDialog(user)
     expect(await dialog.findByText("✖ upstream down")).toBeInTheDocument()
     expect(dialog.getByRole("button", { name: "Retry" })).toBeInTheDocument()
@@ -63,7 +63,7 @@ describe("Install toolchain dialog", () => {
 
   it("keeps a rejected install in the dialog", async () => {
     mockApi(routes({ "POST /api/toolchains": () => json({ error: "unknown toolchain \"node\"" }, 400) }))
-    const { user } = renderApp("/storage")
+    const { user } = renderApp("/toolchains")
     const dialog = await openDialog(user)
     await user.type(dialog.getByRole("textbox", { name: "Version" }), "24")
     await user.click(dialog.getByRole("button", { name: "Install" }))
@@ -73,7 +73,7 @@ describe("Install toolchain dialog", () => {
 
   it("is not offered while the daemon is unreachable", async () => {
     mockApi(routes({ "GET /api/status": () => json({ error: "connection refused" }, 502) }))
-    renderApp("/storage")
+    renderApp("/toolchains")
     await waitFor(() => expect(screen.getAllByText(/daemon unreachable/).length).toBeGreaterThan(0))
     expect(await screen.findByRole("button", { name: "Install…" })).toBeDisabled()
   })
@@ -86,7 +86,7 @@ describe("Install toolchain dialog", () => {
         "POST /api/toolchains": () => json({ error: "connection refused" }, 502),
       }),
     )
-    const { user } = renderApp("/storage")
+    const { user } = renderApp("/toolchains")
     const dialog = await openDialog(user)
     await user.click(await dialog.findByRole("button", { name: /^22\.11\.0/ }))
     down = true
