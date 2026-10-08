@@ -2,8 +2,6 @@ import { render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { copyText } from "@/lib/clipboard"
 import { Sparkline } from "./sparkline"
-import { stateVariant } from "@/lib/status"
-import { StateBadge } from "./state-badge"
 
 function secure(value: boolean) {
   Object.defineProperty(window, "isSecureContext", { value, configurable: true })
@@ -12,20 +10,6 @@ function secure(value: boolean) {
 afterEach(() => {
   Reflect.deleteProperty(navigator, "clipboard")
   Reflect.deleteProperty(document, "execCommand")
-})
-
-describe("StateBadge", () => {
-  it("colours each state", () => {
-    expect(stateVariant("busy")).toBe("blue")
-    expect(stateVariant("success")).toBe("green")
-    expect(stateVariant("idle")).toBe("amber")
-    expect(stateVariant("failure")).toBe("red")
-    expect(stateVariant("cleaning")).toBe("secondary")
-  })
-  it("shows the state", () => {
-    render(<StateBadge state="busy" />)
-    expect(screen.getByText("busy")).toBeInTheDocument()
-  })
 })
 
 describe("Sparkline", () => {

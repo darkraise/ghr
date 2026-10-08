@@ -1,99 +1,23 @@
-import { readFileSync } from "node:fs"
-import { dirname, resolve } from "node:path"
+import { readdirSync, readFileSync } from "node:fs"
+import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import ts from "typescript"
 import { describe, expect, it } from "vitest"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+const testHelpers = resolve(root, "src", "test")
 
-// The files the identity and Dashboard spec created or restyled. Spec 2 adds
-// each page it redesigns, until this list is all of src.
-const FILES = [
-  "public/theme-init.js",
-  "src/components/account-section.tsx",
-  "src/components/activity-panel.tsx",
-  "src/components/add-repo-dialog.tsx",
-  "src/components/brand.tsx",
-  "src/components/buckets-chart.tsx",
-  "src/components/capacity-bar.tsx",
-  "src/components/disk-breakdown.tsx",
-  "src/components/event-list.tsx",
-  "src/components/install-dialog.tsx",
-  "src/components/label-check-group.tsx",
-  "src/components/lanes-chart.tsx",
-  "src/components/log-view.tsx",
-  "src/components/mode-control.tsx",
-  "src/components/page/error-line.tsx",
-  "src/components/page/field.tsx",
-  "src/components/page/section-nav.tsx",
-  "src/components/page/section.tsx",
-  "src/components/page/split-view.tsx",
-  "src/components/page/state-text.tsx",
-  "src/components/prune-section.tsx",
-  "src/components/refused-hint.tsx",
-  "src/components/repo-activity-strip.tsx",
-  "src/components/repo-activity.tsx",
-  "src/components/repo-table.tsx",
-  "src/components/runner-list.tsx",
-  "src/components/runner-panel.tsx",
-  "src/components/registrations-group.tsx",
-  "src/components/result-icon.tsx",
-  "src/components/runner-meter.tsx",
-  "src/components/runner-section.tsx",
-  "src/components/save-bar.tsx",
-  "src/components/settings-form.tsx",
-  "src/components/shell.tsx",
-  "src/components/size-bar.tsx",
-  "src/components/sparkline.tsx",
-  "src/components/stat-card.tsx",
-  "src/components/step-list.tsx",
-  "src/components/stop-runner-dialog.tsx",
-  "src/components/storage-disk.tsx",
-  "src/components/storage-tables.tsx",
-  "src/components/toolchain-actions.tsx",
-  "src/components/toolchain-sections.tsx",
-  "src/components/token-section.tsx",
-  "src/components/unsaved-guard.tsx",
-  "src/components/update-card.tsx",
-  "src/components/window-control.tsx",
-  "src/api/client.ts",
-  "src/api/hooks.ts",
-  "src/lib/activity-view.ts",
-  "src/lib/capacity.ts",
-  "src/lib/disk.ts",
-  "src/lib/draft.ts",
-  "src/lib/format.ts",
-  "src/lib/settings-form.ts",
-  "src/lib/history.ts",
-  "src/lib/repos.ts",
-  "src/lib/status.ts",
-  "src/lib/storage.ts",
-  "src/lib/steps.ts",
-  "src/lib/summary.ts",
-  "src/lib/token.ts",
-  "src/lib/toolchains.ts",
-  "src/lib/use-activity-window.ts",
-  "src/lib/use-repo-actions.ts",
-  "src/lib/use-media-query.ts",
-  "src/lib/use-operation-toasts.ts",
-  "src/lib/use-popular-set.ts",
-  "src/lib/use-prune.ts",
-  "src/lib/use-width.ts",
-  "src/pages/dashboard.tsx",
-  "src/pages/history.tsx",
-  "src/router.tsx",
-  "src/pages/login.tsx",
-  "src/pages/repositories.tsx",
-  "src/pages/repository.tsx",
-  "src/pages/runners.tsx",
-  "src/pages/settings.tsx",
-  "src/pages/setup.tsx",
-  "src/pages/storage.tsx",
-  "src/pages/toolchains.tsx",
-  "src/query.ts",
-  "src/styles/ghr-theme.css",
-  "src/theme.config.ts",
-]
+// Every source file under src, plus the theme script. Tests and the test
+// helpers hold fixture copy rather than UI, so they are left out.
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) return path === testHelpers ? [] : sourceFiles(path)
+    return /\.(tsx?|css)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : []
+  })
+}
+
+const FILES = [...sourceFiles(resolve(root, "src")).map((p) => relative(root, p).split("\\").join("/")), "public/theme-init.js"].sort()
 
 const DASH = /[–—]/
 
@@ -138,10 +62,15 @@ function gradientArgs(text: string, start: number): string[] {
   return args
 }
 
+// Tailwind 4 names its gradients bg-linear-*, bg-radial and bg-conic (with
+// or without a suffix); Tailwind 3 named them bg-gradient-to-*.
+const GRADIENT_UTILITY = /\bbg-(?:linear-|gradient-to-|radial(?:-|\b)|conic(?:-|\b))/
+
 function styleViolations(text: string): string[] {
   const found: string[] = []
   if (/backdrop-filter|backdrop-blur-/.test(text)) found.push("backdrop blur")
   if (/background-clip:\s*text|bg-clip-text/.test(text)) found.push("background-clip: text")
+  if (GRADIENT_UTILITY.test(text)) found.push("gradient utility")
   for (const m of text.matchAll(/(?:linear|radial)-gradient\(/g)) {
     const args = gradientArgs(text, (m.index ?? 0) + m[0].length)
     const stops = args.filter((a, i) => !(i === 0 && /^(to |at |circle|ellipse|closest|farthest|[-\d.]+(deg|turn|rad|grad))/.test(a)))
@@ -149,6 +78,10 @@ function styleViolations(text: string): string[] {
   }
   return found
 }
+
+// TagField's removable chips are controls, so they keep the kit's Badge.
+const BADGE_ALLOWED = "src/components/tag-field.tsx"
+const RETIRED = /darkraise-ui\/components\/badge|@\/components\/(?:glyph|state-badge)["/]/
 
 describe("anti-slop rules", () => {
   it("catch what they are meant to catch", () => {
@@ -159,6 +92,29 @@ describe("anti-slop rules", () => {
     expect(styleViolations("background: linear-gradient(red)")).toEqual([])
     expect(styleViolations('className="backdrop-blur-sm"')).toHaveLength(1)
     expect(styleViolations('className="bg-clip-text"')).toHaveLength(1)
+    expect(styleViolations('className="bg-linear-to-r from-primary to-card"')).toHaveLength(1)
+    expect(styleViolations('className="bg-gradient-to-b from-card"')).toHaveLength(1)
+    expect(styleViolations('className="bg-radial from-primary"')).toHaveLength(1)
+    expect(styleViolations('className="bg-radial-[at_25%_25%]"')).toHaveLength(1)
+    expect(styleViolations('className="bg-conic-180 from-primary"')).toHaveLength(1)
+    expect(styleViolations('className="bg-card bg-muted bg-primary/45"')).toEqual([])
+    expect(RETIRED.test('import { Badge } from "darkraise-ui/components/badge"')).toBe(true)
+    expect(RETIRED.test('import { StateBadge } from "@/components/state-badge"')).toBe(true)
+    expect(RETIRED.test('import { Glyph } from "@/components/glyph"')).toBe(true)
+    expect(RETIRED.test('import { ResultIcon } from "@/components/result-icon"')).toBe(false)
+  })
+
+  it("walk every source file and leave tests and test helpers out", () => {
+    expect(FILES).toContain("public/theme-init.js")
+    expect(FILES).toContain("src/pages/settings.tsx")
+    expect(FILES).toContain("src/styles/ghr-theme.css")
+    expect(FILES.filter((f) => f.includes(".test."))).toEqual([])
+    expect(FILES.filter((f) => f.startsWith("src/test/"))).toEqual([])
+  })
+
+  it("keep the kit's Badge to TagField and import no Glyph or StateBadge", () => {
+    const offenders = FILES.filter((file) => file !== BADGE_ALLOWED && RETIRED.test(readFileSync(resolve(root, file), "utf8")))
+    expect(offenders).toEqual([])
   })
 
   it.each(FILES)("%s follows them", (file) => {
