@@ -72,3 +72,17 @@ describe("History accessibility", () => {
     30_000,
   )
 })
+
+describe("Repositories accessibility", () => {
+  it(
+    "has no axe violations",
+    async () => {
+      mockApi(authedRoutes())
+      renderApp("/repositories")
+      await screen.findByRole("region", { name: "Configured repositories" })
+      await screen.findByText("50%")
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})

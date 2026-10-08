@@ -177,7 +177,7 @@ describe("repository page", () => {
   it("is reached from the Repositories page", async () => {
     mockApi(routes())
     const { user, router } = renderApp("/repositories")
-    await user.click(await screen.findByRole("link", { name: "Manage darkmem" }))
+    await user.click(await screen.findByRole("link", { name: "darkmem" }))
     await waitFor(() => expect(router.state.location.pathname).toBe("/repositories/darkmem"))
   })
 })

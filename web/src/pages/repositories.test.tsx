@@ -1,109 +1,98 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import type { HistoryEntry } from "@/api/types"
-import { mockApi, noContent } from "@/test/api"
+import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
-function entry(id: string, conclusion: string, minutesAgo: number): HistoryEntry {
-  const finished = Date.now() - minutesAgo * 60_000
-  return {
-    id,
-    repo: "darkmem",
-    run_id: Number(id),
-    run_number: id,
-    workflow: "ci",
-    job_name: "build",
-    conclusion,
-    started_at: new Date(finished - 5 * 60_000).toISOString(),
-    finished_at: new Date(finished).toISOString(),
-  }
-}
-
-const history = [entry("3", "success", 10), entry("2", "failure", 20), entry("1", "cancelled", 30)]
-
-function routes(over: Record<string, unknown> = {}) {
-  return authedRoutes({ "GET /api/history": history, ...over })
-}
+const row = (name: string) => within(screen.getByRole("link", { name }).closest("tr") as HTMLElement)
 
 describe("Repositories page", () => {
-  it("names a cancelled last job as cancelled", async () => {
-    const repos = fixtures.status.repos.map((r) =>
-      r.name === "darkmem" && r.last_job ? { ...r, last_job: { ...r.last_job, conclusion: "cancelled" } } : r,
-    )
-    mockApi(routes({ "GET /api/status": { ...fixtures.status, repos }, "GET /api/history": [] }))
+  it("sums up the repositories in the header", async () => {
+    mockApi(authedRoutes())
     renderApp("/repositories")
-    expect(await screen.findByRole("img", { name: "cancelled" })).toBeInTheDocument()
-    expect(screen.queryByRole("img", { name: "failed" })).toBeNull()
+    expect(await screen.findByText("2 configured, 1 running, 1 paused")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Add repository" })).toBeEnabled()
   })
 
-  it("shows a card per repo with its state, counts and activity", async () => {
-    mockApi(routes())
+  it("lists every repository with the week's success rate and labels", async () => {
+    mockApi(authedRoutes())
     renderApp("/repositories")
-    expect(await screen.findByText("1/2 running · 3 queued")).toBeInTheDocument()
-    expect(screen.getByText("darkcloud")).toBeInTheDocument()
-    expect(screen.getByText("removing… running jobs finish first")).toBeInTheDocument()
-    expect(screen.getByText("GitHub: not found")).toBeInTheDocument()
-    expect(screen.getByText(/#41 build · /)).toBeInTheDocument()
-    await waitFor(() => expect(screen.getAllByText("3 jobs · 33% success · avg 5m00s")).toHaveLength(3))
-    expect(screen.getAllByRole("img", { name: "#3 build: success" })).toHaveLength(3)
+    const table = within(await screen.findByRole("region", { name: "Configured repositories" }))
+    expect(table.getByRole("columnheader", { name: "7 days" })).toBeInTheDocument()
+    await waitFor(() => expect(row("darkmem").getByText("50%")).toBeInTheDocument())
+    expect(row("darkmem").getByText("gpu")).toBeInTheDocument()
+    expect(row("old-repo").getByText("Removing. Running jobs finish first.")).toBeInTheDocument()
+  })
+
+  it("asks for the last 24 hours of activity", async () => {
+    const { calls } = mockApi(authedRoutes())
+    renderApp("/repositories")
+    await screen.findByRole("region", { name: "Configured repositories" })
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/activity" && c.search === "?window=24h&tz=UTC")).toBe(true))
   })
 
   it("waits for the daemon before the first status", async () => {
-    mockApi(routes({ "GET /api/status": () => new Response(JSON.stringify({ error: "connection refused" }), { status: 502 }) }))
+    mockApi(authedRoutes({ "GET /api/status": () => json({ error: "connection refused" }, 502) }))
     renderApp("/repositories")
-    expect(await screen.findByText("waiting for the daemon…")).toBeInTheDocument()
+    expect(await screen.findByText("Waiting for the daemon")).toBeInTheDocument()
   })
 
-  it("keeps the cards but disables their actions while the daemon is unreachable", { timeout: 10_000 }, async () => {
+  it("keeps the table but locks its actions while the daemon is unreachable", { timeout: 10_000 }, async () => {
     let reads = 0
-    mockApi(routes({ "GET /api/status": () => (++reads === 1 ? fixtures.status : new Response(JSON.stringify({ error: "connection refused" }), { status: 502 })) }))
-    renderApp("/repositories")
+    mockApi(authedRoutes({ "GET /api/status": () => (++reads === 1 ? fixtures.status : json({ error: "connection refused" }, 502)) }))
+    const { user } = renderApp("/repositories")
     expect(await screen.findByText("Reconnecting", {}, { timeout: 4000 })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Pause darkmem" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Remove darkmem" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Add repository" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "More actions for darkmem" }))
+    expect(await screen.findByRole("menuitem", { name: "Pause" })).toHaveAttribute("aria-disabled", "true")
   })
 
-  it("says when no repo is configured", async () => {
-    mockApi(routes({ "GET /api/status": { ...fixtures.status, repos: [] } }))
+  it("says when no repository is configured, with the button that fixes it", async () => {
+    mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, repos: [] } }))
     renderApp("/repositories")
     expect(await screen.findByText("No repositories yet")).toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "Add repository" })).toHaveLength(2)
+    expect(screen.queryByRole("region", { name: "Configured repositories" })).toBeNull()
   })
 
-  it("pauses and resumes a repo", async () => {
-    const { calls } = mockApi(
-      routes({ "POST /api/repos/darkmem/pause": () => noContent(), "POST /api/repos/darkcloud/resume": () => noContent() }),
-    )
+  it("pauses a repository from its row menu", async () => {
+    const { calls } = mockApi(authedRoutes({ "POST /api/repos/darkmem/pause": () => noContent() }))
     const { user } = renderApp("/repositories")
-    await user.click(await screen.findByRole("button", { name: "Pause darkmem" }))
+    await user.click(await screen.findByRole("button", { name: "More actions for darkmem" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Pause" }))
     expect((await screen.findAllByText("Paused darkmem")).length).toBeGreaterThan(0)
-    await user.click(screen.getByRole("button", { name: "Resume darkcloud" }))
-    expect((await screen.findAllByText("Resumed darkcloud")).length).toBeGreaterThan(0)
-    expect(calls.filter((c) => c.method === "POST").map((c) => c.path)).toEqual([
-      "/api/repos/darkmem/pause",
-      "/api/repos/darkcloud/resume",
-    ])
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.path)).toEqual(["/api/repos/darkmem/pause"])
   })
 
-  it("locks a repo that is being removed", async () => {
-    mockApi(routes())
-    renderApp("/repositories")
-    expect(await screen.findByRole("button", { name: "Resume old-repo" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Remove old-repo" })).toBeDisabled()
-  })
-
-  it("removes a repo only after confirmation", async () => {
-    const { calls } = mockApi(routes({ "DELETE /api/repos/darkmem": () => noContent() }))
+  it("removes a repository only after confirmation", async () => {
+    const { calls } = mockApi(authedRoutes({ "DELETE /api/repos/darkmem": () => noContent() }))
     const { user } = renderApp("/repositories")
-    await user.click(await screen.findByRole("button", { name: "Remove darkmem" }))
-    expect(await screen.findByText("Remove repo darkmem? Its running jobs finish first.")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(await screen.findByRole("button", { name: "More actions for darkmem" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Remove" }))
+    const ask = within(await screen.findByRole("alertdialog"))
+    expect(ask.getByText("Remove darkmem?")).toBeInTheDocument()
+    expect(ask.getByText("Its running jobs finish first.")).toBeInTheDocument()
+    await user.click(ask.getByRole("button", { name: "Cancel" }))
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(calls.some((c) => c.method === "DELETE")).toBe(false)
 
-    await user.click(screen.getByRole("button", { name: "Remove darkmem" }))
+    await user.click(screen.getByRole("button", { name: "More actions for darkmem" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Remove" }))
     await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remove" }))
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/repos/darkmem")).toBe(true))
     expect((await screen.findAllByText("Removing darkmem")).length).toBeGreaterThan(0)
+  })
+
+  it("opens a repository from its row", async () => {
+    mockApi(authedRoutes())
+    const { user, router } = renderApp("/repositories")
+    await user.click(await screen.findByRole("link", { name: "darkcloud" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/repositories/darkcloud"))
+  })
+
+  it("shows warm in all mode", async () => {
+    mockApi(authedRoutes({ "GET /api/config": { ...fixtures.config, mode: "all" } }))
+    renderApp("/repositories")
+    expect(await screen.findByRole("columnheader", { name: "Warm" })).toBeInTheDocument()
   })
 })

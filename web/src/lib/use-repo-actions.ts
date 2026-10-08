@@ -35,7 +35,8 @@ export function useRepoActions(repo: RepoStatus, offline: boolean) {
     togglePause: () => pause.mutate(repo.paused),
     askRemove: () =>
       setConfirm({
-        title: `Remove repo ${repo.name}? Its running jobs finish first.`,
+        title: `Remove ${repo.name}?`,
+        body: "Its running jobs finish first.",
         action: "Remove",
         destructive: true,
         run: () => remove.mutate(),

@@ -31,7 +31,7 @@ describe("useRepoActions", () => {
     const { calls } = mockApi({ "DELETE /api/repos/darkmem": () => noContent() })
     const { result } = setup(darkmem)
     act(() => result.current.askRemove())
-    expect(result.current.confirm?.title).toBe("Remove repo darkmem? Its running jobs finish first.")
+    expect(result.current.confirm).toMatchObject({ title: "Remove darkmem?", body: "Its running jobs finish first.", action: "Remove" })
     expect(calls).toHaveLength(0)
     act(() => result.current.confirm?.run())
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/repos/darkmem")).toBe(true))

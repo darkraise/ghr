@@ -1,66 +1,62 @@
-import { Link } from "@tanstack/react-router"
+import { useNavigate } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
-import { Card, CardContent, CardHeader, CardTitle } from "darkraise-ui/components/card"
-import { EmptyState } from "darkraise-ui/components/empty-state"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { useState } from "react"
-import { useConfig, useStatus } from "@/api/hooks"
+import { useActivity, useConfig, useStatus } from "@/api/hooks"
 import { AddRepoDialog } from "@/components/add-repo-dialog"
-import { RepoActionButtons } from "@/components/repo-actions"
-import { ActivitySummary, RepoSummary } from "@/components/repo-summary"
+import { Section } from "@/components/page/section"
+import { RepoTable } from "@/components/repo-table"
+import { reposSummary } from "@/lib/repos"
 import { useNow } from "@/lib/use-now"
 
 export function RepositoriesPage() {
   const status = useStatus()
   const config = useConfig()
+  const activity = useActivity("24h")
   const now = useNow()
+  const navigate = useNavigate()
   const [adding, setAdding] = useState(false)
 
   const st = status.data
   if (!st) {
     return (
-      <>
+      <div className="flex flex-col gap-4">
         <PageHeader title="Repositories" />
-        <Spinner label="waiting for the daemon…" />
-      </>
+        <Spinner label="Waiting for the daemon" />
+      </div>
     )
   }
   const offline = status.isError
-  const addButton = (
+  const add = (
     <Button disabled={offline} onClick={() => setAdding(true)}>
       Add repository
     </Button>
   )
   return (
-    <>
-      <PageHeader title="Repositories" actions={addButton} />
+    <div className="flex flex-col gap-4">
+      <PageHeader title="Repositories" description={reposSummary(st) || undefined} actions={add} />
       {st.repos.length === 0 ? (
-        <EmptyState title="No repositories yet" action={addButton} />
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {st.repos.map((r) => (
-            <Card key={r.name}>
-              <CardHeader>
-                <CardTitle>{r.name}</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <RepoSummary repo={r} now={now} />
-                <ActivitySummary name={r.name} retention={config.data?.history_retention} now={now} />
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" asChild>
-                    <Link to="/repositories/$name" params={{ name: r.name }} aria-label={`Manage ${r.name}`}>
-                      Manage
-                    </Link>
-                  </Button>
-                  <RepoActionButtons repo={r} offline={offline} />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+        <div className="flex flex-col items-start gap-2">
+          <p className="text-sm text-muted-foreground">No repositories yet</p>
+          {add}
         </div>
+      ) : (
+        <Section title="Configured repositories">
+          <div className="overflow-x-auto">
+            <RepoTable
+              repos={st.repos}
+              activity={activity.data?.repos}
+              now={now}
+              offline={offline}
+              onOpen={(name) => void navigate({ to: "/repositories/$name", params: { name } })}
+              columns="full"
+              config={config.data}
+            />
+          </div>
+        </Section>
       )}
       <AddRepoDialog open={adding} onClose={() => setAdding(false)} />
-    </>
+    </div>
   )
 }
