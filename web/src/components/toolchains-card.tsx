@@ -8,32 +8,19 @@ import { api } from "@/api/client"
 import { keys } from "@/api/hooks"
 import type { Status, Storage, Toolchain } from "@/api/types"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
-import { InstallDialog } from "@/components/install-dialog"
 import { RefusedHint } from "@/components/refused-hint"
+import { ToolchainActions } from "@/components/toolchain-actions"
 import { dateTime, humanBytes } from "@/lib/format"
 import { lastDotnetMajor, queueText } from "@/lib/toolchains"
-
-// The daemon's popular preset (internal/toolchain/set.go), listed in the
-// same words the confirmation shows before queueing it.
-const POPULAR_QUESTION =
-  "Install the popular set? node 22, node 24, dotnet 8.0, dotnet 10.0, python 3.13, python 3.14, go latest, java 21, java 25. Versions already installed are skipped."
 
 export function ToolchainsCard({ storage, status, offline }: { storage: Storage; status: Status | undefined; offline: boolean }) {
   const queryClient = useQueryClient()
   const [confirm, setConfirm] = useState<Confirm | null>(null)
-  const [installing, setInstalling] = useState(false)
   const settled = () => queryClient.invalidateQueries({ queryKey: keys.storage })
   const remove = useMutation({
     mutationFn: (t: Toolchain) => api.removeToolchain(t.tool, t.version),
     onSuccess: (_data, t) => {
       toast.success(`queued: remove ${t.tool} ${t.version}`)
-    },
-    onSettled: settled,
-  })
-  const popular = useMutation({
-    mutationFn: () => api.installPreset("popular"),
-    onSuccess: () => {
-      toast.success("queued: popular set")
     },
     onSettled: settled,
   })
@@ -91,21 +78,9 @@ export function ToolchainsCard({ storage, status, offline }: { storage: Storage;
         )}
         {queue && <p className="text-sm text-amber-600">{queue}</p>}
         <RefusedHint what="Remove" status={status} />
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={offline} onClick={() => setInstalling(true)}>
-            Install
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={offline}
-            onClick={() => setConfirm({ title: POPULAR_QUESTION, action: "Install popular set", run: () => popular.mutate() })}
-          >
-            Install popular set
-          </Button>
-        </div>
+        <ToolchainActions offline={offline} />
       </CardContent>
       <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
-      <InstallDialog open={installing} onClose={() => setInstalling(false)} />
     </Card>
   )
 }

@@ -57,16 +57,18 @@ describe("Toolchains card", () => {
     const { calls } = mockApi(routes({ "POST /api/toolchains": () => noContent() }))
     const { user } = renderApp("/toolchains")
     await user.click(await screen.findByRole("button", { name: "Install popular set" }))
-    const question =
-      "Install the popular set? node 22, node 24, dotnet 8.0, dotnet 10.0, python 3.13, python 3.14, go latest, java 21, java 25. Versions already installed are skipped."
-    expect(await screen.findByText(question)).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    const ask = within(await screen.findByRole("alertdialog"))
+    expect(ask.getByText("Install the popular set?")).toBeInTheDocument()
+    expect(
+      ask.getByText("node 22, node 24, dotnet 8.0, dotnet 10.0, python 3.13, python 3.14, go latest, java 21, java 25. Versions already installed are skipped."),
+    ).toBeInTheDocument()
+    await user.click(ask.getByRole("button", { name: "Cancel" }))
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(calls.some((c) => c.method === "POST")).toBe(false)
 
     await user.click(screen.getByRole("button", { name: "Install popular set" }))
     await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Install popular set" }))
     await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ preset: "popular" }))
-    expect((await screen.findAllByText("queued: popular set")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Queued: popular set")).length).toBeGreaterThan(0)
   })
 })
