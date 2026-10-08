@@ -57,6 +57,7 @@ const FILES = [
   "src/lib/status.ts",
   "src/lib/steps.ts",
   "src/lib/summary.ts",
+  "src/lib/toolchains.ts",
   "src/lib/use-activity-window.ts",
   "src/lib/use-repo-actions.ts",
   "src/lib/use-media-query.ts",

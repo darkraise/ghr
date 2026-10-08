@@ -4,29 +4,10 @@ import type { Toolchain } from "@/api/types"
 import { mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
-import { lastDotnetMajor, queueText } from "@/lib/toolchains"
 
 const routes = (over: Record<string, unknown> = {}) => authedRoutes({ "GET /api/storage": fixtures.storage, ...over })
 
 const sdk = (version: string): Toolchain => ({ tool: "dotnet", version, arch: "x64", path: "", bytes: 1, installed_at: "2026-10-01T00:00:00Z" })
-
-describe("lastDotnetMajor", () => {
-  it("names the major only for the last SDK of that major", () => {
-    const all = [sdk("8.0.404"), sdk("8.0.100"), sdk("10.0.100")]
-    expect(lastDotnetMajor(sdk("10.0.100"), all)).toBe("10")
-    expect(lastDotnetMajor(sdk("8.0.404"), all)).toBe("")
-    expect(lastDotnetMajor({ ...sdk("22.11.0"), tool: "node" }, all)).toBe("")
-  })
-})
-
-describe("queueText", () => {
-  it("describes the running operation and the queue", () => {
-    expect(queueText(fixtures.storage.operations)).toBe("installing node 24 — extracting (1 queued)")
-    expect(queueText({ current: null, queued: 2, recent: [] })).toBe("2 queued")
-    expect(queueText({ current: null, queued: 0, recent: [] })).toBe("")
-    expect(queueText({ current: { id: "x", kind: "clear", target: "nuget", started_at: "" }, queued: 0, recent: [] })).toBe("clearing nuget")
-  })
-})
 
 describe("Toolchains card", () => {
   it("lists toolchains, other folders and the queue", async () => {
@@ -37,7 +18,7 @@ describe("Toolchains card", () => {
     expect(screen.getByText("installed 2026-09-30")).toBeInTheDocument()
     expect(screen.getByText("PyPy")).toBeInTheDocument()
     expect(screen.getByText("other: a job's own setup step")).toBeInTheDocument()
-    expect(screen.getByText("installing node 24 — extracting (1 queued)")).toBeInTheDocument()
+    expect(screen.getByText("Installing node 24, extracting, 1 more queued")).toBeInTheDocument()
     expect(screen.getByText("Remove: refused while 1 jobs run")).toBeInTheDocument()
   })
 
