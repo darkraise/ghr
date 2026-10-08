@@ -1,0 +1,126 @@
+/* ghr's palette over darkraise-ui. The theme engine writes these tokens as
+   inline styles on <html>, so each override needs !important to win. The
+   values are HSL triplets because the kit reads them as hsl(var(--token));
+   --chart-* and --sf-hue* are whole colours. */
+
+:root {
+  --shadow-card: none !important;
+  --shadow-dropdown: none !important;
+  --noise-opacity: 0 !important;
+  --content-gradient-overlay: none !important;
+  --surface-tint: none !important;
+  --bg-style: solid !important;
+  --sf-hue: transparent !important;
+  --sf-hue-2: transparent !important;
+  --sf-hue-3: transparent !important;
+}
+
+:root[data-mode="dark"] {
+  --background: 212.7 29.7% 7.3% !important;
+  --surface-base: 212.7 29.7% 7.3% !important;
+  --card: 211.8 32.1% 10.4% !important;
+  --popover: 211.8 32.1% 10.4% !important;
+  --surface-raised: 211.8 32.1% 10.4% !important;
+  --surface-overlay: 211.8 32.1% 10.4% !important;
+  --surface-header: 211.8 32.1% 10.4% !important;
+  --muted: 213.0 28.6% 13.7% !important;
+  --secondary: 213.0 28.6% 13.7% !important;
+  --accent: 213.0 28.6% 13.7% !important;
+  --surface-sunken: 213.0 28.6% 13.7% !important;
+  --control-well-subtle: 213.0 28.6% 13.7% !important;
+  --control-well-deep: 213.0 28.6% 13.7% !important;
+  --border: 212.5 26.1% 18.0% !important;
+  --input: 212.5 26.1% 18.0% !important;
+  --border-default: 212.5 26.1% 18.0% !important;
+  --border-subtle: 212.5 26.1% 14.0% !important;
+  --border-strong: 212.5 26.1% 22.0% !important;
+  --foreground: 212.0 24.6% 88.0% !important;
+  --card-foreground: 212.0 24.6% 88.0% !important;
+  --popover-foreground: 212.0 24.6% 88.0% !important;
+  --secondary-foreground: 212.0 24.6% 88.0% !important;
+  --accent-foreground: 212.0 24.6% 88.0% !important;
+  --muted-foreground: 214.3 12.4% 55.7% !important;
+  --legend: 214.3 12.4% 55.7% !important;
+  --primary: 188.3 62.7% 56.9% !important;
+  --primary-fill: 188.3 62.7% 56.9% !important;
+  --ring: 188.3 62.7% 56.9% !important;
+  --focus-ring: 188.3 62.7% 56.9% !important;
+  --info: 188.3 62.7% 56.9% !important;
+  --primary-foreground: 192.7 73.3% 8.8% !important;
+  --info-foreground: 192.7 73.3% 8.8% !important;
+  --success: 136.2 39.7% 50.6% !important;
+  --success-foreground: 212.7 29.7% 7.3% !important;
+  --destructive: 5.4 81.9% 65.3% !important;
+  --destructive-foreground: 212.7 29.7% 7.3% !important;
+  --warning: 37.7 71.6% 57.3% !important;
+  --warning-foreground: 212.7 29.7% 7.3% !important;
+  --surface-sidebar: 213.3 33.3% 5.3% !important;
+  --sidebar-foreground: 213.0 22.7% 82.7% !important;
+  --sidebar-foreground-hover: 213.0 22.7% 82.7% !important;
+  --sidebar-foreground-muted: 214.0 13.0% 54.9% !important;
+  --sidebar-hover-bg: 213.0 30.3% 12.9% !important;
+  --sidebar-border: 213.0 30.3% 12.9% !important;
+  --chart-1: hsl(188.3 62.7% 56.9%) !important;
+  --chart-2: hsl(190.3 44.9% 40.6%) !important;
+  --chart-3: hsl(193.2 43.0% 31.0%) !important;
+  --chart-4: hsl(195.9 39.8% 24.1%) !important;
+  --chart-5: hsl(214.3 12.4% 55.7%) !important;
+}
+
+:root[data-mode="light"] {
+  --background: 210.0 21.4% 94.5% !important;
+  --surface-base: 210.0 21.4% 94.5% !important;
+  --card: 0.0 0.0% 100.0% !important;
+  --popover: 0.0 0.0% 100.0% !important;
+  --surface-raised: 0.0 0.0% 100.0% !important;
+  --surface-overlay: 0.0 0.0% 100.0% !important;
+  --surface-header: 0.0 0.0% 100.0% !important;
+  --muted: 213.3 20.9% 91.6% !important;
+  --secondary: 213.3 20.9% 91.6% !important;
+  --accent: 213.3 20.9% 91.6% !important;
+  --surface-sunken: 213.3 20.9% 91.6% !important;
+  --control-well-subtle: 213.3 20.9% 91.6% !important;
+  --control-well-deep: 213.3 20.9% 91.6% !important;
+  --border: 214.3 19.4% 85.9% !important;
+  --input: 214.3 19.4% 85.9% !important;
+  --border-default: 214.3 19.4% 85.9% !important;
+  --border-subtle: 214.3 19.4% 89.9% !important;
+  --border-strong: 214.3 19.4% 81.9% !important;
+  --foreground: 213.3 33.3% 10.6% !important;
+  --card-foreground: 213.3 33.3% 10.6% !important;
+  --popover-foreground: 213.3 33.3% 10.6% !important;
+  --secondary-foreground: 213.3 33.3% 10.6% !important;
+  --accent-foreground: 213.3 33.3% 10.6% !important;
+  --muted-foreground: 214.8 15.0% 40.6% !important;
+  --legend: 214.8 15.0% 40.6% !important;
+  --primary: 189.0 88.2% 26.7% !important;
+  --primary-fill: 189.0 88.2% 26.7% !important;
+  --ring: 189.0 88.2% 26.7% !important;
+  --focus-ring: 189.0 88.2% 26.7% !important;
+  --info: 189.0 88.2% 26.7% !important;
+  --primary-foreground: 0.0 0.0% 100.0% !important;
+  --info-foreground: 0.0 0.0% 100.0% !important;
+  --success: 135.9 55.4% 30.8% !important;
+  --success-foreground: 0.0 0.0% 100.0% !important;
+  --destructive: 4.4 61.6% 48.0% !important;
+  --destructive-foreground: 0.0 0.0% 100.0% !important;
+  --warning: 37.8 100.0% 27.1% !important;
+  --warning-foreground: 0.0 0.0% 100.0% !important;
+  --surface-sidebar: 212.0 28.3% 10.4% !important;
+  --sidebar-foreground: 213.8 23.5% 86.7% !important;
+  --sidebar-foreground-hover: 213.8 23.5% 86.7% !important;
+  --sidebar-foreground-muted: 214.0 14.3% 58.8% !important;
+  --sidebar-hover-bg: 213.9 24.7% 18.2% !important;
+  --sidebar-border: 213.9 24.7% 18.2% !important;
+  --chart-1: hsl(189.0 88.2% 26.7%) !important;
+  --chart-2: hsl(190.0 31.5% 51.4%) !important;
+  --chart-3: hsl(191.3 30.3% 65.7%) !important;
+  --chart-4: hsl(195.0 29.5% 76.1%) !important;
+  --chart-5: hsl(214.8 15.0% 40.6%) !important;
+}
+
+.sidebar-gradient-overlay::before,
+.header-gradient-overlay::before,
+main[data-content]::before {
+  background: none !important;
+}
