@@ -1,7 +1,7 @@
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from "@tanstack/react-router"
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { UnsavedGuard } from "@/components/unsaved-guard"
 import { setViewport } from "@/test/media"
 import { FieldGroup } from "./field"
@@ -32,7 +32,15 @@ function placeAt(id: string, top: number) {
   vi.spyOn(el, "getBoundingClientRect").mockReturnValue({ top } as DOMRect)
 }
 
+function layout(tops: Record<string, number>) {
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    return { top: tops[this.id] ?? 500 } as DOMRect
+  })
+}
+
 describe("SectionNav", () => {
+  afterEach(() => vi.restoreAllMocks())
+
   it("is not shown below 1280px", () => {
     setViewport(1024)
     render(<Page />)
@@ -49,8 +57,16 @@ describe("SectionNav", () => {
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Timing" }))
   })
 
+  it("works out the current section on mount, before any scroll", () => {
+    setViewport(1280)
+    layout({ general: -400, timing: 40 })
+    render(<Page />)
+    expect(screen.getByRole("button", { name: "Timing" })).toHaveAttribute("aria-current", "true")
+  })
+
   it("marks the section nearest the top as current while scrolling", () => {
     setViewport(1280)
+    layout({})
     render(<Page />)
     expect(screen.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "true")
     placeAt("general", -400)

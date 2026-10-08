@@ -24,6 +24,8 @@ export function SectionNav({ items }: { items: readonly NavItem[] }) {
       }
       setCurrent(found)
     }
+    // A page reloaded already scrolled fires no scroll event.
+    onScroll()
     // Capture catches the scroll of whichever element holds the page.
     document.addEventListener("scroll", onScroll, { capture: true, passive: true })
     return () => document.removeEventListener("scroll", onScroll, { capture: true })
