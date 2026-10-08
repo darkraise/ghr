@@ -23,7 +23,7 @@ import { AddRepoDialog } from "@/components/add-repo-dialog"
 import { Brand } from "@/components/brand"
 import { SettingsSections } from "@/components/settings-form"
 import { ToolchainActions } from "@/components/toolchain-actions"
-import { InstalledSection } from "@/components/toolchain-sections"
+import { InstalledSection, ToolCacheSection } from "@/components/toolchain-sections"
 import { useSettingsForm } from "@/lib/settings-form"
 import { errorText } from "@/query"
 
@@ -210,6 +210,7 @@ function ToolchainsStep({ popular, onPopular }: { popular: boolean; onPopular: (
       </div>
       <p className="text-xs text-muted-foreground">Queues the popular toolchain set when you finish; it installs in the background.</p>
       <ToolchainActions offline={status.isError} />
+      {storage.data && <ToolCacheSection storage={storage.data} />}
       {storage.data && <InstalledSection storage={storage.data} status={status.data} offline={status.isError} />}
     </div>
   )

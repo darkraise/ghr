@@ -14,7 +14,7 @@ import { Section } from "@/components/page/section"
 import { RefusedHint } from "@/components/refused-hint"
 import { SizeBar } from "@/components/size-bar"
 import { dateTime, humanBytes } from "@/lib/format"
-import { groupByTool, lastDotnetMajor, queueText } from "@/lib/toolchains"
+import { cacheParts, groupByTool, lastDotnetMajor, queueText, type CachePart } from "@/lib/toolchains"
 import { usePopularSet } from "@/lib/use-popular-set"
 
 export function InstalledSection({ storage, status, offline }: { storage: Storage; status: Status | undefined; offline: boolean }) {
@@ -124,6 +124,44 @@ export function InstalledSection({ storage, status, offline }: { storage: Storag
       </div>
       <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
       <ConfirmDialog confirm={popular.confirm} onClose={popular.close} />
+    </Section>
+  )
+}
+
+const SLOT_CLASS: Record<CachePart["slot"], string> = {
+  1: "bg-chart-1",
+  2: "bg-chart-2",
+  3: "bg-chart-3",
+  4: "bg-chart-4",
+  5: "bg-chart-5",
+}
+
+export function ToolCacheSection({ storage }: { storage: Storage }) {
+  const parts = cacheParts(storage)
+  const total = parts.reduce((n, p) => n + p.bytes, 0)
+  if (total === 0) return null
+  return (
+    <Section title="Tool cache">
+      <div className="flex flex-col gap-3">
+        <div
+          role="img"
+          aria-label={`Tool cache: ${parts.map((p) => `${p.label} ${humanBytes(p.bytes)}`).join(", ")}`}
+          className="flex h-3 overflow-hidden rounded-[3px] bg-muted"
+        >
+          {parts.map((p) => (
+            <span key={p.key} data-part={p.key} className={SLOT_CLASS[p.slot]} style={{ width: `${(p.bytes / total) * 100}%` }} />
+          ))}
+        </div>
+        <ul className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
+          {parts.map((p) => (
+            <li key={p.key} className="flex items-center gap-2">
+              <span aria-hidden="true" className={`size-2.5 shrink-0 rounded-[2px] ${SLOT_CLASS[p.slot]}`} />
+              <span className="flex-1">{p.label}</span>
+              <span className="font-mono text-muted-foreground">{humanBytes(p.bytes)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </Section>
   )
 }

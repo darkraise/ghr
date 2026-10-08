@@ -108,4 +108,34 @@ describe("Toolchains page", () => {
     await user.hover(await screen.findByRole("button", { name: "Remove node 22.11.0" }))
     expect(await screen.findByRole("tooltip")).toHaveTextContent("Remove")
   })
+
+  it("draws the tool cache by tool, in chart colours", async () => {
+    mockApi(routes())
+    const { container } = renderApp("/toolchains")
+    expect(await screen.findByRole("img", { name: "Tool cache: node 190.0 MB, Other 80.0 MB" })).toBeInTheDocument()
+    expect(container.querySelector('[data-part="node"]')).toHaveClass("bg-chart-1")
+    expect(container.querySelector('[data-part="__other"]')).toHaveClass("bg-chart-5")
+    const legend = within(screen.getByRole("region", { name: "Tool cache" }))
+    expect(legend.getByText("Other")).toBeInTheDocument()
+    expect(legend.getByText("190.0 MB")).toHaveClass("font-mono")
+  })
+
+  it("sums up the cache in the header", async () => {
+    mockApi(routes())
+    renderApp("/toolchains")
+    expect(await screen.findByText("1 installed, 270.0 MB")).toBeInTheDocument()
+  })
+
+  it("says the cache is not measured before the first measurement", async () => {
+    mockApi(routes({ "GET /api/storage": { ...fixtures.storage, measured_at: undefined } }))
+    renderApp("/toolchains")
+    expect(await screen.findByText("Not measured yet")).toBeInTheDocument()
+  })
+
+  it("draws no tool cache bar for an empty cache", async () => {
+    mockApi(routes({ "GET /api/storage": { ...fixtures.storage, toolchains: null, other_tool_cache: [] } }))
+    renderApp("/toolchains")
+    await screen.findByText("The tool cache is empty")
+    expect(screen.queryByRole("region", { name: "Tool cache" })).toBeNull()
+  })
 })

@@ -107,3 +107,17 @@ describe("Repository page accessibility", () => {
     30_000,
   )
 })
+
+describe("Toolchains accessibility", () => {
+  it(
+    "has no axe violations",
+    async () => {
+      mockApi(authedRoutes())
+      renderApp("/toolchains")
+      await screen.findByRole("img", { name: /^Tool cache: / })
+      await screen.findByText("Installing node 24, extracting, 1 more queued")
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})
