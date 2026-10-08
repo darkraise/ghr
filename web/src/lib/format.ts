@@ -88,3 +88,13 @@ export function series(samples: MetricSample[], pick: (s: MetricSample) => numbe
   }
   return out
 }
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+export function monthDay(d: Date): string {
+  return `${MONTHS[d.getMonth()] ?? ""} ${d.getDate()}`
+}
+
+export function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`
+}

@@ -4,7 +4,7 @@ import { keys } from "@/api/hooks"
 import type { InstanceStatus, MetricSample } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
-import { ago, clock, dateTime, dateTimeSec, dur, elapsed, fmtMem, hhmm, humanBytes, isZeroTime, maxText, series, startedAt } from "./format"
+import { ago, clock, dateTime, dateTimeSec, dur, elapsed, fmtMem, hhmm, humanBytes, isZeroTime, maxText, monthDay, plural, series, startedAt } from "./format"
 import { clockOffset, useNow } from "./use-now"
 
 const statusFixture = fixtures.status
@@ -134,5 +134,19 @@ describe("startedAt", () => {
   it("falls back to since without a job or before the job starts", () => {
     expect(startedAt(base)).toBe("2026-10-03T14:00:00Z")
     expect(startedAt({ ...base, job: { started_at: "0001-01-01T00:00:00Z" } } as InstanceStatus)).toBe("2026-10-03T14:00:00Z")
+  })
+})
+
+describe("monthDay", () => {
+  it("names the month and day", () => {
+    expect(monthDay(new Date("2026-10-03T14:05:00Z"))).toBe("Oct 3")
+  })
+})
+
+describe("plural", () => {
+  it("adds an s except for one", () => {
+    expect(plural(1, "day")).toBe("1 day")
+    expect(plural(0, "day")).toBe("0 days")
+    expect(plural(6, "job")).toBe("6 jobs")
   })
 })
