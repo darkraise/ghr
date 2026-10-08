@@ -1,51 +1,45 @@
-import { Card, CardContent, CardHeader, CardTitle } from "darkraise-ui/components/card"
-import { Spinner } from "darkraise-ui/components/spinner"
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { PageHeader } from "darkraise-ui/layout"
-import { useState } from "react"
-import { useLogTail, useStatus } from "@/api/hooks"
-import { LogView } from "@/components/log-view"
-import { RunnersTable } from "@/components/runners-table"
+import { useEffect } from "react"
+import { useStatus } from "@/api/hooks"
+import { SplitView } from "@/components/page/split-view"
+import { RunnerList } from "@/components/runner-list"
+import { RunnerPanel, type DetailTab } from "@/components/runner-panel"
+import { runnersSummary } from "@/lib/summary"
+import { useMediaQuery, WIDE } from "@/lib/use-media-query"
+import { useNow } from "@/lib/use-now"
+
+function RunnersView({ id, tab }: { id: string | undefined; tab: DetailTab }) {
+  const status = useStatus()
+  const now = useNow()
+  const wide = useMediaQuery(WIDE)
+  const navigate = useNavigate()
+  const first = status.data?.instances.find((i) => i.state !== "cleaning")?.id
+
+  // On wide screens the first live runner goes into the URL, so the selection
+  // stays put when that runner finishes. Narrow screens keep the list.
+  useEffect(() => {
+    if (wide && id === undefined && first !== undefined) {
+      void navigate({ to: "/runners/$id", params: { id: first }, search: { tab: "steps" }, replace: true })
+    }
+  }, [wide, id, first, navigate])
+
+  const list = <RunnerList status={status.data} selected={id} tab={tab} now={now} />
+  const panel = id === undefined ? null : <RunnerPanel key={id} id={id} tab={tab} backLink={!wide} />
+  return (
+    <div className="flex flex-col gap-4">
+      <PageHeader title="Runners" description={status.data ? runnersSummary(status.data) : undefined} />
+      <SplitView list={list} panel={panel} narrow={panel ?? list} />
+    </div>
+  )
+}
 
 export function RunnersPage() {
-  const status = useStatus()
-  const [picked, setPicked] = useState<string | null>(null)
-  const [follow, setFollow] = useState(true)
-  const instances = status.data?.instances ?? []
-  const first = instances[0]?.id
-  // Until the owner picks one, the first runner is the selection. A picked
-  // runner that ends stays picked, so its last log stays readable.
-  if (picked === null && first !== undefined) setPicked(first)
-  const live = picked !== null && instances.some((i) => i.id === picked)
-  const log = useLogTail(picked ?? "", live)
-  const title = picked === null ? "Log preview — no runner selected" : `Log preview — ${picked} (${live ? "following" : "ended"})`
-  return (
-    <>
-      <PageHeader title="Runners" />
-      <Card>
-        <CardContent className="max-h-[50vh] overflow-auto p-4">
-          {status.data ? (
-            <RunnersTable
-              status={status.data}
-              actions
-              selected={live ? picked : null}
-              onSelect={(id) => {
-                setPicked(id)
-                setFollow(true)
-              }}
-            />
-          ) : (
-            <Spinner label="waiting for the daemon…" />
-          )}
-        </CardContent>
-      </Card>
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>{title}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {picked !== null && <LogView text={log.data?.text ?? ""} follow={follow} onFollowChange={setFollow} className="h-[17.5rem]" />}
-        </CardContent>
-      </Card>
-    </>
-  )
+  return <RunnersView id={undefined} tab="steps" />
+}
+
+export function RunnerPage() {
+  const { id } = useParams({ from: "/app/runners/$id" })
+  const { tab } = useSearch({ from: "/app/runners/$id" })
+  return <RunnersView id={id} tab={tab} />
 }

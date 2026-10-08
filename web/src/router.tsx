@@ -11,6 +11,7 @@ import { keys } from "./api/hooks"
 import type { SetupState } from "./api/types"
 import { RootLayout } from "./components/root-layout"
 import { RouteError } from "./components/route-error"
+import type { DetailTab } from "./components/runner-panel"
 import { Shell } from "./components/shell"
 import { loginSearch, safeRedirect } from "./lib/redirect"
 import { DashboardPage } from "./pages/dashboard"
@@ -18,8 +19,7 @@ import { HistoryPage } from "./pages/history"
 import { LoginPage } from "./pages/login"
 import { RepositoriesPage } from "./pages/repositories"
 import { RepositoryPage } from "./pages/repository"
-import { RunnerDetailPage, type DetailTab } from "./pages/runner-detail"
-import { RunnersPage } from "./pages/runners"
+import { RunnerPage, RunnersPage } from "./pages/runners"
 import { SettingsPage } from "./pages/settings"
 import { SetupPage } from "./pages/setup"
 import { StoragePage } from "./pages/storage"
@@ -92,7 +92,7 @@ const runnerRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): { tab: DetailTab } => ({
     tab: search.tab === "log" || search.tab === "containers" ? search.tab : "steps",
   }),
-  component: RunnerDetailPage,
+  component: RunnerPage,
 })
 const historyRoute = createRoute({ getParentRoute: () => appRoute, path: "/history", component: HistoryPage })
 const toolchainsRoute = createRoute({ getParentRoute: () => appRoute, path: "/toolchains", component: ToolchainsPage })

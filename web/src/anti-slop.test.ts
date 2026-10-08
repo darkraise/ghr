@@ -56,6 +56,7 @@ const FILES = [
   "src/lib/use-width.ts",
   "src/pages/dashboard.tsx",
   "src/pages/login.tsx",
+  "src/pages/runners.tsx",
   "src/pages/setup.tsx",
   "src/query.ts",
   "src/styles/ghr-theme.css",
