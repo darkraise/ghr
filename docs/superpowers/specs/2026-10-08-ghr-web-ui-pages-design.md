@@ -86,7 +86,7 @@ All five are optional, and each regenerates its frontend fixtures in the same co
    - Lanes are not padded to capacity. `capacity` is `null`, so each bucket's `busy_pct` is `null` and `busy_minutes` counts that repository's runs only.
    - Each bucket's `waiting_max` and `cpu_avg` are `null`, and `waiting` and `cpu` are empty: host load does not belong to one repository.
    - `Backend.Activity` takes the repo and adds it, lower-cased, to its cache key.
-2. **7-day counts.** Each `repos[]` entry on `/activity` gains `week: {succeeded, failed, cancelled}` over the rolling 7 days ending now, whatever the window. Conclusions map as the buckets map them today (`finishedState`): anything that is not success, cancelled or skipped counts as failed (item 5 still owns that rule), and skipped is counted in none of the three.
+2. **7-day counts.** Each `repos[]` entry on `/activity` gains `week: {succeeded, failed, cancelled}` over the rolling 7 days ending now, whatever the window. Conclusions are counted as the buckets count them today (`tally`): success is succeeded, cancelled and skipped are cancelled, and anything else counts as failed (item 5 still owns that rule).
 3. **`GET /history?since=<RFC 3339 time>`.**
    - It returns entries that finished at or after `since`. An absent or empty `since` means no bound. Any other value that does not parse returns 400 "since must be an RFC 3339 time".
    - `history.Store.Query`, `Backend.History` and `api.Client.History` gain a `since time.Time` argument, where the zero time means no bound. `api.Client.History` leaves the parameter out for the zero time.
@@ -121,7 +121,7 @@ The TypeScript types in `web/src/api/types.ts` mirror each field. `api.activity`
   - Each runner row is a link to `/runners/$id` that keeps the current tab. The rows use a roving tabindex: only the selected row is in the tab order.
   - Arrow Up and Arrow Down move focus to the previous or next row and navigate to it with `replace: true`, so arrowing does not fill the Back history. Enter follows the focused link, and Home and End jump to the first and last row.
   - With no `$id`, the first live runner is selected by navigating to it with `replace: true` once the first status arrives, so the selection then stays put when that runner finishes, as today.
-  - The selected row is marked with `aria-current="true"` and a `sunk` fill.
+  - The selected row is marked with `aria-current="page"` (TanStack's `Link` sets it on the active link and overrides any other value) and a `sunk` fill.
 - **The panel.**
   - **Header:** the runner ID, its `StateText`, and a fact row with labels: Repository, Job, Running for, Started. It does not use "·".
   - **Actions:** **Open run** and **Stop runner** stay visible when they apply. **Copy run URL** and **Copy runner ID** sit in a **More actions** menu. The Logs, Copy ID and Stop row buttons leave the list.
