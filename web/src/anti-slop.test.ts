@@ -33,6 +33,7 @@ const FILES = [
   "src/components/runner-list.tsx",
   "src/components/runner-panel.tsx",
   "src/components/result-icon.tsx",
+  "src/components/runner-meter.tsx",
   "src/components/save-bar.tsx",
   "src/components/shell.tsx",
   "src/components/sparkline.tsx",

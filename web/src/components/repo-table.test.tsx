@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "darkraise-ui/components/tooltip"
 import { describe, expect, it, vi } from "vitest"
-import type { RepoStatus } from "@/api/types"
+import type { ActivityRepo, Config, RepoStatus } from "@/api/types"
 import { mockApi, noContent } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
@@ -117,5 +117,53 @@ describe("RepoTable", () => {
     const { user } = draw()
     await user.hover(screen.getByRole("button", { name: "More actions for darkmem" }))
     expect(await screen.findByRole("tooltip", {}, { timeout: 3000 })).toHaveTextContent("More actions")
+  })
+
+  function drawFull(config: Config, activity: ActivityRepo[]) {
+    const { wrapper } = withQuery()
+    render(
+      <TooltipProvider>
+        <RepoTable repos={fixtures.status.repos} activity={activity} now={now} offline={false} onOpen={vi.fn()} columns="full" config={config} />
+      </TooltipProvider>,
+      { wrapper },
+    )
+  }
+  const week = [{ repo: "darkmem", hours: [], week: { succeeded: 46, failed: 2, cancelled: 1 } }]
+
+  it("keeps the Dashboard's columns by default", () => {
+    draw()
+    expect(screen.queryByRole("columnheader", { name: "7 days" })).toBeNull()
+    expect(screen.queryByRole("columnheader", { name: "Labels" })).toBeNull()
+    expect(screen.queryByText("Removing. Running jobs finish first.")).toBeNull()
+  })
+
+  it("adds the week's success rate and the labels in full mode", () => {
+    drawFull(fixtures.config, week)
+    expect(screen.getByRole("columnheader", { name: "7 days" })).toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "Warm" })).toBeNull()
+    expect(within(row("darkmem")).getByText("96%")).toHaveClass("font-mono")
+    expect(within(row("darkmem")).getByText("46 succeeded, 2 failed, 1 cancelled in 7 days")).toHaveClass("sr-only")
+    expect(within(row("darkcloud")).queryByText(/%$/)).toBeNull()
+    expect(within(row("darkmem")).getByText("gpu")).toHaveClass("font-mono")
+  })
+
+  it("shows warm in all mode, with the default of 1 when unset", () => {
+    drawFull({ ...fixtures.config, mode: "all" }, week)
+    expect(screen.getByRole("columnheader", { name: "Warm" })).toBeInTheDocument()
+    const warm = (name: string) => within(row(name)).getByTestId("warm")
+    expect(warm("darkmem")).toHaveTextContent("1")
+    expect(warm("darkcloud")).toHaveTextContent("1")
+  })
+
+  it("notes a repository being removed under its name", () => {
+    drawFull(fixtures.config, week)
+    expect(within(row("old-repo")).getByText("Removing. Running jobs finish first.")).toHaveClass("text-muted-foreground")
+  })
+
+  it("hides the extra columns below 768px", () => {
+    drawFull({ ...fixtures.config, mode: "all" }, week)
+    for (const name of ["Warm", "7 days", "Labels"]) {
+      expect(screen.getByRole("columnheader", { name })).toHaveClass("hidden", "md:table-cell")
+    }
   })
 })
