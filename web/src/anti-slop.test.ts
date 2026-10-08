@@ -38,6 +38,7 @@ const FILES = [
   "src/components/registrations-group.tsx",
   "src/components/result-icon.tsx",
   "src/components/runner-meter.tsx",
+  "src/components/runner-section.tsx",
   "src/components/save-bar.tsx",
   "src/components/settings-form.tsx",
   "src/components/shell.tsx",

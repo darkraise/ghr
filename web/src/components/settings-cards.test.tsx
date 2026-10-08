@@ -1,77 +1,8 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import type { RunnerUpdate } from "@/api/types"
-import { dateTime } from "@/lib/format"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
-
-const DAY = 86_400_000
-// The UI runs on the daemon's clock, the status fixture's now.
-const DAEMON_NOW = Date.parse(fixtures.status.now)
-
-function withUpdate(runner_update: RunnerUpdate, over: Record<string, unknown> = {}) {
-  return authedRoutes({ "GET /api/token": fixtures.token, "GET /api/status": { ...fixtures.status, runner_update }, ...over })
-}
-
-describe("Maintenance card", () => {
-  it("cancels a queued runner update", async () => {
-    const { calls } = mockApi(withUpdate(fixtures.status.runner_update, { "DELETE /api/runner-update": () => noContent() }))
-    const { user } = renderApp("/settings")
-    expect(await screen.findByText("runs when no job is running or queued")).toBeInTheDocument()
-    expect(screen.getByText("2.337.0 → 2.338.0")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Cancel queued update" }))
-    await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/runner-update")).toBe(true))
-    expect((await screen.findAllByText("queued runner update cancelled")).length).toBeGreaterThan(0)
-  })
-
-  it("queues an available update and shows its deadline", async () => {
-    const deadline = new Date(DAEMON_NOW + 20 * DAY + 3_600_000).toISOString()
-    const { calls } = mockApi(
-      withUpdate({ installed: "2.337.0", latest: "2.338.0", deadline }, { "POST /api/runner-update": () => new Response(null, { status: 202 }) }),
-    )
-    const { user } = renderApp("/settings")
-    expect(await screen.findByText("update available")).toBeInTheDocument()
-    expect(screen.getByText(`update by ${dateTime(deadline).slice(0, 10)} (20 days)`)).toBeInTheDocument()
-    await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Queue update" }))
-    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/runner-update")).toBe(true))
-    expect((await screen.findAllByText("runner update queued")).length).toBeGreaterThan(0)
-  })
-
-  it("says when the runner is up to date", async () => {
-    mockApi(withUpdate({ installed: "2.338.0", checked_at: new Date(DAEMON_NOW - 2 * 3_600_000).toISOString() }))
-    renderApp("/settings")
-    expect(await screen.findByText("up to date")).toBeInTheDocument()
-    expect(screen.getByText("checked 2h ago")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Queue update" })).toBeNull()
-  })
-
-  it("says when the version is unknown", async () => {
-    mockApi(withUpdate({}))
-    renderApp("/settings")
-    expect(await screen.findByText("version unknown (no dist/current)")).toBeInTheDocument()
-  })
-
-  it("shows the last failed check", async () => {
-    mockApi(withUpdate({ installed: "2.337.0", check_error: "GitHub: 502" }))
-    renderApp("/settings")
-    expect(await screen.findByText("last check failed: GitHub: 502")).toBeInTheDocument()
-  })
-
-  it("reloads the config and counts the warnings", async () => {
-    mockApi(withUpdate({}, { "POST /api/reload": ["web settings changed; restart ghr to apply", "another"] }))
-    const { user } = renderApp("/settings")
-    await user.click(await screen.findByRole("button", { name: "Reload config.yaml" }))
-    expect((await screen.findAllByText("config reloaded (2 warnings, see Activity)")).length).toBeGreaterThan(0)
-  })
-
-  it("shows a rejected reload", async () => {
-    mockApi(withUpdate({}, { "POST /api/reload": () => json({ error: 'mode must be "queue" or "all"' }, 400) }))
-    const { user } = renderApp("/settings")
-    await user.click(await screen.findByRole("button", { name: "Reload config.yaml" }))
-    expect((await screen.findAllByText('reload rejected: mode must be "queue" or "all"')).length).toBeGreaterThan(0)
-  })
-})
 
 describe("Account card", () => {
   async function fill(user: ReturnType<typeof renderApp>["user"], current: string, next: string, again: string) {
