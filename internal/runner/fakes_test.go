@@ -602,7 +602,7 @@ func (h *harness) eventText() string {
 
 func (h *harness) history(t *testing.T) []string {
 	t.Helper()
-	got, err := h.m.History.Query("", "", 0)
+	got, err := h.m.History.Query("", "", time.Time{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

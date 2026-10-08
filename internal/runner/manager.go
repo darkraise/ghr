@@ -204,7 +204,7 @@ func (m *Manager) Init() error {
 		m.epoch = strconv.FormatInt(m.Now().UnixNano(), 36)
 	}
 	m.loadUpdate()
-	entries, err := m.History.Query("", "", 0)
+	entries, err := m.History.Query("", "", time.Time{}, 0)
 	if err != nil {
 		return err
 	}

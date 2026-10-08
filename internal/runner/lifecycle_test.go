@@ -137,7 +137,7 @@ func TestExitRecordsHistoryArchivesLogsAndCleansUp(t *testing.T) {
 	if h.state("aaaaaa") != "gone" {
 		t.Fatalf("state %s", h.state("aaaaaa"))
 	}
-	got, _ := h.m.History.Query("", "", 0)
+	got, _ := h.m.History.Query("", "", time.Time{}, 0)
 	if len(got) != 1 || got[0].Conclusion != "success" || got[0].JobName != "CI / e2e" || got[0].HTMLURL != "https://x/9" {
 		t.Fatalf("history %+v", got)
 	}
@@ -234,7 +234,7 @@ func TestFinishFallsBackToConfirmedJob(t *testing.T) {
 	h.sd.active["ghr-runner-aaaaaa"] = false
 	h.m.refreshUnits(context.Background())
 	h.m.Wait()
-	got, _ := h.m.History.Query("", "", 0)
+	got, _ := h.m.History.Query("", "", time.Time{}, 0)
 	if len(got) != 1 || got[0].RunID != 77 || got[0].Conclusion != "failure" {
 		t.Fatalf("history %+v", got)
 	}
@@ -250,7 +250,7 @@ func TestFinishTimeFromCompletionHook(t *testing.T) {
 	h.sd.active["ghr-runner-aaaaaa"] = false
 	h.m.refreshUnits(context.Background())
 	h.m.Wait()
-	got, _ := h.m.History.Query("", "", 0)
+	got, _ := h.m.History.Query("", "", time.Time{}, 0)
 	if len(got) != 1 || !got[0].FinishedAt.Equal(time.Date(2026, 10, 3, 12, 5, 0, 0, time.UTC)) {
 		t.Fatalf("history %+v", got)
 	}
@@ -632,7 +632,7 @@ func TestCompletionOnlyRecordHasNoNegativeDuration(t *testing.T) {
 	h.sd.active["ghr-runner-aaaaaa"] = false
 	h.m.refreshUnits(context.Background())
 	h.m.Wait()
-	got, _ := h.m.History.Query("", "", 0)
+	got, _ := h.m.History.Query("", "", time.Time{}, 0)
 	if len(got) != 1 || got[0].StartedAt.After(got[0].FinishedAt) {
 		t.Fatalf("history %+v", got)
 	}

@@ -185,7 +185,7 @@ func TestPruneHistoryAndLogs(t *testing.T) {
 	os.MkdirAll(newLog, 0o755)
 	os.Chtimes(oldLog, old, old)
 	h.m.prune(h.cfg, h.now)
-	got, _ := h.m.History.Query("", "", 0)
+	got, _ := h.m.History.Query("", "", time.Time{}, 0)
 	if len(got) != 1 || got[0].ID != "new" {
 		t.Fatalf("history %v", got)
 	}

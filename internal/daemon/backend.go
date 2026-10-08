@@ -133,7 +133,7 @@ func (b *Backend) Activity(ctx context.Context, window string, loc *time.Locatio
 		return e.val, nil
 	}
 	cfg := b.Store.Config()
-	hist, err := b.Hist.Query("", "", 0)
+	hist, err := b.Hist.Query("", "", time.Time{}, 0)
 	if err != nil {
 		return model.Activity{}, err
 	}
@@ -210,7 +210,7 @@ func (b *Backend) EventsAfter(seq int64) []model.Event { return b.Events.After(s
 func (b *Backend) Config() any                         { return b.Store.Config() }
 
 func (b *Backend) History(repo, conclusion string, limit int) ([]model.HistoryEntry, error) {
-	return b.Hist.Query(repo, conclusion, limit)
+	return b.Hist.Query(repo, conclusion, time.Time{}, limit)
 }
 
 func notFoundIfUnknown(err error) error {
