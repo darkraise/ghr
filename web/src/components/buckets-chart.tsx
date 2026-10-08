@@ -1,4 +1,4 @@
-import type { Activity } from "@/api/types"
+import type { Activity, ActivityBucket } from "@/api/types"
 import { bucketAria, bucketTickLabel, GUTTER, lineRuns, PAD_RIGHT, retentionText, scaleX, sinceText, windowWords } from "@/lib/activity-view"
 
 const TRACK_H = 44
@@ -23,14 +23,30 @@ function Line({ runs, track, stroke, fill }: { runs: Point[][]; track: string; s
   )
 }
 
-export function BucketsChart({ activity, now, width }: { activity: Activity; now: number; width: number }) {
+export function BucketsChart({
+  activity,
+  now,
+  width,
+  tracks: mode = "all",
+  picked = null,
+  onPick,
+}: {
+  activity: Activity
+  now: number
+  width: number
+  tracks?: "all" | "jobs"
+  picked?: string | null
+  onPick?: (bucket: ActivityBucket) => void
+}) {
   const buckets = activity.buckets
+  const jobs = mode === "jobs"
+  const trackCount = jobs ? 2 : 4
   const plotW = width - GUTTER - PAD_RIGHT
   const colW = plotW / Math.max(1, buckets.length)
   const colX = (i: number) => GUTTER + i * colW
   const center = (i: number) => colX(i) + colW / 2
   const top = (k: number) => k * (TRACK_H + TRACK_GAP)
-  const axisTop = top(3) + TRACK_H
+  const axisTop = top(trackCount - 1) + TRACK_H
   const height = axisTop + AXIS_H
 
   const all = activity.capacity === null
@@ -62,12 +78,13 @@ export function BucketsChart({ activity, now, width }: { activity: Activity; now
     ? colX(buckets.length - 1) + colW * Math.min(1, Math.max(0, (now - Date.parse(last.start)) / (Date.parse(last.end) - Date.parse(last.start))))
     : GUTTER + plotW
 
-  const tracks: [string, string][] = [
+  const allTracks: [string, string][] = [
     ["Busy", all ? `peak ${Math.round(busyPeak)} min` : `peak ${Math.round(busyPeak)}%`],
     ["Runs", `peak ${runsPeak}`],
     ["Waiting", known(waits).length > 0 ? `peak ${waitPeak}` : ""],
     ["CPU", known(cpus).length > 0 ? `peak ${Math.round(cpuPeak)}%` : ""],
   ]
+  const tracks = allTracks.slice(0, trackCount)
 
   // A null is a gap, never a zero; nulls from the start of the window mean
   // the metrics began part-way through it.
@@ -89,7 +106,7 @@ export function BucketsChart({ activity, now, width }: { activity: Activity; now
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       role="group"
-      aria-label={`Activity per bucket for ${windowWords(activity.window)}`}
+      aria-label={`${jobs ? "Jobs" : "Activity"} per bucket for ${windowWords(activity.window)}`}
       className="block text-xs"
     >
       {tracks.map(([name, peak], k) => (
@@ -138,10 +155,22 @@ export function BucketsChart({ activity, now, width }: { activity: Activity; now
           <g
             key={b.start}
             tabIndex={0}
-            role="img"
+            role={onPick ? "button" : "img"}
             aria-label={label}
+            aria-pressed={onPick ? picked === b.start : undefined}
             data-open={open ? "true" : undefined}
-            className={`ghr-mark ${open ? "opacity-60" : ""}`}
+            className={`ghr-mark ${open ? "opacity-60" : ""} ${onPick ? "cursor-pointer" : ""}`}
+            onClick={onPick ? () => onPick(b) : undefined}
+            onKeyDown={
+              onPick
+                ? (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      onPick(b)
+                    }
+                  }
+                : undefined
+            }
           >
             <title>{label}</title>
             <rect x={colX(i)} y={0} width={colW} height={axisTop} className="ghr-mark-box fill-transparent" />
@@ -150,13 +179,20 @@ export function BucketsChart({ activity, now, width }: { activity: Activity; now
             {failH > 0 && (
               <rect data-kind="failed" x={x0} y={top(1) + TRACK_H - okH - failH} width={w} height={failH} className="fill-destructive/70" />
             )}
+            {picked === b.start && (
+              <rect data-picked="true" x={colX(i)} y={0} width={colW} height={axisTop} strokeWidth={1.5} className="fill-none stroke-primary" />
+            )}
           </g>
         )
       })}
-      <Line runs={waitRuns} track="waiting" stroke="stroke-warning" fill="fill-warning" />
-      <Line runs={cpuRuns} track="cpu" stroke="stroke-primary" fill="fill-primary" />
-      {collecting(waits, 2)}
-      {collecting(cpus, 3)}
+      {!jobs && (
+        <>
+          <Line runs={waitRuns} track="waiting" stroke="stroke-warning" fill="fill-warning" />
+          <Line runs={cpuRuns} track="cpu" stroke="stroke-primary" fill="fill-primary" />
+          {collecting(waits, 2)}
+          {collecting(cpus, 3)}
+        </>
+      )}
       {totalRuns === 0 && (
         <text x={GUTTER + plotW / 2} y={top(1) + TRACK_H / 2 + 4} textAnchor="middle" className="fill-muted-foreground">
           {`No jobs ran in ${windowWords(activity.window)}.`}

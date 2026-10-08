@@ -1,14 +1,15 @@
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
-import type { Activity } from "@/api/types"
+import userEvent from "@testing-library/user-event"
+import { describe, expect, it, vi } from "vitest"
+import type { Activity, ActivityBucket } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
 import { BucketsChart } from "./buckets-chart"
 
 const now = Date.parse("2026-10-03T14:05:00Z")
 const base = fixtures.activityBuckets
 
-function draw(over: Partial<Activity> = {}) {
-  return render(<BucketsChart activity={{ ...base, ...over }} now={now} width={960} />)
+function draw(over: Partial<Activity> = {}, props: Partial<Parameters<typeof BucketsChart>[0]> = {}) {
+  return render(<BucketsChart activity={{ ...base, ...over }} now={now} width={960} {...props} />)
 }
 
 describe("BucketsChart", () => {
@@ -86,5 +87,39 @@ describe("BucketsChart", () => {
   it("says when no jobs ran", () => {
     draw({ buckets: base.buckets.map((b) => ({ ...b, succeeded: 0, failed: 0, cancelled: 0 })) })
     expect(screen.getByText("No jobs ran in the last 24 hours.")).toBeInTheDocument()
+  })
+
+  it("draws only busy time and finished jobs in jobs mode", () => {
+    const { container } = draw({}, { tracks: "jobs" })
+    expect(screen.getByRole("group", { name: "Jobs per bucket for the last 24 hours" })).toBeInTheDocument()
+    expect(screen.getByText("Busy")).toBeInTheDocument()
+    expect(screen.getByText("Runs")).toBeInTheDocument()
+    expect(screen.queryByText("Waiting")).toBeNull()
+    expect(screen.queryByText("CPU")).toBeNull()
+    expect(container.querySelectorAll("[data-track]")).toHaveLength(0)
+    expect(screen.queryByText(/^Collecting data since/)).toBeNull()
+  })
+
+  it("lets a bucket be picked by click, Enter or Space when asked", async () => {
+    const onPick = vi.fn<(b: ActivityBucket) => void>()
+    draw({}, { tracks: "jobs", onPick, picked: "2026-10-03T13:00:00Z" })
+    const buttons = screen.getAllByRole("button")
+    expect(buttons).toHaveLength(25)
+    const thirteen = screen.getByRole("button", { name: /^13:00 to 14:00/ })
+    expect(thirteen).toHaveAttribute("aria-pressed", "true")
+    expect(buttons.filter((b) => b.getAttribute("aria-pressed") === "true")).toHaveLength(1)
+    const user = userEvent.setup()
+    await user.click(thirteen)
+    thirteen.focus()
+    await user.keyboard("{Enter}")
+    await user.keyboard(" ")
+    expect(onPick).toHaveBeenCalledTimes(3)
+    expect(onPick.mock.calls[0]?.[0].start).toBe("2026-10-03T13:00:00Z")
+  })
+
+  it("keeps image buckets without onPick", () => {
+    draw()
+    expect(screen.queryAllByRole("button")).toHaveLength(0)
+    expect(screen.getAllByRole("img")).toHaveLength(25)
   })
 })

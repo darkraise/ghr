@@ -2,7 +2,15 @@ import { ToggleGroup, ToggleGroupItem } from "darkraise-ui/components/toggle-gro
 import type { ActivityWindow } from "@/api/types"
 import { ACTIVITY_WINDOWS } from "@/lib/activity-view"
 
-export function WindowControl({ value, onChange }: { value: ActivityWindow; onChange: (w: ActivityWindow) => void }) {
+export function WindowControl<W extends ActivityWindow = ActivityWindow>({
+  value,
+  onChange,
+  options = ACTIVITY_WINDOWS as readonly W[],
+}: {
+  value: W
+  onChange: (w: W) => void
+  options?: readonly W[]
+}) {
   return (
     <ToggleGroup
       type="single"
@@ -11,11 +19,11 @@ export function WindowControl({ value, onChange }: { value: ActivityWindow; onCh
       value={value}
       aria-label="Time window"
       onValueChange={(next) => {
-        const w = ACTIVITY_WINDOWS.find((x) => x === next)
+        const w = options.find((x) => x === next)
         if (w) onChange(w)
       }}
     >
-      {ACTIVITY_WINDOWS.map((w) => (
+      {options.map((w) => (
         <ToggleGroupItem key={w} value={w} className="font-mono">
           {w}
         </ToggleGroupItem>
