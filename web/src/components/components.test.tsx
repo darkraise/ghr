@@ -38,6 +38,11 @@ describe("Sparkline", () => {
     const { container } = render(<Sparkline label="cpu" values={[null, null]} />)
     expect(container.querySelectorAll("polyline")).toHaveLength(0)
   })
+  it("draws steps when asked, in the given colour", () => {
+    const { container } = render(<Sparkline label="queued" values={[1, 3]} step className="text-warning" />)
+    expect(container.querySelector("polyline")?.getAttribute("points")?.split(" ")).toHaveLength(3)
+    expect(screen.getByRole("img", { name: "queued" })).toHaveClass("text-warning")
+  })
 })
 
 describe("copyText", () => {
