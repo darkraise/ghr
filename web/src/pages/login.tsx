@@ -8,6 +8,7 @@ import { Spinner } from "darkraise-ui/components/spinner"
 import { useState, type FormEvent } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys } from "@/api/hooks"
+import { Brand } from "@/components/brand"
 import { hhmm } from "@/lib/format"
 import { safeRedirect } from "@/lib/redirect"
 
@@ -66,10 +67,11 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-6 p-4">
+      <Brand />
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>ghr</CardTitle>
+          <CardTitle>{setup ? "Set a password" : "Log in"}</CardTitle>
           <CardDescription>
             {setup
               ? "No password is set. Choose one to claim this ghr."

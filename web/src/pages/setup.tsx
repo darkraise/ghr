@@ -15,10 +15,12 @@ import { Input } from "darkraise-ui/components/input"
 import { Label } from "darkraise-ui/components/label"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { Switch } from "darkraise-ui/components/switch"
+import { Check } from "lucide-react"
 import { useEffect, useState, type FormEvent, type ReactNode } from "react"
 import { api } from "@/api/client"
 import { keys, setupStart, useConfig, useSetupState, useStatus, useStorage } from "@/api/hooks"
 import { AddRepoDialog } from "@/components/add-repo-dialog"
+import { Brand } from "@/components/brand"
 import { SettingsSections } from "@/components/settings-form"
 import { ToolchainsCard } from "@/components/toolchains-card"
 import { useSettingsForm } from "@/lib/settings-form"
@@ -318,6 +320,7 @@ export function SetupPage() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-4xl p-4 sm:p-8">
+        <Brand className="mb-6" />
         <h1 className="mb-1 text-2xl font-semibold">Set up ghr</h1>
         <p className="mb-6 text-sm text-muted-foreground">Each step saves as you go; this page stays open to you until you finish.</p>
         <ol className="mb-6 flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="Setup steps">
@@ -329,7 +332,7 @@ export function SetupPage() {
                 aria-current={i === current ? "step" : undefined}
                 className={i === current ? "font-semibold" : "text-muted-foreground"}
               >
-                {done ? "✓" : `${i + 1}.`} {name}
+                {done ? <Check size={15} role="img" aria-label="Done" className="inline align-[-2px] text-success" /> : `${i + 1}.`} {name}
               </li>
             )
           })}
