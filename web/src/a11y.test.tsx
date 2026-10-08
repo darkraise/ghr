@@ -86,3 +86,24 @@ describe("Repositories accessibility", () => {
     30_000,
   )
 })
+
+describe("Repository page accessibility", () => {
+  it(
+    "has no axe violations at 1280px",
+    async () => {
+      setViewport(1280)
+      mockApi(
+        authedRoutes({
+          "GET /api/history": [],
+          "GET /api/repos/darkmem/label-check": fixtures.labelCheck,
+          "GET /api/repos/darkmem/registrations": fixtures.registrations,
+        }),
+      )
+      renderApp("/repositories/darkmem")
+      await screen.findByRole("group", { name: "Jobs per bucket for the last 24 hours" })
+      await screen.findByText("ghr-aaaaaa")
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})

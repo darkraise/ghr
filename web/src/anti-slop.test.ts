@@ -66,6 +66,7 @@ const FILES = [
   "src/router.tsx",
   "src/pages/login.tsx",
   "src/pages/repositories.tsx",
+  "src/pages/repository.tsx",
   "src/pages/runners.tsx",
   "src/pages/setup.tsx",
   "src/query.ts",

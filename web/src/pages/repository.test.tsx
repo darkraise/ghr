@@ -1,8 +1,9 @@
-import { screen, waitFor } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import type { Config } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
+import { setViewport } from "@/test/media"
 import { renderApp } from "@/test/render"
 
 function routes(over: Record<string, unknown> = {}) {
@@ -23,16 +24,24 @@ function applyingRoutes() {
 }
 
 describe("repository page", () => {
-  it("shows the repo's settings and the labels its runners get", async () => {
+  it("shows the repo's state, settings and the labels its runners get", async () => {
     mockApi(routes())
     renderApp("/repositories/darkmem")
     expect(await screen.findByLabelText("Max")).toHaveValue(2)
     expect(screen.getByLabelText("Warm")).toHaveValue(1)
+    expect(screen.getByText("Running 1 of 2 runners, 3 jobs waiting")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Remove gpu" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Remove darkmem-" })).toBeInTheDocument()
-    expect(screen.getByText("self-hosted linux x64")).toBeInTheDocument()
-    expect(screen.getByText("homelab (global) gpu")).toBeInTheDocument()
-    expect(screen.getByText("1/2 running · 3 queued")).toBeInTheDocument()
+    expect(within(screen.getByRole("list", { name: "Runner labels" })).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "self-hosted",
+      "linux",
+      "x64",
+      "homelabglobal",
+      "gpu",
+    ])
+    expect(screen.getByText("Leave empty for the default: 1 in queue mode, no limit in all mode. Once set, it stays explicit.")).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Last 24 hours" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Capacity" })).toBeInTheDocument()
   })
 
   it("saves only the changed field", async () => {
@@ -46,7 +55,7 @@ describe("repository page", () => {
     expect((await screen.findAllByText("Repositories saved")).length).toBeGreaterThan(0)
     expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ repos: { darkmem: { max: 3 } } })
     await waitFor(() => expect(screen.queryByText("1 unsaved change")).toBeNull())
-    expect(screen.queryByText(/daemon did not apply/)).toBeNull()
+    expect(screen.queryByText(/Daemon did not apply/)).toBeNull()
   })
 
   it("starts a fresh draft on another repository", async () => {
@@ -68,7 +77,7 @@ describe("repository page", () => {
     await user.type(await screen.findByRole("textbox", { name: "Prefixes" }), "test_{Enter}")
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     expect(
-      (await screen.findAllByText("daemon did not apply darkmem.cleanup_name_prefixes; is it older than this ghr?")).length,
+      (await screen.findAllByText("Daemon did not apply darkmem.cleanup_name_prefixes; is it older than this ghr?")).length,
     ).toBeGreaterThan(0)
   })
 
@@ -86,7 +95,7 @@ describe("repository page", () => {
     const { user } = renderApp("/repositories/darkmem")
     await user.type(await screen.findByRole("textbox", { name: "Prefixes" }), "test_{Enter}")
     await user.click(screen.getByRole("button", { name: "Save changes" }))
-    expect((await screen.findAllByText("saved, but re-reading the config failed: ghr is restarting")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Saved, but re-reading the config failed: ghr is restarting")).length).toBeGreaterThan(0)
     expect(screen.getByText("test_")).toBeInTheDocument()
     expect(screen.queryByText(/unsaved change/)).toBeNull()
   })
@@ -104,7 +113,7 @@ describe("repository page", () => {
     expect(await screen.findByText("Save rejected")).toBeInTheDocument()
     expect(screen.getByText("darkmem: needs at least one label in labels or repo labels")).toBeInTheDocument()
     expect(screen.getByText("and 1 more")).toBeInTheDocument()
-    expect((await screen.findAllByText("repositories not saved")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Repositories not saved")).length).toBeGreaterThan(0)
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
   })
 
@@ -114,9 +123,9 @@ describe("repository page", () => {
     const warm = await screen.findByLabelText("Warm")
     await user.clear(warm)
     await user.type(warm, "3")
-    expect(screen.getByText("✖ warm must be <= max")).toBeInTheDocument()
+    expect(screen.getByText("Warm must be <= max")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Save changes" }))
-    expect((await screen.findAllByText("fix the highlighted settings first")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Fix the highlighted settings first")).length).toBeGreaterThan(0)
     expect(calls.some((c) => c.method === "PATCH")).toBe(false)
   })
 
@@ -126,9 +135,9 @@ describe("repository page", () => {
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     expect(max).toHaveValue(null)
-    expect(screen.getByText("✖ enter a number from 0 to 99")).toBeInTheDocument()
+    expect(screen.getByText("Enter a number from 0 to 99")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Save changes" }))
-    expect((await screen.findAllByText("fix the highlighted settings first")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Fix the highlighted settings first")).length).toBeGreaterThan(0)
     expect(calls.some((c) => c.method === "PATCH")).toBe(false)
   })
 
@@ -166,12 +175,14 @@ describe("repository page", () => {
     renderApp("/repositories/darkmem")
     expect(await screen.findByLabelText("Max")).toBeDisabled()
     expect(screen.getByRole("textbox", { name: "Repo labels" })).toBeDisabled()
+    expect(screen.getByText("Being removed. Running jobs finish first, and settings are read-only.")).toBeInTheDocument()
   })
 
   it("says when the repo is not configured", async () => {
     mockApi(routes())
     renderApp("/repositories/nope")
-    expect(await screen.findByText("Repository not found")).toBeInTheDocument()
+    expect(await screen.findByText("Repository not found. It may have been removed.")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Go to Repositories" })).toHaveAttribute("href", "/repositories")
   })
 
   it("is reached from the Repositories page", async () => {
@@ -179,5 +190,46 @@ describe("repository page", () => {
     const { user, router } = renderApp("/repositories")
     await user.click(await screen.findByRole("link", { name: "darkmem" }))
     await waitFor(() => expect(router.state.location.pathname).toBe("/repositories/darkmem"))
+  })
+
+  it("pauses from the header and links to the repository's history", async () => {
+    const { calls } = mockApi(routes({ "POST /api/repos/darkmem/pause": () => noContent() }))
+    const { user } = renderApp("/repositories/darkmem")
+    expect(await screen.findByRole("link", { name: "View history" })).toHaveAttribute("href", "/history?repo=darkmem")
+    await user.click(screen.getByRole("button", { name: "Pause" }))
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/repos/darkmem/pause")).toBe(true))
+  })
+
+  it("removes from the More actions menu after confirmation", async () => {
+    const { calls } = mockApi(routes({ "DELETE /api/repos/darkmem": () => noContent() }))
+    const { user } = renderApp("/repositories/darkmem")
+    await user.click(await screen.findByRole("button", { name: "More actions for darkmem" }))
+    await user.click(await screen.findByRole("menuitem", { name: "Remove" }))
+    const ask = within(await screen.findByRole("alertdialog"))
+    expect(ask.getByText("Remove darkmem?")).toBeInTheDocument()
+    await user.click(ask.getByRole("button", { name: "Remove" }))
+    await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/repos/darkmem")).toBe(true))
+  })
+
+  it("disables pause and remove until the repository's status exists, but not its history", async () => {
+    const repos = fixtures.status.repos.filter((r) => r.name !== "darkmem")
+    mockApi(routes({ "GET /api/status": { ...fixtures.status, repos } }))
+    const { user } = renderApp("/repositories/darkmem")
+    expect(await screen.findByRole("button", { name: "Pause" })).toBeDisabled()
+    expect(screen.getByRole("link", { name: "View history" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "More actions for darkmem" }))
+    expect(await screen.findByRole("menuitem", { name: "Remove" })).toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("marks a changed field and indexes the sections at 1280px", async () => {
+    setViewport(1280)
+    mockApi(routes())
+    const { user } = renderApp("/repositories/darkmem")
+    const max = await screen.findByLabelText("Max")
+    await user.clear(max)
+    await user.type(max, "3")
+    expect(screen.getByText("Changed")).toHaveClass("text-warning")
+    const nav = within(screen.getByRole("navigation", { name: "Sections" }))
+    expect(nav.getAllByRole("button").map((b) => b.textContent)).toEqual(["Capacity", "Labels", "Cleanup", "Workflow labels", "GitHub registrations"])
   })
 })
