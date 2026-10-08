@@ -41,6 +41,7 @@ type fakeBackend struct {
 	metrics       model.Metrics
 	metricsCalls  int
 	activityCalls []string
+	historySince  []time.Time
 	activity      model.Activity
 	updates       []string
 	updateErr     error
@@ -104,7 +105,8 @@ func (f *fakeBackend) EventsAfter(seq int64) []model.Event {
 	}
 	return []model.Event{{Seq: 1, Level: "info", Msg: "hello"}}
 }
-func (f *fakeBackend) History(repo, conclusion string, limit int) ([]model.HistoryEntry, error) {
+func (f *fakeBackend) History(repo, conclusion string, since time.Time, limit int) ([]model.HistoryEntry, error) {
+	f.historySince = append(f.historySince, since)
 	return []model.HistoryEntry{{ID: "a", Repo: repo, Conclusion: conclusion, RunNumber: "7"}}, nil
 }
 func (f *fakeBackend) RunnerLog(id, cursor string) (model.LogChunk, error) {
@@ -505,5 +507,25 @@ func TestActivityRoute(t *testing.T) {
 	}
 	if len(b.activityCalls) != 2 {
 		t.Fatalf("a bad request reached the backend: %v", b.activityCalls)
+	}
+}
+
+func TestHistorySinceParameter(t *testing.T) {
+	c, b := setup(t)
+	ctx := context.Background()
+	var got []model.HistoryEntry
+	for _, q := range []string{"since=2026-10-01T18:00:00%2B07:00", "since=", ""} {
+		if err := c.call(ctx, http.MethodGet, "/history?"+q, nil, &got); err != nil {
+			t.Fatalf("%q: %v", q, err)
+		}
+	}
+	want := time.Date(2026, 10, 1, 11, 0, 0, 0, time.UTC)
+	if len(b.historySince) != 3 || !b.historySince[0].Equal(want) || !b.historySince[1].IsZero() || !b.historySince[2].IsZero() {
+		t.Fatalf("backend saw %v", b.historySince)
+	}
+	err := c.call(ctx, http.MethodGet, "/history?since=yesterday", nil, &got)
+	var ae *Error
+	if !errors.As(err, &ae) || ae.Status != http.StatusBadRequest || len(b.historySince) != 3 {
+		t.Fatalf("unparsable since: %v, backend saw %d calls", err, len(b.historySince))
 	}
 }

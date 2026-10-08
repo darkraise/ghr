@@ -60,7 +60,7 @@ func Conflict(msg string) error   { return &Error{Status: http.StatusConflict, M
 type Backend interface {
 	Status() model.Status
 	EventsAfter(seq int64) []model.Event
-	History(repo, conclusion string, limit int) ([]model.HistoryEntry, error)
+	History(repo, conclusion string, since time.Time, limit int) ([]model.HistoryEntry, error)
 	RunnerLog(id, cursor string) (model.LogChunk, error)
 	RunnerSteps(ctx context.Context, id string) ([]model.Step, error)
 	RunnerContainers(ctx context.Context, id string) ([]model.Container, error)
@@ -126,7 +126,16 @@ func NewServer(b Backend) http.Handler {
 	mux.HandleFunc("GET /history", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		limit, _ := strconv.Atoi(q.Get("limit"))
-		h, err := b.History(q.Get("repo"), q.Get("conclusion"), limit)
+		var since time.Time
+		if s := q.Get("since"); s != "" {
+			t, err := time.Parse(time.RFC3339, s)
+			if err != nil {
+				respond(w, nil, BadRequest("since must be an RFC 3339 time"))
+				return
+			}
+			since = t
+		}
+		h, err := b.History(q.Get("repo"), q.Get("conclusion"), since, limit)
 		if h == nil {
 			h = []model.HistoryEntry{}
 		}

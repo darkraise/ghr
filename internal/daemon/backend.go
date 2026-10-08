@@ -209,8 +209,8 @@ func (b *Backend) Status() model.Status {
 func (b *Backend) EventsAfter(seq int64) []model.Event { return b.Events.After(seq) }
 func (b *Backend) Config() any                         { return b.Store.Config() }
 
-func (b *Backend) History(repo, conclusion string, limit int) ([]model.HistoryEntry, error) {
-	return b.Hist.Query(repo, conclusion, time.Time{}, limit)
+func (b *Backend) History(repo, conclusion string, since time.Time, limit int) ([]model.HistoryEntry, error) {
+	return b.Hist.Query(repo, conclusion, since, limit)
 }
 
 func notFoundIfUnknown(err error) error {
