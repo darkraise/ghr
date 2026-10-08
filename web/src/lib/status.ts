@@ -72,3 +72,8 @@ const tones: Record<string, Tone> = {
 export function stateTone(state: string): Tone {
   return tones[state.toLowerCase()] ?? "muted"
 }
+
+// A repository at its cap with jobs queued: the jobs wait on its own limit.
+export function waitingRepos(status: Status): RepoStatus[] {
+  return status.repos.filter((r) => !r.paused && r.queued > 0 && r.max > 0 && r.active >= r.max)
+}

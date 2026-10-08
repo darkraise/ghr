@@ -1,5 +1,6 @@
 import type { RepoStatus, Status } from "@/api/types"
 import { plural } from "./format"
+import { running } from "./status"
 
 function where(names: string[]): string {
   if (names.length === 1) return `in ${names[0] ?? ""}`
@@ -35,4 +36,11 @@ export function dashboardSummary(status: Status): string {
   if (errors.length === 1 && first) parts.push(`${first.name}: ${(first.error ?? "").replace(/\.$/, "")}.`)
   else if (errors.length > 1) parts.push(`${errors.length} repositories have errors.`)
   return parts.join(" ")
+}
+
+export function runnersSummary(status: Status): string {
+  const live = running(status)
+  const queued = status.repos.reduce((n, r) => n + r.queued, 0)
+  const head = live === 0 ? "No live runners" : `${live} live`
+  return queued > 0 ? `${head}, ${plural(queued, "job")} waiting` : head
 }
