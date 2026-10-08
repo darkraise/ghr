@@ -261,3 +261,78 @@ type AvailableRepo struct {
 	Private    bool   `json:"private"`
 	Configured bool   `json:"configured"`
 }
+
+// Activity is GET /activity: what the runners did over a window, as lanes of
+// runs (1h, 3h) or time buckets (24h, 7d, 30d), with every time in TZ.
+type Activity struct {
+	Window   string    `json:"window"`
+	TZ       string    `json:"tz"`
+	From     time.Time `json:"from"`
+	To       time.Time `json:"to"`
+	Capacity *int      `json:"capacity"` // global_max in queue mode, null in all mode
+	// HistoryFrom is the oldest finish time history_retention keeps.
+	HistoryFrom time.Time        `json:"history_from"`
+	Lanes       []ActivityLane   `json:"lanes"`
+	Buckets     []ActivityBucket `json:"buckets"`
+	Waiting     []ActivityPoint  `json:"waiting"`
+	CPU         []ActivityCPU    `json:"cpu"`
+	Repos       []ActivityRepo   `json:"repos"`
+}
+
+// ActivityLane holds runs one after another; it is not a fixed runner slot.
+type ActivityLane struct {
+	Runs []ActivityRun `json:"runs"`
+}
+
+// ActivityRun is one runner instance's time in the window.
+type ActivityRun struct {
+	InstanceID string            `json:"instance_id"`
+	Repo       string            `json:"repo"`
+	Workflow   string            `json:"workflow,omitempty"`
+	Job        string            `json:"job,omitempty"`
+	RunNumber  string            `json:"run_number,omitempty"`
+	Segments   []ActivitySegment `json:"segments"`
+	HTMLURL    string            `json:"html_url,omitempty"`
+}
+
+// ActivitySegment is a stretch of one state; To is null while it lasts.
+type ActivitySegment struct {
+	State string     `json:"state"` // starting | warm | running | succeeded | failed | cancelled | skipped
+	From  time.Time  `json:"from"`
+	To    *time.Time `json:"to"`
+}
+
+type ActivityBucket struct {
+	Start       time.Time `json:"start"`
+	End         time.Time `json:"end"`
+	BusyMinutes float64   `json:"busy_minutes"`
+	BusyPct     *float64  `json:"busy_pct"`
+	Succeeded   int       `json:"succeeded"`
+	Failed      int       `json:"failed"`
+	Cancelled   int       `json:"cancelled"`
+	WaitingMax  *int      `json:"waiting_max"`
+	CPUAvg      *float64  `json:"cpu_avg"`
+}
+
+type ActivityPoint struct {
+	At    time.Time `json:"at"`
+	Value int       `json:"value"`
+}
+
+type ActivityCPU struct {
+	At  time.Time `json:"at"`
+	CPU *float64  `json:"cpu"`
+	Mem *int64    `json:"mem"`
+}
+
+type ActivityRepo struct {
+	Repo  string         `json:"repo"`
+	Hours []ActivityHour `json:"hours"`
+}
+
+type ActivityHour struct {
+	Start     time.Time `json:"start"`
+	Succeeded int       `json:"succeeded"`
+	Failed    int       `json:"failed"`
+	Cancelled int       `json:"cancelled"`
+}
