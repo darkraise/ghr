@@ -70,7 +70,11 @@ func Build(in Input) model.Activity {
 			a.Waiting = append(a.Waiting, model.ActivityPoint{At: m.At.In(loc), Value: m.Queued})
 			a.CPU = append(a.CPU, model.ActivityCPU{At: m.At.In(loc), CPU: m.CPU, Mem: m.Mem})
 		}
+	} else {
+		from, bs := buckets(in, sp, rs, loc)
+		a.From, a.Buckets = from.In(loc), bs
 	}
+	a.Repos = repoHours(in, loc)
 	return a
 }
 
