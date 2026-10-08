@@ -13,7 +13,7 @@ import { keys, useConfig, useStatus } from "@/api/hooks"
 import type { Config, RepoConfig, RepoPatch } from "@/api/types"
 import { ActivitySummary, RepoSummary } from "@/components/repo-summary"
 import { LabelCheckGroup } from "@/components/label-check-group"
-import { RegistrationsCard } from "@/components/registrations-card"
+import { RegistrationsGroup } from "@/components/registrations-group"
 import { RejectedAlert, SaveBar } from "@/components/save-bar"
 import { TagField } from "@/components/tag-field"
 import { UnsavedGuard } from "@/components/unsaved-guard"
@@ -261,7 +261,7 @@ function RepositoryForm({ name }: { name: string }) {
       </div>
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <LabelCheckGroup name={name} effective={effective} degraded={degraded} degradedReason={status.data?.degraded_reason} disabled={locked} onAddLabel={addLabel} />
-        <RegistrationsCard name={name} degraded={degraded} degradedReason={status.data?.degraded_reason} disabled={locked} />
+        <RegistrationsGroup name={name} degraded={degraded} degradedReason={status.data?.degraded_reason} disabled={locked} />
       </div>
       <SaveBar count={changed.length} saving={saving} disabled={status.isError} onSave={() => void save()} onDiscard={discard} />
       <UnsavedGuard count={changed.length} page="Repositories" saving={saving} onSave={save} onDiscard={discard} />

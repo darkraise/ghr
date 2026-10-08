@@ -32,6 +32,7 @@ const FILES = [
   "src/components/repo-table.tsx",
   "src/components/runner-list.tsx",
   "src/components/runner-panel.tsx",
+  "src/components/registrations-group.tsx",
   "src/components/result-icon.tsx",
   "src/components/runner-meter.tsx",
   "src/components/save-bar.tsx",

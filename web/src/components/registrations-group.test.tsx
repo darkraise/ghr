@@ -16,14 +16,18 @@ function routes(over: Record<string, unknown> = {}) {
   })
 }
 
-describe("GitHub registrations card", () => {
+describe("GitHub registrations group", () => {
   it("lists registrations and offers Delete only for an offline foreign one", async () => {
     mockApi(routes())
     renderApp("/repositories/darkmem")
     expect(await screen.findByText("ghr-aaaaaa")).toBeInTheDocument()
     expect(screen.getByText("old-runner")).toBeInTheDocument()
     expect(screen.getByText("self-hosted linux")).toBeInTheDocument()
-    expect(screen.getByText("offline")).toBeInTheDocument()
+    const region = within(screen.getByRole("region", { name: "GitHub registrations" }))
+    expect(region.getByText("Offline")).toHaveClass("text-destructive")
+    expect(region.getByText("Busy")).toHaveClass("text-primary")
+    expect(region.getByText("ghr")).toHaveClass("text-muted-foreground")
+    expect(region.getByText("self-hosted linux")).toHaveClass("font-mono")
     expect(screen.getByRole("button", { name: "Delete old-runner" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Delete ghr-aaaaaa" })).toBeNull()
   })
@@ -32,7 +36,9 @@ describe("GitHub registrations card", () => {
     const { calls } = mockApi(routes({ "DELETE /api/repos/darkmem/registrations/9": () => noContent() }))
     const { user } = renderApp("/repositories/darkmem")
     await user.click(await screen.findByRole("button", { name: "Delete old-runner" }))
-    expect(await screen.findByText("Delete the runner registration old-runner from darkmem?")).toBeInTheDocument()
+    const ask = within(await screen.findByRole("alertdialog"))
+    expect(ask.getByText("Delete runner registration old-runner?")).toBeInTheDocument()
+    expect(ask.getByText("It is removed from darkmem on GitHub.")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Cancel" }))
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(calls.some((c) => c.method === "DELETE")).toBe(false)
@@ -42,14 +48,14 @@ describe("GitHub registrations card", () => {
     await waitFor(() =>
       expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/repos/darkmem/registrations/9")).toBe(true),
     )
-    expect((await screen.findAllByText("deleted old-runner")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Deleted old-runner")).length).toBeGreaterThan(0)
   })
 
   it("says when nothing is registered, and refreshes", async () => {
     const { calls } = mockApi(routes({ "GET /api/repos/darkmem/registrations": [] }))
     const { user } = renderApp("/repositories/darkmem")
     expect(
-      await screen.findByText("No runners registered. ghr starts single-use runners on demand (and keeps warm ones in all mode)."),
+      await screen.findByText("No runners registered. ghr starts single-use runners on demand, and keeps warm ones in all mode."),
     ).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Refresh" }))
     await waitFor(() => expect(calls.filter((c) => c.path === "/api/repos/darkmem/registrations")).toHaveLength(2))
