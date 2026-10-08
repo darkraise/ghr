@@ -111,9 +111,12 @@ export function DashboardPage() {
           <Section
             title="Disk"
             aside={
-              <Link to="/storage" className="ml-auto text-sm text-primary hover:underline">
-                Storage
-              </Link>
+              <>
+                {st.disk_root && <span className="font-mono text-sm text-muted-foreground">{st.disk_root}</span>}
+                <Link to="/storage" className="ml-auto text-sm text-primary hover:underline">
+                  Storage
+                </Link>
+              </>
             }
           >
             <DiskBreakdown status={st} storage={storage.data} highWater={config.data?.disk_high_water ?? 80} />

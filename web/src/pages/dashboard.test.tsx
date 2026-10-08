@@ -121,4 +121,18 @@ describe("Dashboard page", () => {
     await user.click(await screen.findByRole("button", { name: "Add repository" }))
     expect(await screen.findByRole("heading", { name: "Add repository" })).toBeInTheDocument()
   })
+
+  it("shows Docker's data root beside the Disk heading once it is measured", async () => {
+    mockApi(authedRoutes())
+    renderApp("/")
+    await screen.findByRole("region", { name: "Disk" })
+    expect(region("Disk").getByText("/var/lib/docker")).toHaveClass("font-mono", "text-muted-foreground")
+  })
+
+  it("leaves the data root out until it is measured", async () => {
+    mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, disk_root: undefined } }))
+    renderApp("/")
+    await screen.findByRole("region", { name: "Disk" })
+    expect(region("Disk").queryByText("/var/lib/docker")).toBeNull()
+  })
 })
