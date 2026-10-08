@@ -12,7 +12,7 @@ describe("Package caches card", () => {
     mockApi(routes())
     renderApp("/storage")
     expect(await screen.findByText("41000 files")).toBeInTheDocument()
-    expect(screen.getByText("3.6 GB")).toBeInTheDocument()
+    expect(within(screen.getByText("41000 files").closest("tr") as HTMLElement).getByText("3.6 GB")).toBeInTheDocument()
     expect(screen.getByText(/^written (just now|\d+[mhd] ago)$/)).toBeInTheDocument()
     expect(screen.getByText("not present")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Clear Cargo" })).toBeNull()
