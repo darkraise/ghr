@@ -1,5 +1,5 @@
 import type { Activity, ActivityRun } from "@/api/types"
-import { GUTTER, laneTicks, lineRuns, PAD_RIGHT, retentionText, runAria, runEnd, runLabel, scaleX, windowWords } from "@/lib/activity-view"
+import { GUTTER, hasJob, laneTicks, lineRuns, PAD_RIGHT, retentionText, runAria, runEnd, runLabel, scaleX, windowWords } from "@/lib/activity-view"
 import { fmtMem } from "@/lib/format"
 
 const LANE_H = 20
@@ -92,7 +92,7 @@ function RunMark({
       </a>
     )
   }
-  if (run.html_url) {
+  if (run.html_url?.startsWith("https://")) {
     return (
       <a href={run.html_url} target="_blank" rel="noreferrer" aria-label={label} className="ghr-mark">
         {body}
@@ -130,7 +130,7 @@ export function LanesChart({
   const axisTop = cpuTop + TRACK_H
   const height = axisTop + AXIS_H
   const historyFrom = Date.parse(activity.history_from)
-  const runCount = activity.lanes.reduce((n, l) => n + l.runs.length, 0)
+  const jobCount = activity.lanes.reduce((n, l) => n + l.runs.filter(hasJob).length, 0)
 
   const waiting = activity.waiting.map((p) => ({ t: Date.parse(p.at), v: p.value }))
   const waitPeak = Math.max(0, ...waiting.map((p) => p.v))
@@ -187,15 +187,17 @@ export function LanesChart({
       {historyFrom > from && (
         <g data-retention="true">
           <rect x={GUTTER} y={0} width={x(historyFrom) - GUTTER} height={axisTop} className="fill-muted" />
-          <text x={GUTTER + 6} y={12} className="fill-muted-foreground">
-            {retentionText(activity)}
-          </text>
+          {x(historyFrom) - GUTTER > retentionText(activity).length * 6.5 + 12 && (
+            <text x={GUTTER + 6} y={12} className="fill-muted-foreground">
+              {retentionText(activity)}
+            </text>
+          )}
         </g>
       )}
       {activity.lanes.map((lane, i) =>
         lane.runs.map((run) => <RunMark key={run.instance_id} run={run} top={laneTop(i)} x={x} now={now} onOpenRunner={onOpenRunner} />),
       )}
-      {runCount === 0 && (
+      {jobCount === 0 && (
         <text x={GUTTER + plotW / 2} y={lanesH / 2 + 4} textAnchor="middle" className="fill-muted-foreground">
           {`No jobs ran in ${windowWords(activity.window)}.`}
         </text>

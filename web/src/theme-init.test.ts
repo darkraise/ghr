@@ -39,10 +39,19 @@ describe("theme-init.js", () => {
     expect(root.getAttribute("data-mode")).toBe("dark")
   })
 
-  it("resolves system from the media query", () => {
-    localStorage.setItem("mode", "system")
-    run()
-    expect(root.getAttribute("data-mode")).toBe("light")
+  it.each([
+    [false, "light"],
+    [true, "dark"],
+  ])("resolves system from the media query (prefers dark: %s)", (prefersDark, expected) => {
+    const original = window.matchMedia
+    window.matchMedia = ((query: string) => ({ ...original(query), matches: prefersDark })) as typeof window.matchMedia
+    try {
+      localStorage.setItem("mode", "system")
+      run()
+      expect(root.getAttribute("data-mode")).toBe(expected)
+    } finally {
+      window.matchMedia = original
+    }
   })
 
   it("pins the theme axes before React mounts", () => {

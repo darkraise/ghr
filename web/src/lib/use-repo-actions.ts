@@ -19,14 +19,14 @@ export function useRepoActions(repo: RepoStatus, offline: boolean) {
   const pause = useMutation({
     mutationFn: (resume: boolean) => (resume ? api.resumeRepo(repo.name) : api.pauseRepo(repo.name)),
     onSuccess: (_data, resume) => {
-      toast.success(`${resume ? "resumed" : "paused"} ${repo.name}`)
+      toast.success(`${resume ? "Resumed" : "Paused"} ${repo.name}`)
     },
     onSettled: refresh,
   })
   const remove = useMutation({
     mutationFn: () => api.removeRepo(repo.name),
     onSuccess: () => {
-      toast.success(`removing ${repo.name}`)
+      toast.success(`Removing ${repo.name}`)
     },
     onSettled: refresh,
   })

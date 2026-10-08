@@ -53,6 +53,19 @@ describe("UpdateCard", () => {
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/runner-update")).toBe(true))
   })
 
+  it("leaves out the queued time when the daemon gave none", () => {
+    draw({ latest: "2.338.0", queued: true })
+    expect(screen.getByText("Queued. Runners update between jobs.")).toBeInTheDocument()
+  })
+
+  it("marks the update for a collapsed rail, outside the part that hides", () => {
+    draw({ latest: "2.338.0", deadline: inDays(20) })
+    const marker = screen.getByRole("img", { name: "Runner update needs attention" })
+    expect(marker).toHaveClass("ghr-rail-narrow")
+    expect(marker.closest(".ghr-rail-wide")).toBeNull()
+    expect(screen.getByRole("heading", { name: "Runner update" }).closest("section")).toHaveClass("ghr-rail-wide")
+  })
+
   it("shows a running update with no action", () => {
     draw({ running: true, queued: true })
     expect(screen.getByText("Updating runners")).toBeInTheDocument()

@@ -82,6 +82,25 @@ describe("LanesChart", () => {
     expect(screen.getByText("Lane 1")).toBeInTheDocument()
   })
 
+  it("says no jobs ran when only a warm runner is drawn", () => {
+    draw({ lanes: [{ runs: [{ instance_id: "ffffff", repo: "darkmem", segments: [{ state: "warm", from: "2026-10-03T13:10:00Z", to: null }] }] }] })
+    expect(screen.getByText("No jobs ran in the last hour.")).toBeInTheDocument()
+  })
+
+  it("does not link a run whose URL is not https", () => {
+    const lanes = fixtures.activityLanes.lanes.map((l) => ({ runs: l.runs.map((r) => (r.html_url ? { ...r, html_url: "javascript:void(0)" } : r)) }))
+    draw({ lanes })
+    const name = "darkmem, ci, build, run 41, succeeded, 5m00s"
+    expect(screen.queryByRole("link", { name })).toBeNull()
+    expect(screen.getByRole("img", { name })).toHaveAttribute("tabindex", "0")
+  })
+
+  it("drops the retention note when the shaded strip cannot hold it", () => {
+    const { container } = draw({ history_from: "2026-10-03T13:06:00Z" })
+    expect(container.querySelector('[data-retention="true"]')).not.toBeNull()
+    expect(screen.queryByText(/^History is kept for/)).toBeNull()
+  })
+
   it("shades the time before history starts", () => {
     const { container } = draw({ history_from: "2026-10-03T13:35:00Z" })
     expect(container.querySelector('[data-retention="true"]')).not.toBeNull()

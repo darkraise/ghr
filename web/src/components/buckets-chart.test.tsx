@@ -62,6 +62,12 @@ describe("BucketsChart", () => {
     expect(screen.getByText("History is kept for 14 hours")).toBeInTheDocument()
   })
 
+  it("drops the retention note when the shaded strip cannot hold it", () => {
+    const { container } = draw({ history_from: "2026-10-02T14:10:00Z" })
+    expect(container.querySelector('[data-retention="true"]')).not.toBeNull()
+    expect(screen.queryByText(/^History is kept for/)).toBeNull()
+  })
+
   it("labels time every 6 hours", () => {
     draw()
     expect(screen.getByText("18:00")).toBeInTheDocument()

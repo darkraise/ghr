@@ -76,9 +76,9 @@ describe("Repositories page", () => {
     )
     const { user } = renderApp("/repositories")
     await user.click(await screen.findByRole("button", { name: "Pause darkmem" }))
-    expect((await screen.findAllByText("paused darkmem")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Paused darkmem")).length).toBeGreaterThan(0)
     await user.click(screen.getByRole("button", { name: "Resume darkcloud" }))
-    expect((await screen.findAllByText("resumed darkcloud")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Resumed darkcloud")).length).toBeGreaterThan(0)
     expect(calls.filter((c) => c.method === "POST").map((c) => c.path)).toEqual([
       "/api/repos/darkmem/pause",
       "/api/repos/darkcloud/resume",
@@ -104,6 +104,6 @@ describe("Repositories page", () => {
     await user.click(screen.getByRole("button", { name: "Remove darkmem" }))
     await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remove" }))
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/repos/darkmem")).toBe(true))
-    expect((await screen.findAllByText("removing darkmem")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Removing darkmem")).length).toBeGreaterThan(0)
   })
 })

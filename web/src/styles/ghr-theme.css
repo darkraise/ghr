@@ -245,6 +245,19 @@ body {
   display: none;
 }
 
+.ghr-rail-narrow {
+  display: none;
+}
+
+.dr-sidebar-layout-aside[data-collapsed="true"] .ghr-rail-narrow {
+  display: block;
+}
+
+.dr-sidebar-layout-aside[data-collapsed="true"] .ghr-rail-foot,
+.dr-sidebar-layout-aside[data-collapsed="true"] .ghr-mode {
+  flex-direction: column;
+}
+
 .dr-layout-header {
   border-color: hsl(var(--border));
 }

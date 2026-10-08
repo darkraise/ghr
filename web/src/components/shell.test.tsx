@@ -140,6 +140,22 @@ describe("shell", () => {
     expect(await screen.findByRole("radiogroup", { name: "Colour mode" })).toBeInTheDocument()
   })
 
+  it("keeps log out, the colour mode and the update marker out of what a collapsed rail hides", async () => {
+    mockApi(authedRoutes())
+    renderApp("/")
+    const logout = await screen.findByRole("button", { name: "Log out" })
+    expect(logout).toHaveAttribute("aria-label", "Log out")
+    expect(logout.closest(".ghr-rail-wide")).toBeNull()
+    expect(screen.getByRole("radiogroup", { name: "Colour mode" }).closest(".ghr-rail-wide")).toBeNull()
+    expect((await screen.findByRole("img", { name: "Runner update needs attention" })).closest(".ghr-rail-wide")).toBeNull()
+  })
+
+  it("does not double the period of a degraded reason", async () => {
+    mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, degraded: true, degraded_reason: "GitHub rejected the token." } }))
+    renderApp("/")
+    expect(await screen.findByText("GitHub rejected the token. No new runners start until this clears.")).toBeInTheDocument()
+  })
+
   it("names the host for the brand label", async () => {
     mockApi(authedRoutes())
     renderApp("/")

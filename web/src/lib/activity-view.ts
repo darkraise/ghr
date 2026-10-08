@@ -28,6 +28,10 @@ const RESULT: Record<string, string | undefined> = {
   skipped: "skipped",
 }
 
+export function hasJob(run: ActivityRun): boolean {
+  return run.segments.some((s) => JOB_STATES.has(s.state))
+}
+
 export function isLaneWindow(w: string): boolean {
   return w === "1h" || w === "3h"
 }
@@ -114,7 +118,7 @@ export function bucketAria(b: ActivityBucket, a: { window: string; capacity: num
 export function activitySummary(a: Activity): string {
   const words = windowWords(a.window)
   if (isLaneWindow(a.window)) {
-    const jobs = a.lanes.flatMap((l) => l.runs).filter((r) => r.segments.some((s) => JOB_STATES.has(s.state)))
+    const jobs = a.lanes.flatMap((l) => l.runs).filter(hasJob)
     if (jobs.length === 0) return `No jobs ran in ${words}.`
     const failed = jobs.filter((r) => r.segments.at(-1)?.state === "failed").length
     const running = jobs.filter((r) => r.segments.some((s) => s.state === "running" && s.to === null)).length

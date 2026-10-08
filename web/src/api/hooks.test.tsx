@@ -4,7 +4,7 @@ import { mockApi } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
 import { appendEvents, appendLog, browserZone, MAX_EVENTS, MAX_LOG, useActivity, useEvents, useLogTail } from "./hooks"
-import type { GhrEvent, LogChunk } from "./types"
+import type { ActivityWindow, GhrEvent, LogChunk } from "./types"
 
 const ev = (seq: number): GhrEvent => ({ seq, time: "2026-10-03T14:05:00Z", level: "info", msg: `event ${seq}` })
 
@@ -96,5 +96,25 @@ describe("useActivity", () => {
     await waitFor(() => expect(result.current.data?.capacity).toBe(2))
     expect(browserZone()).toBe("UTC")
     expect(calls[0]?.search).toBe("?window=3h&tz=UTC")
+  })
+
+  it("keeps the last window's data while the next one loads", async () => {
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    mockApi({
+      "GET /api/activity": async ({ url }: { url: URL }) => {
+        if (url.searchParams.get("window") !== "24h") return fixtures.activityLanes
+        await gate
+        return fixtures.activityBuckets
+      },
+    })
+    const { wrapper } = withQuery()
+    const { result, rerender } = renderHook(({ w }) => useActivity(w), { wrapper, initialProps: { w: "1h" as ActivityWindow } })
+    await waitFor(() => expect(result.current.data?.window).toBe("1h"))
+    rerender({ w: "24h" })
+    expect(result.current.data?.window).toBe("1h")
+    expect(result.current.isPlaceholderData).toBe(true)
+    release()
+    await waitFor(() => expect(result.current.data?.window).toBe("24h"))
   })
 })

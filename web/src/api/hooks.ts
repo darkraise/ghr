@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "./client"
 import type { ActivityWindow, GhrEvent, LogChunk, Status, Storage } from "./types"
 
@@ -66,6 +66,9 @@ export function useActivity(window: ActivityWindow) {
     queryKey: keys.activity(window, tz),
     queryFn: ({ signal }) => api.activity(window, tz, signal),
     refetchInterval: POLL_SLOW,
+    // Keeps the panel and the repository strips drawn while a new window loads;
+    // ActivityPanel reads lanes or buckets from the data's own window.
+    placeholderData: keepPreviousData,
   })
 }
 

@@ -119,9 +119,11 @@ export function BucketsChart({ activity, now, width }: { activity: Activity; now
       {historyFrom > start && (
         <g data-retention="true">
           <rect x={GUTTER} y={0} width={scaleX(historyFrom, start, end, plotW)} height={axisTop} className="fill-muted" />
-          <text x={GUTTER + 6} y={12} className="fill-muted-foreground">
-            {retentionText(activity)}
-          </text>
+          {scaleX(historyFrom, start, end, plotW) > retentionText(activity).length * 6.5 + 12 && (
+            <text x={GUTTER + 6} y={12} className="fill-muted-foreground">
+              {retentionText(activity)}
+            </text>
+          )}
         </g>
       )}
       {buckets.map((b, i) => {

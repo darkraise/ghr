@@ -106,7 +106,10 @@ describe("RepoTable", () => {
     const { calls } = mockApi({})
     const { user } = draw(fixtures.status.repos, true)
     await user.click(screen.getByRole("button", { name: "More actions for darkmem" }))
-    await user.click(await screen.findByRole("menuitem", { name: "Pause" }))
+    expect(await screen.findByRole("menuitem", { name: "Pause" })).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByRole("menuitem", { name: "Remove" })).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByRole("menuitem", { name: "Edit" })).not.toHaveAttribute("aria-disabled", "true")
+    await user.click(screen.getByRole("menuitem", { name: "Pause" }))
     expect(calls).toHaveLength(0)
   })
 

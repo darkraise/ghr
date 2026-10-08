@@ -35,10 +35,6 @@ export function running(status: Status): number {
   return status.instances.filter((i) => i.state !== "cleaning").length
 }
 
-export function capText(status: Status): string {
-  return status.mode === "all" ? "∞" : String(status.global_max)
-}
-
 export function repoStateWord(r: RepoStatus): "Error" | "Removing" | "Paused" | "Running" | "Idle" {
   if (r.error) return "Error"
   if (r.removing) return "Removing"

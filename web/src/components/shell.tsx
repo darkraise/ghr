@@ -92,16 +92,16 @@ export function Shell() {
       navFooter={
         <div className="flex flex-col gap-3">
           {st && (
-            <div className="ghr-rail-wide empty:hidden">
+            <div className="empty:hidden">
               <UpdateCard update={st.runner_update} offline={offline} />
             </div>
           )}
-          <div className="ghr-rail-wide flex items-center gap-2 text-sm text-[hsl(var(--sidebar-foreground))]">
-            <span className="flex-1 truncate">Owner</span>
+          <div className="ghr-rail-foot flex items-center gap-2 text-sm text-[hsl(var(--sidebar-foreground))]">
+            <span className="ghr-rail-wide flex-1 truncate">Owner</span>
             <ModeControl />
-            <Button size="sm" variant="ghost" onClick={() => void logout()}>
+            <Button size="sm" variant="ghost" aria-label="Log out" onClick={() => void logout()}>
               <LogOut size={15} aria-hidden="true" />
-              Log out
+              <span className="ghr-rail-wide">Log out</span>
             </Button>
           </div>
         </div>
@@ -118,7 +118,7 @@ export function Shell() {
       {st?.degraded && (
         <Alert variant="warning" className="mb-4">
           <AlertTitle>Degraded</AlertTitle>
-          <AlertDescription>{`${st.degraded_reason ?? "The daemon is degraded"}. No new runners start until this clears.`}</AlertDescription>
+          <AlertDescription>{`${(st.degraded_reason ?? "The daemon is degraded").replace(/\.$/, "")}. No new runners start until this clears.`}</AlertDescription>
         </Alert>
       )}
       {st?.setup_pending && (
