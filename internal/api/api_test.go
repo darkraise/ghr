@@ -18,36 +18,38 @@ import (
 )
 
 type fakeBackend struct {
-	patches      []model.ConfigPatch
-	added        []model.AddRepoRequest
-	removed      []string
-	pauseAll     []bool
-	token        string
-	killed       []string
-	killErr      error
-	pruneErr     error
-	reloadErr    error
-	tokenStatus  model.TokenStatus
-	tokenCalls   int
-	regs         []model.Registration
-	regErr       error
-	regRepos     []string
-	deletedReg   []string
-	checked      []string
-	startErr     error
-	lc           model.LabelCheck
-	lcErr        error
-	lcRepos      []string
-	metrics      model.Metrics
-	metricsCalls int
-	updates      []string
-	updateErr    error
-	avail        []model.AvailableRepo
-	availErr     error
-	storage      model.Storage
-	storageErr   error // returned by every storage method
-	choices      []model.ToolchainChoice
-	storageCalls []string
+	patches       []model.ConfigPatch
+	added         []model.AddRepoRequest
+	removed       []string
+	pauseAll      []bool
+	token         string
+	killed        []string
+	killErr       error
+	pruneErr      error
+	reloadErr     error
+	tokenStatus   model.TokenStatus
+	tokenCalls    int
+	regs          []model.Registration
+	regErr        error
+	regRepos      []string
+	deletedReg    []string
+	checked       []string
+	startErr      error
+	lc            model.LabelCheck
+	lcErr         error
+	lcRepos       []string
+	metrics       model.Metrics
+	metricsCalls  int
+	activityCalls []string
+	activity      model.Activity
+	updates       []string
+	updateErr     error
+	avail         []model.AvailableRepo
+	availErr      error
+	storage       model.Storage
+	storageErr    error // returned by every storage method
+	choices       []model.ToolchainChoice
+	storageCalls  []string
 }
 
 func (f *fakeBackend) AvailableRepos(context.Context) ([]model.AvailableRepo, error) {
@@ -62,6 +64,11 @@ func (f *fakeBackend) QueueRunnerUpdate(context.Context) error {
 func (f *fakeBackend) CancelRunnerUpdate() error {
 	f.updates = append(f.updates, "cancel")
 	return f.updateErr
+}
+
+func (f *fakeBackend) Activity(_ context.Context, window string, loc *time.Location) (model.Activity, error) {
+	f.activityCalls = append(f.activityCalls, window+"|"+loc.String())
+	return f.activity, nil
 }
 
 func (f *fakeBackend) Metrics() model.Metrics {
@@ -472,5 +479,31 @@ func TestSetWebPasswordPostsTheBody(t *testing.T) {
 	var sent map[string]string
 	if err := json.Unmarshal([]byte(body), &sent); err != nil || sent["password"] != "a <long> secret" {
 		t.Fatalf("body %q: %v", body, err)
+	}
+}
+
+func TestActivityRoute(t *testing.T) {
+	c, b := setup(t)
+	ctx := context.Background()
+	b.activity = model.Activity{Window: "1h", TZ: "Asia/Ho_Chi_Minh"}
+	var got model.Activity
+	if err := c.call(ctx, http.MethodGet, "/activity?window=1h&tz=Asia/Ho_Chi_Minh", nil, &got); err != nil || got.Window != "1h" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if err := c.call(ctx, http.MethodGet, "/activity?window=24h", nil, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(b.activityCalls, []string{"1h|Asia/Ho_Chi_Minh", "24h|Local"}) {
+		t.Fatalf("backend saw %v", b.activityCalls)
+	}
+	for _, q := range []string{"window=2h", "window=1h&tz=Mars/Olympus_Mons", ""} {
+		err := c.call(ctx, http.MethodGet, "/activity?"+q, nil, &got)
+		var ae *Error
+		if !errors.As(err, &ae) || ae.Status != http.StatusBadRequest {
+			t.Fatalf("%q: %v", q, err)
+		}
+	}
+	if len(b.activityCalls) != 2 {
+		t.Fatalf("a bad request reached the backend: %v", b.activityCalls)
 	}
 }

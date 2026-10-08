@@ -10,7 +10,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	// time/tzdata embeds the zone database, so GET /activity can load the
+	// browser's zone on a host without /usr/share/zoneinfo.
+	_ "time/tzdata"
 
+	"github.com/darkraise/ghr/internal/activity"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 )
@@ -70,6 +74,7 @@ type Backend interface {
 	Reload() ([]string, error)
 	Prune() error
 	Metrics() model.Metrics
+	Activity(ctx context.Context, window string, loc *time.Location) (model.Activity, error)
 	Token() model.TokenStatus
 	StartLabelCheck(repo string) error
 	LabelCheck(repo string) (model.LabelCheck, error)
@@ -90,6 +95,25 @@ type Backend interface {
 func NewServer(b Backend) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.Metrics()) })
+	mux.HandleFunc("GET /activity", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		window := q.Get("window")
+		if !activity.Valid(window) {
+			respond(w, nil, BadRequest("window must be one of 1h, 3h, 24h, 7d, 30d"))
+			return
+		}
+		loc := time.Local
+		if tz := q.Get("tz"); tz != "" {
+			l, err := time.LoadLocation(tz)
+			if err != nil {
+				respond(w, nil, BadRequest("unknown time zone "+tz))
+				return
+			}
+			loc = l
+		}
+		a, err := b.Activity(r.Context(), window, loc)
+		respond(w, a, err)
+	})
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.Status()) })
 	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
 		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)

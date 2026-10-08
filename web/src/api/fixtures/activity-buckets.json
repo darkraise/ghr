@@ -1,0 +1,439 @@
+{
+  "window": "24h",
+  "tz": "UTC",
+  "from": "2026-10-02T14:00:00Z",
+  "to": "2026-10-03T14:05:00Z",
+  "capacity": null,
+  "history_from": "2026-09-03T14:05:00Z",
+  "lanes": [],
+  "buckets": [
+    {
+      "start": "2026-10-02T14:00:00Z",
+      "end": "2026-10-02T15:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-02T15:00:00Z",
+      "end": "2026-10-02T16:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-02T16:00:00Z",
+      "end": "2026-10-02T17:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-02T17:00:00Z",
+      "end": "2026-10-02T18:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-02T18:00:00Z",
+      "end": "2026-10-02T19:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-02T19:00:00Z",
+      "end": "2026-10-02T20:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-02T20:00:00Z",
+      "end": "2026-10-02T21:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-02T21:00:00Z",
+      "end": "2026-10-02T22:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-02T22:00:00Z",
+      "end": "2026-10-02T23:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-02T23:00:00Z",
+      "end": "2026-10-03T00:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T00:00:00Z",
+      "end": "2026-10-03T01:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T01:00:00Z",
+      "end": "2026-10-03T02:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T02:00:00Z",
+      "end": "2026-10-03T03:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T03:00:00Z",
+      "end": "2026-10-03T04:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T04:00:00Z",
+      "end": "2026-10-03T05:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T05:00:00Z",
+      "end": "2026-10-03T06:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T06:00:00Z",
+      "end": "2026-10-03T07:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T07:00:00Z",
+      "end": "2026-10-03T08:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T08:00:00Z",
+      "end": "2026-10-03T09:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T09:00:00Z",
+      "end": "2026-10-03T10:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T10:00:00Z",
+      "end": "2026-10-03T11:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T11:00:00Z",
+      "end": "2026-10-03T12:00:00Z",
+      "busy_minutes": 10,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 1,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T12:00:00Z",
+      "end": "2026-10-03T13:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    },
+    {
+      "start": "2026-10-03T13:00:00Z",
+      "end": "2026-10-03T14:00:00Z",
+      "busy_minutes": 5,
+      "busy_pct": null,
+      "succeeded": 1,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": 3,
+      "cpu_avg": 22.5
+    },
+    {
+      "start": "2026-10-03T14:00:00Z",
+      "end": "2026-10-03T15:00:00Z",
+      "busy_minutes": 0,
+      "busy_pct": null,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "waiting_max": null,
+      "cpu_avg": null
+    }
+  ],
+  "waiting": [],
+  "cpu": [],
+  "repos": [
+    {
+      "repo": "darkmem",
+      "hours": [
+        {
+          "start": "2026-10-02T15:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T16:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T17:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T18:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T19:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T20:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T21:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T22:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T23:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T00:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T01:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T02:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T03:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T04:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T05:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T06:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T07:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T08:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T09:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T10:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T11:00:00Z",
+          "succeeded": 0,
+          "failed": 1,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T12:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T13:00:00Z",
+          "succeeded": 1,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T14:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        }
+      ]
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/activity"
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
 )
@@ -101,6 +102,41 @@ func fixtureValues() map[string]any {
 			{Number: 3, Name: "Post checkout", Status: "queued"},
 		},
 		"containers": []model.Container{{ID: "c0ffee12", Name: "ghr-aaaaaa-db-1", Image: "postgres:17", State: "running", Project: "ghr-aaaaaa"}},
+		"activity-lanes": activity.Build(activity.Input{
+			Window: "1h", Now: fixtureTime, Capacity: ptr(2), Retention: 30 * 24 * time.Hour,
+			Repos: []string{"darkmem", "darkcloud"},
+			History: []model.HistoryEntry{
+				{ID: "h1", Repo: "darkmem", RunID: 101, RunNumber: "41", Workflow: "ci", JobName: "build", Conclusion: "success",
+					StartedAt: at(-30 * time.Minute), FinishedAt: at(-25 * time.Minute),
+					HTMLURL: "https://github.com/darkraise/darkmem/actions/runs/101/job/1"},
+				{ID: "h3", Repo: "darkmem", RunID: 99, RunNumber: "40", Workflow: "ci", JobName: "lint", Conclusion: "failure",
+					StartedAt: at(-50 * time.Minute), FinishedAt: at(-44 * time.Minute)},
+			},
+			Instances: []model.InstanceStatus{
+				{ID: "aaaaaa", Repo: "darkmem", RunnerName: "ghr-aaaaaa", State: "busy", Since: at(-5 * time.Minute),
+					Job: &model.JobInfo{RunID: 102, RunNumber: "42", Workflow: "ci", Name: "test",
+						HTMLURL: "https://github.com/darkraise/darkmem/actions/runs/102/job/2", StartedAt: at(-4 * time.Minute)}},
+				{ID: "bbbbbb", Repo: "darkmem", RunnerName: "ghr-bbbbbb", State: "idle", Since: at(-2 * time.Minute)},
+			},
+			Minutes: []model.MetricSample{
+				{At: at(-3 * time.Minute), Live: 1, Queued: 2, CPU: ptr(12.5), Mem: ptr(int64(2 << 30))},
+				{At: at(-2 * time.Minute), Live: 2, Queued: 1, CPU: ptr(48.0), Mem: ptr(int64(3 << 30))},
+				{At: at(-time.Minute), Live: 2, Queued: 3},
+			},
+		}),
+		"activity-buckets": activity.Build(activity.Input{
+			Window: "24h", Now: fixtureTime, Retention: 30 * 24 * time.Hour,
+			Repos: []string{"darkmem"},
+			History: []model.HistoryEntry{
+				{ID: "h1", Repo: "darkmem", RunID: 101, RunNumber: "41", Workflow: "ci", JobName: "build", Conclusion: "success",
+					StartedAt: at(-30 * time.Minute), FinishedAt: at(-25 * time.Minute)},
+				{ID: "h2", Repo: "darkmem", RunID: 90, RunNumber: "39", Workflow: "ci", JobName: "build", Conclusion: "failure",
+					StartedAt: at(-3 * time.Hour), FinishedAt: at(-170 * time.Minute)},
+			},
+			Hours: []model.MetricRollup{
+				{At: time.Date(2026, 10, 3, 13, 0, 0, 0, time.UTC), Samples: 60, QueuedMax: 3, CPUAvg: ptr(22.5), MemAvg: ptr(int64(3 << 30))},
+			},
+		}),
 		"metrics": model.Metrics{
 			Samples: []model.MetricSample{
 				{At: at(-3 * time.Minute), Live: 1, Queued: 2, CPU: ptr(12.5), Mem: ptr(int64(2 << 30))},

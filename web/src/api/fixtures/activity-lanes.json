@@ -1,0 +1,405 @@
+{
+  "window": "1h",
+  "tz": "UTC",
+  "from": "2026-10-03T13:05:00Z",
+  "to": "2026-10-03T14:05:00Z",
+  "capacity": 2,
+  "history_from": "2026-09-03T14:05:00Z",
+  "lanes": [
+    {
+      "runs": [
+        {
+          "instance_id": "h3",
+          "repo": "darkmem",
+          "workflow": "ci",
+          "job": "lint",
+          "run_number": "40",
+          "segments": [
+            {
+              "state": "failed",
+              "from": "2026-10-03T13:15:00Z",
+              "to": "2026-10-03T13:21:00Z"
+            }
+          ]
+        },
+        {
+          "instance_id": "h1",
+          "repo": "darkmem",
+          "workflow": "ci",
+          "job": "build",
+          "run_number": "41",
+          "segments": [
+            {
+              "state": "succeeded",
+              "from": "2026-10-03T13:35:00Z",
+              "to": "2026-10-03T13:40:00Z"
+            }
+          ],
+          "html_url": "https://github.com/darkraise/darkmem/actions/runs/101/job/1"
+        },
+        {
+          "instance_id": "aaaaaa",
+          "repo": "darkmem",
+          "workflow": "ci",
+          "job": "test",
+          "run_number": "42",
+          "segments": [
+            {
+              "state": "running",
+              "from": "2026-10-03T14:01:00Z",
+              "to": null
+            }
+          ],
+          "html_url": "https://github.com/darkraise/darkmem/actions/runs/102/job/2"
+        }
+      ]
+    },
+    {
+      "runs": [
+        {
+          "instance_id": "bbbbbb",
+          "repo": "darkmem",
+          "segments": [
+            {
+              "state": "warm",
+              "from": "2026-10-03T14:03:00Z",
+              "to": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "buckets": [],
+  "waiting": [
+    {
+      "at": "2026-10-03T14:02:00Z",
+      "value": 2
+    },
+    {
+      "at": "2026-10-03T14:03:00Z",
+      "value": 1
+    },
+    {
+      "at": "2026-10-03T14:04:00Z",
+      "value": 3
+    }
+  ],
+  "cpu": [
+    {
+      "at": "2026-10-03T14:02:00Z",
+      "cpu": 12.5,
+      "mem": 2147483648
+    },
+    {
+      "at": "2026-10-03T14:03:00Z",
+      "cpu": 48,
+      "mem": 3221225472
+    },
+    {
+      "at": "2026-10-03T14:04:00Z",
+      "cpu": null,
+      "mem": null
+    }
+  ],
+  "repos": [
+    {
+      "repo": "darkmem",
+      "hours": [
+        {
+          "start": "2026-10-02T15:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T16:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T17:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T18:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T19:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T20:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T21:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T22:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T23:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T00:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T01:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T02:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T03:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T04:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T05:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T06:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T07:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T08:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T09:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T10:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T11:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T12:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T13:00:00Z",
+          "succeeded": 1,
+          "failed": 1,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T14:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        }
+      ]
+    },
+    {
+      "repo": "darkcloud",
+      "hours": [
+        {
+          "start": "2026-10-02T15:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T16:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T17:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T18:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T19:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T20:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T21:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T22:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-02T23:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T00:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T01:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T02:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T03:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T04:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T05:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T06:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T07:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T08:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T09:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T10:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T11:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T12:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T13:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        },
+        {
+          "start": "2026-10-03T14:00:00Z",
+          "succeeded": 0,
+          "failed": 0,
+          "cancelled": 0
+        }
+      ]
+    }
+  ]
+}
