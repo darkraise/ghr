@@ -59,6 +59,7 @@ const FILES = [
   "src/lib/history.ts",
   "src/lib/repos.ts",
   "src/lib/status.ts",
+  "src/lib/storage.ts",
   "src/lib/steps.ts",
   "src/lib/summary.ts",
   "src/lib/toolchains.ts",
