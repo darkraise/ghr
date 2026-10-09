@@ -184,6 +184,6 @@ describe("History page", () => {
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
     await user.click(await screen.findByRole("button", { name: "Copy run URL of build #41" }))
     expect(writeText).toHaveBeenCalledWith("https://github.com/darkraise/darkmem/actions/runs/101/job/1")
-    expect((await screen.findAllByText("copied run URL")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Copied run URL")).length).toBeGreaterThan(0)
   })
 })

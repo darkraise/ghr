@@ -38,7 +38,7 @@ export function StopRunnerDialog({ instance, onClose }: { instance: InstanceStat
       }
     },
     onSuccess: (stopped, id) => {
-      if (stopped) toast.success(`stopped ${id}`)
+      if (stopped) toast.success(`Stopped ${id}`)
       else toast.info(`${id} had already finished`)
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.status }),

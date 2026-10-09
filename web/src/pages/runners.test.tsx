@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import { json, mockApi } from "@/test/api"
+import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { setViewport } from "@/test/media"
 import { renderApp } from "@/test/render"
@@ -136,6 +136,14 @@ describe("Runners page", () => {
     expect(await ask.findByText("Runner bbbbbb has already finished")).toBeInTheDocument()
     expect(ask.getByRole("button", { name: "Stop" })).toBeDisabled()
     expect(calls.some((c) => c.method === "DELETE")).toBe(false)
+  })
+
+  it("toasts the runner it stopped", async () => {
+    mockApi(routes({ "DELETE /api/runners/aaaaaa": () => noContent() }))
+    const { user } = renderApp("/runners/aaaaaa")
+    await user.click(await screen.findByRole("button", { name: "Stop runner" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Stop" }))
+    expect((await screen.findAllByText("Stopped aaaaaa")).length).toBeGreaterThan(0)
   })
 
   it("treats a runner the daemon no longer knows as finished", async () => {

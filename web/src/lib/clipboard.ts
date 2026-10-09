@@ -25,7 +25,7 @@ export async function copyText(text: string): Promise<void> {
 export async function copyWithToast(text: string, label: string): Promise<void> {
   try {
     await copyText(text)
-    toast.success(`copied ${label}`)
+    toast.success(`Copied ${label}`)
   } catch (err) {
     toast.error(errorText(err))
   }
