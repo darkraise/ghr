@@ -12,6 +12,8 @@
 
 **Execution:** inline — `claude --model sonnet --effort high` — 4 of 7 tasks total 4 or less; Tasks 2, 5 and 6 (total 5 or more) are delegated.
 
+**Plan review:** 2026-10-10 — dr-superpowers:judge-opus — executability 17 / coherence 18 / coverage 18 / assumptions 15 (round 2)
+
 ## Global Constraints
 
 - Execution environment: the owner's Linux machine (bash, GNU coreutils `timeout`, Go 1.26 at `/usr/local/go/bin`, Node 24). If `go` is not on `PATH`, run `export PATH=$PATH:/usr/local/go/bin` first.
@@ -34,7 +36,7 @@
 - `setLogRequestWindow(t *testing.T, d time.Duration)` (Task 1, `joblogs_test.go`): sets `logRequestWindow` for one test and restores it.
 - `logBusy` (Task 2): a `logOutcome` after `logFailed`; never cached. `logCall.started chan struct{}` (Task 2): closed when the download gets its slot.
 - `GitHub.OpenJobLog(ctx context.Context, repo string, jobID int64) (io.ReadCloser, int64, error)` (Task 4): added to the daemon's `GitHub` interface in `backend.go`.
-- Fakes (Task 4): `fakeRuns.logLen map[int64]int64` (overrides `OpenJobLog`'s length for that job; -1 means none declared), `fakeRuns.logClosed int` (bodies `OpenJobLog` returned that were closed), `fakeRuns.logReads int` (`Read` calls on those bodies), `fakeRuns.logCtx context.Context` (the last `OpenJobLog` call's context), all guarded by `rmu`; `fakeRuns.OpenJobLog` recorded as `"OpenJobLog <repo> <id>"`, never waiting on `logWait`; `panickyGH.openLog bool` makes `OpenJobLog` panic.
+- Fakes (Task 4): `fakeRuns.logLen map[int64]int64` (overrides `OpenJobLog`'s length for that job; -1 means none declared), `fakeRuns.logClosed int` (bodies `OpenJobLog` returned that were closed), `fakeRuns.logReads int` (`Read` calls on those bodies), `fakeRuns.logCtx context.Context` (the last `OpenJobLog` call's context), all guarded by `rmu`; `fakeRuns.OpenJobLog` recorded as `"OpenJobLog <repo> <id>"`, never waiting on `logWait`; `panickyGH.openLog bool` makes `OpenJobLog` record its context in `logCtx` (when it wraps a `*fakeGH`) and panic.
 - `rawLimit` (Task 5): becomes `var rawLimit int64 = 32 << 20` (tests shrink it); `rawSlotWait` (Task 5): `var rawSlotWait = 25 * time.Second`.
 - `(b *Backend) openRawLog(ctx context.Context, repo string, jobID int64) (io.ReadCloser, int64, error)` (Task 5): the reader holds a slot, GitHub's body and the request deadline until `Close`, which is safe to call more than once; on an error all three are already released. The length is always known (≥ 0).
 - `(b *Backend) RawJobLog(ctx context.Context, repo string, jobID int64) (io.ReadCloser, int64, error)` (Task 6): returns `b.openRawLog(ctx, repo, jobID)`.
@@ -58,7 +60,8 @@
 - `panic(http.ErrAbortHandler)` aborts the response without logging a stack trace: `/usr/local/go/src/net/http/server.go:1869-1873`, read on 2026-10-10.
 - The `net/http` client stops a body with a declared length at that length (`transfer.go:572-573`) and reports a short body as `io.ErrUnexpectedEOF` (`transfer.go:865`); a handler writing past its declared length gets `http.ErrContentLength` (`server.go:56`). Read on 2026-10-10. So `openRawLog` needs no cap reader for a declared length.
 - Under the web tests' jsdom, `new Response(...).blob()` returns a `Blob` (`instanceof Blob`, `text()` works), and a body stream that errors makes `blob()` reject with the stream's own error ("connection dropped"): probed with a throwaway Vitest file on 2026-10-10.
-- `newBlobServer` in `internal/github/download_test.go:16` writes a short body in one `Fprint`, so Go's server sends a `Content-Length`; a handler that calls `Flush` first sends none (chunked). Task 3's test uses both.
+- A handler that sets `Content-Length` itself keeps it after a `Flush`: the server chunks only a response without one (`/usr/local/go/src/net/http/server.go:1341-1342`), so Task 3's `gatedBlob` serves a declared length and, without the header, a chunked body. `ResponseController.Flush` returns the connection's write error (`FlushError` at `:1724-1733`, `chunkWriter.flush` at `:401-405`), so Task 6's flush fails once the write deadline has passed. Read on 2026-10-10.
+- `rawWriteWindow` (Task 6, `internal/api`) and `logRequestWindow` (Task 1, `internal/daemon`) are two 50 s values although spec §2.5 names one: Task 1 lands before the api package has a window to share, and the daemon tests override `logRequestWindow` on their own. Plan review round 2 rated this Minor; both comments name the other value.
 - Whether GitHub's job-log blob responses carry a `Content-Length` is unverified; `openRawLog` handles both cases, and no task depends on the answer.
 - Task 6 scores coupling 2 although it changes `api.Backend.RawJobLog`'s signature: both implementers (`*daemon.Backend`, checked by `var _ api.Backend = (*Backend)(nil)` at `internal/daemon/backend.go:117`, and `fakeBackend`) change in that task and the compiler checks them, the precedent of the run details plan's Task 11 (`docs/superpowers/plans/2026-10-09-ghr-run-details.md:4385`). The daemon side is written first (Task 5) as `openRawLog`, so Task 6 only switches the interface.
 - Task 4 has no new test: it adds an interface method and fakes, checked by `go vet` and the existing daemon suite. It is separate from Task 5 so each stays within Rule S.
@@ -177,7 +180,7 @@ with:
 ```go
 	// logRequestWindow bounds each log request from its start (job read,
 	// slot wait, and download or copy), keeping the answer under the web
-	// listener's 60 s timeouts; a parsed download that outlasts it still
+	// listener's 60 s WriteTimeout; a parsed download that outlasts it still
 	// finishes and fills the cache for the next call.
 	logRequestWindow = 50 * time.Second
 ```
@@ -373,9 +376,9 @@ In `internal/daemon/joblogs.go`, replace the `logRequestWindow` comment written 
 ```go
 	// logRequestWindow bounds each log request from its start (job read,
 	// slot wait, and download or copy) and a queued download's wait for a
-	// slot, keeping the answer under the web listener's 60 s timeouts; a
-	// parsed download that outlasts it still finishes and fills the cache
-	// for the next call.
+	// slot, keeping the answer under the web listener's 60 s WriteTimeout
+	// (the api package's rawWriteWindow matches it); a parsed download that
+	// outlasts it still finishes and fills the cache for the next call.
 ```
 
 Add `logBusy` to the outcomes:
@@ -739,7 +742,7 @@ In `internal/daemon/backend.go`, add `"io"` to the imports and add to the `GitHu
 
 - [ ] **Step 2: Add the fakes**
 
-In `internal/daemon/runs_fake_test.go`, add `"bytes"` and `"io"` to the imports and add two fields to `fakeRuns`, after `logWait`:
+In `internal/daemon/runs_fake_test.go`, add `"bytes"` and `"io"` to the imports and add four fields to `fakeRuns`, after `logWait`:
 
 ```go
 	logLen      map[int64]int64             // OpenJobLog's length for that job, when set (-1: none declared)
@@ -804,6 +807,11 @@ and add after `func (p *panickyGH) JobLog`:
 ```go
 func (p *panickyGH) OpenJobLog(ctx context.Context, repo string, jobID int64) (io.ReadCloser, int64, error) {
 	if p.openLog {
+		if f, ok := p.GitHub.(*fakeGH); ok {
+			f.rmu.Lock()
+			f.logCtx = ctx
+			f.rmu.Unlock()
+		}
 		panic("boom")
 	}
 	return p.GitHub.OpenJobLog(ctx, repo, jobID)
@@ -995,7 +1003,7 @@ func TestRawLogErrorsReleaseEverything(t *testing.T) {
 			gh.logs[1002] = []byte(strings.Repeat("x", 65))
 			gh.logLen = map[int64]int64{1002: -1}
 		}, 413, tooLarge, 1, true},
-		{"panic", func(b *Backend, gh *fakeGH) { b.GH = &panickyGH{GitHub: gh, openLog: true} }, 0, "could not read the log", 0, false},
+		{"panic", func(b *Backend, gh *fakeGH) { b.GH = &panickyGH{GitHub: gh, openLog: true} }, 0, "could not read the log", 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b, _, gh := newBackend(t)
