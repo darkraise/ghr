@@ -155,6 +155,23 @@ describe("Repositories page", () => {
     expect(await screen.findByRole("region", { name: "Watched repositories" })).toBeInTheDocument()
   })
 
+  it("keeps the watched section, with a retry, when the config fails to load", async () => {
+    let fail = true
+    mockApi(
+      authedRoutes({
+        "GET /api/config": () => (fail ? json({ error: "config unreadable" }, 500) : json(fixtures.config)),
+      }),
+    )
+    const { user } = renderApp("/repositories")
+    const watched = within(await screen.findByRole("region", { name: "Watched repositories" }))
+    expect(await watched.findByText("config unreadable")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Watch a repository" })).toBeEnabled()
+    fail = false
+    await user.click(watched.getByRole("button", { name: "Try again" }))
+    expect(await watched.findByText("docs")).toBeInTheDocument()
+    expect(watched.queryByRole("alert")).toBeNull()
+  })
+
   it("scrolls to the watched section from a link", async () => {
     const spy = vi.spyOn(Element.prototype, "scrollIntoView")
     mockApi(authedRoutes())

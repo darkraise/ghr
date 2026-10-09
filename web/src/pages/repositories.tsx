@@ -6,17 +6,29 @@ import { Spinner } from "darkraise-ui/components/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "darkraise-ui/components/tooltip"
 import { PageHeader } from "darkraise-ui/layout"
 import { X } from "lucide-react"
-import { useEffect, useState } from "react"
+import { type ReactNode, useEffect, useState } from "react"
 import { api } from "@/api/client"
 import { keys, useActivity, useConfig, useStatus } from "@/api/hooks"
 import { AddRepoDialog } from "@/components/add-repo-dialog"
+import { ErrorLine } from "@/components/page/error-line"
 import { Section } from "@/components/page/section"
 import { RepoTable } from "@/components/repo-table"
 import { WatchRepoDialog } from "@/components/watch-repo-dialog"
 import { reposSummary } from "@/lib/repos"
 import { useNow } from "@/lib/use-now"
+import { errorText } from "@/query"
 
-function WatchedSection({ names, offline, onWatch }: { names: string[]; offline: boolean; onWatch: () => void }) {
+function WatchedSection({
+  names,
+  error,
+  offline,
+  onWatch,
+}: {
+  names: string[]
+  error?: ReactNode
+  offline: boolean
+  onWatch: () => void
+}) {
   const queryClient = useQueryClient()
   const remove = useMutation({
     mutationFn: (name: string) => api.unwatchRepo(name),
@@ -37,6 +49,7 @@ function WatchedSection({ names, offline, onWatch }: { names: string[]; offline:
       }
     >
       <p className="text-sm text-muted-foreground">Their workflow runs show on the Actions page. ghr runs no runners for them.</p>
+      {error}
       {names.length > 0 && (
         <ul className="mt-3 flex flex-col divide-y divide-border">
           {names.map((name) => (
@@ -76,7 +89,7 @@ export function RepositoriesPage() {
 
   const st = status.data
   const watchedNames = config.data?.watch_repos
-  const ready = st !== undefined && config.data !== undefined
+  const ready = st !== undefined && (config.data !== undefined || config.isError)
   // Scrolled here rather than by the router, so a link to #watched works
   // whatever the router does with hashes.
   useEffect(() => {
@@ -120,7 +133,16 @@ export function RepositoriesPage() {
           </div>
         </Section>
       )}
-      {config.data && <WatchedSection names={watchedNames ?? []} offline={offline} onWatch={() => setWatching(true)} />}
+      {(config.data || config.isError) && (
+        <WatchedSection
+          names={watchedNames ?? []}
+          error={
+            config.isError && <ErrorLine onRetry={() => void config.refetch()}>{errorText(config.error)}</ErrorLine>
+          }
+          offline={offline}
+          onWatch={() => setWatching(true)}
+        />
+      )}
       <AddRepoDialog open={adding} onClose={() => setAdding(false)} />
       <WatchRepoDialog open={watching} onClose={() => setWatching(false)} />
     </div>
