@@ -111,6 +111,7 @@ type Backend struct {
 	actions actionsCache
 	wfFiles wfCache
 	details detailCache
+	logs    logCache
 }
 
 var _ api.Backend = (*Backend)(nil)
