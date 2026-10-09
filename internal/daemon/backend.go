@@ -109,6 +109,7 @@ type Backend struct {
 	activity   map[string]*activityEntry
 
 	actions actionsCache
+	wfFiles wfCache
 }
 
 var _ api.Backend = (*Backend)(nil)
