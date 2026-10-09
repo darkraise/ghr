@@ -52,7 +52,7 @@ while it installs the runner, so a queued runner update cannot run at the same t
 running runners are separate units and keep their jobs. If setup.sh fails after that, it
 starts ghr again.
 
-**Downgrading.** A config that lists `watch_repos` (the repositories the web UI's Actions page watches) is refused by any ghr older than that page. Remove the `watch_repos` key from the config file before installing an older release.
+**Downgrading.** A config that lists `watch_repos` (the repositories the web UI's Actions page watches) is refused by any ghr older than v0.1.18, the first release with that page. Remove the `watch_repos` key from the config file before installing an older release.
 
 ## Use
 
