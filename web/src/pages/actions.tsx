@@ -6,17 +6,14 @@ import { Spinner } from "darkraise-ui/components/spinner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "darkraise-ui/components/table"
 import { ToggleGroup, ToggleGroupItem } from "darkraise-ui/components/toggle-group"
 import { PageHeader } from "darkraise-ui/layout"
-import { Clock } from "lucide-react"
 import { useEffect } from "react"
 import { useActions, useConfig } from "@/api/hooks"
 import type { ActionsRun } from "@/api/types"
 import { ErrorLine } from "@/components/page/error-line"
 import { Section } from "@/components/page/section"
-import { ResultIcon } from "@/components/result-icon"
+import { RunStatusIcon } from "@/components/run-status-icon"
 import {
   actionsSummary,
-  isActive,
-  isQueued,
   repoErrorText,
   runMs,
   splitRuns,
@@ -33,25 +30,23 @@ import { errorText } from "@/query"
 
 const ALL = "__all__"
 
-function StatusIcon({ run }: { run: ActionsRun }) {
-  if (!isActive(run)) return <ResultIcon conclusion={run.conclusion} />
-  if (isQueued(run)) return <Clock role="img" aria-label="Queued" size={15} className="shrink-0 text-muted-foreground" />
-  return <Spinner size="sm" label={<span className="sr-only">Running</span>} />
-}
-
 function RunRow({ run, now, wide }: { run: ActionsRun; now: number; wide: boolean }) {
   const took = dur(runMs(run, now))
   const start = startText(run.started_at, now)
   return (
     <TableRow>
       <TableCell className="w-8 align-top">
-        <StatusIcon run={run} />
+        <RunStatusIcon status={run.status} conclusion={run.conclusion} />
       </TableCell>
       <TableCell className="align-top">
-        <a href={run.html_url} target="_blank" rel="noreferrer" className="font-medium hover:underline">
+        <Link
+          to="/actions/$repo/runs/$id"
+          params={{ repo: run.repo, id: String(run.id) }}
+          className="font-medium hover:underline"
+        >
           {run.title}
-          <span className="sr-only">{`, ${run.repo} #${run.run_number}, opens in a new tab`}</span>
-        </a>
+          <span className="sr-only">{`, ${run.repo} #${run.run_number}`}</span>
+        </Link>
         <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
           <span>{run.workflow}</span>
           <span>{run.repo}</span>

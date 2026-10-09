@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { json, mockApi } from "@/test/api"
-import { authedRoutes, fixtures } from "@/test/fixtures"
+import { authedRoutes, fixtures, runRoutes } from "@/test/fixtures"
 import { setViewport } from "@/test/media"
 import { renderApp } from "@/test/render"
 
@@ -22,9 +22,9 @@ describe("Actions page", () => {
     renderApp("/actions")
     await screen.findByRole("region", { name: "In progress" })
     const progress = region("In progress")
-    const link = progress.getByRole("link", { name: "Fix the cache key, darkmem #42, opens in a new tab" })
-    expect(link).toHaveAttribute("href", "https://github.com/darkraise/darkmem/actions/runs/102")
-    expect(link).toHaveAttribute("target", "_blank")
+    const link = progress.getByRole("link", { name: "Fix the cache key, darkmem #42" })
+    expect(link).toHaveAttribute("href", "/actions/darkmem/runs/102")
+    expect(link).not.toHaveAttribute("target")
     expect(progress.getByText("Running")).toBeInTheDocument()
     expect(progress.getByRole("img", { name: "Queued" })).toBeInTheDocument()
     expect(progress.getByText(/^4m0\ds$/)).toBeInTheDocument()
@@ -59,6 +59,15 @@ describe("Actions page", () => {
     const old = within(recent.getByRole("link", { name: /^deploy/ }).closest("tr") as HTMLElement)
     expect(old.getByText("Oct 2 14:05")).toBeInTheDocument()
     expect(old.queryByText("ghr")).toBeNull()
+  })
+
+  it("opens a run's page from its title", async () => {
+    mockApi(runRoutes())
+    const { user, router } = renderApp("/actions")
+    await screen.findByRole("region", { name: "In progress" })
+    await user.click(region("In progress").getByRole("link", { name: "Fix the cache key, darkmem #42" }))
+    expect(await screen.findByRole("heading", { name: "Fix the cache key", level: 1 })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/actions/darkmem/runs/102")
   })
 
   it("lists each repository that could not be read", async () => {
