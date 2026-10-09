@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -107,6 +108,45 @@ func TestDownloadErrors(t *testing.T) {
 			}
 			if !IsKind(err, tc.kind) {
 				t.Fatalf("err %#v, want kind %d", err, tc.kind)
+			}
+		})
+	}
+}
+
+func TestJobLogErrorsHideTheSignedURL(t *testing.T) {
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close()
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(slow.Close)
+	for _, tc := range []struct {
+		name     string
+		loc      string
+		timeout  time.Duration
+		deadline bool
+	}{
+		{name: "unreachable", loc: closed.URL + "/log?sig=secret"},
+		{name: "malformed", loc: "http://%zz/log?sig=secret"},
+		{name: "deadline", loc: slow.URL + "/log?sig=secret", timeout: 50 * time.Millisecond, deadline: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Location", tc.loc)
+				w.WriteHeader(http.StatusFound)
+			})
+			ctx := context.Background()
+			if tc.timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tc.timeout)
+				defer cancel()
+			}
+			_, err := c.JobLog(ctx, "darkmem", 1, 10)
+			if err == nil || strings.Contains(err.Error(), "sig=") || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("err %v", err)
+			}
+			if tc.deadline && !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("err %v, want a deadline", err)
 			}
 		})
 	}

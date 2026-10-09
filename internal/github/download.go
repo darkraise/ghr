@@ -7,6 +7,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -73,15 +75,15 @@ func (c *Client) redirectURL(ctx context.Context, u string) (string, error) {
 func (c *Client) JobLog(ctx context.Context, repo string, jobID int64, max int64) ([]byte, error) {
 	loc, err := c.redirectURL(ctx, c.repoURL(repo, fmt.Sprintf("/actions/jobs/%d/logs", jobID)))
 	if err != nil {
-		return nil, err
+		return nil, hideURL(err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, loc, nil)
 	if err != nil {
-		return nil, err
+		return nil, hideURL(err)
 	}
 	resp, err := c.Blob.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, hideURL(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -95,6 +97,20 @@ func (c *Client) JobLog(ctx context.Context, repo string, jobID int64, max int64
 		return nil, ErrTooLarge
 	}
 	return data, nil
+}
+
+// hideURL drops the address a *url.Error quotes: the signed log URL grants
+// access to the log until it expires. net/http quotes a Location it cannot
+// parse inside the inner error too, so that one is replaced whole.
+func hideURL(err error) error {
+	var ue *url.Error
+	if !errors.As(err, &ue) {
+		return err
+	}
+	if strings.HasPrefix(ue.Err.Error(), "failed to parse Location header") {
+		return errors.New("github: the log download address is malformed")
+	}
+	return fmt.Errorf("github: log download failed: %w", ue.Err)
 }
 
 // ArtifactURL returns the signed address of an artifact's zip without
