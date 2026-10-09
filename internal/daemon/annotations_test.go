@@ -112,6 +112,38 @@ func TestRunAnnotationsCountsUnreadAfterTheWait(t *testing.T) {
 	}
 }
 
+func TestRunAnnotationsCountsABusyDownloadAsUnread(t *testing.T) {
+	setAnnotationsWait(t, 2*time.Second)
+	setLogRequestWindow(t, 50*time.Millisecond)
+	b, _, gh := newBackend(t)
+	for id := int64(1); id <= 4; id++ {
+		logJobOf(gh, id, fmt.Sprintf("job %d", id), "x")
+	}
+	annotatedRun(gh, logJobOf(gh, 2001, "Build", "##[error]a"))
+	gh.logWait = make(chan struct{})
+	t.Cleanup(func() { close(gh.logWait) })
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for id := int64(1); id <= 4; id++ {
+		go b.JobLog(ctx, "darkmem", id)
+	}
+	waitCalls(t, gh, "JobLog", 4)
+	start := time.Now()
+	a, err := b.RunAnnotations(ctx, "darkmem", 102, 0)
+	if err != nil || a.Unread != 1 || a.Failed != 0 || len(a.Items) != 0 {
+		t.Fatalf("annotations %+v err %v", a, err)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("waited %v for a download that could not start", took)
+	}
+	b.logs.mu.Lock()
+	_, missed := b.logs.misses[2001]
+	b.logs.mu.Unlock()
+	if missed {
+		t.Fatal("a busy download was cached as a miss")
+	}
+}
+
 func TestRunAnnotationsCountsLogOutcomes(t *testing.T) {
 	b, _, gh := newBackend(t)
 	clock := frozenClock(b, actionsT0)

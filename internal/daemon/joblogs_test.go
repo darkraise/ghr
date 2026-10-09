@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -329,5 +330,78 @@ func TestJobLogPanicIsContained(t *testing.T) {
 	b.logs.mu.Unlock()
 	if left != 0 || len(b.logs.slots) != 0 {
 		t.Fatalf("%d calls and %d slots left held", left, len(b.logs.slots))
+	}
+}
+
+func TestLogRouteTellsAQueuedDownloadFromAStartedOne(t *testing.T) {
+	setLogRequestWindow(t, 100*time.Millisecond)
+	b, _, gh := newBackend(t)
+	for id := int64(1); id <= 5; id++ {
+		logJobOf(gh, id, fmt.Sprintf("job %d", id), "x")
+	}
+	gh.logWait = make(chan struct{})
+	release := sync.OnceFunc(func() { close(gh.logWait) })
+	t.Cleanup(release)
+	ctx := context.Background()
+	const (
+		started = "GitHub is still sending this log; try again shortly"
+		queued  = "ghr is reading other logs; try again shortly"
+	)
+	type answer struct {
+		id  int64
+		err error
+	}
+	answers := make(chan answer, 6)
+	ask := func(id int64) {
+		_, err := b.JobLog(ctx, "darkmem", id)
+		answers <- answer{id, err}
+	}
+	for id := int64(1); id <= 4; id++ {
+		go ask(id)
+	}
+	waitCalls(t, gh, "JobLog", 4)
+	go ask(5)
+	go ask(5) // joins the first caller's queued download
+	for range 6 {
+		a := <-answers
+		want := started
+		if a.id == 5 {
+			want = queued
+		}
+		var ae *api.Error
+		if !errors.As(a.err, &ae) || ae.Status != 503 || ae.Msg != want {
+			t.Errorf("job %d: %v, want 503 %q", a.id, a.err, want)
+		}
+	}
+	var ae *api.Error
+	if _, err := b.JobLog(ctx, "darkmem", 1); !errors.As(err, &ae) || ae.Msg != started {
+		t.Fatalf("joining a started download: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		b.logs.mu.Lock()
+		_, inFlight := b.logs.calls[5]
+		_, missed := b.logs.misses[5]
+		b.logs.mu.Unlock()
+		if missed {
+			t.Fatal("a busy download was cached as a miss")
+		}
+		if !inFlight {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the queued download never gave up")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	release()
+	for len(b.logs.slots) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the slots never freed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, err := b.JobLog(ctx, "darkmem", 5); err != nil || gh.count("JobLog darkmem 5") != 1 {
+		t.Fatalf("after the slots freed: err %v, %d downloads of job 5", err, gh.count("JobLog darkmem 5"))
 	}
 }

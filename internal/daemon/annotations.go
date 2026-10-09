@@ -72,9 +72,13 @@ wait:
 				out.Unread++
 				continue
 			}
-			if call.res.outcome == logParsed {
+			switch call.res.outcome {
+			case logParsed:
 				notes[j.ID] = call.res.notes
-			} else {
+			case logBusy:
+				out.Unread++
+				continue
+			default:
 				outcomes[j.ID] = call.res.outcome
 			}
 		}
