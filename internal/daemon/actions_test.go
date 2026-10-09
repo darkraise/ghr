@@ -1,9 +1,13 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -220,6 +224,35 @@ func TestActionsFailedHistoryMarksNothing(t *testing.T) {
 	}
 	if len(a.Runs) != 1 || a.Runs[0].GHR {
 		t.Fatalf("runs %+v", a.Runs)
+	}
+}
+
+func TestActionsWarnsOnceWhileHistoryReadsFail(t *testing.T) {
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	clock := frozenClock(b, actionsT0)
+	good := b.Hist
+	build := func(at time.Duration, h *history.Store) {
+		t.Helper()
+		clock.Store(actionsT0.Add(at).UnixNano())
+		b.Hist = h
+		if _, err := b.Actions(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bad := &history.Store{Path: t.TempDir()}
+	build(0, bad)
+	build(time.Minute, bad)
+	if n := strings.Count(logs.String(), "cannot read history"); n != 1 {
+		t.Fatalf("%d warnings while failing:\n%s", n, logs.String())
+	}
+	build(2*time.Minute, good)
+	build(3*time.Minute, bad)
+	if n := strings.Count(logs.String(), "cannot read history"); n != 2 {
+		t.Fatalf("%d warnings after a recovery:\n%s", n, logs.String())
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -137,6 +138,9 @@ type actionsCache struct {
 	val    model.Actions
 	good   map[string][]model.ActionsRun
 	goodAt time.Time
+	// histFailing holds whether the last build failed to read history, so a
+	// read that keeps failing warns once rather than at every build.
+	histFailing bool
 }
 
 // Actions shares one build between callers, so the fetch runs detached from
@@ -182,7 +186,11 @@ func (b *Backend) Actions(ctx context.Context) (model.Actions, error) {
 		cancel()
 	}
 
-	ours := b.ghrRuns()
+	ours, herr := b.ghrRuns()
+	if herr != nil && !c.histFailing {
+		log.Printf("actions: cannot read history, so no run is marked as ghr's: %v", herr)
+	}
+	c.histFailing = herr != nil
 	now := b.now()
 	out := model.Actions{FetchedAt: now, Runs: []model.ActionsRun{}, Repos: make([]model.ActionsRepo, 0, len(covered))}
 	// fetched_at keeps the last good build's time only while every
@@ -225,14 +233,14 @@ func (b *Backend) Actions(ctx context.Context) (model.Actions, error) {
 
 // ghrRuns reads live instances, then pending records, then history: a job
 // moves through them in that order, so one that moves mid-read is still seen.
-// A failed history read marks nothing.
-func (b *Backend) ghrRuns() map[string]bool {
+// A failed history read marks nothing and returns its error.
+func (b *Backend) ghrRuns() (map[string]bool, error) {
 	insts := b.M.Status().Instances
 	pend := b.M.Pending()
 	hist, err := b.Hist.Query("", "", time.Time{}, 0)
 	ours := map[string]bool{}
 	if err != nil {
-		return ours
+		return ours, err
 	}
 	for _, i := range insts {
 		if i.Job != nil && i.Job.RunID != 0 {
@@ -249,5 +257,5 @@ func (b *Backend) ghrRuns() map[string]bool {
 			ours[ghrRunKey(h.Repo, h.RunID)] = true
 		}
 	}
-	return ours
+	return ours, nil
 }
