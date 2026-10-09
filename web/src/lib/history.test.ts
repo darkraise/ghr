@@ -81,6 +81,7 @@ describe("resultWord", () => {
     ["success", "Succeeded"],
     ["cancelled", "Cancelled"],
     ["skipped", "Skipped"],
+    ["unknown", "Unknown"],
     ["failure", "Failed"],
     ["timed_out", "Failed"],
   ])("reads %s as %s", (conclusion, word) => {

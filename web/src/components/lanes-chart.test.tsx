@@ -30,13 +30,16 @@ describe("LanesChart", () => {
         { instance_id: "cccccc", repo: "darkmem", segments: [{ state: "starting", from: "2026-10-03T13:06:00Z", to: "2026-10-03T13:07:00Z" }] },
         { instance_id: "dddddd", repo: "darkmem", job: "docs", segments: [{ state: "cancelled", from: "2026-10-03T13:08:00Z", to: "2026-10-03T13:09:00Z" }] },
         { instance_id: "eeeeee", repo: "darkmem", job: "deploy", segments: [{ state: "skipped", from: "2026-10-03T13:10:00Z", to: "2026-10-03T13:11:00Z" }] },
+        { instance_id: "ffffff", repo: "darkmem", job: "pack", segments: [{ state: "unknown", from: "2026-10-03T13:12:00Z", to: "2026-10-03T13:13:00Z" }] },
       ],
     }
     const { container } = draw({ lanes: [...fixtures.activityLanes.lanes, extra] })
-    for (const state of ["failed", "succeeded", "running", "warm", "starting", "cancelled", "skipped"]) {
+    for (const state of ["failed", "succeeded", "running", "warm", "starting", "cancelled", "skipped", "unknown"]) {
       expect(container.querySelector(`rect[data-state="${state}"]`)).not.toBeNull()
     }
     expect(container.querySelector('rect[data-state="warm"]')).toHaveAttribute("stroke-dasharray", "3 2")
+    expect(container.querySelector('rect[data-state="unknown"]')).toHaveAttribute("stroke-dasharray", "3 2")
+    expect(screen.getByRole("img", { name: "darkmem, pack, result unknown, 1m00s" })).toBeInTheDocument()
     expect(container.querySelector(".ghr-pulse")).not.toBeNull()
   })
 

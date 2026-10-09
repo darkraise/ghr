@@ -79,12 +79,14 @@ func overlap(a0, a1, b0, b1 time.Time) time.Duration {
 	return e.Sub(s)
 }
 
-func tally(conclusion string, succeeded, failed, cancelled *int) {
+func tally(conclusion string, succeeded, failed, cancelled, unknown *int) {
 	switch finishedState(conclusion) {
 	case "succeeded":
 		*succeeded++
 	case "failed":
 		*failed++
+	case "unknown":
+		*unknown++
 	default:
 		*cancelled++
 	}
@@ -125,7 +127,7 @@ func buckets(in Input, sp spec, rs []model.ActivityRun, loc *time.Location) (tim
 		}
 		for _, h := range in.History {
 			if !h.FinishedAt.Before(s) && h.FinishedAt.Before(e) {
-				tally(h.Conclusion, &b.Succeeded, &b.Failed, &b.Cancelled)
+				tally(h.Conclusion, &b.Succeeded, &b.Failed, &b.Cancelled, &b.Unknown)
 			}
 		}
 		cpuSum, cpuN := 0.0, 0
@@ -165,14 +167,14 @@ func repoHours(in Input, loc *time.Location) []model.ActivityRepo {
 			hr := model.ActivityHour{Start: s.In(loc)}
 			for _, h := range in.History {
 				if strings.EqualFold(h.Repo, name) && !h.FinishedAt.Before(s) && h.FinishedAt.Before(e) {
-					tally(h.Conclusion, &hr.Succeeded, &hr.Failed, &hr.Cancelled)
+					tally(h.Conclusion, &hr.Succeeded, &hr.Failed, &hr.Cancelled, &hr.Unknown)
 				}
 			}
 			r.Hours[i] = hr
 		}
 		for _, h := range in.History {
 			if strings.EqualFold(h.Repo, name) && !h.FinishedAt.Before(weekFrom) && !h.FinishedAt.After(in.Now) {
-				tally(h.Conclusion, &r.Week.Succeeded, &r.Week.Failed, &r.Week.Cancelled)
+				tally(h.Conclusion, &r.Week.Succeeded, &r.Week.Failed, &r.Week.Cancelled, &r.Week.Unknown)
 			}
 		}
 		out = append(out, r)

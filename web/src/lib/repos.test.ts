@@ -7,9 +7,9 @@ const repo = (over: Partial<RepoStatus>): RepoStatus => ({ name: "darkmem", paus
 
 describe("weekRate", () => {
   it.each([
-    [{ succeeded: 46, failed: 2, cancelled: 1 }, 96],
-    [{ succeeded: 1, failed: 1, cancelled: 0 }, 50],
-    [{ succeeded: 0, failed: 0, cancelled: 4 }, undefined],
+    [{ succeeded: 46, failed: 2, cancelled: 1, unknown: 0 }, 96],
+    [{ succeeded: 1, failed: 1, cancelled: 0, unknown: 0 }, 50],
+    [{ succeeded: 0, failed: 0, cancelled: 4, unknown: 0 }, undefined],
     [undefined, undefined],
   ])("reads %j as %s", (week, rate) => {
     expect(weekRate(week)).toBe(rate)
@@ -18,7 +18,8 @@ describe("weekRate", () => {
 
 describe("weekText", () => {
   it("names every count", () => {
-    expect(weekText({ succeeded: 46, failed: 2, cancelled: 1 })).toBe("46 succeeded, 2 failed, 1 cancelled in 7 days")
+    expect(weekText({ succeeded: 46, failed: 2, cancelled: 1, unknown: 0 })).toBe("46 succeeded, 2 failed, 1 cancelled in 7 days")
+    expect(weekText({ succeeded: 46, failed: 2, cancelled: 1, unknown: 3 })).toBe("46 succeeded, 2 failed, 1 cancelled, 3 unknown in 7 days")
   })
 })
 

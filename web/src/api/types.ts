@@ -383,6 +383,7 @@ export interface ActivityBucket {
   succeeded: number
   failed: number
   cancelled: number
+  unknown: number
   waiting_max: number | null
   cpu_avg: number | null
 }
@@ -403,6 +404,7 @@ export interface ActivityHour {
   succeeded: number
   failed: number
   cancelled: number
+  unknown: number
 }
 
 export interface ActivityRepo {
@@ -415,6 +417,7 @@ export interface ActivityWeek {
   succeeded: number
   failed: number
   cancelled: number
+  unknown: number
 }
 
 export interface Activity {

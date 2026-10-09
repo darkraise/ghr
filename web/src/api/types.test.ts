@@ -76,7 +76,7 @@ describe("type fixtures", () => {
     expect(buckets.buckets).toHaveLength(25)
     expect(buckets.buckets[0]?.busy_pct).toBeNull()
     expect(buckets.repos[0]?.hours).toHaveLength(24)
-    expect(buckets.repos[0]?.week).toEqual({ succeeded: 1, failed: 1, cancelled: 0 })
+    expect(buckets.repos[0]?.week).toEqual({ succeeded: 1, failed: 1, cancelled: 0, unknown: 0 })
   })
 
   it("status carries the fields the UI reads", () => {

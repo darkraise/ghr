@@ -68,8 +68,9 @@ func TestCountsByConclusion(t *testing.T) {
 		job("b", at(13, 0), at(13, 6), "failure"),
 		job("c", at(13, 0), at(13, 7), "cancelled"),
 		job("d", at(13, 0), at(13, 8), "skipped"),
+		job("e", at(13, 0), at(13, 9), "unknown"),
 	}})
-	if b := bucketAt(t, a, at(13, 0)); b.Succeeded != 1 || b.Failed != 1 || b.Cancelled != 2 {
+	if b := bucketAt(t, a, at(13, 0)); b.Succeeded != 1 || b.Failed != 1 || b.Cancelled != 2 || b.Unknown != 1 {
 		t.Fatalf("counts %+v", b)
 	}
 }
@@ -131,6 +132,7 @@ func TestRepoHours(t *testing.T) {
 	a := Build(Input{Window: "1h", Now: now, Repos: []string{"darkmem", "darkcloud"}, History: []model.HistoryEntry{
 		job("a", at(13, 0), at(13, 10), "success"),
 		job("b", at(13, 20), at(13, 40), "failure"),
+		job("u", at(13, 20), at(13, 45), "unknown"),
 		{ID: "c", Repo: "removed-repo", Conclusion: "success", StartedAt: at(13, 0), FinishedAt: at(13, 5)},
 	}})
 	if len(a.Repos) != 2 || a.Repos[0].Repo != "darkmem" || a.Repos[1].Repo != "darkcloud" {
@@ -140,7 +142,7 @@ func TestRepoHours(t *testing.T) {
 	if len(hrs) != 24 || !hrs[23].Start.Equal(at(14, 0)) || !hrs[0].Start.Equal(time.Date(2026, 10, 2, 15, 0, 0, 0, time.UTC)) {
 		t.Fatalf("hours from %v to %v", hrs[0].Start, hrs[len(hrs)-1].Start)
 	}
-	if hrs[22].Succeeded != 1 || hrs[22].Failed != 1 || a.Repos[1].Hours[22].Succeeded != 0 {
+	if hrs[22].Succeeded != 1 || hrs[22].Failed != 1 || hrs[22].Unknown != 1 || a.Repos[1].Hours[22].Succeeded != 0 {
 		t.Fatalf("13:00 %+v", hrs[22])
 	}
 }
@@ -187,10 +189,11 @@ func TestRepoWeek(t *testing.T) {
 		entry("t", "darkmem", now.Add(-time.Hour), "timed_out"),
 		entry("c", "darkmem", now.Add(-time.Hour), "cancelled"),
 		entry("s", "darkmem", now.Add(-time.Hour), "skipped"),
+		entry("u", "darkmem", now.Add(-time.Hour), "unknown"),
 		entry("cased", "DarkMem", now.Add(-time.Minute), "success"),
 		entry("other", "ghr", now.Add(-time.Minute), "success"),
 	}})
-	if got := a.Repos[0].Week; got != (model.ActivityWeek{Succeeded: 2, Failed: 2, Cancelled: 2}) {
+	if got := a.Repos[0].Week; got != (model.ActivityWeek{Succeeded: 2, Failed: 2, Cancelled: 2, Unknown: 1}) {
 		t.Fatalf("darkmem week %+v", got)
 	}
 	if got := a.Repos[1].Week; got != (model.ActivityWeek{}) {

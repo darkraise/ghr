@@ -128,7 +128,7 @@ describe("RepoTable", () => {
       { wrapper },
     )
   }
-  const week = [{ repo: "darkmem", hours: [], week: { succeeded: 46, failed: 2, cancelled: 1 } }]
+  const week = [{ repo: "darkmem", hours: [], week: { succeeded: 46, failed: 2, cancelled: 1, unknown: 0 } }]
 
   it("keeps the Dashboard's columns by default", () => {
     draw()

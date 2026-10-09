@@ -85,7 +85,8 @@ func Build(in Input) model.Activity {
 }
 
 // finishedState maps a job conclusion to a segment state; anything that is
-// not a success, a cancellation or a skip counts as a failure.
+// not a success, a cancellation, a skip or unknown counts as a failure.
+// "unknown" is ghr's own conclusion for a job whose result it never learned.
 func finishedState(conclusion string) string {
 	switch conclusion {
 	case "success":
@@ -94,6 +95,8 @@ func finishedState(conclusion string) string {
 		return "cancelled"
 	case "skipped":
 		return "skipped"
+	case "unknown":
+		return "unknown"
 	default:
 		return "failed"
 	}

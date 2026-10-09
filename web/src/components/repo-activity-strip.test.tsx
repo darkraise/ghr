@@ -8,6 +8,7 @@ const hour = (i: number, over: Partial<ActivityHour> = {}): ActivityHour => ({
   succeeded: 0,
   failed: 0,
   cancelled: 0,
+  unknown: 0,
   ...over,
 })
 
@@ -26,6 +27,15 @@ describe("RepoActivityStrip", () => {
     expect(cells[23]).toHaveAttribute("data-open", "true")
     expect(cells[23]).toHaveClass("outline-primary")
     expect(cells[22]).not.toHaveAttribute("data-open")
+  })
+
+  it("keeps an hour with only unknown results neutral", () => {
+    const hours = Array.from({ length: 24 }, (_, i) => hour(i))
+    hours[3] = hour(3, { unknown: 1 })
+    hours[4] = hour(4, { succeeded: 1, unknown: 1 })
+    render(<RepoActivityStrip repo="darkmem" hours={hours} />)
+    const strip = screen.getByRole("img", { name: "darkmem, last 24 hours: 1 succeeded, 0 failed, 2 unknown" })
+    expect([...strip.children].map((c) => c.getAttribute("data-cell")).slice(3, 5)).toEqual(["unknown", "ok-1"])
   })
 
   it("says when nothing ran", () => {

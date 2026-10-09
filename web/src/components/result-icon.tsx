@@ -1,4 +1,4 @@
-import { Ban, Check, CircleSlash, X, type LucideIcon } from "lucide-react"
+import { Ban, Check, CircleHelp, CircleSlash, X, type LucideIcon } from "lucide-react"
 
 interface Result {
   label: string
@@ -13,6 +13,8 @@ const RESULTS: Record<string, Result | undefined> = {
   failure: FAILED,
   cancelled: { label: "Cancelled", Icon: Ban, className: "text-muted-foreground" },
   skipped: { label: "Skipped", Icon: CircleSlash, className: "text-muted-foreground" },
+  // ghr's own conclusion for a job whose result it never learned.
+  unknown: { label: "Unknown", Icon: CircleHelp, className: "text-muted-foreground" },
 }
 
 // Any other conclusion shows as failed, as the Dashboard has always shown it.

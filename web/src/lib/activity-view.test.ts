@@ -80,6 +80,7 @@ describe("activity view", () => {
       "13:00 to 14:00, 5 busy runner-minutes, 1 succeeded, 0 failed, 0 cancelled, at most 3 waiting, CPU 23%",
     )
     expect(bucketAria({ ...lastClosed, busy_pct: 8.3 }, { window: "24h", capacity: 2 })).toContain("8.3% busy against today's max of 2")
+    expect(bucketAria({ ...lastClosed, unknown: 2 }, buckets)).toContain("0 cancelled, 2 unknown, at most")
     const empty = bucketAria(buckets.buckets[0] as ActivityBucket, buckets)
     expect(empty).toContain("waiting not measured")
     expect(empty).toContain("CPU not measured")
@@ -89,6 +90,9 @@ describe("activity view", () => {
     expect(activitySummary(lanes)).toBe("3 jobs in the last hour, 1 failed, 1 running.")
     expect(activitySummary(buckets)).toBe("2 jobs in the last 24 hours, 1 failed.")
     expect(activitySummary({ ...lanes, lanes: [] })).toBe("No jobs ran in the last hour.")
+    const unknownOnly = buckets.buckets.map((b) => ({ ...b, succeeded: 0, failed: 0, cancelled: 0, unknown: 0 }))
+    unknownOnly[3] = { ...(unknownOnly[3] as ActivityBucket), unknown: 1 }
+    expect(activitySummary({ ...buckets, buckets: unknownOnly })).toBe("1 job in the last 24 hours, 0 failed.")
   })
 
   it("states retention and when metrics start", () => {

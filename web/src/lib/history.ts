@@ -69,12 +69,13 @@ export function median(values: number[]): number | undefined {
   return ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2
 }
 
-// As the result icons read them: anything not a success, a cancellation or a
-// skip is a failure.
+// As the result icons read them: anything not a success, a cancellation, a
+// skip or unknown is a failure.
 export function resultWord(conclusion: string): string {
   if (conclusion === "success") return "Succeeded"
   if (conclusion === "cancelled") return "Cancelled"
   if (conclusion === "skipped") return "Skipped"
+  if (conclusion === "unknown") return "Unknown"
   return "Failed"
 }
 

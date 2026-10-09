@@ -302,7 +302,7 @@ type ActivityRun struct {
 
 // ActivitySegment is a stretch of one state; To is null while it lasts.
 type ActivitySegment struct {
-	State string     `json:"state"` // starting | warm | running | succeeded | failed | cancelled | skipped
+	State string     `json:"state"` // starting | warm | running | finishing | succeeded | failed | cancelled | skipped | unknown
 	From  time.Time  `json:"from"`
 	To    *time.Time `json:"to"`
 }
@@ -315,6 +315,7 @@ type ActivityBucket struct {
 	Succeeded   int       `json:"succeeded"`
 	Failed      int       `json:"failed"`
 	Cancelled   int       `json:"cancelled"`
+	Unknown     int       `json:"unknown"`
 	WaitingMax  *int      `json:"waiting_max"`
 	CPUAvg      *float64  `json:"cpu_avg"`
 }
@@ -342,6 +343,7 @@ type ActivityWeek struct {
 	Succeeded int `json:"succeeded"`
 	Failed    int `json:"failed"`
 	Cancelled int `json:"cancelled"`
+	Unknown   int `json:"unknown"`
 }
 
 type ActivityHour struct {
@@ -349,4 +351,5 @@ type ActivityHour struct {
 	Succeeded int       `json:"succeeded"`
 	Failed    int       `json:"failed"`
 	Cancelled int       `json:"cancelled"`
+	Unknown   int       `json:"unknown"`
 }

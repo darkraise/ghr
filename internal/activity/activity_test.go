@@ -127,7 +127,7 @@ func TestLiveInstances(t *testing.T) {
 
 func TestConclusionStatesAndAbsentURL(t *testing.T) {
 	for conclusion, state := range map[string]string{
-		"success": "succeeded", "failure": "failed", "timed_out": "failed", "cancelled": "cancelled", "skipped": "skipped",
+		"success": "succeeded", "failure": "failed", "timed_out": "failed", "cancelled": "cancelled", "skipped": "skipped", "unknown": "unknown",
 	} {
 		a := Build(Input{Window: "1h", Now: now, History: []model.HistoryEntry{job("j", at(13, 30), at(13, 40), conclusion)}})
 		if got := a.Lanes[0].Runs[0].Segments[0].State; got != state {

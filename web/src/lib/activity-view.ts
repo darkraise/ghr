@@ -8,7 +8,7 @@ export const GUTTER = 64
 export const PAD_RIGHT = 8
 
 const HOUR = 3_600_000
-const JOB_STATES = new Set(["running", "succeeded", "failed", "cancelled", "skipped"])
+const JOB_STATES = new Set(["running", "succeeded", "failed", "cancelled", "skipped", "unknown"])
 
 const WORDS: Record<string, string | undefined> = {
   "1h": "the last hour",
@@ -26,6 +26,7 @@ const RESULT: Record<string, string | undefined> = {
   failed: "failed",
   cancelled: "cancelled",
   skipped: "skipped",
+  unknown: "result unknown",
 }
 
 export function hasJob(run: ActivityRun): boolean {
@@ -110,6 +111,7 @@ export function bucketAria(b: ActivityBucket, a: { window: string; capacity: num
     `${b.succeeded} succeeded`,
     `${b.failed} failed`,
     `${b.cancelled} cancelled`,
+    ...(b.unknown > 0 ? [`${b.unknown} unknown`] : []),
     b.waiting_max === null ? "waiting not measured" : `at most ${b.waiting_max} waiting`,
     b.cpu_avg === null ? "CPU not measured" : `CPU ${Math.round(b.cpu_avg)}%`,
   ].join(", ")
@@ -124,7 +126,7 @@ export function activitySummary(a: Activity): string {
     const running = jobs.filter((r) => r.segments.some((s) => s.state === "running" && s.to === null)).length
     return `${plural(jobs.length, "job")} in ${words}, ${failed} failed, ${running} running.`
   }
-  const total = a.buckets.reduce((n, b) => n + b.succeeded + b.failed + b.cancelled, 0)
+  const total = a.buckets.reduce((n, b) => n + b.succeeded + b.failed + b.cancelled + b.unknown, 0)
   if (total === 0) return `No jobs ran in ${words}.`
   const failed = a.buckets.reduce((n, b) => n + b.failed, 0)
   return `${plural(total, "job")} in ${words}, ${failed} failed.`

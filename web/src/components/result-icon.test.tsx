@@ -8,7 +8,8 @@ describe("ResultIcon", () => {
     ["failure", "Failed", "text-destructive"],
     ["cancelled", "Cancelled", "text-muted-foreground"],
     ["skipped", "Skipped", "text-muted-foreground"],
-    ["unknown", "Failed", "text-destructive"],
+    ["unknown", "Unknown", "text-muted-foreground"],
+    ["timed_out", "Failed", "text-destructive"],
   ])("draws %s", (conclusion, label, colour) => {
     render(<ResultIcon conclusion={conclusion} />)
     expect(screen.getByRole("img", { name: label })).toHaveClass(colour)

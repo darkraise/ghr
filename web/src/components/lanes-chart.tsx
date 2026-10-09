@@ -17,6 +17,7 @@ const SEGMENT: Record<string, string | undefined> = {
   failed: "fill-destructive/30 stroke-destructive/70",
   cancelled: "fill-muted stroke-muted-foreground",
   skipped: "fill-muted stroke-muted-foreground",
+  unknown: "fill-muted stroke-muted-foreground",
 }
 
 type Point = { x: number; y: number }
@@ -58,7 +59,7 @@ function RunMark({
             height={LANE_H - 1}
             rx={2}
             strokeWidth={1}
-            strokeDasharray={s.state === "warm" ? "3 2" : undefined}
+            strokeDasharray={s.state === "warm" || s.state === "unknown" ? "3 2" : undefined}
             className={`ghr-mark-box ${SEGMENT[s.state] ?? "fill-muted stroke-muted-foreground"}`}
           />
         )
