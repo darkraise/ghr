@@ -313,3 +313,21 @@ func TestRawJobLog(t *testing.T) {
 		}
 	}
 }
+
+func TestJobLogPanicIsContained(t *testing.T) {
+	b, _, gh := newBackend(t)
+	logJobOf(gh, 1002, "Backend tests", "##[error]F401 unused")
+	p := &panickyGH{GitHub: gh, jobLog: true}
+	b.GH = p
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := b.JobLog(ctx, "darkmem", 1002); err == nil {
+		t.Fatal("a panicking download answered without an error")
+	}
+	b.logs.mu.Lock()
+	left := len(b.logs.calls)
+	b.logs.mu.Unlock()
+	if left != 0 || len(b.logs.slots) != 0 {
+		t.Fatalf("%d calls and %d slots left held", left, len(b.logs.slots))
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -72,7 +73,14 @@ func (b *Backend) workflowFile(ctx context.Context, repo, sha, path string) ([]b
 // runGraph builds the job graph of a run from its workflow file at sha. When
 // no graph can be drawn it returns the note that says why; an error means
 // the run details call fails as a whole.
-func (b *Backend) runGraph(ctx context.Context, repo, sha, path string, jobs []github.Job) (*model.RunGraph, string, error) {
+func (b *Backend) runGraph(ctx context.Context, repo, sha, path string, jobs []github.Job) (graph *model.RunGraph, note string, err error) {
+	// A defect in reading a workflow file costs the graph, not the run page.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("run graph %s: panic: %v", path, r)
+			graph, note, err = nil, fmt.Sprintf(noteInvalid, path), nil
+		}
+	}()
 	if !strings.HasPrefix(path, ".github/workflows/") {
 		return nil, noteNoFile, nil
 	}

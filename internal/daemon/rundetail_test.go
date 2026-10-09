@@ -260,3 +260,63 @@ func TestRunDetailCallersShareOneFetch(t *testing.T) {
 		t.Fatalf("%d GetRun calls, want 1", n)
 	}
 }
+
+// panickyGH panics where its flags say, to check that a failure inside a
+// GitHub call is contained.
+type panickyGH struct {
+	GitHub
+	run, jobLog, content bool
+}
+
+func (p *panickyGH) GetContent(ctx context.Context, repo, path, ref string) ([]byte, error) {
+	if p.content {
+		panic("boom")
+	}
+	return p.GitHub.GetContent(ctx, repo, path, ref)
+}
+
+func (p *panickyGH) GetRun(ctx context.Context, repo string, id int64) (*github.Run, error) {
+	if p.run {
+		panic("boom")
+	}
+	return p.GitHub.GetRun(ctx, repo, id)
+}
+
+func (p *panickyGH) JobLog(ctx context.Context, repo string, jobID int64, limit int64) ([]byte, error) {
+	if p.jobLog {
+		panic("boom")
+	}
+	return p.GitHub.JobLog(ctx, repo, jobID, limit)
+}
+
+func TestRunDetailPanicLeavesNoCallBehind(t *testing.T) {
+	b, _, gh := newBackend(t)
+	detailRun(gh, "completed")
+	p := &panickyGH{GitHub: gh, run: true}
+	b.GH = p
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var ae *api.Error
+	if _, err := b.RunDetail(ctx, "darkmem", 102, 0); !errors.As(err, &ae) || ae.Status != 502 {
+		t.Fatalf("panic answered %v, want a 502", err)
+	}
+	b.details.mu.Lock()
+	left := len(b.details.calls)
+	b.details.mu.Unlock()
+	if left != 0 {
+		t.Fatalf("%d calls left in flight", left)
+	}
+	p.run = false
+	if _, err := b.RunDetail(ctx, "darkmem", 102, 0); err != nil {
+		t.Fatalf("the next request failed: %v", err)
+	}
+}
+
+func TestRunGraphPanicCostsOnlyTheGraph(t *testing.T) {
+	b, _, gh := newBackend(t)
+	b.GH = &panickyGH{GitHub: gh, content: true}
+	g, note, err := b.runGraph(context.Background(), "darkmem", "abc", ciPath, nil)
+	if err != nil || g != nil || note != fmt.Sprintf(noteInvalid, ciPath) {
+		t.Fatalf("graph %v, note %q, err %v", g, note, err)
+	}
+}

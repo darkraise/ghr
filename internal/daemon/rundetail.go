@@ -189,9 +189,7 @@ func (b *Backend) RunDetail(ctx context.Context, repo string, id int64, attempt 
 	c.calls[key] = call
 	c.mu.Unlock()
 
-	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), detailDeadline)
-	call.val, call.err = b.fetchDetail(fctx, name, watched, id, attempt)
-	cancel()
+	call.val, call.err = b.fetchDetailSafely(ctx, name, watched, id, attempt)
 	call.err = detailErr(call.err, b.Store.Config().Owner, name)
 
 	c.mu.Lock()
@@ -220,6 +218,21 @@ func (b *Backend) RunDetail(ctx context.Context, repo string, id int64, attempt 
 	c.mu.Unlock()
 	close(call.done)
 	return call.val, call.err
+}
+
+// fetchDetailSafely turns a panic in the fetch into an error: the call must
+// still leave c.calls and close done, or every later request for the run
+// would wait on it for good.
+func (b *Backend) fetchDetailSafely(ctx context.Context, name string, watched bool, id int64, attempt int) (val model.RunDetail, err error) {
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), detailDeadline)
+	defer cancel()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("run %d detail: panic: %v", id, r)
+			val, err = model.RunDetail{}, errors.New("could not read the run")
+		}
+	}()
+	return b.fetchDetail(fctx, name, watched, id, attempt)
 }
 
 func (c *detailCache) evictOldest() {

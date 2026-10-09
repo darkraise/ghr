@@ -118,31 +118,12 @@ func (b *Backend) startLogLocked(j logJob) *logCall {
 // waiting still leaves the result in the caches.
 func (b *Backend) downloadLog(j logJob, call *logCall) {
 	c := &b.logs
-	c.slots <- struct{}{}
-	ctx, cancel := context.WithTimeout(context.Background(), logDeadline)
-	data, err := b.GH.JobLog(ctx, j.repo, j.id, parseLimit)
-	cancel()
-	<-c.slots
-
-	var res logResult
-	switch {
-	case err == nil:
-		steps := joblog.Parse(data, j.steps)
-		items, omitted := joblog.Annotations(j.id, j.name, steps)
-		res = logResult{outcome: logParsed, log: model.JobLog{JobID: j.id, Steps: steps}, notes: jobNotes{items: items, omitted: omitted}}
-	case errors.Is(err, github.ErrTooLarge):
-		res.outcome = logTooLarge
-	case github.IsKind(err, github.ErrGone):
-		res.outcome = logExpired
-	default:
-		res.outcome, res.err = logFailed, err
-		log.Printf("job %d log: %v", j.id, err)
-	}
+	res, size := b.readLog(j)
 
 	c.mu.Lock()
 	delete(c.calls, j.id)
 	if res.outcome == logParsed {
-		c.parsed.add(j.id, res.log, int64(len(data)))
+		c.parsed.add(j.id, res.log, size)
 		c.notes.add(j.id, res.notes, 0)
 		delete(c.misses, j.id)
 	} else {
@@ -151,6 +132,39 @@ func (b *Backend) downloadLog(j logJob, call *logCall) {
 	c.mu.Unlock()
 	call.res = res
 	close(call.done)
+}
+
+// readLog downloads and parses one job's log. This runs on a detached
+// goroutine, where a panic would end the daemon, so it becomes a failed
+// outcome; the download slot is released either way.
+func (b *Backend) readLog(j logJob) (res logResult, size int64) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("job %d log: panic: %v", j.id, r)
+			res, size = logResult{outcome: logFailed, err: errors.New("could not read the log")}, 0
+		}
+	}()
+	c := &b.logs
+	c.slots <- struct{}{}
+	data, err := func() ([]byte, error) {
+		defer func() { <-c.slots }()
+		ctx, cancel := context.WithTimeout(context.Background(), logDeadline)
+		defer cancel()
+		return b.GH.JobLog(ctx, j.repo, j.id, parseLimit)
+	}()
+
+	switch {
+	case err == nil:
+		steps := joblog.Parse(data, j.steps)
+		items, omitted := joblog.Annotations(j.id, j.name, steps)
+		return logResult{outcome: logParsed, log: model.JobLog{JobID: j.id, Steps: steps}, notes: jobNotes{items: items, omitted: omitted}}, int64(len(data))
+	case errors.Is(err, github.ErrTooLarge):
+		return logResult{outcome: logTooLarge}, 0
+	case github.IsKind(err, github.ErrGone):
+		return logResult{outcome: logExpired}, 0
+	}
+	log.Printf("job %d log: %v", j.id, err)
+	return logResult{outcome: logFailed, err: err}, 0
 }
 
 func flaggedLog(id int64, o logOutcome) model.JobLog {
