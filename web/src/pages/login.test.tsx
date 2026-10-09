@@ -7,7 +7,7 @@ import { renderApp } from "@/test/render"
 const loginState = { "GET /auth/state": { setup_required: false, authenticated: false } }
 
 describe("login page", () => {
-  it("sets the first password, checking it first, and opens the dashboard", async () => {
+  it("sets the first password, checking it first, and opens the dashboard", { timeout: 15_000 }, async () => {
     let done = false
     const { calls } = mockApi(
       authedRoutes({

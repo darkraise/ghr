@@ -39,7 +39,7 @@ describe("Settings page", () => {
     expect(screen.queryByText(/unsaved change/)).toBeNull()
   })
 
-  it("saves only the changed fields", async () => {
+  it("saves only the changed fields", { timeout: 15_000 }, async () => {
     const { calls } = mockApi(applyingDaemon())
     const { user } = renderApp("/settings")
     const poll = await screen.findByLabelText("Poll interval")

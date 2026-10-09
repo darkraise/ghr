@@ -141,7 +141,8 @@ describe("History page", () => {
     expect(await screen.findByText("#7")).toBeInTheDocument()
   })
 
-  it("says when the 500-job cap cut the window short", async () => {
+  // Rendering 500 rows in jsdom takes about 13 s on a heavily loaded host.
+  it("says when the 500-job cap cut the window short", { timeout: 30_000 }, async () => {
     const [build] = fixtures.history as [HistoryEntry]
     const many = Array.from({ length: 500 }, (_, i) => ({ ...build, id: `h${i}` }))
     mockApi(authedRoutes({ "GET /api/history": many }))
