@@ -217,10 +217,14 @@ func (c *Client) record(gen uint64, h http.Header, apiErr *APIError) {
 		c.meta.CheckedAt, c.meta.OK = c.Now(), true
 	// Contents: read is optional (only the run graph reads files), so a 403
 	// on a contents path means that permission is missing, not a bad token.
-	case apiErr.Kind == ErrAuth && !(apiErr.Status == 403 && strings.Contains(apiErr.Path, "/contents/")):
+	case apiErr.Kind == ErrAuth && !(apiErr.Status == 403 && contentsPathRe.MatchString(apiErr.Path)):
 		c.meta.CheckedAt, c.meta.OK = c.Now(), false
 	}
 }
+
+// contentsPathRe matches the contents endpoint of any repository, not a
+// repository that happens to be named contents.
+var contentsPathRe = regexp.MustCompile(`^/repos/[^/]+/[^/]+/contents/`)
 
 // parseExpiry reads GitHub's token expiry header, "2026-12-31 23:59:59 UTC".
 func parseExpiry(v string) (time.Time, bool) {
