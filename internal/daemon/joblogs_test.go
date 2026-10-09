@@ -139,7 +139,7 @@ func TestJobLogRefusals(t *testing.T) {
 			t.Fatalf("%s uncovered: %v", name, err)
 		}
 	}
-	if gh.count("JobLog") != 0 {
+	if gh.count("JobLog") != 0 || gh.count("OpenJobLog") != 0 {
 		t.Fatalf("an unfinished job's log was downloaded: %v", gh.calls)
 	}
 	m.degraded = "401 Bad credentials"
