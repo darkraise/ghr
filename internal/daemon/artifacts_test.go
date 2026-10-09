@@ -21,6 +21,7 @@ func TestDownloadHost(t *testing.T) {
 		"https://evilgithubusercontent.com/x":                                            false,
 		"https://githubusercontent.com/x":                                                false,
 		"https://pipelines.actions.githubusercontent.com@example.com/x":                  false,
+		"https://pipelines.actions.githubusercontent.com:8443/x":                         true,
 		"https://example.com#.githubusercontent.com":                                     false,
 		"https://example.com/.githubusercontent.com":                                     false,
 		"/relative": false,
