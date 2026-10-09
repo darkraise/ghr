@@ -47,6 +47,9 @@ type Config struct {
 	Labels           []string     `yaml:"labels" json:"labels"`
 	RunnerLimits     RunnerLimits `yaml:"runner_limits" json:"runner_limits"`
 	Repos            []Repo       `yaml:"repos" json:"repos"`
+	// WatchRepos are repositories whose workflow runs the Actions page shows;
+	// ghr runs no runners for them.
+	WatchRepos []string `yaml:"watch_repos,omitempty" json:"watch_repos,omitempty"`
 	// Web is read at daemon start only; changing it needs a restart.
 	Web Web `yaml:"web,omitempty" json:"web,omitzero"`
 }
@@ -237,6 +240,16 @@ func (c *Config) Repo(name string) *Repo {
 	return nil
 }
 
+// Watched reports whether name is in watch_repos, ignoring case.
+func (c *Config) Watched(name string) bool {
+	for _, w := range c.WatchRepos {
+		if strings.EqualFold(w, name) {
+			return true
+		}
+	}
+	return false
+}
+
 // EffectiveMax returns the repo's cap; 0 means unlimited.
 // An omitted max is 1 in queue mode and unlimited in all mode.
 func (c *Config) EffectiveMax(r Repo) int {
@@ -347,6 +360,28 @@ func (c *Config) Validate() ([]string, error) {
 		}
 		if len(r.CleanupNamePrefixes) > 0 && c.EffectiveMax(r) != 1 {
 			warnings = append(warnings, r.Name+": cleanup_name_prefixes can remove a concurrent job's containers when max is not 1")
+		}
+	}
+	watched := map[string]bool{}
+	for _, w := range c.WatchRepos {
+		name := strings.TrimSpace(w)
+		if name == "" {
+			errs = append(errs, "watch_repos must not contain an empty name")
+			continue
+		}
+		if name != w {
+			errs = append(errs, "watch_repos: "+w+" must not have surrounding spaces")
+		}
+		if strings.Contains(name, "/") {
+			errs = append(errs, "watch_repos: "+w+" must be a repository name under owner, without a slash")
+		}
+		key := strings.ToLower(name)
+		if watched[key] {
+			errs = append(errs, "duplicate watched repo "+w+" (names are case-insensitive)")
+		}
+		watched[key] = true
+		if seen[key] {
+			errs = append(errs, "watch_repos: "+w+" is already a configured repo")
 		}
 	}
 	if c.Web.Listen != "" {

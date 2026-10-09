@@ -96,11 +96,16 @@ func TestValidateErrors(t *testing.T) {
 		"darkcloud: cleanup_name_prefixes must not contain an empty prefix": func(c *Config) {
 			c.Repos[0].CleanupNamePrefixes = []string{"dc-e2e-", " "}
 		},
-		"darkmem: a repo being removed must stay paused": func(c *Config) { c.Repos[1].Removing = true },
-		"runner_limits.memory_max":                       func(c *Config) { c.RunnerLimits.MemoryMax = "6 gigs" },
-		"runner_limits.cpu_quota":                        func(c *Config) { c.RunnerLimits.CPUQuota = "2" },
-		"poll_interval must be >= 5s":                    func(c *Config) { c.PollInterval = Duration(time.Millisecond) },
-		"history_retention must be >= 1d":                func(c *Config) { c.HistoryRetention = Duration(time.Second) },
+		"darkmem: a repo being removed must stay paused":       func(c *Config) { c.Repos[1].Removing = true },
+		"runner_limits.memory_max":                             func(c *Config) { c.RunnerLimits.MemoryMax = "6 gigs" },
+		"runner_limits.cpu_quota":                              func(c *Config) { c.RunnerLimits.CPUQuota = "2" },
+		"poll_interval must be >= 5s":                          func(c *Config) { c.PollInterval = Duration(time.Millisecond) },
+		"history_retention must be >= 1d":                      func(c *Config) { c.HistoryRetention = Duration(time.Second) },
+		"watch_repos must not contain an empty name":           func(c *Config) { c.WatchRepos = []string{" "} },
+		"watch_repos:  docs  must not have surrounding spaces": func(c *Config) { c.WatchRepos = []string{" docs "} },
+		"watch_repos: other/docs must be a repository name":    func(c *Config) { c.WatchRepos = []string{"other/docs"} },
+		"duplicate watched repo Docs":                          func(c *Config) { c.WatchRepos = []string{"docs", "Docs"} },
+		"watch_repos: DarkMem is already a configured repo":    func(c *Config) { c.WatchRepos = []string{"DarkMem"} },
 	}
 	for want, mutate := range cases {
 		c, _, err := Parse([]byte(sample))
@@ -386,5 +391,42 @@ func TestEmptyOwnerValidates(t *testing.T) {
 		if c.Owner != want {
 			t.Fatalf("owner %s: got %q, want %q", owner, c.Owner, want)
 		}
+	}
+}
+
+func TestWatchReposRoundTripAndLookup(t *testing.T) {
+	c, _, err := Parse([]byte(sample + "watch_repos: [docs]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Watched("DOCS") || c.Watched("darkmem") {
+		t.Fatalf("Watched: %v", c.WatchRepos)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	back, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.WatchRepos) != 1 || back.WatchRepos[0] != "docs" {
+		t.Fatalf("round trip: %v", back.WatchRepos)
+	}
+	if d := back.Clone(); len(d.WatchRepos) != 1 {
+		t.Fatalf("clone lost watch_repos: %v", d.WatchRepos)
+	}
+
+	plain, _, _ := Parse([]byte(sample))
+	data, _ := json.Marshal(plain)
+	if strings.Contains(string(data), "watch_repos") {
+		t.Fatalf("empty watch_repos marshalled: %s", data)
+	}
+	if err := Save(path, plain); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if strings.Contains(string(raw), "watch_repos") {
+		t.Fatalf("empty watch_repos saved:\n%s", raw)
 	}
 }
