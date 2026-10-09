@@ -319,6 +319,135 @@ type ActionsRepo struct {
 	RetryAt *time.Time `json:"retry_at,omitempty"`
 }
 
+// RunDetail is GET /actions/{repo}/runs/{id}: one attempt of a workflow run.
+// Attempts is the run's latest attempt number. Graph is nil when GraphNote
+// says why the page draws a timeline instead.
+type RunDetail struct {
+	Repo         string        `json:"repo"`
+	Watched      bool          `json:"watched"`
+	ID           int64         `json:"id"`
+	RunNumber    int64         `json:"run_number"`
+	Attempt      int           `json:"attempt"`
+	Attempts     int           `json:"attempts"`
+	Workflow     string        `json:"workflow"`
+	Title        string        `json:"title"`
+	Branch       string        `json:"branch"`
+	Event        string        `json:"event"`
+	Actor        string        `json:"actor"`
+	Status       string        `json:"status"`
+	Conclusion   string        `json:"conclusion"`
+	HeadSHA      string        `json:"head_sha"`
+	Path         string        `json:"path"`
+	PullRequests []int         `json:"pull_requests"`
+	StartedAt    time.Time     `json:"started_at"`
+	UpdatedAt    time.Time     `json:"updated_at"`
+	HTMLURL      string        `json:"html_url"`
+	Jobs         []RunJob      `json:"jobs"`
+	Graph        *RunGraph     `json:"graph,omitempty"`
+	GraphNote    string        `json:"graph_note,omitempty"`
+	Artifacts    []RunArtifact `json:"artifacts"`
+	FetchedAt    time.Time     `json:"fetched_at"`
+}
+
+// RunJob is one job of a run attempt; GHR is set when ghr's runners ran a
+// job of that name in the run.
+type RunJob struct {
+	ID          int64      `json:"id"`
+	Name        string     `json:"name"`
+	Status      string     `json:"status"`
+	Conclusion  string     `json:"conclusion"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	RunnerName  string     `json:"runner_name"`
+	Labels      []string   `json:"labels"`
+	HTMLURL     string     `json:"html_url"`
+	GHR         bool       `json:"ghr"`
+	Steps       []Step     `json:"steps"`
+}
+
+type RunGraph struct {
+	Nodes []GraphNode `json:"nodes"`
+}
+
+// GraphNode is one workflow job: Key is its YAML ID, Column the length of
+// its longest needs chain, JobIDs its jobs in the jobs API's order. Group is
+// set for a matrix or a reusable-workflow caller.
+type GraphNode struct {
+	Key    string   `json:"key"`
+	Name   string   `json:"name"`
+	Column int      `json:"column"`
+	Needs  []string `json:"needs"`
+	JobIDs []int64  `json:"job_ids"`
+	Group  bool     `json:"group"`
+}
+
+type RunArtifact struct {
+	ID        int64      `json:"id"`
+	Name      string     `json:"name"`
+	SizeBytes int64      `json:"size_bytes"`
+	Expired   bool       `json:"expired"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+// RunAnnotations is GET /actions/{repo}/runs/{id}/annotations. Omitted counts,
+// per job ID, the annotations beyond the per-job cap; Unread counts finished
+// jobs whose logs were not ready within the wait.
+type RunAnnotations struct {
+	Items       []Annotation  `json:"items"`
+	Omitted     map[int64]int `json:"omitted"`
+	Unread      int           `json:"unread"`
+	ExpiredLogs int           `json:"expired_logs"`
+	TooLarge    int           `json:"too_large"`
+	Failed      int           `json:"failed"`
+}
+
+// Annotation is an error, warning or notice line of a job log; Line counts
+// within its step.
+type Annotation struct {
+	Level    string `json:"level"`
+	JobID    int64  `json:"job_id"`
+	JobName  string `json:"job_name"`
+	Step     int    `json:"step"`
+	StepName string `json:"step_name"`
+	Line     int    `json:"line"`
+	Message  string `json:"message"`
+}
+
+// JobLog is GET /actions/{repo}/jobs/{jobId}/log: a finished job's log split
+// into its steps.
+type JobLog struct {
+	JobID    int64     `json:"job_id"`
+	TooLarge bool      `json:"too_large"`
+	Expired  bool      `json:"expired"`
+	Steps    []LogStep `json:"steps"`
+}
+
+type LogStep struct {
+	Number int       `json:"number"`
+	Name   string    `json:"name"`
+	Lines  []LogLine `json:"lines"`
+}
+
+// LogLine is one log line. Kind is "", group, endgroup, error, warning,
+// notice, command or debug; Text has the ##[kind] prefix removed and keeps
+// ANSI escapes.
+type LogLine struct {
+	N    int    `json:"n"`
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+}
+
+// RawLog is GET /actions/{repo}/jobs/{jobId}/log/raw.
+type RawLog struct {
+	Text string `json:"text"`
+}
+
+// DownloadURL is GET /actions/{repo}/artifacts/{id}/download: GitHub's
+// signed address, valid for about a minute.
+type DownloadURL struct {
+	URL string `json:"url"`
+}
+
 // Activity is GET /activity: what the runners did over a window, as lanes of
 // runs (1h, 3h) or time buckets (24h, 7d, 30d), with every time in TZ.
 type Activity struct {
