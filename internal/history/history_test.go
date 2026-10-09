@@ -119,6 +119,7 @@ func TestQuerySince(t *testing.T) {
 		{"", "", time.Time{}, 0, "later,after,at,before"},
 		{"", "", t0, 0, "later,after,at"},
 		{"a", "", t0, 0, "later,at"},
+		{"B", "", time.Time{}, 0, "after"},
 		{"", "success", t0, 0, "later,after"},
 		{"", "", t0, 2, "later,after"},
 		{"", "", t0.Add(2 * time.Hour), 0, ""},
