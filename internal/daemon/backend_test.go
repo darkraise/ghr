@@ -91,13 +91,14 @@ func (f *fakeManager) Kill(ctx context.Context, id string) error {
 func (f *fakeManager) ClearDegraded() { f.cleared = true }
 
 type fakeGH struct {
-	repos   map[string]*github.Repository
-	forgot  bool
-	meta    github.TokenMeta
-	runners map[int64]github.Runner
-	getErr  error
-	delErr  error
-	deleted []int64
+	repos    map[string]*github.Repository
+	forgot   bool
+	meta     github.TokenMeta
+	runners  map[int64]github.Runner
+	getErr   error
+	delErr   error
+	deleted  []int64
+	getCalls int // GetRepo calls
 
 	userRepos []github.UserRepo
 	repoErr   error // returned by ListUserRepos
@@ -122,6 +123,7 @@ func (f *fakeGH) ListUserRepos(context.Context) ([]github.UserRepo, error) {
 }
 
 func (f *fakeGH) GetRepo(ctx context.Context, repo string) (*github.Repository, error) {
+	f.getCalls++
 	r, ok := f.repos[repo]
 	if !ok {
 		return nil, &github.APIError{Status: 404, Kind: github.ErrNotFound}
@@ -1070,5 +1072,126 @@ func TestRunnerStepsCarryTimes(t *testing.T) {
 	if err != nil || len(s) != 2 || s[0].StartedAt == nil || !s[0].StartedAt.Equal(start) || s[0].CompletedAt == nil ||
 		!s[0].CompletedAt.Equal(end) || s[1].StartedAt != nil || s[1].CompletedAt != nil {
 		t.Fatalf("steps %+v err %v", s, err)
+	}
+}
+
+func TestWatchRepo(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	for _, c := range []struct {
+		name   string
+		status int
+		text   string
+	}{
+		{" ", 400, "required"},
+		{"missing", 400, "repository access"},
+		{"DarkCloud", 409, "already configured"},
+	} {
+		if err := b.WatchRepo(ctx, c.name); apiStatus(err) != c.status || !strings.Contains(err.Error(), c.text) {
+			t.Errorf("WatchRepo(%q) = %v", c.name, err)
+		}
+	}
+	if err := b.WatchRepo(ctx, "public"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.WatchRepo(ctx, "Public"); apiStatus(err) != 409 || !strings.Contains(err.Error(), "already watched") {
+		t.Fatalf("second watch: %v", err)
+	}
+	if got := b.Store.Config().WatchRepos; len(got) != 1 || got[0] != "public" {
+		t.Fatalf("watch_repos %v", got)
+	}
+	if _, err := b.Store.Update(func(c *config.Config) error {
+		r := c.Repo("darkmem")
+		r.Paused, r.Removing = true, true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.WatchRepo(ctx, "darkmem"); apiStatus(err) != 409 {
+		t.Fatalf("repo being removed: %v", err)
+	}
+}
+
+func TestUnwatchRepoNeverAsksGitHub(t *testing.T) {
+	b, _, gh := newBackend(t)
+	if err := b.WatchRepo(context.Background(), "public"); err != nil {
+		t.Fatal(err)
+	}
+	delete(gh.repos, "public")
+	before := gh.getCalls
+	if err := b.UnwatchRepo("nope"); apiStatus(err) != 404 {
+		t.Fatalf("unknown: %v", err)
+	}
+	if err := b.UnwatchRepo("PUBLIC"); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.Store.Config().WatchRepos; len(got) != 0 {
+		t.Fatalf("watch_repos %v", got)
+	}
+	if gh.getCalls != before {
+		t.Fatalf("unwatch called GetRepo %d times", gh.getCalls-before)
+	}
+}
+
+func TestConcurrentUnwatchSucceedsOnce(t *testing.T) {
+	b, _, _ := newBackend(t)
+	if err := b.WatchRepo(context.Background(), "public"); err != nil {
+		t.Fatal(err)
+	}
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() { errs <- b.UnwatchRepo("public") }()
+	}
+	first, second := <-errs, <-errs
+	if (first == nil) == (second == nil) || (apiStatus(first) != 404 && apiStatus(second) != 404) {
+		t.Fatalf("errors %v and %v, want one success and one 404", first, second)
+	}
+}
+
+func TestAddRepoTakesOverAWatchedRepo(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	if err := b.WatchRepo(ctx, "newrepo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "newrepo", Labels: []string{"x"}}); err != nil {
+		t.Fatal(err)
+	}
+	c := b.Store.Config()
+	if c.Repo("newrepo") == nil || len(c.WatchRepos) != 0 {
+		t.Fatalf("repos %+v watch_repos %v", c.Repos, c.WatchRepos)
+	}
+}
+
+func TestPatchConfigKeepsWatchRepos(t *testing.T) {
+	b, _, _ := newBackend(t)
+	if err := b.WatchRepo(context.Background(), "public"); err != nil {
+		t.Fatal(err)
+	}
+	three := 3
+	if err := b.PatchConfig(model.ConfigPatch{GlobalMax: &three}); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.Store.Config().WatchRepos; len(got) != 1 || got[0] != "public" {
+		t.Fatalf("watch_repos %v", got)
+	}
+}
+
+func TestAvailableReposMarksWatched(t *testing.T) {
+	b, _, gh := newBackend(t)
+	gh.userRepos = []github.UserRepo{
+		{Name: "public", Owner: github.Account{Login: "darkraise"}},
+		{Name: "darkmem", Private: true, Owner: github.Account{Login: "darkraise"}},
+	}
+	if err := b.WatchRepo(context.Background(), "public"); err != nil {
+		t.Fatal(err)
+	}
+	rs, err := b.AvailableRepos(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []model.AvailableRepo{{Name: "darkmem", Private: true, Configured: true}, {Name: "public", Watched: true}}
+	if len(rs) != 2 || rs[0] != want[0] || rs[1] != want[1] {
+		t.Fatalf("available %+v", rs)
 	}
 }

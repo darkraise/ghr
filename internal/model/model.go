@@ -184,6 +184,11 @@ type AddRepoRequest struct {
 	AllowPublic bool     `json:"allow_public"`
 }
 
+// WatchRequest is POST /watch.
+type WatchRequest struct {
+	Name string `json:"name"`
+}
+
 // MaintenanceStatus is the daemon's prune state, served inside GET /status.
 type MaintenanceStatus struct {
 	Running      bool       `json:"running"`
@@ -265,6 +270,7 @@ type AvailableRepo struct {
 	Name       string `json:"name"`
 	Private    bool   `json:"private"`
 	Configured bool   `json:"configured"`
+	Watched    bool   `json:"watched"`
 }
 
 // Activity is GET /activity: what the runners did over a window, as lanes of

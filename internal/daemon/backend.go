@@ -460,6 +460,7 @@ func (b *Backend) AddRepo(ctx context.Context, req model.AddRepoRequest) error {
 		return api.Conflict(name + " is public; self-hosted runners must only serve private repos (pass --allow-public to override)")
 	}
 	if err := b.update(func(c *config.Config) error {
+		c.WatchRepos = slices.DeleteFunc(c.WatchRepos, func(w string) bool { return strings.EqualFold(w, name) })
 		c.Repos = append(c.Repos, config.Repo{Name: name, Max: req.Max, Labels: req.Labels})
 		return nil
 	}); err != nil {
@@ -467,6 +468,57 @@ func (b *Backend) AddRepo(ctx context.Context, req model.AddRepoRequest) error {
 	}
 	b.forgetLabelCheck(name)
 	b.Events.Add("info", name, "repo added")
+	return nil
+}
+
+// WatchRepo adds name to watch_repos once the token can see it. Public
+// repositories are allowed: no runner ever serves a watched one.
+func (b *Backend) WatchRepo(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return api.BadRequest("repo name is required")
+	}
+	cfg := b.Store.Config()
+	if cfg.Repo(name) != nil {
+		return api.Conflict("repo " + name + " is already configured")
+	}
+	if cfg.Watched(name) {
+		return api.Conflict("repo " + name + " is already watched")
+	}
+	_, err := b.GH.GetRepo(ctx, name)
+	if github.IsKind(err, github.ErrNotFound) {
+		return api.BadRequest(fmt.Sprintf("token cannot see %s/%s: add it to the PAT's repository access first", cfg.Owner, name))
+	}
+	if err != nil {
+		return err
+	}
+	if err := b.update(func(c *config.Config) error {
+		if c.Repo(name) != nil || c.Watched(name) {
+			return api.Conflict("repo " + name + " is already configured or watched")
+		}
+		c.WatchRepos = append(c.WatchRepos, name)
+		return nil
+	}); err != nil {
+		return err
+	}
+	b.Events.Add("info", name, "watching")
+	return nil
+}
+
+// UnwatchRepo never calls GitHub, so a repository GitHub no longer shows can
+// always be unwatched. The check runs inside the update so two concurrent
+// removals cannot both succeed.
+func (b *Backend) UnwatchRepo(name string) error {
+	if err := b.update(func(c *config.Config) error {
+		if !c.Watched(name) {
+			return api.NotFound("repo " + name + " is not watched")
+		}
+		c.WatchRepos = slices.DeleteFunc(c.WatchRepos, func(w string) bool { return strings.EqualFold(w, name) })
+		return nil
+	}); err != nil {
+		return err
+	}
+	b.Events.Add("info", name, "stopped watching")
 	return nil
 }
 
@@ -845,7 +897,7 @@ func (b *Backend) AvailableRepos(ctx context.Context) ([]model.AvailableRepo, er
 	out := []model.AvailableRepo{}
 	for _, r := range rs {
 		if strings.EqualFold(r.Owner.Login, cfg.Owner) {
-			out = append(out, model.AvailableRepo{Name: r.Name, Private: r.Private, Configured: cfg.Repo(r.Name) != nil})
+			out = append(out, model.AvailableRepo{Name: r.Name, Private: r.Private, Configured: cfg.Repo(r.Name) != nil, Watched: cfg.Watched(r.Name)})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })

@@ -2,11 +2,13 @@
   {
     "name": "darkmem",
     "private": true,
-    "configured": true
+    "configured": true,
+    "watched": false
   },
   {
     "name": "new-repo",
     "private": true,
-    "configured": false
+    "configured": false,
+    "watched": false
   }
 ]
