@@ -178,6 +178,7 @@ export interface Config {
   labels: string[] | null
   runner_limits: RunnerLimits
   repos: RepoConfig[] | null
+  watch_repos?: string[]
   web?: WebConfig
 }
 
@@ -220,6 +221,7 @@ export interface AvailableRepo {
   name: string
   private: boolean
   configured: boolean
+  watched: boolean
 }
 
 export interface Toolchain {
@@ -432,4 +434,35 @@ export interface Activity {
   waiting: ActivityPoint[]
   cpu: ActivityCPU[]
   repos: ActivityRepo[]
+}
+
+export interface ActionsRun {
+  repo: string
+  id: number
+  run_number: number
+  workflow: string
+  title: string
+  branch: string
+  event: string
+  actor: string
+  status: string
+  conclusion: string
+  started_at: string
+  updated_at: string
+  html_url: string
+  ghr: boolean
+  watched: boolean
+}
+
+export interface ActionsRepo {
+  repo: string
+  watched: boolean
+  error?: string
+  retry_at?: string
+}
+
+export interface Actions {
+  fetched_at: string
+  runs: ActionsRun[]
+  repos: ActionsRepo[]
 }

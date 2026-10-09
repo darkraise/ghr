@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest"
+import { fixtures } from "@/test/fixtures"
+import actionsJson from "./fixtures/actions.json"
 import activityBucketsJson from "./fixtures/activity-buckets.json"
 import activityLanesJson from "./fixtures/activity-lanes.json"
 import availableReposJson from "./fixtures/available-repos.json"
@@ -17,6 +19,7 @@ import stepsJson from "./fixtures/steps.json"
 import storageJson from "./fixtures/storage.json"
 import tokenJson from "./fixtures/token.json"
 import type {
+  Actions,
   Activity,
   AvailableRepo,
   Config,
@@ -134,5 +137,29 @@ describe("type fixtures", () => {
     expect(registrations[0]?.ghr).toBe(true)
     expect(availableRepos[1]?.configured).toBe(false)
     expect(choices[0]?.lts).toBe(true)
+  })
+
+  it("actions parse with runs, repos and the watch list", () => {
+    const actions: Actions = actionsJson
+    expect(actions.runs.map((r) => r.id)).toEqual([300, 102, 101, 90])
+    expect(actions.runs.find((r) => r.id === 102)?.ghr).toBe(true)
+    expect(actions.runs.find((r) => r.id === 300)?.watched).toBe(true)
+    expect(actions.repos[3]).toEqual({
+      repo: "old-docs",
+      watched: true,
+      error: "GitHub rate limit; API calls are paused",
+      retry_at: "2026-10-03T14:30:00Z",
+    })
+    expect(actions.repos[0]).not.toHaveProperty("error")
+  })
+
+  it("config carries the watch list and available repos say what is watched", () => {
+    expect(fixtures.config.watch_repos).toEqual(["docs", "old-docs"])
+    expect(fixtures.availableRepos.map((r) => [r.name, r.watched])).toEqual([
+      ["darkmem", false],
+      ["docs", true],
+      ["new-repo", false],
+    ])
+    expect(fixtures.actions.repos).toHaveLength(4)
   })
 })

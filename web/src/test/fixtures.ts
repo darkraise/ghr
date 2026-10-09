@@ -1,3 +1,4 @@
+import actionsJson from "@/api/fixtures/actions.json"
 import activityBucketsJson from "@/api/fixtures/activity-buckets.json"
 import activityLanesJson from "@/api/fixtures/activity-lanes.json"
 import availableReposJson from "@/api/fixtures/available-repos.json"
@@ -15,6 +16,7 @@ import storageJson from "@/api/fixtures/storage.json"
 import tokenJson from "@/api/fixtures/token.json"
 import choicesJson from "@/api/fixtures/toolchain-choices.json"
 import type {
+  Actions,
   Activity,
   AvailableRepo,
   Config,
@@ -48,6 +50,7 @@ const availableRepos: AvailableRepo[] = availableReposJson
 const toolchainChoices: ToolchainChoice[] = choicesJson
 const activityLanes: Activity = activityLanesJson
 const activityBuckets: Activity = activityBucketsJson
+const actions: Actions = actionsJson
 
 export const fixtures = {
   status,
@@ -66,6 +69,7 @@ export const fixtures = {
   toolchainChoices,
   activityLanes,
   activityBuckets,
+  actions,
 }
 
 export function authedRoutes(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -78,6 +82,7 @@ export function authedRoutes(over: Record<string, unknown> = {}): Record<string,
     "GET /api/activity": ({ url }: { url: URL }) =>
       ["1h", "3h"].includes(url.searchParams.get("window") ?? "") ? fixtures.activityLanes : fixtures.activityBuckets,
     "GET /api/storage": fixtures.storage,
+    "GET /api/actions": fixtures.actions,
     ...over,
   }
 }
