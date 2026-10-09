@@ -86,7 +86,8 @@ func (s *Store) readAll() ([]model.HistoryEntry, error) {
 
 // Query returns entries by FinishedAt, newest first, filtered by repo (in any
 // case) and conclusion when non-empty, and to entries finished at or after
-// since when since is not zero. limit <= 0 means no limit. Lines are appended in cleanup
+// since when since is not zero. Conclusion "failure" matches every conclusion
+// model.Failed accepts; any other matches exactly. limit <= 0 means no limit. Lines are appended in cleanup
 // order, which is not finish order.
 func (s *Store) Query(repo, conclusion string, since time.Time, limit int) ([]model.HistoryEntry, error) {
 	s.mu.Lock()
@@ -98,7 +99,7 @@ func (s *Store) Query(repo, conclusion string, since time.Time, limit int) ([]mo
 	sort.SliceStable(all, func(a, b int) bool { return all[a].FinishedAt.After(all[b].FinishedAt) })
 	var out []model.HistoryEntry
 	for _, e := range all {
-		if (repo == "" || strings.EqualFold(e.Repo, repo)) && (conclusion == "" || e.Conclusion == conclusion) &&
+		if (repo == "" || strings.EqualFold(e.Repo, repo)) && matchConclusion(e.Conclusion, conclusion) &&
 			(since.IsZero() || !e.FinishedAt.Before(since)) {
 			out = append(out, e)
 			if limit > 0 && len(out) == limit {
@@ -107,6 +108,13 @@ func (s *Store) Query(repo, conclusion string, since time.Time, limit int) ([]mo
 		}
 	}
 	return out, nil
+}
+
+func matchConclusion(got, want string) bool {
+	if want == "failure" {
+		return model.Failed(got)
+	}
+	return want == "" || got == want
 }
 
 // Prune drops entries that finished before cutoff, rewriting the file atomically.

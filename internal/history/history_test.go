@@ -137,3 +137,30 @@ func TestQuerySince(t *testing.T) {
 		}
 	}
 }
+
+func TestQueryFailureMeansEveryFailedConclusion(t *testing.T) {
+	s := &Store{Path: filepath.Join(t.TempDir(), "history.jsonl")}
+	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	for i, c := range []string{"success", "failure", "timed_out", "startup_failure", "action_required", "cancelled", "skipped", "unknown"} {
+		if err := s.Append(model.HistoryEntry{ID: c, Repo: "a", RunID: int64(i + 1), Conclusion: c, FinishedAt: t0.Add(time.Duration(-i) * time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for conclusion, want := range map[string]string{
+		"failure":   "failure,timed_out,startup_failure,action_required",
+		"timed_out": "timed_out",
+		"unknown":   "unknown",
+	} {
+		got, err := s.Query("", conclusion, time.Time{}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, e := range got {
+			ids = append(ids, e.ID)
+		}
+		if strings.Join(ids, ",") != want {
+			t.Errorf("Query(%q) = %v, want %s", conclusion, ids, want)
+		}
+	}
+}

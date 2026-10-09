@@ -124,6 +124,17 @@ type HistoryEntry struct {
 	HTMLURL    string    `json:"html_url,omitempty"`
 }
 
+// Failed reports whether a job conclusion counts as a failure: anything that
+// is not a success, a cancellation, a skip or "unknown", ghr's own conclusion
+// for a job whose result it never learned.
+func Failed(conclusion string) bool {
+	switch conclusion {
+	case "success", "cancelled", "skipped", "unknown":
+		return false
+	}
+	return true
+}
+
 type Step struct {
 	Number     int    `json:"number"`
 	Name       string `json:"name"`
