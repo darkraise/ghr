@@ -8,6 +8,7 @@ import type { RunDetail, RunJob } from "@/api/types"
 import { ErrorLine } from "@/components/page/error-line"
 import { Section } from "@/components/page/section"
 import { RouteError } from "@/components/route-error"
+import { ArtifactsSection } from "@/components/run-artifacts"
 import { RunFrame, type JobLinkFn, type SummaryLinkFn } from "@/components/run-frame"
 import { RunStatusIcon } from "@/components/run-status-icon"
 import { StepList } from "@/components/step-list"
@@ -191,6 +192,7 @@ function RunSummary({ run, owner }: { run: RunDetail; owner: string }) {
       <Section title="Summary">
         <SummaryFacts run={run} owner={owner} now={now} />
       </Section>
+      <ArtifactsSection repo={run.repo} artifacts={run.artifacts} />
     </RunFrame>
   )
 }

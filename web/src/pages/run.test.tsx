@@ -25,6 +25,14 @@ describe("Run page", () => {
     expect(summary.getByText("2")).toHaveClass("font-mono")
   })
 
+  it("lists the run's artifacts", async () => {
+    mockApi(runRoutes())
+    renderApp("/actions/darkmem/runs/102")
+    const artifacts = within(await screen.findByRole("region", { name: "Artifacts" }))
+    expect(artifacts.getByRole("button", { name: "Download frontend-dist" })).toBeInTheDocument()
+    expect(artifacts.getByText("Expired")).toBeInTheDocument()
+  })
+
   it("links the rail to the summary and to each job of the shown attempt", async () => {
     mockApi(runRoutes())
     renderApp("/actions/darkmem/runs/102")
