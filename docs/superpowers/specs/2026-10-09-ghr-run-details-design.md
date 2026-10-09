@@ -1,7 +1,7 @@
 # ghr web UI: workflow run details
 
 **Date:** 2026-10-09
-**Status:** approved section by section in chat on 2026-10-09; mockup at https://claude.ai/artifact/FurnXQ2U5Z22fF2vqb9HFy (example data, approved as the layout). Revised the same day for the Fable review (docs/superpowers/notes/2026-10-09-ghr-run-details-fable-review.md, findings 1 to 40), all dispositions approved by the owner.
+**Status:** approved section by section in chat on 2026-10-09; mockup at https://claude.ai/artifact/FurnXQ2U5Z22fF2vqb9HFy (example data, approved as the layout). Revised the same day for the Fable review (docs/superpowers/notes/2026-10-09-ghr-run-details-fable-review.md, findings 1 to 40), all dispositions approved by the owner. Amended the same day for register rows 21 and 32, rulings approved by the owner: the raw log streams (§2.1, §2.3) and a queued log download gives up after 50 seconds (§2.5).
 **Register:** docs/superpowers/registers/2026-10-09-ghr-run-details.md
 **Builds on:** docs/superpowers/specs/2026-10-09-ghr-actions-view-design.md (the Actions view), and through it spec 1's visual system and anti-slop rules (§1.7) and spec 2's page kit and page-wide rules (§1). They bind the pages here; this spec does not repeat them.
 **Code:** `web/`, `internal/api`, `internal/daemon`, `internal/model`, `internal/github`, new `internal/joblog`, new `internal/wfgraph`
@@ -79,20 +79,25 @@ All use the existing `ErrorLine` or `Alert`:
 
 ### 2.1 Routes
 
-Every route first resolves `{repo}` against the configured and watched names (case-insensitive, `coveredRepos`) to its configured spelling, used from then on for GitHub URLs and cache keys; otherwise it answers 404 "repo {repo} is not configured or watched". `{id}`, `{jobId}` and `attempt` must parse as positive integers, otherwise 400 "{name} must be a positive integer". Every route answers through `respond`.
+Every route first resolves `{repo}` against the configured and watched names (case-insensitive, `coveredRepos`) to its configured spelling, used from then on for GitHub URLs and cache keys; otherwise it answers 404 "repo {repo} is not configured or watched". `{id}`, `{jobId}` and `attempt` must parse as positive integers, otherwise 400 "{name} must be a positive integer". Every route answers through `respond`, except the raw log's body, which streams.
 
 | Route | Returns |
 |---|---|
 | `GET /actions/{repo}/runs/{id}?attempt=N` | `model.RunDetail` |
 | `GET /actions/{repo}/runs/{id}/annotations?attempt=N` | `model.RunAnnotations` |
 | `GET /actions/{repo}/jobs/{jobId}/log` | `model.JobLog` |
-| `GET /actions/{repo}/jobs/{jobId}/log/raw` | `model.RawLog` |
+| `GET /actions/{repo}/jobs/{jobId}/log/raw` | the log itself, `text/plain; charset=utf-8` |
 | `GET /actions/{repo}/artifacts/{id}/download` | `model.DownloadURL` |
 
 - `attempt` absent means the latest attempt. An `attempt` above the run's `run_attempt` answers 400.
 - The log routes answer 409 "job has not finished" for a job whose status is not `completed`.
 - **Artifact download:** the route asks GitHub for the artifact's zip without following the redirect and answers `{url}` with the `Location`, after checking it is `https` on a host ending in `.githubusercontent.com` or `.blob.core.windows.net` (otherwise 502 "GitHub returned an unexpected download address"). The browser's Download button fetches the route with `X-GHR` and then sets `window.location` to `url`; GitHub's signed URL needs no credentials and expires after about a minute, so the button fetches it on each click. 410 from GitHub answers 410 "artifact has expired".
-- **Raw log:** the route returns `{text}` (the log body, at most 32 MiB, otherwise 413 "log is larger than 32 MiB; open it on GitHub"); it is not cached. The Raw log button fetches it with `X-GHR`, turns it into a Blob, and saves it through a temporary object URL with the file name `{repo}-job-{jobId}.log`. No route sets `Content-Disposition`.
+- **Raw log:** the route copies GitHub's log body to the browser byte for byte, never holding the whole log in memory, and is not cached. It holds one of the 4 log download slots (§2.5) from before the GitHub request until the last byte is written.
+  - Every failure that has a status is settled before the first byte, through `respond`: the job read; no free slot within the request's deadline (503 "ghr is reading other logs; try again shortly"); GitHub's errors, as in §2.4; and a `Content-Length` above 32 MiB (413 "log is larger than 32 MiB; open it on GitHub").
+  - `api.Backend.RawJobLog(ctx, repo, jobID) (io.ReadCloser, int64, error)` returns the body and its length (-1 when unknown). Its reader returns an error, not EOF, once it passes 32 MiB; its `Close` releases the slot, closes GitHub's body and ends the deadline. The route closes it in every case.
+  - A known length is passed on as `Content-Length`. One 50 second deadline covers the whole request, the copy included, which keeps it under the web listener's 60 second `WriteTimeout`.
+  - When the copy fails after the first byte (GitHub's body breaks, the deadline passes, or a body sent without a length passes 32 MiB), the handler panics with `http.ErrAbortHandler`. The connection drops before the body completes, so the browser's fetch fails instead of saving a truncated log.
+  - The Raw log button fetches the route with `X-GHR`. A non-2xx answer is read as a JSON error like every other call; otherwise the button saves `response.blob()` through a temporary object URL with the file name `{repo}-job-{jobId}.log`. A failed fetch or body read shows the usual error toast. No route sets `Content-Disposition`.
 
 ### 2.2 Model
 
@@ -105,7 +110,7 @@ Go types in `internal/model`, JSON names in brackets.
 - `RunAnnotations`: `Items []Annotation` (items), `Omitted map[int64]int` (omitted, job ID to the count beyond the per-job cap; TypeScript `Record<string, number>`), `Unread int` (unread, finished jobs whose logs were not ready within the wait), `ExpiredLogs int` (expired_logs), `TooLarge int` (too_large), `Failed int` (failed).
 - `Annotation`: `Level` (level: error, warning or notice), `JobID`, `JobName`, `Step int`, `StepName`, `Line int` (per-step line number), `Message`.
 - `JobLog`: `JobID`, `TooLarge bool` (too_large), `Expired bool` (expired), `Steps []LogStep`. `LogStep`: `Number`, `Name`, `Lines []LogLine`. `LogLine`: `N int` (n), `Kind string` (kind: "", group, endgroup, error, warning, notice, command, debug), `Text` (text, with the `##[…]` prefix removed and ANSI kept).
-- `RawLog`: `Text` (text). `DownloadURL`: `URL` (url).
+- `DownloadURL`: `URL` (url). The raw log has no model type (§2.1).
 
 ### 2.3 GitHub client
 
@@ -118,6 +123,7 @@ Go types in `internal/model`, JSON names in brackets.
   - `request(ctx, method, u) (*http.Response, error)` does what `do` does before and after the round trip (suspension check, headers, `record`, `classify` for statuses of 400 and above) but uses a copy of the client whose `CheckRedirect` returns `http.ErrUseLastResponse`, returns the response unread, and never touches the ETag cache.
   - `redirectURL(ctx, u) (string, error)` calls `request`, expects a 302, and returns `Location`.
   - `JobLog(ctx, repo, jobID, max int64) ([]byte, error)` takes `redirectURL` for `/actions/jobs/{id}/logs`, then fetches that URL with a separate plain `http.Client` (no `Authorization`, dial and response-header timeouts of 10 seconds, no whole-request timeout, the body read through a 30 second idle deadline) and returns `ErrTooLarge` past `max`.
+  - `OpenJobLog(ctx, repo, jobID) (io.ReadCloser, int64, error)` makes the same two requests as `JobLog` and returns the blob response's body unread with its `Content-Length` (-1 when GitHub sends none); the body stays bound to `ctx`. `JobLog` reads through it. The daemon's `GitHub` interface and `fakeGH` gain it.
   - `ArtifactURL(ctx, repo, id) (string, error)` is `redirectURL` for `/actions/artifacts/{id}/zip`.
 - Because the second request is built without the token, nothing depends on Go's cross-host header policy.
 
@@ -144,8 +150,11 @@ All in memory, on `Backend`. Callers for the same key share one fetch (the patte
 | Parsed job log | job ID | `JobLog` | no expiry; at most 32 MiB in total, measured as the raw log size, LRU |
 
 - Detail fetches use a 20 second deadline.
-- **Log downloads** for annotations and the log route share one process-wide limit of 4 at a time. Each runs on its own detached context with a 60 second deadline and fills the annotation and parsed-log caches when it finishes.
-- **The annotations route** starts downloads for every finished, non-skipped job of the attempt not already cached, waits at most 20 seconds, and answers with what it has. Jobs still downloading count in `Unread`. A job whose log answered 410 counts in `ExpiredLogs`, one above the parse cap in `TooLarge`, and one that failed otherwise in `Failed` (the error is logged); these three outcomes are cached for 10 minutes, after which a call downloads the log again.
+- **Log downloads** for annotations and the log route share one process-wide limit of 4 at a time, which the raw log route also draws on (§2.1). Each runs detached from the request and fills the annotation and parsed-log caches when it finishes.
+  - A download waits at most 50 seconds for a slot. One that gets none ends as *busy*, which is not cached, so the next call starts it again. This drains downloads that the annotations route queued for a page nobody has open any more.
+  - Once it has a slot, a download has a 60 second deadline.
+- **The log route** waits at most 50 seconds from its start. When that wait ends, or the download ends busy, it answers 503. The message is "ghr is reading other logs; try again shortly" if the download never got a slot, and "GitHub is still sending this log; try again shortly" if it did. A download that outlasts the wait still fills the cache.
+- **The annotations route** starts downloads for every finished, non-skipped job of the attempt not already cached, waits at most 20 seconds, and answers with what it has. Jobs still downloading, or whose download ended busy, count in `Unread`; the page polls again while `Unread` is above 0. A job whose log answered 410 counts in `ExpiredLogs`, one above the parse cap in `TooLarge`, and one that failed otherwise in `Failed` (the error is logged); these three outcomes are cached for 10 minutes, after which a call downloads the log again.
 
 ### 2.6 API budget
 
@@ -215,16 +224,16 @@ Annotations are the error, warning and notice lines of a job, with duplicates (s
 
 - `internal/joblog`: table tests on fixtures trimmed from real logs, with the darkmem steps that share a second, a byte-order mark, groups, every kind, ANSI kept in `Text`, a line without a timestamp, the pointer staying when nothing matches, the per-job cap and duplicate merging.
 - `internal/wfgraph`: expression names, the matrix suffix, `uses` callers, several roots, a dropped YAML job passing its `needs` through, an unmatched API job giving the mismatch note, a cycle, an unknown `needs`, invalid YAML.
-- `internal/github`: `ErrGone` for 410; `GetContent`'s path escaping; with an `httptest` API server and a second `httptest` blob server, `JobLog` sends no `Authorization` to the blob server, stops at `max`, and records rate headers from the 302; `ArtifactURL` returns `Location` without following it; neither touches the ETag cache.
-- `internal/daemon` with `fakeGH`: the 404 for uncovered repositories and the resolved spelling, the attempt bounds, "latest" and its number sharing a cache entry, each cache's lifetime, bound and shared fetch, the workflow file cache not keeping 403, each `GraphNote`, `Unread` after the 20 second wait (with a shortened test deadline), `ExpiredLogs`, `TooLarge`, `Failed`, the process-wide download limit, the 409 for an unfinished job, the `GHR` marker, a 403 naming the permission.
-- `internal/api`: each route's status codes, including 400 for non-integer parameters, 409, 410, 413, and the download host check.
+- `internal/github`: `ErrGone` for 410; `GetContent`'s path escaping; with an `httptest` API server and a second `httptest` blob server, `JobLog` sends no `Authorization` to the blob server, stops at `max`, and records rate headers from the 302; `OpenJobLog` returns the body unread with its `Content-Length`, or -1 without one; `ArtifactURL` returns `Location` without following it; neither touches the ETag cache.
+- `internal/daemon` with `fakeGH`: the 404 for uncovered repositories and the resolved spelling, the attempt bounds, "latest" and its number sharing a cache entry, each cache's lifetime, bound and shared fetch, the workflow file cache not keeping 403, each `GraphNote`, `Unread` after the 20 second wait (with a shortened test deadline), `ExpiredLogs`, `TooLarge`, `Failed`, the process-wide download limit, a queued download ending busy after its slot wait (not cached, started again by the next call, counted in `Unread`), the log route's two 503 messages, the raw log's slot held until its reader is closed, the 409 for an unfinished job, the `GHR` marker, a 403 naming the permission.
+- `internal/api`: each route's status codes, including 400 for non-integer parameters, 409, 410, 413, and the download host check. The raw route streams the body as `text/plain` with its `Content-Length`, answers 413 for a declared length above 32 MiB before writing, and drops the connection when the body breaks or passes 32 MiB without a declared length.
 
 ### Frontend
 
 Fixtures for a run detail (with a group node), its annotations and a job log, generated from Go models in `web/fixtures_test.go` like `actions.json`.
 
 - Run page: summary facts, graph tiles linking to job pages, the timeline and each note, annotation counts and status lines, the link carrying `attempt`, `step` and `line`, artifacts with an expired row and the download flow (fetch, then navigation), the attempt picker updating `attempt`, the run and annotation polls stopping.
-- Job page: the failed step open, the `step` and `line` parameters including a line above the 5,000-line cut, groups opening, ANSI spans and stripped controls, a `\r` line, search count and navigation opening only the current match's step, the too-large and expired states, a running job's note, a job missing from the attempt, the Raw log Blob save.
+- Job page: the failed step open, the `step` and `line` parameters including a line above the 5,000-line cut, groups opening, ANSI spans and stripped controls, a `\r` line, search count and navigation opening only the current match's step, the too-large and expired states, a running job's note, a job missing from the attempt, the Raw log save from the response blob, and a JSON error answer shown as a toast.
 - The Actions page links to the run page and uses `RunStatusIcon`.
 - Invalid route parameters show the not-found line without an API call.
 - axe on both pages; the narrow layout with the stacked rail; the anti-slop test passes.
