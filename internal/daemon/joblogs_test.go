@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -54,6 +55,39 @@ func setLogRequestWindow(t *testing.T, d time.Duration) {
 	t.Cleanup(func() { logRequestWindow = old })
 }
 
+func setRawSlotWait(t *testing.T, d time.Duration) {
+	old := rawSlotWait
+	rawSlotWait = d
+	t.Cleanup(func() { rawSlotWait = old })
+}
+
+func setRawLimit(t *testing.T, n int64) {
+	old := rawLimit
+	rawLimit = n
+	t.Cleanup(func() { rawLimit = old })
+}
+
+// bodiesClosed is how many OpenJobLog bodies gh has seen closed.
+func bodiesClosed(gh *fakeGH) int {
+	gh.rmu.Lock()
+	defer gh.rmu.Unlock()
+	return gh.logClosed
+}
+
+// bodyReads is how many Read calls OpenJobLog bodies have had.
+func bodyReads(gh *fakeGH) int {
+	gh.rmu.Lock()
+	defer gh.rmu.Unlock()
+	return gh.logReads
+}
+
+// openCtx is the context of gh's last OpenJobLog call.
+func openCtx(gh *fakeGH) context.Context {
+	gh.rmu.Lock()
+	defer gh.rmu.Unlock()
+	return gh.logCtx
+}
+
 // waitCalls waits up to 3 s for n calls starting with prefix.
 func waitCalls(t *testing.T, gh *fakeGH, prefix string, n int) {
 	t.Helper()
@@ -96,7 +130,7 @@ func TestJobLogRefusals(t *testing.T) {
 	var ae *api.Error
 	for name, call := range map[string]func(repo string) error{
 		"log": func(repo string) error { _, err := b.JobLog(ctx, repo, 1002); return err },
-		"raw": func(repo string) error { _, err := b.RawJobLog(ctx, repo, 1002); return err },
+		"raw": func(repo string) error { _, _, err := b.openRawLog(ctx, repo, 1002); return err },
 	} {
 		if err := call("darkmem"); !errors.As(err, &ae) || ae.Status != 409 || ae.Msg != "job has not finished" {
 			t.Fatalf("%s unfinished: %v", name, err)
@@ -252,8 +286,8 @@ func TestLogDownloadsRunFourAtOnce(t *testing.T) {
 	}
 }
 
-func TestRawJobLogGivesUpWhenEverySlotIsBusy(t *testing.T) {
-	setLogRequestWindow(t, 50*time.Millisecond)
+func TestRawLogGivesUpWhenEverySlotIsBusy(t *testing.T) {
+	setRawSlotWait(t, 50*time.Millisecond)
 	b, _, gh := newBackend(t)
 	for id := int64(1); id <= 5; id++ {
 		logJobOf(gh, id, fmt.Sprintf("job %d", id), "x")
@@ -268,19 +302,21 @@ func TestRawJobLogGivesUpWhenEverySlotIsBusy(t *testing.T) {
 	}
 	waitCalls(t, gh, "JobLog", 4)
 	var ae *api.Error
-	if _, err := b.RawJobLog(context.Background(), "darkmem", 5); !errors.As(err, &ae) || ae.Status != 503 || ae.Msg != "ghr is reading other logs; try again shortly" {
+	if _, _, err := b.openRawLog(context.Background(), "darkmem", 5); !errors.As(err, &ae) || ae.Status != 503 || ae.Msg != "ghr is reading other logs; try again shortly" {
 		t.Fatalf("busy slots: %v", err)
 	}
-	if n := gh.count("JobLog darkmem 5"); n != 0 {
-		t.Fatalf("job 5 was downloaded %d times while every slot was busy", n)
+	if n := gh.count("OpenJobLog"); n != 0 {
+		t.Fatalf("a raw log was downloaded %d times while every slot was busy", n)
 	}
 	close(gh.logWait)
 	for range 4 {
-		<-done
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
-func TestRawJobLog(t *testing.T) {
+func TestRawLog(t *testing.T) {
 	b, _, gh := newBackend(t)
 	big := strings.Repeat("x", parseLimit)
 	logJobOf(gh, 1002, "Backend tests", big)
@@ -288,30 +324,102 @@ func TestRawJobLog(t *testing.T) {
 	if l, err := b.JobLog(ctx, "darkmem", 1002); err != nil || !l.TooLarge {
 		t.Fatalf("parsed: %+v err %v", l, err)
 	}
+	want := string(logLines(big))
 	for range 2 {
-		raw, err := b.RawJobLog(ctx, "darkmem", 1002)
-		if err != nil || !strings.Contains(raw.Text, big) {
-			t.Fatalf("raw: %d bytes, err %v", len(raw.Text), err)
+		rc, size, err := b.openRawLog(ctx, "darkmem", 1002)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if n := gh.count("JobLog"); n != 3 {
-		t.Fatalf("%d downloads, want 3: the raw log is not cached", n)
-	}
-	var ae *api.Error
-	for _, tc := range []struct {
-		err    error
-		status int
-		msg    string
-	}{
-		{github.ErrTooLarge, 413, "log is larger than 32 MiB; open it on GitHub"},
-		{&github.APIError{Status: 410, Kind: github.ErrGone}, 410, "GitHub no longer keeps this job's log"},
-	} {
+		if len(b.logs.slots) != 1 {
+			t.Fatalf("%d slots held while the log is open, want 1", len(b.logs.slots))
+		}
+		if n := bodyReads(gh); n != 0 {
+			t.Fatalf("a body with a declared length was read %d times before openRawLog returned", n)
+		}
+		octx := openCtx(gh)
+		if _, ok := octx.Deadline(); !ok || octx.Err() != nil {
+			t.Fatalf("the download's context has no deadline or ended early: %v", octx.Err())
+		}
+		data, err := io.ReadAll(rc)
+		if err != nil || string(data) != want || size != int64(len(want)) {
+			t.Fatalf("raw: %d bytes, size %d, err %v", len(data), size, err)
+		}
+		rc.Close()
+		rc.Close()
+		if len(b.logs.slots) != 0 || octx.Err() == nil {
+			t.Fatalf("%d slots held after closing twice, context err %v", len(b.logs.slots), octx.Err())
+		}
 		gh.rmu.Lock()
-		gh.logErr[1002] = tc.err
+		gh.logReads = 0
 		gh.rmu.Unlock()
-		if _, err := b.RawJobLog(ctx, "darkmem", 1002); !errors.As(err, &ae) || ae.Status != tc.status || ae.Msg != tc.msg {
-			t.Fatalf("%v: got %v", tc.err, err)
-		}
+	}
+	if n, closed := gh.count("OpenJobLog"), bodiesClosed(gh); n != 2 || closed != 2 {
+		t.Fatalf("%d raw downloads and %d bodies closed, want 2 and 2: the raw log is not cached", n, closed)
+	}
+}
+
+func TestRawLogReadsABodyWithoutALength(t *testing.T) {
+	b, _, gh := newBackend(t)
+	logJobOf(gh, 1002, "Backend tests", "x")
+	gh.logLen = map[int64]int64{1002: -1}
+	want := string(logLines("x"))
+	rc, size, err := b.openRawLog(context.Background(), "darkmem", 1002)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(rc)
+	rc.Close()
+	if err != nil || string(data) != want || size != int64(len(want)) {
+		t.Fatalf("raw %q size %d err %v", data, size, err)
+	}
+	if len(b.logs.slots) != 0 || bodiesClosed(gh) != 1 {
+		t.Fatalf("%d slots held, %d bodies closed", len(b.logs.slots), bodiesClosed(gh))
+	}
+}
+
+func TestRawLogErrorsReleaseEverything(t *testing.T) {
+	setRawLimit(t, 64)
+	const tooLarge = "log is larger than 32 MiB; open it on GitHub"
+	for _, tc := range []struct {
+		name   string
+		setup  func(b *Backend, gh *fakeGH)
+		status int    // 0: a plain error
+		msg    string // "" checks the status only
+		closed int    // GitHub bodies closed
+		opened bool   // OpenJobLog was reached, so its context must have ended
+	}{
+		{"expired", func(b *Backend, gh *fakeGH) { gh.logErr[1002] = &github.APIError{Status: 410, Kind: github.ErrGone} },
+			410, "GitHub no longer keeps this job's log", 0, true},
+		{"failed", func(b *Backend, gh *fakeGH) { gh.logErr[1002] = errors.New("boom") }, 502, "", 0, true},
+		{"declared too large", func(b *Backend, gh *fakeGH) { gh.logLen = map[int64]int64{1002: 65} }, 413, tooLarge, 1, true},
+		{"too large without a length", func(b *Backend, gh *fakeGH) {
+			gh.logs[1002] = []byte(strings.Repeat("x", 65))
+			gh.logLen = map[int64]int64{1002: -1}
+		}, 413, tooLarge, 1, true},
+		{"panic", func(b *Backend, gh *fakeGH) { b.GH = &panickyGH{GitHub: gh, openLog: true} }, 0, "could not read the log", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _, gh := newBackend(t)
+			logJobOf(gh, 1002, "Backend tests", "x")
+			tc.setup(b, gh)
+			rc, _, err := b.openRawLog(context.Background(), "darkmem", 1002)
+			if rc != nil || err == nil {
+				t.Fatalf("reader %v err %v", rc, err)
+			}
+			if tc.status == 0 {
+				if err.Error() != tc.msg {
+					t.Fatalf("err %v, want %q", err, tc.msg)
+				}
+			} else if apiStatus(err) != tc.status || (tc.msg != "" && err.Error() != tc.msg) {
+				t.Fatalf("err %v, want %d %q", err, tc.status, tc.msg)
+			}
+			if len(b.logs.slots) != 0 || bodiesClosed(gh) != tc.closed {
+				t.Fatalf("%d slots held and %d bodies closed, want 0 and %d", len(b.logs.slots), bodiesClosed(gh), tc.closed)
+			}
+			if tc.opened && openCtx(gh).Err() == nil {
+				t.Fatal("the download's context outlived the error")
+			}
+		})
 	}
 }
 

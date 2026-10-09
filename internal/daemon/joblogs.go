@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"sync"
@@ -16,7 +18,6 @@ import (
 
 const (
 	parseLimit        = 4 << 20
-	rawLimit          = 32 << 20
 	logSlots          = 4
 	annotationEntries = 500
 	logRetryTTL       = 10 * time.Minute
@@ -33,6 +34,11 @@ var (
 	// (the api package's rawWriteWindow matches it); a parsed download that
 	// outlasts it still finishes and fills the cache for the next call.
 	logRequestWindow = 50 * time.Second
+	// rawLimit caps a raw log; tests shrink it.
+	rawLimit int64 = 32 << 20
+	// rawSlotWait is how long a raw log request, from its start, waits for a
+	// download slot, leaving the rest of logRequestWindow for the copy.
+	rawSlotWait = 25 * time.Second
 )
 
 type logOutcome int
@@ -204,6 +210,10 @@ func logNotReady(call *logCall) error {
 	}
 }
 
+func errRawTooLarge() error {
+	return &api.Error{Status: http.StatusRequestEntityTooLarge, Msg: "log is larger than 32 MiB; open it on GitHub"}
+}
+
 // finishedJob reads a job of a covered repository and refuses one that has
 // not completed.
 func (b *Backend) finishedJob(ctx context.Context, repo string, jobID int64) (logJob, error) {
@@ -265,6 +275,88 @@ func (b *Backend) JobLog(ctx context.Context, repo string, jobID int64) (model.J
 		return model.JobLog{}, logNotReady(call)
 	}
 	return flaggedLog(jobID, call.res.outcome), nil
+}
+
+// rawLog is an open raw log; Close releases what openRawLog took, once.
+type rawLog struct {
+	io.Reader
+	release func()
+	once    sync.Once
+}
+
+func (l *rawLog) Close() error {
+	l.once.Do(l.release)
+	return nil
+}
+
+// openRawLog streams a finished job's whole log, up to rawLimit, uncached.
+// The reader holds a download slot, GitHub's body and the request deadline
+// until it is closed; on an error they are already released.
+func (b *Backend) openRawLog(ctx context.Context, repo string, jobID int64) (rc io.ReadCloser, size int64, err error) {
+	rctx, cancel := context.WithTimeout(ctx, logRequestWindow)
+	release := []func(){cancel}
+	releaseAll := func() {
+		for i := len(release) - 1; i >= 0; i-- {
+			release[i]()
+		}
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("job %d raw log: panic: %v", jobID, r)
+			rc, size, err = nil, 0, errors.New("could not read the log")
+		}
+		if err != nil {
+			releaseAll()
+		}
+	}()
+	slotCtx, stopSlotWait := context.WithTimeout(rctx, rawSlotWait)
+	defer stopSlotWait()
+
+	j, err := b.finishedJob(rctx, repo, jobID)
+	if err != nil {
+		return nil, 0, err
+	}
+	c := &b.logs
+	c.mu.Lock()
+	c.initLocked()
+	slots := c.slots
+	c.mu.Unlock()
+	select {
+	case slots <- struct{}{}:
+		release = append(release, func() { <-slots })
+	case <-slotCtx.Done():
+		if err := ctx.Err(); err != nil {
+			return nil, 0, err
+		}
+		return nil, 0, errReadingOtherLogs()
+	}
+
+	body, size, err := b.GH.OpenJobLog(rctx, j.repo, jobID)
+	switch {
+	case github.IsKind(err, github.ErrGone):
+		return nil, 0, &api.Error{Status: http.StatusGone, Msg: "GitHub no longer keeps this job's log"}
+	case err != nil:
+		return nil, 0, detailErr(err, b.Store.Config().Owner, j.repo)
+	}
+	release = append(release, func() { body.Close() })
+	if size > rawLimit {
+		return nil, 0, errRawTooLarge()
+	}
+	var r io.Reader = body
+	if size < 0 {
+		// Without a length the route could end the response only by closing
+		// the connection, which a proxy speaking HTTP/1.0 to ghr cannot tell
+		// from an abort, so the log is read first and sent with its length.
+		data, rerr := io.ReadAll(io.LimitReader(body, rawLimit+1))
+		if rerr != nil {
+			return nil, 0, detailErr(rerr, b.Store.Config().Owner, j.repo)
+		}
+		if int64(len(data)) > rawLimit {
+			return nil, 0, errRawTooLarge()
+		}
+		r, size = bytes.NewReader(data), int64(len(data))
+	}
+	return &rawLog{Reader: r, release: releaseAll}, size, nil
 }
 
 // RawJobLog returns a finished job's whole log, up to 32 MiB, uncached.
