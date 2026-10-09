@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -223,5 +224,109 @@ func fixtureValues() map[string]any {
 			},
 		},
 		"toolchain-choices": []model.ToolchainChoice{{Spec: "22.11.0", Version: "22.11.0", LTS: true}, {Spec: "24.9.0", Version: "24.9.0"}},
+		"run-detail":        runDetailFixture(),
+		"run-annotations":   runAnnotationsFixture(),
+		"job-log":           jobLogFixture(),
 	}
+}
+
+// runAt is a time of the run-detail fixture's run, on the fixture day.
+func runAt(min, sec int) *time.Time {
+	t := time.Date(2026, 10, 3, 13, min, sec, 0, time.UTC)
+	return &t
+}
+
+// fixtureStep is a completed step; a nil start leaves both times out.
+func fixtureStep(n int, name, conclusion string, start, end *time.Time) model.Step {
+	return model.Step{Number: n, Name: name, Status: "completed", Conclusion: conclusion, StartedAt: start, CompletedAt: end}
+}
+
+func fixtureJob(id int64, name, conclusion string, start, end *time.Time, runner string, labels []string, ghr bool, steps ...model.Step) model.RunJob {
+	return model.RunJob{ID: id, Name: name, Status: "completed", Conclusion: conclusion, StartedAt: start, CompletedAt: end,
+		RunnerName: runner, Labels: labels, HTMLURL: fmt.Sprintf("https://github.com/darkraise/darkmem/actions/runs/102/job/%d", id),
+		GHR: ghr, Steps: steps}
+}
+
+func runDetailFixture() model.RunDetail {
+	ghrLabels := []string{"self-hosted", "homelab"}
+	hosted := []string{"ubuntu-latest"}
+	return model.RunDetail{
+		Repo: "darkmem", ID: 102, RunNumber: 42, Attempt: 2, Attempts: 2, Workflow: "ci", Title: "Fix the cache key",
+		Branch: "fix/cache-key", Event: "pull_request", Actor: "octo-dev", Status: "completed", Conclusion: "failure",
+		HeadSHA: "a1f9c3e0d4b5c6a7b8c9d0e1f2a3b4c5d6e7f8a9", Path: ".github/workflows/ci.yml", PullRequests: []int{87},
+		StartedAt: *runAt(55, 0), UpdatedAt: *runAt(59, 10), HTMLURL: "https://github.com/darkraise/darkmem/actions/runs/102",
+		Jobs: []model.RunJob{
+			fixtureJob(1001, "Pick runner", "success", runAt(55, 0), runAt(55, 20), "ghr-darkmem-a1b2c3", ghrLabels, true,
+				fixtureStep(1, "Set up job", "success", runAt(55, 0), runAt(55, 5)),
+				fixtureStep(2, "Pick", "success", runAt(55, 5), runAt(55, 19)),
+				fixtureStep(3, "Complete job", "success", runAt(55, 19), runAt(55, 20))),
+			fixtureJob(1002, "Backend tests", "failure", runAt(55, 25), runAt(57, 40), "ghr-darkmem-d4e5f6", ghrLabels, true,
+				fixtureStep(1, "Set up job", "success", runAt(55, 25), runAt(55, 30)),
+				fixtureStep(2, "Install", "success", runAt(55, 30), runAt(56, 10)),
+				fixtureStep(3, "Lint (ruff)", "failure", runAt(56, 10), runAt(57, 35)),
+				fixtureStep(4, "Test", "skipped", nil, nil),
+				fixtureStep(5, "Complete job", "success", runAt(57, 35), runAt(57, 40))),
+			fixtureJob(1003, "Frontend tests (1/2)", "success", runAt(55, 25), runAt(58, 0), "GitHub Actions 2", hosted, false,
+				fixtureStep(1, "Set up job", "success", runAt(55, 25), runAt(55, 30)),
+				fixtureStep(2, "Test", "success", runAt(55, 30), runAt(57, 55)),
+				fixtureStep(3, "Complete job", "success", runAt(57, 55), runAt(58, 0))),
+			fixtureJob(1004, "Frontend tests (2/2)", "success", runAt(55, 26), runAt(58, 30), "GitHub Actions 3", hosted, false,
+				fixtureStep(1, "Set up job", "success", runAt(55, 26), runAt(55, 31)),
+				fixtureStep(2, "Test", "success", runAt(55, 31), runAt(58, 25)),
+				fixtureStep(3, "Complete job", "success", runAt(58, 25), runAt(58, 30))),
+			fixtureJob(1005, "E2E (api)", "success", runAt(55, 30), runAt(59, 10), "GitHub Actions 4", hosted, false,
+				fixtureStep(1, "Set up job", "success", runAt(55, 30), runAt(55, 35)),
+				fixtureStep(2, "Test", "success", runAt(55, 35), runAt(59, 5)),
+				fixtureStep(3, "Complete job", "success", runAt(59, 5), runAt(59, 10))),
+		},
+		Graph: &model.RunGraph{Nodes: []model.GraphNode{
+			{Key: "pick-runner", Name: "Pick runner", Column: 0, Needs: []string{}, JobIDs: []int64{1001}},
+			{Key: "e2e", Name: "E2E (${{ matrix.suite }})", Column: 0, Needs: []string{}, JobIDs: []int64{1005}, Group: true},
+			{Key: "backend", Name: "Backend tests", Column: 1, Needs: []string{"pick-runner"}, JobIDs: []int64{1002}},
+			{Key: "frontend-tests", Name: "Frontend tests (${{ matrix.shard }}/2)", Column: 1, Needs: []string{"pick-runner"},
+				JobIDs: []int64{1003, 1004}, Group: true},
+		}},
+		Artifacts: []model.RunArtifact{
+			{ID: 11, Name: "frontend-dist", SizeBytes: 2_400_000, ExpiresAt: ptr(time.Date(2026, 10, 17, 13, 59, 0, 0, time.UTC))},
+			{ID: 12, Name: "coverage-backend", SizeBytes: 51_200, Expired: true, ExpiresAt: ptr(time.Date(2026, 10, 2, 13, 59, 0, 0, time.UTC))},
+		},
+		FetchedAt: fixtureTime,
+	}
+}
+
+func runAnnotationsFixture() model.RunAnnotations {
+	return model.RunAnnotations{
+		Items: []model.Annotation{
+			{Level: "error", JobID: 1002, JobName: "Backend tests", Step: 3, StepName: "Lint (ruff)", Line: 5,
+				Message: "src/cache.py:12:5: F401 'os' imported but unused"},
+			{Level: "error", JobID: 1002, JobName: "Backend tests", Step: 3, StepName: "Lint (ruff)", Line: 7,
+				Message: "Process completed with exit code 1."},
+			{Level: "warning", JobID: 1003, JobName: "Frontend tests (1/2)", Step: 2, StepName: "Test", Line: 2,
+				Message: "Node.js 16 actions are deprecated."},
+			{Level: "notice", JobID: 1005, JobName: "E2E (api)", Step: 2, StepName: "Test", Line: 3, Message: "Retried 1 flaky test"},
+		},
+		Omitted: map[int64]int{1002: 3},
+	}
+}
+
+func jobLogFixture() model.JobLog {
+	line := func(n int, kind, text string) model.LogLine { return model.LogLine{N: n, Kind: kind, Text: text} }
+	return model.JobLog{JobID: 1002, Steps: []model.LogStep{
+		{Number: 1, Name: "Set up job", Lines: []model.LogLine{
+			line(1, "", "Current runner version: '2.338.0'"), line(2, "group", "Runner Image"),
+			line(3, "", "Image: ubuntu-24.04"), line(4, "endgroup", ""),
+		}},
+		{Number: 2, Name: "Install", Lines: []model.LogLine{
+			line(1, "command", "pip install -r requirements.txt"), line(2, "", "Successfully installed ruff-0.6.9"),
+		}},
+		{Number: 3, Name: "Lint (ruff)", Lines: []model.LogLine{
+			line(1, "group", "Run ruff check ."), line(2, "", "ruff check ."), line(3, "endgroup", ""),
+			line(4, "", "\x1b[31mFound 1 error.\x1b[0m"),
+			line(5, "error", "src/cache.py:12:5: F401 'os' imported but unused"),
+			line(6, "debug", "Finishing: Lint (ruff)"),
+			line(7, "error", "Process completed with exit code 1."),
+		}},
+		{Number: 4, Name: "Test", Lines: []model.LogLine{}},
+		{Number: 5, Name: "Complete job", Lines: []model.LogLine{line(1, "", "Cleaning up orphan processes")}},
+	}}
 }

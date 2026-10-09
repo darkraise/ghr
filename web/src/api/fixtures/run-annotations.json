@@ -1,0 +1,47 @@
+{
+  "items": [
+    {
+      "level": "error",
+      "job_id": 1002,
+      "job_name": "Backend tests",
+      "step": 3,
+      "step_name": "Lint (ruff)",
+      "line": 5,
+      "message": "src/cache.py:12:5: F401 'os' imported but unused"
+    },
+    {
+      "level": "error",
+      "job_id": 1002,
+      "job_name": "Backend tests",
+      "step": 3,
+      "step_name": "Lint (ruff)",
+      "line": 7,
+      "message": "Process completed with exit code 1."
+    },
+    {
+      "level": "warning",
+      "job_id": 1003,
+      "job_name": "Frontend tests (1/2)",
+      "step": 2,
+      "step_name": "Test",
+      "line": 2,
+      "message": "Node.js 16 actions are deprecated."
+    },
+    {
+      "level": "notice",
+      "job_id": 1005,
+      "job_name": "E2E (api)",
+      "step": 2,
+      "step_name": "Test",
+      "line": 3,
+      "message": "Retried 1 flaky test"
+    }
+  ],
+  "omitted": {
+    "1002": 3
+  },
+  "unread": 0,
+  "expired_logs": 0,
+  "too_large": 0,
+  "failed": 0
+}

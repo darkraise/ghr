@@ -1,0 +1,307 @@
+{
+  "repo": "darkmem",
+  "watched": false,
+  "id": 102,
+  "run_number": 42,
+  "attempt": 2,
+  "attempts": 2,
+  "workflow": "ci",
+  "title": "Fix the cache key",
+  "branch": "fix/cache-key",
+  "event": "pull_request",
+  "actor": "octo-dev",
+  "status": "completed",
+  "conclusion": "failure",
+  "head_sha": "a1f9c3e0d4b5c6a7b8c9d0e1f2a3b4c5d6e7f8a9",
+  "path": ".github/workflows/ci.yml",
+  "pull_requests": [
+    87
+  ],
+  "started_at": "2026-10-03T13:55:00Z",
+  "updated_at": "2026-10-03T13:59:10Z",
+  "html_url": "https://github.com/darkraise/darkmem/actions/runs/102",
+  "jobs": [
+    {
+      "id": 1001,
+      "name": "Pick runner",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-03T13:55:00Z",
+      "completed_at": "2026-10-03T13:55:20Z",
+      "runner_name": "ghr-darkmem-a1b2c3",
+      "labels": [
+        "self-hosted",
+        "homelab"
+      ],
+      "html_url": "https://github.com/darkraise/darkmem/actions/runs/102/job/1001",
+      "ghr": true,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:55:00Z",
+          "completed_at": "2026-10-03T13:55:05Z"
+        },
+        {
+          "number": 2,
+          "name": "Pick",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:55:05Z",
+          "completed_at": "2026-10-03T13:55:19Z"
+        },
+        {
+          "number": 3,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:55:19Z",
+          "completed_at": "2026-10-03T13:55:20Z"
+        }
+      ]
+    },
+    {
+      "id": 1002,
+      "name": "Backend tests",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-03T13:55:25Z",
+      "completed_at": "2026-10-03T13:57:40Z",
+      "runner_name": "ghr-darkmem-d4e5f6",
+      "labels": [
+        "self-hosted",
+        "homelab"
+      ],
+      "html_url": "https://github.com/darkraise/darkmem/actions/runs/102/job/1002",
+      "ghr": true,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:55:25Z",
+          "completed_at": "2026-10-03T13:55:30Z"
+        },
+        {
+          "number": 2,
+          "name": "Install",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:55:30Z",
+          "completed_at": "2026-10-03T13:56:10Z"
+        },
+        {
+          "number": 3,
+          "name": "Lint (ruff)",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-10-03T13:56:10Z",
+          "completed_at": "2026-10-03T13:57:35Z"
+        },
+        {
+          "number": 4,
+          "name": "Test",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:57:35Z",
+          "completed_at": "2026-10-03T13:57:40Z"
+        }
+      ]
+    },
+    {
+      "id": 1003,
+      "name": "Frontend tests (1/2)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-03T13:55:25Z",
+      "completed_at": "2026-10-03T13:58:00Z",
+      "runner_name": "GitHub Actions 2",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/darkraise/darkmem/actions/runs/102/job/1003",
+      "ghr": false,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:55:25Z",
+          "completed_at": "2026-10-03T13:55:30Z"
+        },
+        {
+          "number": 2,
+          "name": "Test",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:55:30Z",
+          "completed_at": "2026-10-03T13:57:55Z"
+        },
+        {
+          "number": 3,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:57:55Z",
+          "completed_at": "2026-10-03T13:58:00Z"
+        }
+      ]
+    },
+    {
+      "id": 1004,
+      "name": "Frontend tests (2/2)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-03T13:55:26Z",
+      "completed_at": "2026-10-03T13:58:30Z",
+      "runner_name": "GitHub Actions 3",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/darkraise/darkmem/actions/runs/102/job/1004",
+      "ghr": false,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:55:26Z",
+          "completed_at": "2026-10-03T13:55:31Z"
+        },
+        {
+          "number": 2,
+          "name": "Test",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:55:31Z",
+          "completed_at": "2026-10-03T13:58:25Z"
+        },
+        {
+          "number": 3,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:58:25Z",
+          "completed_at": "2026-10-03T13:58:30Z"
+        }
+      ]
+    },
+    {
+      "id": 1005,
+      "name": "E2E (api)",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-03T13:55:30Z",
+      "completed_at": "2026-10-03T13:59:10Z",
+      "runner_name": "GitHub Actions 4",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/darkraise/darkmem/actions/runs/102/job/1005",
+      "ghr": false,
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:55:30Z",
+          "completed_at": "2026-10-03T13:55:35Z"
+        },
+        {
+          "number": 2,
+          "name": "Test",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:55:35Z",
+          "completed_at": "2026-10-03T13:59:05Z"
+        },
+        {
+          "number": 3,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-10-03T13:59:05Z",
+          "completed_at": "2026-10-03T13:59:10Z"
+        }
+      ]
+    }
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "key": "pick-runner",
+        "name": "Pick runner",
+        "column": 0,
+        "needs": [],
+        "job_ids": [
+          1001
+        ],
+        "group": false
+      },
+      {
+        "key": "e2e",
+        "name": "E2E (${{ matrix.suite }})",
+        "column": 0,
+        "needs": [],
+        "job_ids": [
+          1005
+        ],
+        "group": true
+      },
+      {
+        "key": "backend",
+        "name": "Backend tests",
+        "column": 1,
+        "needs": [
+          "pick-runner"
+        ],
+        "job_ids": [
+          1002
+        ],
+        "group": false
+      },
+      {
+        "key": "frontend-tests",
+        "name": "Frontend tests (${{ matrix.shard }}/2)",
+        "column": 1,
+        "needs": [
+          "pick-runner"
+        ],
+        "job_ids": [
+          1003,
+          1004
+        ],
+        "group": true
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "id": 11,
+      "name": "frontend-dist",
+      "size_bytes": 2400000,
+      "expired": false,
+      "expires_at": "2026-10-17T13:59:00Z"
+    },
+    {
+      "id": 12,
+      "name": "coverage-backend",
+      "size_bytes": 51200,
+      "expired": true,
+      "expires_at": "2026-10-02T13:59:00Z"
+    }
+  ],
+  "fetched_at": "2026-10-03T14:05:00Z"
+}

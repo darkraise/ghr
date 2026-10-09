@@ -1,0 +1,106 @@
+{
+  "job_id": 1002,
+  "too_large": false,
+  "expired": false,
+  "steps": [
+    {
+      "number": 1,
+      "name": "Set up job",
+      "lines": [
+        {
+          "n": 1,
+          "kind": "",
+          "text": "Current runner version: '2.338.0'"
+        },
+        {
+          "n": 2,
+          "kind": "group",
+          "text": "Runner Image"
+        },
+        {
+          "n": 3,
+          "kind": "",
+          "text": "Image: ubuntu-24.04"
+        },
+        {
+          "n": 4,
+          "kind": "endgroup",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "name": "Install",
+      "lines": [
+        {
+          "n": 1,
+          "kind": "command",
+          "text": "pip install -r requirements.txt"
+        },
+        {
+          "n": 2,
+          "kind": "",
+          "text": "Successfully installed ruff-0.6.9"
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "name": "Lint (ruff)",
+      "lines": [
+        {
+          "n": 1,
+          "kind": "group",
+          "text": "Run ruff check ."
+        },
+        {
+          "n": 2,
+          "kind": "",
+          "text": "ruff check ."
+        },
+        {
+          "n": 3,
+          "kind": "endgroup",
+          "text": ""
+        },
+        {
+          "n": 4,
+          "kind": "",
+          "text": "\u001b[31mFound 1 error.\u001b[0m"
+        },
+        {
+          "n": 5,
+          "kind": "error",
+          "text": "src/cache.py:12:5: F401 'os' imported but unused"
+        },
+        {
+          "n": 6,
+          "kind": "debug",
+          "text": "Finishing: Lint (ruff)"
+        },
+        {
+          "n": 7,
+          "kind": "error",
+          "text": "Process completed with exit code 1."
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "name": "Test",
+      "lines": []
+    },
+    {
+      "number": 5,
+      "name": "Complete job",
+      "lines": [
+        {
+          "n": 1,
+          "kind": "",
+          "text": "Cleaning up orphan processes"
+        }
+      ]
+    }
+  ]
+}
