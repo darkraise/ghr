@@ -52,10 +52,22 @@ type fakeBackend struct {
 	storageErr    error // returned by every storage method
 	choices       []model.ToolchainChoice
 	storageCalls  []string
+	watched       []string
+	unwatched     []string
 }
 
 func (f *fakeBackend) AvailableRepos(context.Context) ([]model.AvailableRepo, error) {
 	return f.avail, f.availErr
+}
+
+func (f *fakeBackend) WatchRepo(ctx context.Context, name string) error {
+	f.watched = append(f.watched, name)
+	return nil
+}
+
+func (f *fakeBackend) UnwatchRepo(name string) error {
+	f.unwatched = append(f.unwatched, name)
+	return nil
 }
 
 func (f *fakeBackend) QueueRunnerUpdate(context.Context) error {
@@ -569,5 +581,19 @@ func TestClientHistorySendsSince(t *testing.T) {
 	}
 	if len(raw) != 2 || raw[0].Has("since") || raw[1].Get("since") != "2026-10-01T18:00:00.0000005+07:00" {
 		t.Fatalf("raw queries %v", raw)
+	}
+}
+
+func TestWatchRoutes(t *testing.T) {
+	c, b := setup(t)
+	ctx := context.Background()
+	if err := c.call(ctx, http.MethodPost, "/watch", strings.NewReader(`{"name":"docs"}`), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.call(ctx, http.MethodDelete, "/watch/old-docs", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(b.watched, []string{"docs"}) || !reflect.DeepEqual(b.unwatched, []string{"old-docs"}) {
+		t.Fatalf("watched %v unwatched %v", b.watched, b.unwatched)
 	}
 }

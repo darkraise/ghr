@@ -68,6 +68,8 @@ type Backend interface {
 	PatchConfig(p model.ConfigPatch) error
 	AddRepo(ctx context.Context, req model.AddRepoRequest) error
 	RemoveRepo(name string) error
+	WatchRepo(ctx context.Context, name string) error
+	UnwatchRepo(name string) error
 	SetPausedAll(paused bool) error
 	SetToken(ctx context.Context, token string) error
 	KillRunner(ctx context.Context, id string) error
@@ -188,6 +190,17 @@ func NewServer(b Backend) http.Handler {
 	})
 	mux.HandleFunc("DELETE /repos/{name}", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, b.RemoveRepo(r.PathValue("name")))
+	})
+	mux.HandleFunc("POST /watch", func(w http.ResponseWriter, r *http.Request) {
+		var req model.WatchRequest
+		if err := decode(r, &req); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		respond(w, nil, b.WatchRepo(r.Context(), req.Name))
+	})
+	mux.HandleFunc("DELETE /watch/{name}", func(w http.ResponseWriter, r *http.Request) {
+		respond(w, nil, b.UnwatchRepo(r.PathValue("name")))
 	})
 	mux.HandleFunc("POST /repos/{name}/pause", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, b.PatchConfig(pausePatch(r.PathValue("name"), true)))
