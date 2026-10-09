@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { json, mockApi, type Call } from "@/test/api"
 import { fixtures, runRoutes } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
@@ -141,6 +141,86 @@ describe("Job page", () => {
     const rail = within(screen.getByRole("navigation", { name: "Run" }))
     expect(rail.getByRole("link", { name: /Backend tests/ })).toHaveAttribute("aria-current", "page")
     expect(rail.getByRole("link", { name: "Summary" })).not.toHaveAttribute("aria-current")
+  })
+
+  it("shows a finished job's log with search and the raw log button", async () => {
+    const { calls } = mockApi(runRoutes())
+    renderApp("/actions/darkmem/runs/102/jobs/1002")
+    expect(await screen.findByLabelText("Search logs")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Raw log" })).toBeInTheDocument()
+    expect(calls.some((c) => c.path === "/api/actions/darkmem/jobs/1002/log")).toBe(true)
+  })
+
+  it("opens the step and marks the line an annotation links to", async () => {
+    mockApi(runRoutes())
+    renderApp("/actions/darkmem/runs/102/jobs/1002?attempt=2&step=3&line=5")
+    await screen.findByLabelText("Search logs")
+    await waitFor(() => expect(document.querySelector('[data-target="true"]')).toHaveTextContent("src/cache.py:12:5: F401 'os' imported but unused"))
+  })
+
+  it("marks the new line when an annotation link changes step and line", async () => {
+    mockApi(runRoutes())
+    const { router } = renderApp("/actions/darkmem/runs/102/jobs/1002?attempt=2&step=3&line=5")
+    await waitFor(() => expect(document.querySelector('[data-target="true"]')).toHaveTextContent("src/cache.py:12:5"))
+    await router.navigate({
+      to: "/actions/$repo/runs/$id/jobs/$jobId",
+      params: { repo: "darkmem", id: "102", jobId: "1002" },
+      search: { attempt: 2, step: 2, line: 2 },
+    })
+    await waitFor(() => expect(document.querySelector('[data-target="true"]')).toHaveTextContent("Successfully installed ruff-0.6.9"))
+  })
+
+  it("shows why the log could not be read and reads it again on Try again", async () => {
+    let busy = true
+    mockApi(
+      runRoutes({
+        "GET /api/actions/darkmem/jobs/1002/log": () =>
+          busy ? json({ error: "GitHub is still sending this log; try again shortly" }, 503) : fixtures.jobLog,
+      }),
+    )
+    const { user } = renderApp("/actions/darkmem/runs/102/jobs/1002")
+    expect(await screen.findByText("GitHub is still sending this log; try again shortly")).toBeInTheDocument()
+    busy = false
+    await user.click(screen.getByRole("button", { name: "Try again" }))
+    expect(await screen.findByLabelText("Search logs")).toBeInTheDocument()
+  })
+
+  it("offers only the raw log for a log too large to show", async () => {
+    mockApi(runRoutes({ "GET /api/actions/darkmem/jobs/1002/log": { ...fixtures.jobLog, too_large: true, steps: [] } }))
+    renderApp("/actions/darkmem/runs/102/jobs/1002")
+    expect(await screen.findByText("This log is too large to show here.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Raw log" })).toBeInTheDocument()
+    expect(screen.queryByLabelText("Search logs")).toBeNull()
+  })
+
+  it("says when GitHub no longer keeps the log", async () => {
+    mockApi(runRoutes({ "GET /api/actions/darkmem/jobs/1002/log": { ...fixtures.jobLog, expired: true, steps: [] } }))
+    renderApp("/actions/darkmem/runs/102/jobs/1002")
+    expect(await screen.findByText("GitHub no longer keeps this job's log.")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Raw log" })).toBeNull()
+  })
+
+  it("saves the raw log through a Blob", async () => {
+    const { calls } = mockApi(runRoutes({ "GET /api/actions/darkmem/jobs/1002/log/raw": { text: "2026-10-03T13:55:25.0000000Z Set up job\n" } }))
+    const create = vi.fn(() => "blob:http://localhost/raw")
+    const revoke = vi.fn()
+    // jsdom has no object URLs; a subclass keeps new URL(...) working.
+    class FakeURL extends URL {
+      static createObjectURL = create
+      static revokeObjectURL = revoke
+    }
+    vi.stubGlobal("URL", FakeURL)
+    const saved: string[] = []
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(`${this.download} ${this.href}`)
+    })
+    const { user } = renderApp("/actions/darkmem/runs/102/jobs/1002")
+    await user.click(await screen.findByRole("button", { name: "Raw log" }))
+    await waitFor(() => expect(saved).toEqual(["darkmem-job-1002.log blob:http://localhost/raw"]))
+    expect(create).toHaveBeenCalledWith(expect.any(Blob))
+    expect(calls.some((c) => c.path === "/api/actions/darkmem/jobs/1002/log/raw")).toBe(true)
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:http://localhost/raw"))
+    click.mockRestore()
   })
 
   it("says logs wait for a running job and lists its steps", async () => {

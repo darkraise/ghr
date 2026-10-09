@@ -1,10 +1,13 @@
+import { useMutation } from "@tanstack/react-query"
 import { Link, SearchParamError, useNavigate, useParams, useSearch, type ErrorComponentProps } from "@tanstack/react-router"
+import { Button } from "darkraise-ui/components/button"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { useId, type ReactNode } from "react"
-import { ApiError } from "@/api/client"
-import { useConfig, useRunAnnotations, useRunDetail } from "@/api/hooks"
+import { ApiError, api } from "@/api/client"
+import { useConfig, useJobLog, useRunAnnotations, useRunDetail } from "@/api/hooks"
 import type { RunDetail, RunJob } from "@/api/types"
+import { LogViewer } from "@/components/log-viewer"
 import { ErrorLine } from "@/components/page/error-line"
 import { Section } from "@/components/page/section"
 import { RouteError } from "@/components/route-error"
@@ -16,7 +19,7 @@ import { RunStatusIcon } from "@/components/run-status-icon"
 import { JobsTimeline } from "@/components/run-timeline"
 import { StepList } from "@/components/step-list"
 import { dateTimeSec, dur } from "@/lib/format"
-import { githubLinks, isRunActive, jobMs, positiveInt, runTotalMs, statusText } from "@/lib/run-details"
+import { githubLinks, isRunActive, jobMs, positiveInt, rawLogFileName, runTotalMs, statusText, type JobSearch } from "@/lib/run-details"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
@@ -234,7 +237,58 @@ function JobMeta({ job }: { job: RunJob }) {
   )
 }
 
-function JobView({ run, owner, jobId }: { run: RunDetail; owner: string; jobId: number }) {
+// The Blob goes through a temporary object URL because a navigation to the
+// API cannot send X-GHR. The URL is revoked after the click has started the
+// download, not during it.
+function saveText(text: string, fileName: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }))
+  const a = document.createElement("a")
+  a.href = url
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+function JobLogs({ repo, job, search }: { repo: string; job: RunJob; search: JobSearch }) {
+  const log = useJobLog(repo, job.id, true)
+  const raw = useMutation({
+    mutationFn: () => api.rawJobLog(repo, job.id),
+    onSuccess: (r) => saveText(r.text, rawLogFileName(repo, job.id)),
+  })
+  const rawButton = (
+    <Button size="sm" variant="outline" loading={raw.isPending} onClick={() => raw.mutate()}>
+      Raw log
+    </Button>
+  )
+  if (!log.data) {
+    return log.isError ? <ErrorLine onRetry={() => void log.refetch()}>{errorText(log.error)}</ErrorLine> : <Spinner label="Loading" />
+  }
+  if (log.data.expired) return <p className="text-sm text-muted-foreground">GitHub no longer keeps this job&apos;s log.</p>
+  if (log.data.too_large) {
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <p className="text-sm text-muted-foreground">This log is too large to show here.</p>
+        {rawButton}
+      </div>
+    )
+  }
+  // LogViewer reads step and line once, when it mounts; a new annotation
+  // link on the same job page must mount it again.
+  return (
+    <LogViewer
+      key={`${job.id}:${search.step ?? ""}:${search.line ?? ""}`}
+      log={log.data}
+      steps={job.steps}
+      step={search.step}
+      line={search.line}
+      toolbar={rawButton}
+    />
+  )
+}
+
+function JobView({ run, owner, jobId, search }: { run: RunDetail; owner: string; jobId: number; search: JobSearch }) {
   const now = useNow()
   const onAttempt = useAttemptNavigate(run)
   const headingId = useId()
@@ -264,7 +318,7 @@ function JobView({ run, owner, jobId }: { run: RunDetail; owner: string; jobId: 
         <JobMeta job={job} />
         <div className="mt-4">
           {job.status === "completed" ? (
-            <StepList steps={job.steps} now={now} live={false} />
+            <JobLogs repo={run.repo} job={job} search={search} />
           ) : (
             <div className="flex flex-col gap-2">
               <p className="text-sm text-muted-foreground">Logs appear when the job finishes.</p>
@@ -283,7 +337,7 @@ export function JobPage() {
   const jobId = positiveInt(params.jobId)
   return (
     <RunGate repo={params.repo} idParam={params.id} attempt={search.attempt} invalid={jobId === undefined}>
-      {(run, owner) => <JobView run={run} owner={owner} jobId={jobId ?? 0} />}
+      {(run, owner) => <JobView run={run} owner={owner} jobId={jobId ?? 0} search={search} />}
     </RunGate>
   )
 }
