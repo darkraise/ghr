@@ -44,8 +44,11 @@ describe("Install toolchain dialog", () => {
     await user.click(await screen.findByRole("option", { name: "Go" }))
     expect(await dialog.findByRole("button", { name: /^1\.23\.4/ })).toBeInTheDocument()
     expect(calls.some((c) => c.path === "/api/toolchains/available" && c.search === "?tool=go")).toBe(true)
+    // The closed Select hands focus back to its trigger later; typing before
+    // that sends the rest of the keys to the trigger.
+    await waitFor(() => expect(dialog.getByRole("combobox", { name: "Tool" })).toHaveFocus())
     await user.type(dialog.getByRole("textbox", { name: "Version" }), "1.22")
-    expect(dialog.getByText("No match")).toBeInTheDocument()
+    expect(await dialog.findByText("No match")).toBeInTheDocument()
     await user.click(dialog.getByRole("button", { name: "Install" }))
     await waitFor(() =>
       expect(calls.find((c) => c.method === "POST" && c.path === "/api/toolchains")?.body).toEqual({ tool: "go", version: "1.22" }),
