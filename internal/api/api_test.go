@@ -57,6 +57,8 @@ type fakeBackend struct {
 	watchErr      error // returned by WatchRepo and UnwatchRepo
 	actions       model.Actions
 	actionsCalls  int
+	runCalls      []string // "<method> <repo> <id>", plus the attempt for run calls
+	runErr        error    // returned by the five run details methods
 }
 
 func (f *fakeBackend) AvailableRepos(context.Context) ([]model.AvailableRepo, error) {
@@ -71,6 +73,31 @@ func (f *fakeBackend) WatchRepo(ctx context.Context, name string) error {
 func (f *fakeBackend) UnwatchRepo(name string) error {
 	f.unwatched = append(f.unwatched, name)
 	return f.watchErr
+}
+
+func (f *fakeBackend) RunDetail(ctx context.Context, repo string, id int64, attempt int) (model.RunDetail, error) {
+	f.runCalls = append(f.runCalls, fmt.Sprintf("RunDetail %s %d %d", repo, id, attempt))
+	return model.RunDetail{Repo: repo, ID: id, Attempt: attempt}, f.runErr
+}
+
+func (f *fakeBackend) RunAnnotations(ctx context.Context, repo string, id int64, attempt int) (model.RunAnnotations, error) {
+	f.runCalls = append(f.runCalls, fmt.Sprintf("RunAnnotations %s %d %d", repo, id, attempt))
+	return model.RunAnnotations{Items: []model.Annotation{}, Omitted: map[int64]int{id: 1}}, f.runErr
+}
+
+func (f *fakeBackend) JobLog(ctx context.Context, repo string, jobID int64) (model.JobLog, error) {
+	f.runCalls = append(f.runCalls, fmt.Sprintf("JobLog %s %d", repo, jobID))
+	return model.JobLog{JobID: jobID, Steps: []model.LogStep{}}, f.runErr
+}
+
+func (f *fakeBackend) RawJobLog(ctx context.Context, repo string, jobID int64) (model.RawLog, error) {
+	f.runCalls = append(f.runCalls, fmt.Sprintf("RawJobLog %s %d", repo, jobID))
+	return model.RawLog{Text: "raw log"}, f.runErr
+}
+
+func (f *fakeBackend) ArtifactDownload(ctx context.Context, repo string, id int64) (model.DownloadURL, error) {
+	f.runCalls = append(f.runCalls, fmt.Sprintf("ArtifactDownload %s %d", repo, id))
+	return model.DownloadURL{URL: "https://example.blob.core.windows.net/a.zip"}, f.runErr
 }
 
 func (f *fakeBackend) Actions(context.Context) (model.Actions, error) {
@@ -303,6 +330,7 @@ func TestGitHubErrorsMapToStatuses(t *testing.T) {
 		{&github.APIError{Status: 401, Kind: github.ErrAuth, Message: "Bad credentials"}, 403, false},
 		{&github.APIError{Status: 404, Kind: github.ErrNotFound, Message: "Not Found"}, 404, false},
 		{&github.APIError{Status: 422, Kind: github.ErrUnprocessable, Message: "busy"}, 409, false},
+		{&github.APIError{Status: 410, Kind: github.ErrGone, Message: "Gone"}, 410, false},
 		{&github.APIError{Status: 503, Kind: github.ErrServer, Message: "down"}, 502, false},
 		{errors.New("plain"), 500, false},
 		{Conflict("already"), 409, false},
@@ -625,5 +653,79 @@ func TestActionsRoute(t *testing.T) {
 	}
 	if b.actionsCalls != 1 || len(got.Runs) != 1 || got.Runs[0].ID != 7 || len(got.Repos) != 1 {
 		t.Fatalf("calls %d actions %+v", b.actionsCalls, got)
+	}
+}
+
+func TestRunDetailRoutes(t *testing.T) {
+	c, b := setup(t)
+	ctx := context.Background()
+	var d model.RunDetail
+	if err := c.call(ctx, http.MethodGet, "/actions/darkmem/runs/102?attempt=2", nil, &d); err != nil || d.ID != 102 || d.Attempt != 2 {
+		t.Fatalf("run %+v err %v", d, err)
+	}
+	var a model.RunAnnotations
+	if err := c.call(ctx, http.MethodGet, "/actions/darkmem/runs/102/annotations", nil, &a); err != nil || a.Omitted[102] != 1 {
+		t.Fatalf("annotations %+v err %v", a, err)
+	}
+	var l model.JobLog
+	if err := c.call(ctx, http.MethodGet, "/actions/darkmem/jobs/1002/log", nil, &l); err != nil || l.JobID != 1002 {
+		t.Fatalf("log %+v err %v", l, err)
+	}
+	var raw model.RawLog
+	if err := c.call(ctx, http.MethodGet, "/actions/darkmem/jobs/1002/log/raw", nil, &raw); err != nil || raw.Text != "raw log" {
+		t.Fatalf("raw %+v err %v", raw, err)
+	}
+	var u model.DownloadURL
+	if err := c.call(ctx, http.MethodGet, "/actions/darkmem/artifacts/11/download", nil, &u); err != nil || u.URL == "" {
+		t.Fatalf("download %+v err %v", u, err)
+	}
+	want := []string{"RunDetail darkmem 102 2", "RunAnnotations darkmem 102 0", "JobLog darkmem 1002", "RawJobLog darkmem 1002",
+		"ArtifactDownload darkmem 11"}
+	if !reflect.DeepEqual(b.runCalls, want) {
+		t.Fatalf("calls %v", b.runCalls)
+	}
+}
+
+func TestRunDetailRoutesRefuseBadNumbers(t *testing.T) {
+	c, b := setup(t)
+	for path, msg := range map[string]string{
+		"/actions/darkmem/runs/abc":                       "run id must be a positive integer",
+		"/actions/darkmem/runs/0/annotations":             "run id must be a positive integer",
+		"/actions/darkmem/runs/102?attempt=0":             "attempt must be a positive integer",
+		"/actions/darkmem/runs/102/annotations?attempt=x": "attempt must be a positive integer",
+		"/actions/darkmem/runs/102?attempt=99999999999":   "attempt must be a positive integer",
+		"/actions/darkmem/jobs/-4/log":                    "job id must be a positive integer",
+		"/actions/darkmem/jobs/1.5/log/raw":               "job id must be a positive integer",
+		"/actions/darkmem/artifacts/x/download":           "artifact id must be a positive integer",
+	} {
+		var ae *Error
+		if err := c.call(context.Background(), http.MethodGet, path, nil, nil); !errors.As(err, &ae) || ae.Status != 400 || ae.Msg != msg {
+			t.Errorf("%s: %v", path, err)
+		}
+	}
+	if len(b.runCalls) != 0 {
+		t.Fatalf("a bad number reached the backend: %v", b.runCalls)
+	}
+}
+
+func TestRunDetailRoutesPassBackendStatuses(t *testing.T) {
+	c, b := setup(t)
+	for _, tc := range []struct {
+		path string
+		err  error
+	}{
+		{"/actions/nope/runs/1", NotFound("repo nope is not configured or watched")},
+		{"/actions/darkmem/runs/1?attempt=3", BadRequest("run 1 has no attempt 3")},
+		{"/actions/darkmem/jobs/1/log", Conflict("job has not finished")},
+		{"/actions/darkmem/jobs/1/log/raw", &Error{Status: http.StatusRequestEntityTooLarge, Msg: "log is larger than 32 MiB; open it on GitHub"}},
+		{"/actions/darkmem/artifacts/1/download", &Error{Status: http.StatusGone, Msg: "artifact has expired"}},
+		{"/actions/darkmem/artifacts/1/download", &Error{Status: http.StatusBadGateway, Msg: "GitHub returned an unexpected download address"}},
+	} {
+		b.runErr = tc.err
+		var want, ae *Error
+		errors.As(tc.err, &want)
+		if err := c.call(context.Background(), http.MethodGet, tc.path, nil, nil); !errors.As(err, &ae) || ae.Status != want.Status || ae.Msg != want.Msg {
+			t.Errorf("%s: %v", tc.path, err)
+		}
 	}
 }

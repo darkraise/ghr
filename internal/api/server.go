@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,6 +49,8 @@ func FromGitHub(err error) error {
 		return &Error{Status: http.StatusNotFound, Msg: err.Error()}
 	case github.ErrUnprocessable:
 		return &Error{Status: http.StatusConflict, Msg: err.Error()}
+	case github.ErrGone:
+		return &Error{Status: http.StatusGone, Msg: err.Error()}
 	}
 	return &Error{Status: http.StatusBadGateway, Msg: err.Error()}
 }
@@ -78,6 +81,11 @@ type Backend interface {
 	Metrics() model.Metrics
 	Activity(ctx context.Context, window, repo string, loc *time.Location) (model.Activity, error)
 	Actions(ctx context.Context) (model.Actions, error)
+	RunDetail(ctx context.Context, repo string, id int64, attempt int) (model.RunDetail, error)
+	RunAnnotations(ctx context.Context, repo string, id int64, attempt int) (model.RunAnnotations, error)
+	JobLog(ctx context.Context, repo string, jobID int64) (model.JobLog, error)
+	RawJobLog(ctx context.Context, repo string, jobID int64) (model.RawLog, error)
+	ArtifactDownload(ctx context.Context, repo string, id int64) (model.DownloadURL, error)
 	Token() model.TokenStatus
 	StartLabelCheck(repo string) error
 	LabelCheck(repo string) (model.LabelCheck, error)
@@ -120,6 +128,51 @@ func NewServer(b Backend) http.Handler {
 	mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
 		a, err := b.Actions(r.Context())
 		respond(w, a, err)
+	})
+	mux.HandleFunc("GET /actions/{repo}/runs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, attempt, err := runParams(r)
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		d, err := b.RunDetail(r.Context(), r.PathValue("repo"), id, attempt)
+		respond(w, d, err)
+	})
+	mux.HandleFunc("GET /actions/{repo}/runs/{id}/annotations", func(w http.ResponseWriter, r *http.Request) {
+		id, attempt, err := runParams(r)
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		a, err := b.RunAnnotations(r.Context(), r.PathValue("repo"), id, attempt)
+		respond(w, a, err)
+	})
+	mux.HandleFunc("GET /actions/{repo}/jobs/{jobId}/log", func(w http.ResponseWriter, r *http.Request) {
+		id, err := positive(r.PathValue("jobId"), "job id")
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		l, err := b.JobLog(r.Context(), r.PathValue("repo"), id)
+		respond(w, l, err)
+	})
+	mux.HandleFunc("GET /actions/{repo}/jobs/{jobId}/log/raw", func(w http.ResponseWriter, r *http.Request) {
+		id, err := positive(r.PathValue("jobId"), "job id")
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		l, err := b.RawJobLog(r.Context(), r.PathValue("repo"), id)
+		respond(w, l, err)
+	})
+	mux.HandleFunc("GET /actions/{repo}/artifacts/{id}/download", func(w http.ResponseWriter, r *http.Request) {
+		id, err := positive(r.PathValue("id"), "artifact id")
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		d, err := b.ArtifactDownload(r.Context(), r.PathValue("repo"), id)
+		respond(w, d, err)
 	})
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.Status()) })
 	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
@@ -297,6 +350,37 @@ func NewServer(b Backend) http.Handler {
 	// plain-text 404 instead of running a standard prune.
 	mux.HandleFunc("POST /prune/{scope}", accepted(func(r *http.Request) error { return b.PruneScope(r.PathValue("scope")) }))
 	return mux
+}
+
+// positive parses a path or query value that must be a positive integer.
+func positive(v, name string) (int64, error) {
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, BadRequest(name + " must be a positive integer")
+	}
+	return n, nil
+}
+
+// attemptParam reads ?attempt=; absent means 0, the latest attempt.
+func attemptParam(r *http.Request) (int, error) {
+	v := r.URL.Query().Get("attempt")
+	if v == "" {
+		return 0, nil
+	}
+	n, err := positive(v, "attempt")
+	if err != nil || n > math.MaxInt32 {
+		return 0, BadRequest("attempt must be a positive integer")
+	}
+	return int(n), nil
+}
+
+func runParams(r *http.Request) (int64, int, error) {
+	id, err := positive(r.PathValue("id"), "run id")
+	if err != nil {
+		return 0, 0, err
+	}
+	attempt, err := attemptParam(r)
+	return id, attempt, err
 }
 
 func pausePatch(name string, paused bool) model.ConfigPatch {
