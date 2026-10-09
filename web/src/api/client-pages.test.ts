@@ -1,6 +1,10 @@
+import { renderHook } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { mockApi, noContent } from "@/test/api"
+import { fixtures } from "@/test/fixtures"
+import { withQuery } from "@/test/query"
 import { api } from "./client"
+import { annotationsPoll, keys, POLL_ACTIONS, POLL_SLOW, runDetailPoll, useJobLog, useRunAnnotations, useRunDetail } from "./hooks"
 
 const ok = () => noContent()
 
@@ -71,5 +75,54 @@ describe("api for the later pages", () => {
       "/api/storage",
       "/api/toolchains/available?tool=node",
     ])
+  })
+})
+
+describe("api for the run pages", () => {
+  it.each([
+    ["runDetail latest", () => api.runDetail("dark mem", 102, undefined), "/api/actions/dark%20mem/runs/102", ""],
+    ["runDetail attempt", () => api.runDetail("darkmem", 102, 1), "/api/actions/darkmem/runs/102", "?attempt=1"],
+    ["runAnnotations latest", () => api.runAnnotations("darkmem", 102, undefined), "/api/actions/darkmem/runs/102/annotations", ""],
+    ["runAnnotations attempt", () => api.runAnnotations("darkmem", 102, 2), "/api/actions/darkmem/runs/102/annotations", "?attempt=2"],
+    ["jobLog", () => api.jobLog("darkmem", 1002), "/api/actions/darkmem/jobs/1002/log", ""],
+    ["rawJobLog", () => api.rawJobLog("darkmem", 1002), "/api/actions/darkmem/jobs/1002/log/raw", ""],
+    ["artifactDownload", () => api.artifactDownload("darkmem", 11), "/api/actions/darkmem/artifacts/11/download", ""],
+  ])("%s reads its route", async (_name, call, path, search) => {
+    const { calls } = mockApi({ [`GET ${path}`]: { ok: true } })
+    await call()
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ method: "GET", path, search })
+  })
+
+  it("keys a run by its lower-case repository, ID and attempt", () => {
+    expect(keys.runDetail("DarkMem", 102, undefined)).toEqual(["run-detail", "darkmem", 102, 0])
+    expect(keys.runAnnotations("darkmem", 102, 1)).toEqual(["run-annotations", "darkmem", 102, 1])
+    expect(keys.jobLog("DarkMem", 1002)).toEqual(["job-log", "darkmem", 1002])
+  })
+
+  it("polls a run only while its attempt is not completed", () => {
+    expect(runDetailPoll(undefined)).toBe(false)
+    expect(runDetailPoll(fixtures.runDetail)).toBe(false)
+    expect(runDetailPoll({ ...fixtures.runDetail, status: "in_progress" })).toBe(POLL_ACTIONS)
+  })
+
+  it.each([
+    ["no data on an active run", undefined, true, POLL_ACTIONS],
+    ["no data on a finished run", undefined, false, false],
+    ["unread logs", { ...fixtures.runAnnotations, unread: 2 }, false, POLL_SLOW],
+    ["every log read on an active run", fixtures.runAnnotations, true, POLL_ACTIONS],
+    ["every log read on a finished run", fixtures.runAnnotations, false, false],
+  ])("polls annotations with %s", (_why, data, active, want) => {
+    expect(annotationsPoll(data, active)).toBe(want)
+  })
+
+  it("reads nothing while the hooks are disabled", async () => {
+    const { calls } = mockApi({})
+    const { wrapper } = withQuery()
+    renderHook(() => useRunDetail("darkmem", 102, undefined, false), { wrapper })
+    renderHook(() => useRunAnnotations("darkmem", 102, undefined, true, false), { wrapper })
+    renderHook(() => useJobLog("darkmem", 1002, false), { wrapper })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(calls).toHaveLength(0)
   })
 })

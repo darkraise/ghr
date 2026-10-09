@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "./client"
-import type { ActivityWindow, GhrEvent, LogChunk, Status, Storage } from "./types"
+import type { ActivityWindow, GhrEvent, LogChunk, RunAnnotations, RunDetail, Status, Storage } from "./types"
 
 export const POLL_FAST = 1000
 export const POLL_SLOW = 5000
@@ -16,6 +16,11 @@ export const keys = {
   config: ["config"] as const,
   metrics: ["metrics"] as const,
   actions: ["actions"] as const,
+  runDetail: (repo: string, id: number, attempt: number | undefined) =>
+    ["run-detail", repo.toLowerCase(), id, attempt ?? 0] as const,
+  runAnnotations: (repo: string, id: number, attempt: number | undefined) =>
+    ["run-annotations", repo.toLowerCase(), id, attempt ?? 0] as const,
+  jobLog: (repo: string, jobId: number) => ["job-log", repo.toLowerCase(), jobId] as const,
   activity: (window: string, tz: string, repo: string) => ["activity", window, tz, repo] as const,
   events: (epoch: string) => ["events", epoch] as const,
   history: (repo: string, conclusion: string, since: string) => ["history", repo, conclusion, since] as const,
@@ -58,6 +63,41 @@ export function useMetrics() {
 
 export function useActions() {
   return useQuery({ queryKey: keys.actions, queryFn: ({ signal }) => api.actions(signal), refetchInterval: POLL_ACTIONS })
+}
+
+// A run's details change only while the shown attempt runs.
+export function runDetailPoll(data: RunDetail | undefined): number | false {
+  return data && data.status !== "completed" ? POLL_ACTIONS : false
+}
+
+// The daemon answers within 20 seconds with the logs it has read, so jobs it
+// is still reading are asked for again soon; new jobs finish only while the
+// run is active.
+export function annotationsPoll(data: RunAnnotations | undefined, active: boolean): number | false {
+  if (data && data.unread > 0) return POLL_SLOW
+  return active ? POLL_ACTIONS : false
+}
+
+export function useRunDetail(repo: string, id: number, attempt: number | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.runDetail(repo, id, attempt),
+    queryFn: ({ signal }) => api.runDetail(repo, id, attempt, signal),
+    enabled,
+    refetchInterval: (q) => runDetailPoll(q.state.data),
+  })
+}
+
+export function useRunAnnotations(repo: string, id: number, attempt: number | undefined, active: boolean, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.runAnnotations(repo, id, attempt),
+    queryFn: ({ signal }) => api.runAnnotations(repo, id, attempt, signal),
+    enabled,
+    refetchInterval: (q) => annotationsPoll(q.state.data, active),
+  })
+}
+
+export function useJobLog(repo: string, jobId: number, enabled: boolean) {
+  return useQuery({ queryKey: keys.jobLog(repo, jobId), queryFn: ({ signal }) => api.jobLog(repo, jobId, signal), enabled })
 }
 
 export function browserZone(): string {

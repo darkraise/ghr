@@ -8,13 +8,18 @@ import type {
   Config,
   ConfigPatch,
   Container,
+  DownloadURL,
   GhrEvent,
   HistoryEntry,
+  JobLog,
   LabelCheck,
   LogChunk,
   Metrics,
   PruneScope,
+  RawLog,
   Registration,
+  RunAnnotations,
+  RunDetail,
   SetupState,
   Status,
   Step,
@@ -105,6 +110,19 @@ export const api = {
   activity: (window: ActivityWindow, tz: string, repo: string, signal?: AbortSignal) =>
     request<Activity>("GET", `/api/activity?${query({ window, tz, ...(repo ? { repo } : {}) })}`, undefined, signal),
   actions: (signal?: AbortSignal) => request<Actions>("GET", "/api/actions", undefined, signal),
+  runDetail: (repo: string, id: number, attempt: number | undefined, signal?: AbortSignal) =>
+    request<RunDetail>("GET", `/api/actions/${seg(repo)}/runs/${id}${attempt ? `?${query({ attempt })}` : ""}`, undefined, signal),
+  runAnnotations: (repo: string, id: number, attempt: number | undefined, signal?: AbortSignal) =>
+    request<RunAnnotations>(
+      "GET",
+      `/api/actions/${seg(repo)}/runs/${id}/annotations${attempt ? `?${query({ attempt })}` : ""}`,
+      undefined,
+      signal,
+    ),
+  jobLog: (repo: string, jobId: number, signal?: AbortSignal) =>
+    request<JobLog>("GET", `/api/actions/${seg(repo)}/jobs/${jobId}/log`, undefined, signal),
+  rawJobLog: (repo: string, jobId: number) => request<RawLog>("GET", `/api/actions/${seg(repo)}/jobs/${jobId}/log/raw`),
+  artifactDownload: (repo: string, id: number) => request<DownloadURL>("GET", `/api/actions/${seg(repo)}/artifacts/${id}/download`),
   config: (signal?: AbortSignal) => request<Config>("GET", "/api/config", undefined, signal),
   stopRunner: (id: string) => send("DELETE", `/api/runners/${seg(id)}`),
   pauseAll: () => send("POST", "/api/pause-all"),
