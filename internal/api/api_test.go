@@ -54,6 +54,7 @@ type fakeBackend struct {
 	storageCalls  []string
 	watched       []string
 	unwatched     []string
+	watchErr      error // returned by WatchRepo and UnwatchRepo
 	actions       model.Actions
 	actionsCalls  int
 }
@@ -64,12 +65,12 @@ func (f *fakeBackend) AvailableRepos(context.Context) ([]model.AvailableRepo, er
 
 func (f *fakeBackend) WatchRepo(ctx context.Context, name string) error {
 	f.watched = append(f.watched, name)
-	return nil
+	return f.watchErr
 }
 
 func (f *fakeBackend) UnwatchRepo(name string) error {
 	f.unwatched = append(f.unwatched, name)
-	return nil
+	return f.watchErr
 }
 
 func (f *fakeBackend) Actions(context.Context) (model.Actions, error) {
@@ -602,6 +603,16 @@ func TestWatchRoutes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(b.watched, []string{"docs"}) || !reflect.DeepEqual(b.unwatched, []string{"old-docs"}) {
 		t.Fatalf("watched %v unwatched %v", b.watched, b.unwatched)
+	}
+
+	b.watchErr = Conflict("repo docs is already watched")
+	var ae *Error
+	if err := c.call(ctx, http.MethodPost, "/watch", strings.NewReader(`{"name":"docs"}`), nil); !errors.As(err, &ae) || ae.Status != 409 || ae.Msg != "repo docs is already watched" {
+		t.Fatalf("watch error: %v", err)
+	}
+	b.watchErr = NotFound("repo old-docs is not watched")
+	if err := c.call(ctx, http.MethodDelete, "/watch/old-docs", nil, nil); !errors.As(err, &ae) || ae.Status != 404 {
+		t.Fatalf("unwatch error: %v", err)
 	}
 }
 

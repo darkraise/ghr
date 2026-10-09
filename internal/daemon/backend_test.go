@@ -1115,6 +1115,7 @@ func TestWatchRepo(t *testing.T) {
 		text   string
 	}{
 		{" ", 400, "required"},
+		{"other/docs", 400, "without a slash"},
 		{"missing", 400, "repository access"},
 		{"DarkCloud", 409, "already configured"},
 	} {

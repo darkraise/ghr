@@ -480,6 +480,9 @@ func (b *Backend) WatchRepo(ctx context.Context, name string) error {
 	if name == "" {
 		return api.BadRequest("repo name is required")
 	}
+	if strings.Contains(name, "/") {
+		return api.BadRequest("repo name must be a repository name under owner, without a slash")
+	}
 	cfg := b.Store.Config()
 	if cfg.Repo(name) != nil {
 		return api.Conflict("repo " + name + " is already configured")
