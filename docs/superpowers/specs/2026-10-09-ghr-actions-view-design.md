@@ -109,7 +109,9 @@ The existing callers, the tick's demand poll and the label check, read only `ID`
 |---|---|---|
 | not found | "token cannot see {owner}/{name}: add it to the PAT's repository access first" (AddRepo's text) | none |
 | rate limit | "GitHub rate limit; API calls are paused" | the client's retry time |
-| auth | "GitHub rejected the token: {err}" | none |
+| auth, 403 naming a permission | "token lacks {permission} on {owner}/{name}: grant it in the PAT settings", {permission} from GitHub's `X-Accepted-GitHub-Permissions` header | none |
+| auth, other 403 | "GitHub refused the request: {GitHub's message}" | none |
+| auth, 401 | "GitHub rejected the token: {err}" | none |
 | deadline | "GitHub did not answer in time" | none |
 | anything else | `err.Error()` | none |
 

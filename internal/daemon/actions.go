@@ -84,6 +84,14 @@ func actionsErr(err error, owner, repo string) (string, *time.Time) {
 			at := ge.RetryAt
 			return "GitHub rate limit; API calls are paused", &at
 		case github.ErrAuth:
+			// A 403 that is not a rate limit is usually a missing PAT
+			// permission, not a bad token.
+			if ge.Status == 403 && ge.Permissions != "" {
+				return fmt.Sprintf("token lacks %s on %s/%s: grant it in the PAT settings", ge.Permissions, owner, repo), nil
+			}
+			if ge.Status == 403 {
+				return "GitHub refused the request: " + ge.Message, nil
+			}
 			return "GitHub rejected the token: " + ge.Error(), nil
 		}
 	}
