@@ -30,6 +30,13 @@ describe("Add repository dialog", () => {
     expect(dialog.getByText("No match")).toBeInTheDocument()
   })
 
+  it("keeps a watched repo pickable, since adding takes it over", async () => {
+    mockApi(routes())
+    const { dialog } = await open()
+    expect(dialog.getByRole("option", { name: /docs/ })).toBeEnabled()
+    expect(dialog.getByText("watched")).toBeInTheDocument()
+  })
+
   it("sends Add while the daemon is unreachable and shows the request's error", { timeout: 10_000 }, async () => {
     let down = false
     const { calls } = mockApi(

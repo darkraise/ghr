@@ -11,14 +11,14 @@ import {
 import { Input } from "darkraise-ui/components/input"
 import { Label } from "darkraise-ui/components/label"
 import { toast } from "darkraise-ui/components/sonner"
-import { Spinner } from "darkraise-ui/components/spinner"
 import { Switch } from "darkraise-ui/components/switch"
 import { TriangleAlert } from "lucide-react"
-import { useState, type KeyboardEvent } from "react"
+import { useState } from "react"
 import { api } from "@/api/client"
-import { keys, useAvailableRepos, useStatus } from "@/api/hooks"
+import { keys, useStatus } from "@/api/hooks"
 import type { AddRepoRequest } from "@/api/types"
 import { ErrorLine } from "@/components/page/error-line"
+import { RepoPicker } from "@/components/repo-picker"
 import { TagField } from "@/components/tag-field"
 import { errorText } from "@/query"
 
@@ -41,28 +41,9 @@ export function AddRepoDialog({ open, onClose }: { open: boolean; onClose: () =>
   )
 }
 
-const KEY_STEP: Record<string, (i: number, n: number) => number> = {
-  ArrowDown: (i, n) => Math.min(n - 1, i + 1),
-  ArrowUp: (i) => Math.max(0, i - 1),
-  Home: () => 0,
-  End: (_i, n) => n - 1,
-}
-
-function moveFocus(e: KeyboardEvent<HTMLDivElement>) {
-  const step = KEY_STEP[e.key]
-  if (!step) return
-  e.preventDefault()
-  const options = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)'))
-  if (options.length === 0) return
-  const at = options.findIndex((o) => o === document.activeElement)
-  options[step(at, options.length)]?.focus()
-}
-
 function AddRepoForm({ onClose }: { onClose: () => void }) {
-  const repos = useAvailableRepos(true)
   const status = useStatus()
   const queryClient = useQueryClient()
-  const [filter, setFilter] = useState("")
   const [picked, setPicked] = useState("")
   const [max, setMax] = useState("")
   const [labels, setLabels] = useState<string[]>([])
@@ -91,44 +72,6 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
     onClose()
   }
 
-  const needle = filter.trim().toLowerCase()
-  const items = (repos.data ?? []).filter((r) => r.name.toLowerCase().includes(needle))
-  const tabStop = items.find((r) => r.name === picked && !r.configured)?.name ?? items.find((r) => !r.configured)?.name
-  let picker
-  if (repos.isError) {
-    picker = <ErrorLine onRetry={() => void repos.refetch()}>{errorText(repos.error)}</ErrorLine>
-  } else if (!repos.data) {
-    picker = <Spinner label="Loading repositories" />
-  } else {
-    picker = (
-      <div className="flex flex-col gap-2">
-        <Input aria-label="Filter repositories" placeholder="Type to filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        {repos.data.length === 0 && <p className="text-sm text-muted-foreground">Nothing to pick</p>}
-        {repos.data.length > 0 && items.length === 0 && <p className="text-sm text-muted-foreground">No match</p>}
-        {items.length > 0 && (
-          <div role="listbox" aria-label="Repositories" className="max-h-64 overflow-auto rounded-md border" onKeyDown={moveFocus}>
-            {items.map((r) => (
-              <button
-                key={r.name}
-                type="button"
-                role="option"
-                aria-selected={picked === r.name}
-                disabled={r.configured}
-                tabIndex={r.name === tabStop ? 0 : -1}
-                onClick={() => setPicked(r.name)}
-                className="flex w-full items-center gap-2 px-2 py-1 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none disabled:opacity-50 aria-selected:bg-muted"
-              >
-                <span>{r.name}</span>
-                {!r.private && <span className="text-muted-foreground">public</span>}
-                {r.configured && <span className="text-muted-foreground">added</span>}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    )
-  }
-
   return (
     <>
       <DialogHeader>
@@ -139,7 +82,7 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
           <span className="text-sm font-medium">Repository</span>
           {picked ? <strong>{picked}</strong> : <span className="text-sm text-muted-foreground">Pick one below</span>}
         </div>
-        {picker}
+        <RepoPicker picked={picked} onPick={setPicked} />
         <div className="flex flex-col gap-1">
           <Label htmlFor="add-max">Max</Label>
           <Input
