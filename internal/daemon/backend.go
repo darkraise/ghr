@@ -99,6 +99,8 @@ type Backend struct {
 
 	activityMu sync.Mutex
 	activity   map[string]*activityEntry
+
+	actions actionsCache
 }
 
 var _ api.Backend = (*Backend)(nil)

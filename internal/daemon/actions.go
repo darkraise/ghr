@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/darkraise/ghr/internal/api"
@@ -115,4 +116,138 @@ func sortActions(rs []model.ActionsRun) {
 		}
 		return a.ID < b.ID
 	})
+}
+
+const (
+	actionsTTL     = 15 * time.Second
+	actionsWorkers = 4
+)
+
+// actionsDeadline bounds one /actions build; tests shorten it.
+var actionsDeadline = 20 * time.Second
+
+// good keeps each repository's runs from its last successful call, keyed by
+// lower-case name, so a paused, rate-limited or rejected repository keeps
+// showing them; a config change starts it over.
+type actionsCache struct {
+	mu     sync.Mutex
+	cfg    *config.Config
+	at     time.Time
+	ok     bool
+	val    model.Actions
+	good   map[string][]model.ActionsRun
+	goodAt time.Time
+}
+
+// Actions shares one build between callers, so the fetch runs detached from
+// any one request and the cache age counts from when the build finished.
+func (b *Backend) Actions(ctx context.Context) (model.Actions, error) {
+	c := &b.actions
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cfg := b.Store.Config()
+	if c.ok && c.cfg == cfg && b.now().Sub(c.at) < actionsTTL {
+		return c.val, nil
+	}
+	if c.cfg != cfg {
+		c.good, c.goodAt = map[string][]model.ActionsRun{}, time.Time{}
+	}
+
+	covered := coveredRepos(cfg)
+	runs := make([][]github.Run, len(covered))
+	errs := make([]error, len(covered))
+	if skip := b.githubErr(); skip != nil {
+		for i := range covered {
+			errs[i] = skip
+		}
+	} else {
+		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), actionsDeadline)
+		sem := make(chan struct{}, actionsWorkers)
+		var wg sync.WaitGroup
+		for i, r := range covered {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				select {
+				case sem <- struct{}{}:
+				case <-fctx.Done():
+					errs[i] = fctx.Err()
+					return
+				}
+				defer func() { <-sem }()
+				runs[i], errs[i] = b.GH.ListRecentRuns(fctx, r.repo, actionRunsPerRepo)
+			}()
+		}
+		wg.Wait()
+		cancel()
+	}
+
+	ours := b.ghrRuns()
+	now := b.now()
+	out := model.Actions{FetchedAt: now, Runs: []model.ActionsRun{}, Repos: make([]model.ActionsRepo, 0, len(covered))}
+	// fetched_at keeps the last good build's time only while every
+	// repository is served from kept runs.
+	fresh, allKept := false, len(covered) > 0
+	for i, r := range covered {
+		row := model.ActionsRepo{Repo: r.repo, Watched: r.watched}
+		key := strings.ToLower(r.repo)
+		if errs[i] == nil {
+			fresh, allKept = true, false
+			got := make([]model.ActionsRun, 0, len(runs[i]))
+			for _, run := range runs[i] {
+				got = append(got, actionsRun(r.repo, r.watched, run, ours))
+			}
+			c.good[key] = got
+			out.Runs = append(out.Runs, got...)
+		} else {
+			row.Error, row.RetryAt = actionsErr(errs[i], cfg.Owner, r.repo)
+			if keepsRuns(errs[i]) {
+				for _, k := range c.good[key] {
+					k.GHR = ours[ghrRunKey(k.Repo, k.ID)]
+					out.Runs = append(out.Runs, k)
+				}
+			} else {
+				allKept = false
+				delete(c.good, key)
+			}
+		}
+		out.Repos = append(out.Repos, row)
+	}
+	if fresh {
+		c.goodAt = now
+	} else if allKept && !c.goodAt.IsZero() {
+		out.FetchedAt = c.goodAt
+	}
+	sortActions(out.Runs)
+	c.cfg, c.at, c.ok, c.val = cfg, now, true, out
+	return out, nil
+}
+
+// ghrRuns reads live instances, then pending records, then history: a job
+// moves through them in that order, so one that moves mid-read is still seen.
+// A failed history read marks nothing.
+func (b *Backend) ghrRuns() map[string]bool {
+	insts := b.M.Status().Instances
+	pend := b.M.Pending()
+	hist, err := b.Hist.Query("", "", time.Time{}, 0)
+	ours := map[string]bool{}
+	if err != nil {
+		return ours
+	}
+	for _, i := range insts {
+		if i.Job != nil && i.Job.RunID != 0 {
+			ours[ghrRunKey(i.Repo, i.Job.RunID)] = true
+		}
+	}
+	for _, p := range pend {
+		if p.RunID != 0 {
+			ours[ghrRunKey(p.Repo, p.RunID)] = true
+		}
+	}
+	for _, h := range hist {
+		if h.RunID != 0 {
+			ours[ghrRunKey(h.Repo, h.RunID)] = true
+		}
+	}
+	return ours
 }

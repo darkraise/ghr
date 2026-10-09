@@ -100,20 +100,27 @@ type fakeGH struct {
 	deleted  []int64
 	getCalls int // GetRepo calls
 
-	userRepos []github.UserRepo
-	repoErr   error // returned by ListUserRepos
-	recent    []github.Run
-	runs      map[string][]github.Run
-	jobs      map[int64][]github.Job
-	jobErr    map[int64]error // returned with that run's jobs
-	block     bool            // ListJobs waits for the context to end
-	listErr   error           // returned by ListRecentRuns
-	gate      chan struct{}   // when set, ListJobs waits for it after recording the call
-	onJobs    func()          // when set, ListJobs calls it after recording the call
-	lmu       sync.Mutex      // guards the fields below, written by scan goroutines
-	jobCalls  []int64
-	inFlight  int // ListJobs calls currently blocked
-	cancelled int // blocked ListJobs calls ended by cancellation (not the deadline)
+	userRepos      []github.UserRepo
+	repoErr        error // returned by ListUserRepos
+	recent         []github.Run
+	runs           map[string][]github.Run
+	jobs           map[int64][]github.Job
+	jobErr         map[int64]error // returned with that run's jobs
+	block          bool            // ListJobs waits for the context to end
+	listErr        error           // returned by ListRecentRuns
+	gate           chan struct{}   // when set, ListJobs waits for it after recording the call
+	onJobs         func()          // when set, ListJobs calls it after recording the call
+	lmu            sync.Mutex      // guards the fields below, written by scan goroutines
+	jobCalls       []int64
+	inFlight       int                     // ListJobs calls currently blocked
+	cancelled      int                     // blocked ListJobs calls ended by cancellation (not the deadline)
+	recentBy       map[string][]github.Run // ListRecentRuns answers by repo, when set
+	recentErr      map[string]error
+	recentWait     chan struct{} // when set, ListRecentRuns waits for it or the context
+	recentCalls    []string      // guarded by lmu
+	recentN        []int         // the n of each call, guarded by lmu
+	recentInFlight int           // guarded by lmu
+	recentPeak     int           // guarded by lmu
 }
 
 func (f *fakeGH) TokenMeta() github.TokenMeta { return f.meta }
@@ -165,7 +172,31 @@ func (f *fakeGH) ListRecentRuns(ctx context.Context, repo string, n int) ([]gith
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
-	return f.recent, nil
+	if f.recentBy == nil && f.recentErr == nil && f.recentWait == nil {
+		return f.recent, nil
+	}
+	f.lmu.Lock()
+	f.recentCalls = append(f.recentCalls, repo)
+	f.recentN = append(f.recentN, n)
+	f.recentInFlight++
+	f.recentPeak = max(f.recentPeak, f.recentInFlight)
+	f.lmu.Unlock()
+	defer func() {
+		f.lmu.Lock()
+		f.recentInFlight--
+		f.lmu.Unlock()
+	}()
+	if f.recentWait != nil {
+		select {
+		case <-f.recentWait:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if err := f.recentErr[repo]; err != nil {
+		return nil, err
+	}
+	return f.recentBy[repo], nil
 }
 func (f *fakeGH) ListRuns(ctx context.Context, repo, status string) ([]github.Run, error) {
 	return f.runs[status], nil
