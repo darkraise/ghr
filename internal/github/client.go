@@ -136,8 +136,11 @@ type Client struct {
 	Owner   string
 	Token   func() string
 	HTTP    *http.Client
-	Now     func() time.Time
-	Sleep   func(time.Duration)
+	// Blob fetches the signed download URLs GitHub redirects to. It sends no
+	// token, and the caller's context bounds the whole download.
+	Blob  *http.Client
+	Now   func() time.Time
+	Sleep func(time.Duration)
 
 	mu         sync.Mutex
 	cache      map[string]cached
@@ -152,7 +155,7 @@ type Client struct {
 func New(owner string, token func() string) *Client {
 	return &Client{
 		BaseURL: "https://api.github.com", Owner: owner, Token: token,
-		HTTP: &http.Client{Timeout: 30 * time.Second}, Now: time.Now, Sleep: time.Sleep,
+		HTTP: &http.Client{Timeout: 30 * time.Second}, Blob: newBlobClient(), Now: time.Now, Sleep: time.Sleep,
 		remaining: -1,
 	}
 }
@@ -250,19 +253,12 @@ func (c *Client) repoURL(repo, rest string) string {
 
 var nextLinkRe = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)
 
-// do performs one request; GETs use ETag revalidation. It returns body and the next-page URL.
-func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, string, error) {
-	var rd io.Reader
-	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
-			return nil, "", err
-		}
-		rd = bytes.NewReader(b)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, u, rd)
+// newRequest builds an authenticated API request and returns the token
+// generation it was built under.
+func (c *Client) newRequest(ctx context.Context, method, u string, body io.Reader) (*http.Request, uint64, error) {
+	req, err := http.NewRequestWithContext(ctx, method, u, body)
 	if err != nil {
-		return nil, "", err
+		return nil, 0, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
@@ -274,16 +270,53 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 	gen := c.gen
 	c.mu.Unlock()
 	req.Header.Set("Authorization", "Bearer "+c.Token())
+	return req, gen, nil
+}
+
+// suspendedErr fails a request fast while a rate limit suspends the API.
+func (c *Client) suspendedErr() error {
+	if until := c.SuspendedUntil(); !until.IsZero() {
+		return &APIError{Status: http.StatusTooManyRequests, Kind: ErrRateLimit, Message: "rate limited until " + until.Format(time.RFC3339), RetryAt: until}
+	}
+	return nil
+}
+
+// suspend extends the suspension to a rate-limit error's retry time, unless
+// the token changed while the request was in flight.
+func (c *Client) suspend(gen uint64, e *APIError) {
+	if e.Kind != ErrRateLimit {
+		return
+	}
+	c.mu.Lock()
+	if gen == c.gen && e.RetryAt.After(c.retryAt) {
+		c.retryAt = e.RetryAt
+	}
+	c.mu.Unlock()
+}
+
+// do performs one request; GETs use ETag revalidation. It returns body and the next-page URL.
+func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, string, error) {
+	var rd io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return nil, "", err
+		}
+		rd = bytes.NewReader(b)
+	}
+	req, gen, err := c.newRequest(ctx, method, u, rd)
+	if err != nil {
+		return nil, "", err
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if err := c.suspendedErr(); err != nil {
+		return nil, "", err
+	}
 	c.mu.Lock()
 	prev, hasPrev := c.cache[u]
-	retryAt := c.retryAt
 	c.mu.Unlock()
-	if c.Now().Before(retryAt) {
-		return nil, "", &APIError{Status: http.StatusTooManyRequests, Kind: ErrRateLimit, Message: "rate limited until " + retryAt.Format(time.RFC3339), RetryAt: retryAt}
-	}
 	if method == http.MethodGet && hasPrev {
 		req.Header.Set("If-None-Match", prev.etag)
 	}
@@ -309,15 +342,8 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 		return prev.body, prev.next, nil
 	}
 	if apiErr != nil {
-		err := apiErr
-		if err.Kind == ErrRateLimit {
-			c.mu.Lock()
-			if gen == c.gen && err.RetryAt.After(c.retryAt) {
-				c.retryAt = err.RetryAt
-			}
-			c.mu.Unlock()
-		}
-		return nil, "", err
+		c.suspend(gen, apiErr)
+		return nil, "", apiErr
 	}
 	if method == http.MethodGet {
 		if etag := resp.Header.Get("ETag"); etag != "" {
