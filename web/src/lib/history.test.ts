@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest"
 import type { HistoryEntry } from "@/api/types"
-import { dayLabel, groupByDay, historySummary, inBucket, median, parseHistorySearch, pickText, resultWord } from "./history"
+import {
+  dayLabel,
+  groupByDay,
+  groupByDayOf,
+  historySummary,
+  inBucket,
+  median,
+  parseHistorySearch,
+  pickText,
+  resultWord,
+} from "./history"
 
 const now = Date.parse("2026-10-03T14:05:00Z")
 const entry = (id: string, start: string, end: string, conclusion = "success"): HistoryEntry => ({
@@ -39,6 +49,22 @@ describe("dayLabel and groupByDay", () => {
     const groups = groupByDay(rows, now)
     expect(groups.map((g) => g.label)).toEqual(["Today", "Yesterday"])
     expect(groups[0]?.rows.map((r) => r.id)).toEqual(["a", "b"])
+  })
+})
+
+describe("groupByDayOf", () => {
+  it("groups any rows by the day its accessor reads", () => {
+    const now = Date.parse("2026-10-03T14:05:00Z")
+    const rows = [
+      { id: 1, at: "2026-10-03T13:00:00Z" },
+      { id: 2, at: "2026-10-03T09:00:00Z" },
+      { id: 3, at: "2026-10-02T23:00:00Z" },
+    ]
+    const groups = groupByDayOf(rows, (r) => r.at, now)
+    expect(groups.map((g) => [g.label, g.rows.map((r) => r.id)])).toEqual([
+      ["Today", [1, 2]],
+      ["Yesterday", [3]],
+    ])
   })
 })
 

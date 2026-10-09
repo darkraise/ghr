@@ -40,21 +40,28 @@ export function dayLabel(iso: string, now: number): string {
   return `${WEEKDAYS[d.getDay()] ?? ""}, ${monthDay(d)}`
 }
 
-export interface DayGroup {
+export interface DayGroupOf<T> {
   key: string
   label: string
-  rows: HistoryEntry[]
+  rows: T[]
+}
+
+export type DayGroup = DayGroupOf<HistoryEntry>
+
+export function groupByDayOf<T>(rows: T[], at: (row: T) => string, now: number): DayGroupOf<T>[] {
+  const out: DayGroupOf<T>[] = []
+  for (const r of rows) {
+    const iso = at(r)
+    const key = dayKey(new Date(iso))
+    const last = out.at(-1)
+    if (last?.key === key) last.rows.push(r)
+    else out.push({ key, label: dayLabel(iso, now), rows: [r] })
+  }
+  return out
 }
 
 export function groupByDay(rows: HistoryEntry[], now: number): DayGroup[] {
-  const out: DayGroup[] = []
-  for (const r of rows) {
-    const key = dayKey(new Date(r.finished_at))
-    const last = out.at(-1)
-    if (last?.key === key) last.rows.push(r)
-    else out.push({ key, label: dayLabel(r.finished_at, now), rows: [r] })
-  }
-  return out
+  return groupByDayOf(rows, (r) => r.finished_at, now)
 }
 
 export function took(entry: HistoryEntry): number {
