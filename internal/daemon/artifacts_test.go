@@ -18,8 +18,13 @@ func TestDownloadHost(t *testing.T) {
 		"https://blob.core.windows.net.example.com/x":                                    false,
 		"https://evilblob.core.windows.net/x":                                            false,
 		"https://example.com/x":                                                          false,
-		"/relative":                                                                      false,
-		"":                                                                               false,
+		"https://evilgithubusercontent.com/x":                                            false,
+		"https://githubusercontent.com/x":                                                false,
+		"https://pipelines.actions.githubusercontent.com@example.com/x":                  false,
+		"https://example.com#.githubusercontent.com":                                     false,
+		"https://example.com/.githubusercontent.com":                                     false,
+		"/relative": false,
+		"":          false,
 	} {
 		if got := downloadHost(u); got != want {
 			t.Errorf("%q: got %v", u, got)
