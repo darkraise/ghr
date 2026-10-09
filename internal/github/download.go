@@ -75,15 +75,15 @@ func (c *Client) redirectURL(ctx context.Context, u string) (string, error) {
 func (c *Client) JobLog(ctx context.Context, repo string, jobID int64, max int64) ([]byte, error) {
 	loc, err := c.redirectURL(ctx, c.repoURL(repo, fmt.Sprintf("/actions/jobs/%d/logs", jobID)))
 	if err != nil {
-		return nil, hideURL(err)
+		return nil, hideURL(err, "log")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, loc, nil)
 	if err != nil {
-		return nil, hideURL(err)
+		return nil, hideURL(err, "log")
 	}
 	resp, err := c.Blob.Do(req)
 	if err != nil {
-		return nil, hideURL(err)
+		return nil, hideURL(err, "log")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -99,22 +99,26 @@ func (c *Client) JobLog(ctx context.Context, repo string, jobID int64, max int64
 	return data, nil
 }
 
-// hideURL drops the address a *url.Error quotes: the signed log URL grants
-// access to the log until it expires. net/http quotes a Location it cannot
-// parse inside the inner error too, so that one is replaced whole.
-func hideURL(err error) error {
+// hideURL drops the address a *url.Error quotes: a signed download URL grants
+// access to the log or artifact until it expires. net/http quotes a Location
+// it cannot parse inside the inner error too, so that one is replaced whole.
+func hideURL(err error, noun string) error {
 	var ue *url.Error
 	if !errors.As(err, &ue) {
 		return err
 	}
 	if strings.HasPrefix(ue.Err.Error(), "failed to parse Location header") {
-		return errors.New("github: the log download address is malformed")
+		return fmt.Errorf("github: the %s download address is malformed", noun)
 	}
-	return fmt.Errorf("github: log download failed: %w", ue.Err)
+	return fmt.Errorf("github: %s download failed: %w", noun, ue.Err)
 }
 
 // ArtifactURL returns the signed address of an artifact's zip without
 // following it; it expires after about a minute.
 func (c *Client) ArtifactURL(ctx context.Context, repo string, id int64) (string, error) {
-	return c.redirectURL(ctx, c.repoURL(repo, fmt.Sprintf("/actions/artifacts/%d/zip", id)))
+	loc, err := c.redirectURL(ctx, c.repoURL(repo, fmt.Sprintf("/actions/artifacts/%d/zip", id)))
+	if err != nil {
+		return "", hideURL(err, "artifact")
+	}
+	return loc, nil
 }

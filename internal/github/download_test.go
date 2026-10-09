@@ -152,6 +152,17 @@ func TestJobLogErrorsHideTheSignedURL(t *testing.T) {
 	}
 }
 
+func TestArtifactURLErrorsHideTheSignedURL(t *testing.T) {
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://%zz/actions-results/x.zip?sig=secret")
+		w.WriteHeader(http.StatusFound)
+	})
+	_, err := c.ArtifactURL(context.Background(), "darkmem", 11)
+	if err == nil || strings.Contains(err.Error(), "sig=") || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("err %v", err)
+	}
+}
+
 func TestArtifactURLDoesNotFollow(t *testing.T) {
 	const signed = "https://productionresultssa1.blob.core.windows.net/actions-results/zip?sig=abc"
 	c, f := newClient(t, func(w http.ResponseWriter, r *http.Request) {
