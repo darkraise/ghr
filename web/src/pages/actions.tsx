@@ -257,7 +257,7 @@ export function ActionsPage() {
       </div>
       {failed.length > 0 && (
         <Alert variant="warning">
-          <AlertTitle>Some repositories could not be read</AlertTitle>
+          <AlertTitle as="h2">Some repositories could not be read</AlertTitle>
           <AlertDescription>
             <ul className="flex flex-col gap-0.5">
               {failed.map((r) => (

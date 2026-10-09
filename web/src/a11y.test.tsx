@@ -73,6 +73,22 @@ describe("History accessibility", () => {
   )
 })
 
+describe("Actions accessibility", () => {
+  it.each([[1280], [390]])(
+    "has no axe violations at %ipx",
+    async (width) => {
+      setViewport(width)
+      mockApi(authedRoutes())
+      renderApp("/actions")
+      await screen.findByText("old-docs: GitHub rate limit; API calls are paused. Retry after 14:30")
+      await screen.findByRole("link", { name: /^Bump the runner/ })
+      await screen.findByRole("link", { name: /^Fix the cache key/ })
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})
+
 describe("Repositories accessibility", () => {
   it(
     "has no axe violations",
@@ -81,6 +97,7 @@ describe("Repositories accessibility", () => {
       renderApp("/repositories")
       await screen.findByRole("region", { name: "Configured repositories" })
       await screen.findByText("50%")
+      await screen.findByRole("region", { name: "Watched repositories" })
       expect(await violations()).toEqual([])
     },
     30_000,

@@ -136,9 +136,9 @@ describe("ghr chrome styles", () => {
     expect(css).toMatch(/--radius-md: 6px;/)
   })
 
-  it("stops the pulse when motion is reduced", () => {
+  it("stops the pulse and the spinner when motion is reduced", () => {
     expect(css).toMatch(/\.ghr-pulse \{\s*animation: ghr-pulse 1\.8s ease-out infinite;/)
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.ghr-pulse \{\s*animation: none;/)
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.ghr-pulse \{\s*animation: none;\s*\}\s*\.dr-spinner-circle \{\s*animation: none;/)
   })
 
   it("draws every Lucide icon at one stroke width", () => {

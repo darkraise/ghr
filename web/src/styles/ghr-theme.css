@@ -323,6 +323,10 @@ textarea {
     animation: none;
   }
 
+  .dr-spinner-circle {
+    animation: none;
+  }
+
   *,
   *::before,
   *::after {
