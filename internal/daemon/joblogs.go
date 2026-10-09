@@ -27,12 +27,11 @@ var (
 	// tests shrink it before the cache is first used.
 	parsedLogBytes int64 = 32 << 20
 	logDeadline          = 60 * time.Second
-	// logRouteWait and rawLogDeadline bound each log request from its start
-	// (job read, slot wait and download), keeping the answer under the web
-	// listener's 60 s WriteTimeout; a parsed download that outlasts the wait
-	// still finishes and fills the cache for the next call.
-	logRouteWait   = 50 * time.Second
-	rawLogDeadline = 50 * time.Second
+	// logRequestWindow bounds each log request from its start (job read,
+	// slot wait, and download or copy), keeping the answer under the web
+	// listener's 60 s WriteTimeout; a parsed download that outlasts it still
+	// finishes and fills the cache for the next call.
+	logRequestWindow = 50 * time.Second
 )
 
 type logOutcome int
@@ -171,6 +170,12 @@ func flaggedLog(id int64, o logOutcome) model.JobLog {
 	return model.JobLog{JobID: id, TooLarge: o == logTooLarge, Expired: o == logExpired, Steps: []model.LogStep{}}
 }
 
+// errReadingOtherLogs is the 503 for a log request that found every download
+// slot taken.
+func errReadingOtherLogs() error {
+	return &api.Error{Status: http.StatusServiceUnavailable, Msg: "ghr is reading other logs; try again shortly"}
+}
+
 // finishedJob reads a job of a covered repository and refuses one that has
 // not completed.
 func (b *Backend) finishedJob(ctx context.Context, repo string, jobID int64) (logJob, error) {
@@ -196,7 +201,7 @@ func (b *Backend) finishedJob(ctx context.Context, repo string, jobID int64) (lo
 // JobLog returns a finished job's log split into steps. An expired or too
 // large log comes back flagged; a failed download is tried again.
 func (b *Backend) JobLog(ctx context.Context, repo string, jobID int64) (model.JobLog, error) {
-	wctx, cancel := context.WithTimeout(ctx, logRouteWait)
+	wctx, cancel := context.WithTimeout(ctx, logRequestWindow)
 	defer cancel()
 	j, err := b.finishedJob(wctx, repo, jobID)
 	if err != nil {
@@ -234,7 +239,7 @@ func (b *Backend) JobLog(ctx context.Context, repo string, jobID int64) (model.J
 
 // RawJobLog returns a finished job's whole log, up to 32 MiB, uncached.
 func (b *Backend) RawJobLog(ctx context.Context, repo string, jobID int64) (model.RawLog, error) {
-	rctx, cancel := context.WithTimeout(ctx, rawLogDeadline)
+	rctx, cancel := context.WithTimeout(ctx, logRequestWindow)
 	defer cancel()
 	j, err := b.finishedJob(rctx, repo, jobID)
 	if err != nil {
@@ -251,7 +256,7 @@ func (b *Backend) RawJobLog(ctx context.Context, repo string, jobID int64) (mode
 		if err := ctx.Err(); err != nil {
 			return model.RawLog{}, err
 		}
-		return model.RawLog{}, &api.Error{Status: http.StatusServiceUnavailable, Msg: "ghr is reading other logs; try again shortly"}
+		return model.RawLog{}, errReadingOtherLogs()
 	}
 	defer func() { <-slots }()
 	data, err := b.GH.JobLog(rctx, j.repo, jobID, rawLimit)
