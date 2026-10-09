@@ -26,6 +26,7 @@ const (
 	ErrNotFound
 	ErrUnprocessable
 	ErrServer
+	ErrGone
 )
 
 type APIError struct {
@@ -41,21 +42,26 @@ type APIError struct {
 func (e *APIError) Error() string { return fmt.Sprintf("github: %d %s", e.Status, e.Message) }
 
 // Run is a workflow run. The tick and the label check read only ID; the
-// Actions page reads the rest. GitHub may leave run_started_at out.
+// Actions page and the run page read the rest. GitHub may leave
+// run_started_at out.
 type Run struct {
-	ID           int64      `json:"id"`
-	Name         string     `json:"name"`
-	DisplayTitle string     `json:"display_title"`
-	RunNumber    int64      `json:"run_number"`
-	HeadBranch   string     `json:"head_branch"`
-	Event        string     `json:"event"`
-	Actor        Account    `json:"actor"`
-	Status       string     `json:"status"`
-	Conclusion   string     `json:"conclusion"`
-	CreatedAt    time.Time  `json:"created_at"`
-	RunStartedAt *time.Time `json:"run_started_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	HTMLURL      string     `json:"html_url"`
+	ID           int64         `json:"id"`
+	Name         string        `json:"name"`
+	DisplayTitle string        `json:"display_title"`
+	RunNumber    int64         `json:"run_number"`
+	HeadBranch   string        `json:"head_branch"`
+	Event        string        `json:"event"`
+	Actor        Account       `json:"actor"`
+	Status       string        `json:"status"`
+	Conclusion   string        `json:"conclusion"`
+	CreatedAt    time.Time     `json:"created_at"`
+	RunStartedAt *time.Time    `json:"run_started_at"`
+	UpdatedAt    time.Time     `json:"updated_at"`
+	HTMLURL      string        `json:"html_url"`
+	HeadSHA      string        `json:"head_sha"`
+	Path         string        `json:"path"`
+	RunAttempt   int           `json:"run_attempt"`
+	PullRequests []PullRequest `json:"pull_requests"`
 }
 
 type Step struct {
@@ -206,7 +212,9 @@ func (c *Client) record(gen uint64, h http.Header, apiErr *APIError) {
 	switch {
 	case apiErr == nil:
 		c.meta.CheckedAt, c.meta.OK = c.Now(), true
-	case apiErr.Kind == ErrAuth:
+	// Contents: read is optional (only the run graph reads files), so a 403
+	// on a contents path means that permission is missing, not a bad token.
+	case apiErr.Kind == ErrAuth && !(apiErr.Status == 403 && strings.Contains(apiErr.Path, "/contents/")):
 		c.meta.CheckedAt, c.meta.OK = c.Now(), false
 	}
 }
@@ -360,6 +368,8 @@ func (c *Client) classify(resp *http.Response, data []byte) *APIError {
 		}
 	case resp.StatusCode == 404:
 		e.Kind = ErrNotFound
+	case resp.StatusCode == 410:
+		e.Kind = ErrGone
 	case resp.StatusCode == 422:
 		e.Kind = ErrUnprocessable
 	case resp.StatusCode >= 500:

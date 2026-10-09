@@ -103,6 +103,7 @@ func TestClassify(t *testing.T) {
 		{"429 retry-after", 429, map[string]string{"Retry-After": "30"}, ErrRateLimit, time.Date(2026, 10, 3, 12, 0, 30, 0, time.UTC)},
 		{"429 bad retry-after", 429, map[string]string{"Retry-After": "soon"}, ErrRateLimit, time.Date(2026, 10, 3, 12, 1, 0, 0, time.UTC)},
 		{"404", 404, nil, ErrNotFound, time.Time{}},
+		{"410", 410, nil, ErrGone, time.Time{}},
 		{"422", 422, nil, ErrUnprocessable, time.Time{}},
 		{"502", 502, nil, ErrServer, time.Time{}},
 	}
