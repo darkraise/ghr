@@ -437,11 +437,6 @@ type LogLine struct {
 	Text string `json:"text"`
 }
 
-// RawLog is GET /actions/{repo}/jobs/{jobId}/log/raw.
-type RawLog struct {
-	Text string `json:"text"`
-}
-
 // DownloadURL is GET /actions/{repo}/artifacts/{id}/download: GitHub's
 // signed address, valid for about a minute.
 type DownloadURL struct {

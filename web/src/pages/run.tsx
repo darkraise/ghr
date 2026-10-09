@@ -240,8 +240,8 @@ function JobMeta({ job }: { job: RunJob }) {
 // The Blob goes through a temporary object URL because a navigation to the
 // API cannot send X-GHR. The URL is revoked after the click has started the
 // download, not during it.
-function saveText(text: string, fileName: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }))
+function saveBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url
   a.download = fileName
@@ -255,7 +255,7 @@ function JobLogs({ repo, job, search }: { repo: string; job: RunJob; search: Job
   const log = useJobLog(repo, job.id, true)
   const raw = useMutation({
     mutationFn: () => api.rawJobLog(repo, job.id),
-    onSuccess: (r) => saveText(r.text, rawLogFileName(repo, job.id)),
+    onSuccess: (blob) => saveBlob(blob, rawLogFileName(repo, job.id)),
   })
   const rawButton = (
     <Button size="sm" variant="outline" loading={raw.isPending} onClick={() => raw.mutate()}>

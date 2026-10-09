@@ -16,7 +16,6 @@ import type {
   LogChunk,
   Metrics,
   PruneScope,
-  RawLog,
   Registration,
   RunAnnotations,
   RunDetail,
@@ -65,6 +64,15 @@ export async function request<T>(method: string, path: string, body?: unknown, s
   // Only an expired session on the API means "log in again"; a 401 from
   // /auth/login or /auth/password is a wrong password the form shows.
   if (res.status === 401 && path.startsWith("/api/")) onUnauthorized()
+  throw err
+}
+
+// A download whose body is the file itself, not JSON.
+async function requestBlob(path: string): Promise<Blob> {
+  const res = await fetch(path, { method: "GET", headers: { "X-GHR": "1" }, credentials: "same-origin" })
+  if (res.ok) return res.blob()
+  const err = await toError(res)
+  if (res.status === 401) onUnauthorized()
   throw err
 }
 
@@ -121,7 +129,7 @@ export const api = {
     ),
   jobLog: (repo: string, jobId: number, signal?: AbortSignal) =>
     request<JobLog>("GET", `/api/actions/${seg(repo)}/jobs/${jobId}/log`, undefined, signal),
-  rawJobLog: (repo: string, jobId: number) => request<RawLog>("GET", `/api/actions/${seg(repo)}/jobs/${jobId}/log/raw`),
+  rawJobLog: (repo: string, jobId: number) => requestBlob(`/api/actions/${seg(repo)}/jobs/${jobId}/log/raw`),
   artifactDownload: (repo: string, id: number) => request<DownloadURL>("GET", `/api/actions/${seg(repo)}/artifacts/${id}/download`),
   config: (signal?: AbortSignal) => request<Config>("GET", "/api/config", undefined, signal),
   stopRunner: (id: string) => send("DELETE", `/api/runners/${seg(id)}`),

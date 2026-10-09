@@ -201,8 +201,17 @@ describe("Job page", () => {
   })
 
   it("saves the raw log through a Blob", async () => {
-    const { calls } = mockApi(runRoutes({ "GET /api/actions/darkmem/jobs/1002/log/raw": { text: "2026-10-03T13:55:25.0000000Z Set up job\n" } }))
-    const create = vi.fn(() => "blob:http://localhost/raw")
+    const text = "2026-10-03T13:55:25.0000000Z Set up job\n"
+    const { calls, fetchMock } = mockApi(
+      runRoutes({
+        "GET /api/actions/darkmem/jobs/1002/log/raw": () => new Response(text, { headers: { "Content-Type": "text/plain; charset=utf-8" } }),
+      }),
+    )
+    const blobs: Blob[] = []
+    const create = vi.fn((obj: Blob | MediaSource) => {
+      blobs.push(obj as Blob)
+      return "blob:http://localhost/raw"
+    })
     const revoke = vi.fn()
     // jsdom has no object URLs; a subclass keeps new URL(...) working.
     class FakeURL extends URL {
@@ -217,10 +226,36 @@ describe("Job page", () => {
     const { user } = renderApp("/actions/darkmem/runs/102/jobs/1002")
     await user.click(await screen.findByRole("button", { name: "Raw log" }))
     await waitFor(() => expect(saved).toEqual(["darkmem-job-1002.log blob:http://localhost/raw"]))
-    expect(create).toHaveBeenCalledWith(expect.any(Blob))
+    expect(blobs).toHaveLength(1)
+    expect(await blobs.at(0)?.text()).toBe(text)
     expect(calls.some((c) => c.path === "/api/actions/darkmem/jobs/1002/log/raw")).toBe(true)
+    const rawCall = fetchMock.mock.calls.find(([input]) => typeof input === "string" && input.endsWith("/log/raw"))
+    expect(new Headers(rawCall?.[1]?.headers).get("X-GHR")).toBe("1")
+    expect(rawCall?.[1]?.credentials).toBe("same-origin")
     await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:http://localhost/raw"))
     click.mockRestore()
+  })
+
+  it.each([
+    ["an error answer", () => json({ error: "log is larger than 32 MiB; open it on GitHub" }, 413), "log is larger than 32 MiB; open it on GitHub"],
+    [
+      "a download that breaks",
+      () =>
+        new Response(
+          new ReadableStream({
+            start: (c) => {
+              c.enqueue(new TextEncoder().encode("part"))
+              c.error(new Error("connection dropped"))
+            },
+          }),
+        ),
+      "connection dropped",
+    ],
+  ])("toasts a raw log save that fails: %s", async (_name, route, message) => {
+    mockApi(runRoutes({ "GET /api/actions/darkmem/jobs/1002/log/raw": route }))
+    const { user } = renderApp("/actions/darkmem/runs/102/jobs/1002")
+    await user.click(await screen.findByRole("button", { name: "Raw log" }))
+    expect((await screen.findAllByText(message)).length).toBeGreaterThan(0)
   })
 
   it("says the job is gone when GitHub has no log for it", async () => {

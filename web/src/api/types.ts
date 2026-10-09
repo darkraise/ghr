@@ -569,10 +569,6 @@ export interface JobLog {
   steps: LogStep[]
 }
 
-export interface RawLog {
-  text: string
-}
-
 export interface DownloadURL {
   url: string
 }
