@@ -263,7 +263,7 @@ function JobLogs({ repo, job, search }: { repo: string; job: RunJob; search: Job
     </Button>
   )
   if (!log.data) {
-    return log.isError ? <ErrorLine onRetry={() => void log.refetch()}>{errorText(log.error)}</ErrorLine> : <Spinner label="Loading" />
+    return log.isError ? <ErrorLine onRetry={() => void log.refetch()}>{runError(log.error)}</ErrorLine> : <Spinner label="Loading" />
   }
   if (log.data.expired) return <p className="text-sm text-muted-foreground">GitHub no longer keeps this job&apos;s log.</p>
   if (log.data.too_large) {

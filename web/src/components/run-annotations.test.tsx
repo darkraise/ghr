@@ -46,6 +46,11 @@ describe("AnnotationsSection", () => {
     expect(within(row).getByText("Process completed with exit code 1.")).toBeInTheDocument()
   })
 
+  it("shows a message without its terminal escape codes", () => {
+    const s = show({ ...none, items: [{ level: "error", job_id: 1, job_name: "j", step: 1, step_name: "s", line: 1, message: "\u001b[31mF401\u001b[0m unused" }] })
+    expect(s.getByText("F401 unused")).toBeInTheDocument()
+  })
+
   it("hides the zero counts", () => {
     const s = show({ ...fixtures.runAnnotations, items: fixtures.runAnnotations.items.filter((a) => a.level === "error") })
     expect(s.getByText("2 errors")).toBeInTheDocument()

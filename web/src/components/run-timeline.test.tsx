@@ -54,6 +54,13 @@ describe("JobsTimeline", () => {
     expect(bars[0]?.style.left).toBe("0%")
   })
 
+  it("spaces the axis labels out for a long run", () => {
+    const { container } = show({ status: "in_progress", started_at: "2026-10-03T11:00:00Z" })
+    const ticks = container.querySelector('[aria-hidden="true"].font-mono') as HTMLElement
+    expect(ticks.children.length).toBeLessThanOrEqual(12)
+    expect(ticks.children[0]).toHaveTextContent("0m")
+  })
+
   it("says skipped or queued for a job that never started", () => {
     const [first, second, ...rest] = fixtures.runDetail.jobs
     if (!first || !second) throw new Error("fixture has too few jobs")

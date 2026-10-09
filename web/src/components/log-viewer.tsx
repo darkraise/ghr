@@ -5,7 +5,7 @@ import type { JobLog, LogLine, LogStep, Step } from "@/api/types"
 import { RunStatusIcon } from "@/components/run-status-icon"
 import { renderAnsi } from "@/lib/ansi"
 import { dur } from "@/lib/format"
-import { containingGroup, findMatches, groupRows, windowStart, type LogMatch } from "@/lib/log-view"
+import { containingGroup, findMatches, groupRows, windowStart, type LogMatch, type LogRow } from "@/lib/log-view"
 import { firstFailedStep } from "@/lib/run-details"
 
 const PREFIX: Record<string, string | undefined> = { error: "Error: ", warning: "Warning: ", notice: "Notice: " }
@@ -17,6 +17,18 @@ const groupKey = (step: number, n: number) => `${step}:${n}`
 function stepMs(step: Step | undefined): number | undefined {
   if (!step?.started_at || !step.completed_at) return undefined
   return Date.parse(step.completed_at) - Date.parse(step.started_at)
+}
+
+// The rows from line index start on. A group that begins above the cut keeps
+// its header and the members below it, so they stay folded under it.
+function rowsFrom(lines: LogLine[], start: number): LogRow[] {
+  const from = lines[start]?.n ?? 0
+  return groupRows(lines).flatMap((row): LogRow[] => {
+    if (row.line.n >= from) return [row]
+    if (row.type === "line") return []
+    const kept = row.lines.filter((l) => l.n >= from)
+    return kept.length > 0 ? [{ ...row, lines: kept }] : []
+  })
 }
 
 function Line({ line, query, current, target }: { line: LogLine; query: string; current?: number; target: boolean }) {
@@ -124,7 +136,7 @@ export function LogViewer({
           </button>
         )}
         {s.lines.length === 0 && <p className="ghr-log-muted px-2">This step wrote no log lines.</p>}
-        {groupRows(s.lines.slice(start)).map((row) => {
+        {rowsFrom(s.lines, start).map((row) => {
           if (row.type === "line") return <Line key={row.line.n} {...lineProps(row.line)} />
           const key = groupKey(s.number, row.line.n)
           const open = groupOpen(s.number, row.line.n)

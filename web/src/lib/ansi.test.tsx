@@ -64,6 +64,11 @@ describe("matchRanges", () => {
     ])
     expect(matchRanges("text", "")).toEqual([])
   })
+
+  it("keeps offsets in the original text when lowercasing changes a length", () => {
+    expect(matchRanges("İ ab", "ab")).toEqual([[2, 4]])
+    expect(matchRanges("a.b a+b", "a+b")).toEqual([[4, 7]])
+  })
 })
 
 describe("renderAnsi", () => {

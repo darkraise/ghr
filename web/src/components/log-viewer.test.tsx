@@ -159,6 +159,15 @@ describe("LogViewer", () => {
     expect(screen.queryByRole("button", { name: /earlier lines/ })).toBeNull()
   })
 
+  it("keeps a group that straddles the cut folded under its header", { timeout: 20_000 }, () => {
+    const lines: LogLine[] = Array.from({ length: 6000 }, (_, i) => ({ n: i + 1, kind: "", text: `row ${i + 1}` }))
+    lines[899] = { n: 900, kind: "group", text: "Straddling group" }
+    const log: JobLog = { job_id: 9, too_large: false, expired: false, steps: [{ number: 1, name: "Build", lines }] }
+    const { container } = render(<LogViewer log={log} steps={bigSteps} />)
+    expect(screen.getByRole("button", { name: "Straddling group" })).toHaveAttribute("aria-expanded", "false")
+    expect(container.querySelector('[data-line="1001"]')).toBeNull()
+  })
+
   it("renders back to the URL's line when it is above the cut", { timeout: 20_000 }, () => {
     const { container } = render(<LogViewer log={bigLog(6000)} steps={bigSteps} step={1} line={10} />)
     expect(container.querySelector('[data-line="10"]')).toHaveAttribute("data-target", "true")

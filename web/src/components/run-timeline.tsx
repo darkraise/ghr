@@ -28,7 +28,10 @@ export function JobsTimeline({ run, now, jobLink }: { run: RunDetail; now: numbe
   })
   const to = Math.max(from + MINUTE, isRunActive(run.status) ? now : from, ...ends)
   const span = to - from
-  const ticks = Array.from({ length: Math.floor(span / MINUTE) + 1 }, (_, i) => i)
+  // At most about ten labels, so a run that waited for hours stays readable.
+  const minutes = Math.floor(span / MINUTE)
+  const every = Math.max(1, Math.ceil(minutes / 10))
+  const ticks = Array.from({ length: Math.floor(minutes / every) + 1 }, (_, i) => i * every)
   const pct = (t: number) => `${(Math.max(0, t - from) / span) * 100}%`
 
   return (

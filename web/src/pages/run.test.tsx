@@ -223,6 +223,12 @@ describe("Job page", () => {
     click.mockRestore()
   })
 
+  it("says the job is gone when GitHub has no log for it", async () => {
+    mockApi(runRoutes({ "GET /api/actions/darkmem/jobs/1002/log": () => json({ error: "not found on GitHub" }, 404) }))
+    renderApp("/actions/darkmem/runs/102/jobs/1002")
+    expect(await screen.findByText("This run no longer exists on GitHub.")).toBeInTheDocument()
+  })
+
   it("says logs wait for a running job and lists its steps", async () => {
     const running = {
       ...fixtures.runDetail,

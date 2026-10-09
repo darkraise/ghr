@@ -113,6 +113,7 @@ describe("RunFrame", () => {
   it("leaves out the workflow file link for a run without a workflow file", () => {
     renderFrame({}, { ...fixtures.runDetail, path: "dynamic/dependabot/dependabot-updates" })
     expect(screen.queryByRole("link", { name: /Workflow file/ })).toBeNull()
+    expect(screen.queryByText("Run details")).toBeNull()
   })
 
   it("stacks the rail above the content below 800 px", () => {

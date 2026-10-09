@@ -5,6 +5,7 @@ import { ErrorLine } from "@/components/page/error-line"
 import { Section } from "@/components/page/section"
 import type { JobLinkFn } from "@/components/run-frame"
 import { plural } from "@/lib/format"
+import { plainText } from "@/lib/ansi"
 import { annotationCounts } from "@/lib/run-details"
 import { errorText } from "@/query"
 
@@ -94,7 +95,7 @@ export function AnnotationsSection({
                     <div className="flex gap-2">
                       <LevelIcon level={a.level} />
                       <div className="flex min-w-0 flex-col gap-1">
-                        <p className="font-mono text-sm break-words whitespace-pre-wrap">{a.message}</p>
+                        <p className="font-mono text-sm break-words whitespace-pre-wrap">{plainText(a.message)}</p>
                         <p className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
                           <span>{`${a.job_name} / ${a.step_name}`}</span>
                           {jobLink(a.job_id, `Log line ${a.line}`, {

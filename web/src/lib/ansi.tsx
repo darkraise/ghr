@@ -69,14 +69,11 @@ export function plainText(raw: string): string {
 }
 
 // Case-insensitive, non-overlapping occurrences of query in text, as
-// [start, end) offsets.
+// [start, end) offsets in text itself (lowercasing a copy can change lengths).
 export function matchRanges(text: string, query: string): [number, number][] {
   if (!query) return []
-  const hay = text.toLowerCase()
-  const needle = query.toLowerCase()
-  const out: [number, number][] = []
-  for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + needle.length)) out.push([i, i + needle.length])
-  return out
+  const re = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
+  return [...text.matchAll(re)].map((m) => [m.index, m.index + m[0].length])
 }
 
 function segmentClass(s: AnsiSegment): string | undefined {

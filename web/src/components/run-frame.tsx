@@ -105,12 +105,14 @@ export function RunFrame({
               )
             })}
           </ul>
-          <p className={RAIL_LABEL}>Run details</p>
           {workflowFile && (
-            <a href={workflowFile} target="_blank" rel="noreferrer" className={RAIL_LINK}>
-              Workflow file
-              <span className="sr-only">, opens in a new tab</span>
-            </a>
+            <>
+              <p className={RAIL_LABEL}>Run details</p>
+              <a href={workflowFile} target="_blank" rel="noreferrer" className={RAIL_LINK}>
+                Workflow file
+                <span className="sr-only">, opens in a new tab</span>
+              </a>
+            </>
           )}
         </nav>
         <div className="flex min-w-0 flex-col gap-4">{children}</div>
