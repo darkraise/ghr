@@ -16,12 +16,14 @@ import { Shell } from "./components/shell"
 import { parseActionsSearch, type ActionsSearch } from "./lib/actions"
 import { parseHistorySearch, type HistorySearch } from "./lib/history"
 import { loginSearch, safeRedirect } from "./lib/redirect"
+import { parseJobSearch, parseRunSearch, type JobSearch, type RunSearch } from "./lib/run-details"
 import { ActionsPage } from "./pages/actions"
 import { DashboardPage } from "./pages/dashboard"
 import { HistoryPage } from "./pages/history"
 import { LoginPage } from "./pages/login"
 import { RepositoriesPage } from "./pages/repositories"
 import { RepositoryPage } from "./pages/repository"
+import { JobPage, RunNotFound, RunPage } from "./pages/run"
 import { RunnerPage, RunnersPage } from "./pages/runners"
 import { SettingsPage } from "./pages/settings"
 import { SetupPage } from "./pages/setup"
@@ -121,6 +123,39 @@ const actionsRoute = createRoute({
   }),
   component: ActionsPage,
 })
+// A value the parser refused fails the route, so a bad attempt, step or line
+// shows the not-found line instead of quietly falling back to the latest
+// attempt; the router would otherwise drop it from the address.
+function strictSearch<T extends object>(raw: Record<string, unknown>, parsed: T, names: string[]): T {
+  const kept = new Map(Object.entries(parsed))
+  for (const name of names) {
+    if (raw[name] !== undefined && kept.get(name) === undefined) throw new Error(`${name} must be a positive integer`)
+  }
+  return parsed
+}
+
+const runRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/actions/$repo/runs/$id",
+  validateSearch: (search: Record<string, unknown>): RunSearch => ({
+    attempt: undefined,
+    ...strictSearch(search, parseRunSearch(search), ["attempt"]),
+  }),
+  component: RunPage,
+  errorComponent: RunNotFound,
+})
+const jobRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/actions/$repo/runs/$id/jobs/$jobId",
+  validateSearch: (search: Record<string, unknown>): JobSearch => ({
+    attempt: undefined,
+    step: undefined,
+    line: undefined,
+    ...strictSearch(search, parseJobSearch(search), ["attempt", "step", "line"]),
+  }),
+  component: JobPage,
+  errorComponent: RunNotFound,
+})
 const toolchainsRoute = createRoute({ getParentRoute: () => appRoute, path: "/toolchains", component: ToolchainsPage })
 const storageRoute = createRoute({ getParentRoute: () => appRoute, path: "/storage", component: StoragePage })
 const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings", component: SettingsPage })
@@ -135,6 +170,8 @@ const routeTree = rootRoute.addChildren([
     runnersRoute,
     runnerRoute,
     actionsRoute,
+    runRoute,
+    jobRoute,
     historyRoute,
     toolchainsRoute,
     storageRoute,
