@@ -33,6 +33,16 @@ describe("Run page", () => {
     expect(artifacts.getByText("Expired")).toBeInTheDocument()
   })
 
+  it("links each annotation to its line in the job's log", async () => {
+    mockApi(runRoutes())
+    renderApp("/actions/darkmem/runs/102")
+    const annotations = within(await screen.findByRole("region", { name: "Annotations" }))
+    expect(await annotations.findByRole("link", { name: "Log line 5, Backend tests / Lint (ruff)" })).toHaveAttribute(
+      "href",
+      "/actions/darkmem/runs/102/jobs/1002?attempt=2&step=3&line=5",
+    )
+  })
+
   it("links the rail to the summary and to each job of the shown attempt", async () => {
     mockApi(runRoutes())
     renderApp("/actions/darkmem/runs/102")

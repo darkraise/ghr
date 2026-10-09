@@ -3,17 +3,18 @@ import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { useId, type ReactNode } from "react"
 import { ApiError } from "@/api/client"
-import { useConfig, useRunDetail } from "@/api/hooks"
+import { useConfig, useRunAnnotations, useRunDetail } from "@/api/hooks"
 import type { RunDetail, RunJob } from "@/api/types"
 import { ErrorLine } from "@/components/page/error-line"
 import { Section } from "@/components/page/section"
 import { RouteError } from "@/components/route-error"
+import { AnnotationsSection } from "@/components/run-annotations"
 import { ArtifactsSection } from "@/components/run-artifacts"
 import { RunFrame, type JobLinkFn, type SummaryLinkFn } from "@/components/run-frame"
 import { RunStatusIcon } from "@/components/run-status-icon"
 import { StepList } from "@/components/step-list"
 import { dateTimeSec, dur } from "@/lib/format"
-import { githubLinks, jobMs, positiveInt, runTotalMs, statusText } from "@/lib/run-details"
+import { githubLinks, isRunActive, jobMs, positiveInt, runTotalMs, statusText } from "@/lib/run-details"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
@@ -186,12 +187,14 @@ function SummaryFacts({ run, owner, now }: { run: RunDetail; owner: string; now:
 function RunSummary({ run, owner }: { run: RunDetail; owner: string }) {
   const now = useNow()
   const onAttempt = useAttemptNavigate(run)
+  const annotations = useRunAnnotations(run.repo, run.id, run.attempt, isRunActive(run.status), true)
   const { jobLink, summaryLink } = linksFor(run)
   return (
     <RunFrame run={run} owner={owner} now={now} current="summary" jobLink={jobLink} summaryLink={summaryLink} onAttempt={onAttempt}>
       <Section title="Summary">
         <SummaryFacts run={run} owner={owner} now={now} />
       </Section>
+      <AnnotationsSection data={annotations.data} error={annotations.error} onRetry={() => void annotations.refetch()} jobLink={jobLink} />
       <ArtifactsSection repo={run.repo} artifacts={run.artifacts} />
     </RunFrame>
   )
