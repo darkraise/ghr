@@ -11,7 +11,9 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/darkraise/ghr/internal/github"
@@ -57,8 +59,12 @@ type fakeBackend struct {
 	watchErr      error // returned by WatchRepo and UnwatchRepo
 	actions       model.Actions
 	actionsCalls  int
-	runCalls      []string // "<method> <repo> <id>", plus the attempt for run calls
-	runErr        error    // returned by the five run details methods
+	runCalls      []string      // "<method> <repo> <id>", plus the attempt for run calls
+	runErr        error         // returned by the five run details methods
+	rawBody       io.Reader     // what RawJobLog streams; "raw log" when nil
+	rawSize       int64         // rawBody's length
+	rawDelay      time.Duration // RawJobLog sleeps this long before answering
+	rawClosed     atomic.Int32  // RawJobLog readers closed
 }
 
 func (f *fakeBackend) AvailableRepos(context.Context) ([]model.AvailableRepo, error) {
@@ -90,9 +96,27 @@ func (f *fakeBackend) JobLog(ctx context.Context, repo string, jobID int64) (mod
 	return model.JobLog{JobID: jobID, Steps: []model.LogStep{}}, f.runErr
 }
 
-func (f *fakeBackend) RawJobLog(ctx context.Context, repo string, jobID int64) (model.RawLog, error) {
+func (f *fakeBackend) RawJobLog(ctx context.Context, repo string, jobID int64) (io.ReadCloser, int64, error) {
 	f.runCalls = append(f.runCalls, fmt.Sprintf("RawJobLog %s %d", repo, jobID))
-	return model.RawLog{Text: "raw log"}, f.runErr
+	time.Sleep(f.rawDelay)
+	if f.runErr != nil {
+		return nil, 0, f.runErr
+	}
+	body, size := f.rawBody, f.rawSize
+	if body == nil {
+		body, size = strings.NewReader("raw log"), 7
+	}
+	return &countingBody{Reader: body, closed: &f.rawClosed}, size, nil
+}
+
+type countingBody struct {
+	io.Reader
+	closed *atomic.Int32
+}
+
+func (c *countingBody) Close() error {
+	c.closed.Add(1)
+	return nil
 }
 
 func (f *fakeBackend) ArtifactDownload(ctx context.Context, repo string, id int64) (model.DownloadURL, error) {
@@ -671,9 +695,8 @@ func TestRunDetailRoutes(t *testing.T) {
 	if err := c.call(ctx, http.MethodGet, "/actions/darkmem/jobs/1002/log", nil, &l); err != nil || l.JobID != 1002 {
 		t.Fatalf("log %+v err %v", l, err)
 	}
-	var raw model.RawLog
-	if err := c.call(ctx, http.MethodGet, "/actions/darkmem/jobs/1002/log/raw", nil, &raw); err != nil || raw.Text != "raw log" {
-		t.Fatalf("raw %+v err %v", raw, err)
+	if resp, body, err := getRaw(c, "/actions/darkmem/jobs/1002/log/raw"); err != nil || resp.StatusCode != 200 || string(body) != "raw log" {
+		t.Fatalf("raw %q err %v", body, err)
 	}
 	var u model.DownloadURL
 	if err := c.call(ctx, http.MethodGet, "/actions/darkmem/artifacts/11/download", nil, &u); err != nil || u.URL == "" {
@@ -728,4 +751,85 @@ func TestRunDetailRoutesPassBackendStatuses(t *testing.T) {
 			t.Errorf("%s: %v", tc.path, err)
 		}
 	}
+}
+
+// getRaw fetches path from the API without decoding the body; resp is nil
+// when no response arrived.
+func getRaw(c *Client, path string) (*http.Response, []byte, error) {
+	resp, err := c.HTTP.Get(c.Base + path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	return resp, body, err
+}
+
+// waitClosed waits up to 3 s for n RawJobLog readers to be closed: the
+// handler closes its reader as it returns, which can be after the client
+// has read the response.
+func waitClosed(t *testing.T, b *fakeBackend, n int32) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for b.rawClosed.Load() != n {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d readers closed, want %d", b.rawClosed.Load(), n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestRawLogRoute(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		body   io.Reader
+		size   int64
+		status int
+		want   string // the body, or the JSON error's message
+		broken bool   // the body fails after the status line
+	}{
+		{name: "streams", body: strings.NewReader("line one\nline two\n"), size: 18, status: 200, want: "line one\nline two\n"},
+		{name: "empty", body: strings.NewReader(""), size: 0, status: 200, want: ""},
+		{name: "fails before the first byte", body: iotest.ErrReader(errors.New("boom")), size: 10, status: 502, want: "GitHub stopped sending the log"},
+		{name: "fails after the first byte", body: io.MultiReader(strings.NewReader("line one\n"), iotest.ErrReader(errors.New("boom"))), size: 100, status: 200, broken: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, b := setup(t)
+			b.rawBody, b.rawSize = tc.body, tc.size
+			resp, body, err := getRaw(c, "/actions/darkmem/jobs/1002/log/raw")
+			if resp == nil || resp.StatusCode != tc.status {
+				t.Fatalf("response %v err %v, want status %d", resp, err, tc.status)
+			}
+			switch {
+			case tc.broken:
+				if err == nil {
+					t.Fatalf("a broken copy read as complete: %q", body)
+				}
+			case tc.status == 200:
+				if err != nil || string(body) != tc.want || resp.ContentLength != tc.size || resp.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
+					t.Fatalf("body %q length %d type %q err %v", body, resp.ContentLength, resp.Header.Get("Content-Type"), err)
+				}
+			default:
+				var e struct {
+					Error string `json:"error"`
+				}
+				if err != nil || json.Unmarshal(body, &e) != nil || e.Error != tc.want {
+					t.Fatalf("error body %q err %v", body, err)
+				}
+			}
+			waitClosed(t, b, 1)
+		})
+	}
+}
+
+func TestRawLogRouteDeadlineCountsFromTheRouteStart(t *testing.T) {
+	old := rawWriteWindow
+	rawWriteWindow = 50 * time.Millisecond
+	t.Cleanup(func() { rawWriteWindow = old })
+	c, b := setup(t)
+	b.rawDelay = 100 * time.Millisecond
+	if resp, body, err := getRaw(c, "/actions/darkmem/jobs/1002/log/raw"); err == nil {
+		t.Fatalf("a write after the window completed: status %d body %q", resp.StatusCode, body)
+	}
+	waitClosed(t, b, 1)
 }

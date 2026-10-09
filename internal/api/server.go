@@ -84,7 +84,7 @@ type Backend interface {
 	RunDetail(ctx context.Context, repo string, id int64, attempt int) (model.RunDetail, error)
 	RunAnnotations(ctx context.Context, repo string, id int64, attempt int) (model.RunAnnotations, error)
 	JobLog(ctx context.Context, repo string, jobID int64) (model.JobLog, error)
-	RawJobLog(ctx context.Context, repo string, jobID int64) (model.RawLog, error)
+	RawJobLog(ctx context.Context, repo string, jobID int64) (io.ReadCloser, int64, error)
 	ArtifactDownload(ctx context.Context, repo string, id int64) (model.DownloadURL, error)
 	Token() model.TokenStatus
 	StartLabelCheck(repo string) error
@@ -162,8 +162,14 @@ func NewServer(b Backend) http.Handler {
 			respond(w, nil, err)
 			return
 		}
-		l, err := b.RawJobLog(r.Context(), r.PathValue("repo"), id)
-		respond(w, l, err)
+		deadline := time.Now().Add(rawWriteWindow)
+		body, size, err := b.RawJobLog(r.Context(), r.PathValue("repo"), id)
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		defer body.Close()
+		streamLog(w, body, size, deadline)
 	})
 	mux.HandleFunc("GET /actions/{repo}/artifacts/{id}/download", func(w http.ResponseWriter, r *http.Request) {
 		id, err := positive(r.PathValue("id"), "artifact id")
@@ -432,4 +438,43 @@ func respond(w http.ResponseWriter, v any, err error) {
 		return
 	}
 	writeJSON(w, v)
+}
+
+// rawWriteWindow bounds a raw log request from the route's start, the same
+// window as the daemon's logRequestWindow, which this package cannot import.
+// It also covers the Unix socket listener, which has no WriteTimeout; tests
+// shorten it.
+var rawWriteWindow = 50 * time.Second
+
+// streamLog copies a raw log of size bytes to the client. Until the first
+// byte is written a failure still answers with a status; after it the
+// handler aborts, so the connection drops short of Content-Length and the
+// browser's download fails instead of saving a truncated log.
+func streamLog(w http.ResponseWriter, body io.Reader, size int64, deadline time.Time) {
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(deadline)
+	buf := make([]byte, 32<<10)
+	n, err := io.ReadAtLeast(body, buf, 1)
+	if err != nil && err != io.EOF {
+		respond(w, nil, &Error{Status: http.StatusBadGateway, Msg: "GitHub stopped sending the log"})
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "text/plain; charset=utf-8")
+	h.Set("Content-Length", strconv.FormatInt(size, 10))
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(buf[:n]); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+	if n == 0 {
+		return
+	}
+	// The status line goes out now, so a later abort reaches the client as a
+	// broken body rather than as no response at all.
+	if err := rc.Flush(); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+	if _, err := io.CopyBuffer(w, body, buf); err != nil {
+		panic(http.ErrAbortHandler)
+	}
 }

@@ -359,36 +359,8 @@ func (b *Backend) openRawLog(ctx context.Context, repo string, jobID int64) (rc 
 	return &rawLog{Reader: r, release: releaseAll}, size, nil
 }
 
-// RawJobLog returns a finished job's whole log, up to 32 MiB, uncached.
-func (b *Backend) RawJobLog(ctx context.Context, repo string, jobID int64) (model.RawLog, error) {
-	rctx, cancel := context.WithTimeout(ctx, logRequestWindow)
-	defer cancel()
-	j, err := b.finishedJob(rctx, repo, jobID)
-	if err != nil {
-		return model.RawLog{}, err
-	}
-	c := &b.logs
-	c.mu.Lock()
-	c.initLocked()
-	slots := c.slots
-	c.mu.Unlock()
-	select {
-	case slots <- struct{}{}:
-	case <-rctx.Done():
-		if err := ctx.Err(); err != nil {
-			return model.RawLog{}, err
-		}
-		return model.RawLog{}, errReadingOtherLogs()
-	}
-	defer func() { <-slots }()
-	data, err := b.GH.JobLog(rctx, j.repo, jobID, rawLimit)
-	switch {
-	case errors.Is(err, github.ErrTooLarge):
-		return model.RawLog{}, &api.Error{Status: http.StatusRequestEntityTooLarge, Msg: "log is larger than 32 MiB; open it on GitHub"}
-	case github.IsKind(err, github.ErrGone):
-		return model.RawLog{}, &api.Error{Status: http.StatusGone, Msg: "GitHub no longer keeps this job's log"}
-	case err != nil:
-		return model.RawLog{}, detailErr(err, b.Store.Config().Owner, j.repo)
-	}
-	return model.RawLog{Text: string(data)}, nil
+// RawJobLog streams a finished job's whole log, up to 32 MiB, uncached; the
+// reader holds a download slot until it is closed.
+func (b *Backend) RawJobLog(ctx context.Context, repo string, jobID int64) (io.ReadCloser, int64, error) {
+	return b.openRawLog(ctx, repo, jobID)
 }
