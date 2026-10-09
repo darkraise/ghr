@@ -267,6 +267,7 @@ export function ActionsPage() {
           </AlertDescription>
         </Alert>
       )}
+      {actions.isError && data && <ErrorLine onRetry={() => void actions.refetch()}>{errorText(actions.error)}</ErrorLine>}
       {body}
     </div>
   )

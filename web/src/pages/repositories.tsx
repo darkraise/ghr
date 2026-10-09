@@ -75,7 +75,8 @@ export function RepositoriesPage() {
   const [watching, setWatching] = useState(false)
 
   const st = status.data
-  const ready = st !== undefined
+  const watchedNames = config.data?.watch_repos
+  const ready = st !== undefined && config.data !== undefined
   // Scrolled here rather than by the router, so a link to #watched works
   // whatever the router does with hashes.
   useEffect(() => {
@@ -119,7 +120,7 @@ export function RepositoriesPage() {
           </div>
         </Section>
       )}
-      <WatchedSection names={config.data?.watch_repos ?? []} offline={offline} onWatch={() => setWatching(true)} />
+      {config.data && <WatchedSection names={watchedNames ?? []} offline={offline} onWatch={() => setWatching(true)} />}
       <AddRepoDialog open={adding} onClose={() => setAdding(false)} />
       <WatchRepoDialog open={watching} onClose={() => setWatching(false)} />
     </div>

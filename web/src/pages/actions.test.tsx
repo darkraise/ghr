@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import { mockApi } from "@/test/api"
+import { json, mockApi } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { setViewport } from "@/test/media"
 import { renderApp } from "@/test/render"
@@ -65,6 +65,17 @@ describe("Actions page", () => {
     mockApi(authedRoutes())
     renderApp("/actions")
     expect(await screen.findByText("old-docs: GitHub rate limit; API calls are paused. Retry after 14:30")).toBeInTheDocument()
+  })
+
+  it("keeps the runs and shows the error when a later poll fails", async () => {
+    let down = false
+    mockApi(authedRoutes({ "GET /api/actions": () => (down ? json({ error: "bad gateway" }, 502) : fixtures.actions) }))
+    const { queryClient } = renderApp("/actions")
+    await screen.findByRole("region", { name: "Recent" })
+    down = true
+    await queryClient.invalidateQueries({ queryKey: ["actions"] })
+    expect(await screen.findByText("bad gateway")).toBeInTheDocument()
+    expect(region("Recent").getByRole("link", { name: /^Bump the runner/ })).toBeInTheDocument()
   })
 
   it("filters by status in the URL", async () => {

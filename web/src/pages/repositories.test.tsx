@@ -129,6 +129,32 @@ describe("Repositories page", () => {
     expect(calls.find((c) => c.method === "POST" && c.path === "/api/watch")?.body).toEqual({ name: "new-repo" })
   })
 
+  it("shows the daemon's error in the watch dialog and keeps it open", async () => {
+    mockApi(
+      authedRoutes({
+        "GET /api/repos/available": fixtures.availableRepos,
+        "POST /api/watch": () => json({ error: "repo new-repo is already watched" }, 409),
+      }),
+    )
+    const { user } = renderApp("/repositories")
+    await user.click(await screen.findByRole("button", { name: "Watch a repository" }))
+    const dialog = within(await screen.findByRole("dialog"))
+    await user.click(await dialog.findByRole("option", { name: /new-repo/ }))
+    await user.click(dialog.getByRole("button", { name: "Watch" }))
+    expect(await dialog.findByText("repo new-repo is already watched")).toBeInTheDocument()
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("shows the watched section once the config has loaded", async () => {
+    let answer: (r: Response) => void = () => undefined
+    mockApi(authedRoutes({ "GET /api/config": () => new Promise<Response>((resolve) => (answer = resolve)) }))
+    renderApp("/repositories")
+    await screen.findByRole("region", { name: "Configured repositories" })
+    expect(screen.queryByRole("region", { name: "Watched repositories" })).toBeNull()
+    answer(json(fixtures.config))
+    expect(await screen.findByRole("region", { name: "Watched repositories" })).toBeInTheDocument()
+  })
+
   it("scrolls to the watched section from a link", async () => {
     const spy = vi.spyOn(Element.prototype, "scrollIntoView")
     mockApi(authedRoutes())
