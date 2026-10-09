@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"slices"
@@ -60,6 +61,7 @@ type GitHub interface {
 	ListArtifacts(ctx context.Context, repo string, runID int64) ([]github.Artifact, error)
 	GetContent(ctx context.Context, repo, path, ref string) ([]byte, error)
 	JobLog(ctx context.Context, repo string, jobID int64, max int64) ([]byte, error)
+	OpenJobLog(ctx context.Context, repo string, jobID int64) (io.ReadCloser, int64, error)
 	ArtifactURL(ctx context.Context, repo string, id int64) (string, error)
 }
 

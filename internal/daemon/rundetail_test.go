@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -265,7 +266,7 @@ func TestRunDetailCallersShareOneFetch(t *testing.T) {
 // GitHub call is contained.
 type panickyGH struct {
 	GitHub
-	run, jobLog, content bool
+	run, jobLog, content, openLog bool
 }
 
 func (p *panickyGH) GetContent(ctx context.Context, repo, path, ref string) ([]byte, error) {
@@ -287,6 +288,18 @@ func (p *panickyGH) JobLog(ctx context.Context, repo string, jobID int64, limit 
 		panic("boom")
 	}
 	return p.GitHub.JobLog(ctx, repo, jobID, limit)
+}
+
+func (p *panickyGH) OpenJobLog(ctx context.Context, repo string, jobID int64) (io.ReadCloser, int64, error) {
+	if p.openLog {
+		if f, ok := p.GitHub.(*fakeGH); ok {
+			f.rmu.Lock()
+			f.logCtx = ctx
+			f.rmu.Unlock()
+		}
+		panic("boom")
+	}
+	return p.GitHub.OpenJobLog(ctx, repo, jobID)
 }
 
 func TestRunDetailPanicLeavesNoCallBehind(t *testing.T) {

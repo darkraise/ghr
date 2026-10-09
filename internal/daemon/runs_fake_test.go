@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -25,6 +27,10 @@ type fakeRuns struct {
 	logs        map[int64][]byte            // JobLog, by job ID
 	logErr      map[int64]error             // returned by JobLog for that job
 	logWait     chan struct{}               // when set, JobLog waits for it or the context
+	logLen      map[int64]int64             // OpenJobLog's length for that job, when set (-1: none declared)
+	logClosed   int                         // bodies OpenJobLog returned that were closed
+	logReads    int                         // Read calls on bodies OpenJobLog returned
+	logCtx      context.Context             // the context of the last OpenJobLog call
 	artURL      string                      // returned by ArtifactURL
 	artErr      error                       // returned by ArtifactURL when set
 	calls       []string
@@ -163,6 +169,47 @@ func (f *fakeRuns) JobLog(ctx context.Context, repo string, jobID int64, limit i
 		return nil, github.ErrTooLarge
 	}
 	return data, nil
+}
+
+// OpenJobLog answers from logs and logErr like JobLog, without waiting on
+// logWait.
+func (f *fakeRuns) OpenJobLog(ctx context.Context, repo string, jobID int64) (io.ReadCloser, int64, error) {
+	f.record("OpenJobLog", repo, jobID)
+	f.rmu.Lock()
+	defer f.rmu.Unlock()
+	f.logCtx = ctx
+	if err := f.logErr[jobID]; err != nil {
+		return nil, 0, err
+	}
+	data, ok := f.logs[jobID]
+	if !ok {
+		return nil, 0, ghNotFound()
+	}
+	size := int64(len(data))
+	if n, ok := f.logLen[jobID]; ok {
+		size = n
+	}
+	return &fakeBody{r: bytes.NewReader(data), f: f}, size, nil
+}
+
+// fakeBody counts its reads in logReads and its closes in logClosed.
+type fakeBody struct {
+	r io.Reader
+	f *fakeRuns
+}
+
+func (b *fakeBody) Read(p []byte) (int, error) {
+	b.f.rmu.Lock()
+	b.f.logReads++
+	b.f.rmu.Unlock()
+	return b.r.Read(p)
+}
+
+func (b *fakeBody) Close() error {
+	b.f.rmu.Lock()
+	b.f.logClosed++
+	b.f.rmu.Unlock()
+	return nil
 }
 
 func (f *fakeRuns) ArtifactURL(ctx context.Context, repo string, id int64) (string, error) {
