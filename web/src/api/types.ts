@@ -466,3 +466,113 @@ export interface Actions {
   runs: ActionsRun[]
   repos: ActionsRepo[]
 }
+
+export interface RunJob {
+  id: number
+  name: string
+  status: string
+  conclusion: string
+  started_at?: string
+  completed_at?: string
+  runner_name: string
+  labels: string[]
+  html_url: string
+  ghr: boolean
+  steps: Step[]
+}
+
+export interface GraphNode {
+  key: string
+  name: string
+  column: number
+  needs: string[]
+  job_ids: number[]
+  group: boolean
+}
+
+export interface RunGraph {
+  nodes: GraphNode[]
+}
+
+export interface RunArtifact {
+  id: number
+  name: string
+  size_bytes: number
+  expired: boolean
+  expires_at?: string
+}
+
+export interface RunDetail {
+  repo: string
+  watched: boolean
+  id: number
+  run_number: number
+  attempt: number
+  attempts: number
+  workflow: string
+  title: string
+  branch: string
+  event: string
+  actor: string
+  status: string
+  conclusion: string
+  head_sha: string
+  path: string
+  pull_requests: number[]
+  started_at: string
+  updated_at: string
+  html_url: string
+  jobs: RunJob[]
+  graph?: RunGraph
+  graph_note?: string
+  artifacts: RunArtifact[]
+  fetched_at: string
+}
+
+export interface Annotation {
+  level: string
+  job_id: number
+  job_name: string
+  step: number
+  step_name: string
+  line: number
+  message: string
+}
+
+// omitted maps a job ID, as a JSON object key, to the annotations beyond the
+// per-job cap.
+export interface RunAnnotations {
+  items: Annotation[]
+  omitted: Record<string, number>
+  unread: number
+  expired_logs: number
+  too_large: number
+  failed: number
+}
+
+export interface LogLine {
+  n: number
+  kind: string
+  text: string
+}
+
+export interface LogStep {
+  number: number
+  name: string
+  lines: LogLine[]
+}
+
+export interface JobLog {
+  job_id: number
+  too_large: boolean
+  expired: boolean
+  steps: LogStep[]
+}
+
+export interface RawLog {
+  text: string
+}
+
+export interface DownloadURL {
+  url: string
+}

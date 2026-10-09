@@ -6,10 +6,13 @@ import configJson from "@/api/fixtures/config.json"
 import containersJson from "@/api/fixtures/containers.json"
 import eventsJson from "@/api/fixtures/events.json"
 import historyJson from "@/api/fixtures/history.json"
+import jobLogJson from "@/api/fixtures/job-log.json"
 import labelCheckJson from "@/api/fixtures/label-check.json"
 import logJson from "@/api/fixtures/log.json"
 import metricsJson from "@/api/fixtures/metrics.json"
 import registrationsJson from "@/api/fixtures/registrations.json"
+import runAnnotationsJson from "@/api/fixtures/run-annotations.json"
+import runDetailJson from "@/api/fixtures/run-detail.json"
 import statusJson from "@/api/fixtures/status.json"
 import stepsJson from "@/api/fixtures/steps.json"
 import storageJson from "@/api/fixtures/storage.json"
@@ -23,10 +26,13 @@ import type {
   Container,
   GhrEvent,
   HistoryEntry,
+  JobLog,
   LabelCheck,
   LogChunk,
   Metrics,
   Registration,
+  RunAnnotations,
+  RunDetail,
   Status,
   Step,
   Storage,
@@ -51,6 +57,9 @@ const toolchainChoices: ToolchainChoice[] = choicesJson
 const activityLanes: Activity = activityLanesJson
 const activityBuckets: Activity = activityBucketsJson
 const actions: Actions = actionsJson
+const runDetail: RunDetail = runDetailJson
+const runAnnotations: RunAnnotations = runAnnotationsJson
+const jobLog: JobLog = jobLogJson
 
 export const fixtures = {
   status,
@@ -70,6 +79,9 @@ export const fixtures = {
   activityLanes,
   activityBuckets,
   actions,
+  runDetail,
+  runAnnotations,
+  jobLog,
 }
 
 export function authedRoutes(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -85,4 +97,14 @@ export function authedRoutes(over: Record<string, unknown> = {}): Record<string,
     "GET /api/actions": fixtures.actions,
     ...over,
   }
+}
+
+// The run page's routes for run 102 of darkmem and its failed job 1002.
+export function runRoutes(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return authedRoutes({
+    "GET /api/actions/darkmem/runs/102": fixtures.runDetail,
+    "GET /api/actions/darkmem/runs/102/annotations": fixtures.runAnnotations,
+    "GET /api/actions/darkmem/jobs/1002/log": fixtures.jobLog,
+    ...over,
+  })
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fixtures } from "@/test/fixtures"
+import { fixtures, runRoutes } from "@/test/fixtures"
 import actionsJson from "./fixtures/actions.json"
 import activityBucketsJson from "./fixtures/activity-buckets.json"
 import activityLanesJson from "./fixtures/activity-lanes.json"
@@ -9,10 +9,13 @@ import configJson from "./fixtures/config.json"
 import containersJson from "./fixtures/containers.json"
 import eventsJson from "./fixtures/events.json"
 import historyJson from "./fixtures/history.json"
+import jobLogJson from "./fixtures/job-log.json"
 import labelCheckJson from "./fixtures/label-check.json"
 import logJson from "./fixtures/log.json"
 import metricsJson from "./fixtures/metrics.json"
 import registrationsJson from "./fixtures/registrations.json"
+import runAnnotationsJson from "./fixtures/run-annotations.json"
+import runDetailJson from "./fixtures/run-detail.json"
 import statusDegradedJson from "./fixtures/status-degraded.json"
 import statusJson from "./fixtures/status.json"
 import stepsJson from "./fixtures/steps.json"
@@ -26,10 +29,13 @@ import type {
   Container,
   GhrEvent,
   HistoryEntry,
+  JobLog,
   LabelCheck,
   LogChunk,
   Metrics,
   Registration,
+  RunAnnotations,
+  RunDetail,
   Status,
   Step,
   Storage,
@@ -161,5 +167,48 @@ describe("type fixtures", () => {
       ["new-repo", false],
     ])
     expect(fixtures.actions.repos).toHaveLength(4)
+  })
+})
+
+describe("run detail fixtures", () => {
+  const run: RunDetail = runDetailJson
+  const annotations: RunAnnotations = runAnnotationsJson
+  const jobLog: JobLog = jobLogJson
+
+  it("the run carries its attempts, jobs, graph and artifacts", () => {
+    expect([run.id, run.run_number, run.attempt, run.attempts]).toEqual([102, 42, 2, 2])
+    expect(run.pull_requests).toEqual([87])
+    expect(run.jobs.map((j) => j.id)).toEqual([1001, 1002, 1003, 1004, 1005])
+    expect(run.jobs[1]?.steps[3]).toEqual({ number: 4, name: "Test", status: "completed", conclusion: "skipped" })
+    expect(run.graph?.nodes.map((n) => [n.key, n.column, n.group])).toEqual([
+      ["pick-runner", 0, false],
+      ["e2e", 0, true],
+      ["backend", 1, false],
+      ["frontend-tests", 1, true],
+    ])
+    expect(run.graph?.nodes[3]?.job_ids).toEqual([1003, 1004])
+    expect(run).not.toHaveProperty("graph_note")
+    expect(run.artifacts.map((a) => [a.name, a.expired])).toEqual([
+      ["frontend-dist", false],
+      ["coverage-backend", true],
+    ])
+  })
+
+  it("annotations key the omitted counts by job ID", () => {
+    expect(annotations.items.map((a) => a.level)).toEqual(["error", "error", "warning", "notice"])
+    expect(annotations.omitted).toEqual({ "1002": 3 })
+    expect([annotations.unread, annotations.expired_logs, annotations.too_large, annotations.failed]).toEqual([0, 0, 0, 0])
+  })
+
+  it("the job log keeps every kind and ANSI in the text", () => {
+    expect(jobLog.steps.map((s) => s.lines.length)).toEqual([4, 2, 7, 0, 1])
+    expect(jobLog.steps[2]?.lines[3]?.text).toBe("\u001b[31mFound 1 error.\u001b[0m")
+    expect(jobLog.steps[2]?.lines.map((l) => l.kind)).toEqual(["group", "", "endgroup", "", "error", "debug", "error"])
+  })
+
+  it("runRoutes serves run 102 and lets a test replace one route", () => {
+    expect(runRoutes()["GET /api/actions/darkmem/jobs/1002/log"]).toBe(fixtures.jobLog)
+    expect(runRoutes()["GET /api/status"]).toBe(fixtures.status)
+    expect(runRoutes({ "GET /api/actions/darkmem/runs/102": 1 })["GET /api/actions/darkmem/runs/102"]).toBe(1)
   })
 })
