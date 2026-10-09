@@ -91,6 +91,7 @@ func (f *fakeManager) Kill(ctx context.Context, id string) error {
 func (f *fakeManager) ClearDegraded() { f.cleared = true }
 
 type fakeGH struct {
+	fakeRuns
 	repos    map[string]*github.Repository
 	forgot   bool
 	meta     github.TokenMeta

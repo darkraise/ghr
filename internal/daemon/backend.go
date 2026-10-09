@@ -53,6 +53,14 @@ type GitHub interface {
 	ListRuns(ctx context.Context, repo, status string) ([]github.Run, error)
 	ListRecentRuns(ctx context.Context, repo string, n int) ([]github.Run, error)
 	ListUserRepos(ctx context.Context) ([]github.UserRepo, error)
+	GetRun(ctx context.Context, repo string, id int64) (*github.Run, error)
+	GetRunAttempt(ctx context.Context, repo string, id int64, attempt int) (*github.Run, error)
+	ListAttemptJobs(ctx context.Context, repo string, id int64, attempt int) ([]github.Job, error)
+	GetJob(ctx context.Context, repo string, jobID int64) (*github.Job, error)
+	ListArtifacts(ctx context.Context, repo string, runID int64) ([]github.Artifact, error)
+	GetContent(ctx context.Context, repo, path, ref string) ([]byte, error)
+	JobLog(ctx context.Context, repo string, jobID int64, max int64) ([]byte, error)
+	ArtifactURL(ctx context.Context, repo string, id int64) (string, error)
 }
 
 // StorageService is the part of *storage.Service the backend uses.
