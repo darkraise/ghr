@@ -70,26 +70,38 @@ func (c *Client) redirectURL(ctx context.Context, u string) (string, error) {
 	return loc, nil
 }
 
-// JobLog downloads a finished job's log, at most max bytes. The signed URL
-// GitHub redirects to is fetched without the token.
-func (c *Client) JobLog(ctx context.Context, repo string, jobID int64, max int64) ([]byte, error) {
+// OpenJobLog starts a job log download and returns the body unread with its
+// Content-Length, -1 when GitHub sends none. The body stays bound to ctx; the
+// caller closes it.
+func (c *Client) OpenJobLog(ctx context.Context, repo string, jobID int64) (io.ReadCloser, int64, error) {
 	loc, err := c.redirectURL(ctx, c.repoURL(repo, fmt.Sprintf("/actions/jobs/%d/logs", jobID)))
 	if err != nil {
-		return nil, hideURL(err, "log")
+		return nil, 0, hideURL(err, "log")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, loc, nil)
 	if err != nil {
-		return nil, hideURL(err, "log")
+		return nil, 0, hideURL(err, "log")
 	}
 	resp, err := c.Blob.Do(req)
 	if err != nil {
-		return nil, hideURL(err, "log")
+		return nil, 0, hideURL(err, "log")
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github: log download answered %d", resp.StatusCode)
+		resp.Body.Close()
+		return nil, 0, fmt.Errorf("github: log download answered %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	return resp.Body, resp.ContentLength, nil
+}
+
+// JobLog downloads a finished job's log, at most max bytes. The signed URL
+// GitHub redirects to is fetched without the token.
+func (c *Client) JobLog(ctx context.Context, repo string, jobID int64, max int64) ([]byte, error) {
+	body, _, err := c.OpenJobLog(ctx, repo, jobID)
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+	data, err := io.ReadAll(io.LimitReader(body, max+1))
 	if err != nil {
 		return nil, err
 	}

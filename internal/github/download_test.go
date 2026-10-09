@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -71,6 +73,74 @@ func TestJobLogStopsAtMax(t *testing.T) {
 	}
 }
 
+const (
+	gatedHead = "2026-10-03T13:56:10.0000000Z hello\n"
+	gatedTail = "2026-10-03T13:56:11.0000000Z bye\n"
+)
+
+// gatedBlob serves gatedHead, flushes, and holds gatedTail back until release
+// is called; sized declares a Content-Length. It refuses any Authorization.
+func gatedBlob(t *testing.T, sized bool) (*httptest.Server, func()) {
+	t.Helper()
+	gate := make(chan struct{})
+	release := sync.OnceFunc(func() { close(gate) })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("blob server saw Authorization %q", r.Header.Get("Authorization"))
+		}
+		if sized {
+			w.Header().Set("Content-Length", strconv.Itoa(len(gatedHead+gatedTail)))
+		}
+		fmt.Fprint(w, gatedHead)
+		w.(http.Flusher).Flush()
+		<-gate
+		fmt.Fprint(w, gatedTail)
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(release)
+	return srv, release
+}
+
+func TestOpenJobLogReturnsTheBodyUnread(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		sized bool
+		size  int64
+	}{
+		{"with a length", true, int64(len(gatedHead + gatedTail))},
+		{"without a length", false, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blob, release := gatedBlob(t, tc.sized)
+			c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, blob.URL+"/log?sig=1", http.StatusFound)
+			})
+			var body io.ReadCloser
+			var size int64
+			var err error
+			opened := make(chan struct{})
+			go func() {
+				body, size, err = c.OpenJobLog(context.Background(), "darkmem", 1002)
+				close(opened)
+			}()
+			select {
+			case <-opened:
+			case <-time.After(3 * time.Second):
+				t.Fatal("OpenJobLog did not return while GitHub held the rest of the body")
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer body.Close()
+			release()
+			data, err := io.ReadAll(body)
+			if err != nil || string(data) != gatedHead+gatedTail || size != tc.size {
+				t.Fatalf("body %q size %d err %v", data, size, err)
+			}
+		})
+	}
+}
+
 func TestDownloadErrors(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
@@ -83,6 +153,8 @@ func TestDownloadErrors(t *testing.T) {
 	}{
 		{name: "expired log", status: 410, kind: ErrGone,
 			call: func(c *Client) error { _, err := c.JobLog(ctx, "darkmem", 1, 10); return err }},
+		{name: "expired log, opened", status: 410, kind: ErrGone,
+			call: func(c *Client) error { _, _, err := c.OpenJobLog(ctx, "darkmem", 1); return err }},
 		{name: "expired artifact", status: 410, kind: ErrGone,
 			call: func(c *Client) error { _, err := c.ArtifactURL(ctx, "darkmem", 11); return err }},
 		{name: "missing permission", status: 403, headers: map[string]string{"X-Accepted-GitHub-Permissions": "actions=read"}, kind: ErrAuth,
