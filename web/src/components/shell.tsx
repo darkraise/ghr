@@ -3,7 +3,7 @@ import { Link, Outlet, useNavigate } from "@tanstack/react-router"
 import { Alert, AlertDescription, AlertTitle } from "darkraise-ui/components/alert"
 import { Button } from "darkraise-ui/components/button"
 import { SidebarLayout, useBrandStore, type NavGroup } from "darkraise-ui/layout"
-import { Boxes, GitBranch, HardDrive, HistoryIcon, LayoutDashboard, LogOut, Settings, Wrench } from "lucide-react"
+import { Boxes, GitBranch, HardDrive, HistoryIcon, LayoutDashboard, LogOut, Settings, Workflow, Wrench } from "lucide-react"
 import { useEffect, useRef } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useEvents, useMetrics, useStatus } from "@/api/hooks"
@@ -26,6 +26,7 @@ function navGroups(status: Status | undefined, config: Config | undefined): NavG
       items: [
         { label: "Dashboard", href: "/", icon: LayoutDashboard },
         { label: "Runners", href: "/runners", icon: Boxes, badge: count(status && running(status)) },
+        { label: "Actions", href: "/actions", icon: Workflow },
         { label: "History", href: "/history", icon: HistoryIcon },
       ],
     },

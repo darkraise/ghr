@@ -1,4 +1,5 @@
 import type {
+  Actions,
   Activity,
   ActivityWindow,
   AddRepoRequest,
@@ -103,6 +104,7 @@ export const api = {
   metrics: (signal?: AbortSignal) => request<Metrics>("GET", "/api/metrics", undefined, signal),
   activity: (window: ActivityWindow, tz: string, repo: string, signal?: AbortSignal) =>
     request<Activity>("GET", `/api/activity?${query({ window, tz, ...(repo ? { repo } : {}) })}`, undefined, signal),
+  actions: (signal?: AbortSignal) => request<Actions>("GET", "/api/actions", undefined, signal),
   config: (signal?: AbortSignal) => request<Config>("GET", "/api/config", undefined, signal),
   stopRunner: (id: string) => send("DELETE", `/api/runners/${seg(id)}`),
   pauseAll: () => send("POST", "/api/pause-all"),

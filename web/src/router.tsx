@@ -13,8 +13,10 @@ import { RootLayout } from "./components/root-layout"
 import { RouteError } from "./components/route-error"
 import type { DetailTab } from "./components/runner-panel"
 import { Shell } from "./components/shell"
+import { parseActionsSearch, type ActionsSearch } from "./lib/actions"
 import { parseHistorySearch, type HistorySearch } from "./lib/history"
 import { loginSearch, safeRedirect } from "./lib/redirect"
+import { ActionsPage } from "./pages/actions"
 import { DashboardPage } from "./pages/dashboard"
 import { HistoryPage } from "./pages/history"
 import { LoginPage } from "./pages/login"
@@ -108,6 +110,17 @@ const historyRoute = createRoute({
   }),
   component: HistoryPage,
 })
+const actionsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/actions",
+  // As History: naming the keys keeps a value the parser dropped from coming back.
+  validateSearch: (search: Record<string, unknown>): ActionsSearch => ({
+    repo: undefined,
+    status: undefined,
+    ...parseActionsSearch(search),
+  }),
+  component: ActionsPage,
+})
 const toolchainsRoute = createRoute({ getParentRoute: () => appRoute, path: "/toolchains", component: ToolchainsPage })
 const storageRoute = createRoute({ getParentRoute: () => appRoute, path: "/storage", component: StoragePage })
 const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings", component: SettingsPage })
@@ -121,6 +134,7 @@ const routeTree = rootRoute.addChildren([
     repositoryRoute,
     runnersRoute,
     runnerRoute,
+    actionsRoute,
     historyRoute,
     toolchainsRoute,
     storageRoute,

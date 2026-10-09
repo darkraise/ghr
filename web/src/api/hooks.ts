@@ -4,6 +4,8 @@ import type { ActivityWindow, GhrEvent, LogChunk, Status, Storage } from "./type
 
 export const POLL_FAST = 1000
 export const POLL_SLOW = 5000
+// GET /actions caches for 15 seconds, so polling faster would read the same build.
+export const POLL_ACTIONS = 15_000
 export const MAX_EVENTS = 200
 export const MAX_LOG = 256 * 1024
 
@@ -13,6 +15,7 @@ export const keys = {
   status: ["status"] as const,
   config: ["config"] as const,
   metrics: ["metrics"] as const,
+  actions: ["actions"] as const,
   activity: (window: string, tz: string, repo: string) => ["activity", window, tz, repo] as const,
   events: (epoch: string) => ["events", epoch] as const,
   history: (repo: string, conclusion: string, since: string) => ["history", repo, conclusion, since] as const,
@@ -51,6 +54,10 @@ export function useConfig() {
 
 export function useMetrics() {
   return useQuery({ queryKey: keys.metrics, queryFn: ({ signal }) => api.metrics(signal), refetchInterval: POLL_SLOW })
+}
+
+export function useActions() {
+  return useQuery({ queryKey: keys.actions, queryFn: ({ signal }) => api.actions(signal), refetchInterval: POLL_ACTIONS })
 }
 
 export function browserZone(): string {
