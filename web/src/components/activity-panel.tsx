@@ -34,6 +34,7 @@ function Legend({ lanes, capacity }: { lanes: boolean; capacity: number | null }
         ["Cancelled", <Swatch className="fill-muted stroke-muted-foreground" />],
         ["Unknown", <Swatch className="fill-muted stroke-muted-foreground" dash />],
         ["Running", <Swatch className="fill-primary stroke-primary" />],
+        ["Finishing", <Swatch className="fill-primary/25 stroke-primary/60" />],
         ["Warm", <Swatch className="fill-none stroke-primary" dash />],
         ["Starting", <Swatch className="fill-none stroke-muted-foreground" />],
         ["Jobs waiting", <Swatch className="fill-warning/25 stroke-warning" />],

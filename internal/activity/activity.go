@@ -39,6 +39,9 @@ type Input struct {
 	Capacity  *int // global_max in queue mode, nil in all mode
 	Retention time.Duration
 	History   []model.HistoryEntry
+	// Pending holds finished jobs whose history entry has not landed yet:
+	// ghr is cleaning up after them or waiting for their conclusion.
+	Pending   []model.HistoryEntry
 	Instances []model.InstanceStatus
 	Repos     []string // configured repository names
 	Minutes   []model.MetricSample
@@ -113,6 +116,12 @@ func forRepo(in Input) Input {
 			hist = append(hist, h)
 		}
 	}
+	var pend []model.HistoryEntry
+	for _, p := range in.Pending {
+		if strings.EqualFold(p.Repo, in.Repo) {
+			pend = append(pend, p)
+		}
+	}
 	var insts []model.InstanceStatus
 	for _, i := range in.Instances {
 		if strings.EqualFold(i.Repo, in.Repo) {
@@ -125,15 +134,15 @@ func forRepo(in Input) Input {
 			repos = append(repos, r)
 		}
 	}
-	in.History, in.Instances, in.Repos = hist, insts, repos
+	in.History, in.Pending, in.Instances, in.Repos = hist, pend, insts, repos
 	in.Capacity, in.Minutes, in.Hours = nil, nil, nil
 	return in
 }
 
-// runs builds one run per runner instance: a finished job from history, or
-// a live instance in its current state. A cleaning instance is left out
-// until its history entry lands; a live instance that already has one is
-// shown from history.
+// runs builds one run per runner instance: a finished job from history, a
+// job awaiting its history entry as finishing, or a live instance in its
+// current state. A job's record wins over its instance, history over
+// pending. A cleaning instance with no record is left out.
 func runs(in Input, loc *time.Location) []model.ActivityRun {
 	seen := map[string]bool{}
 	out := []model.ActivityRun{}
@@ -143,6 +152,17 @@ func runs(in Input, loc *time.Location) []model.ActivityRun {
 		out = append(out, model.ActivityRun{
 			InstanceID: e.ID, Repo: e.Repo, Workflow: e.Workflow, Job: e.JobName, RunNumber: e.RunNumber, HTMLURL: e.HTMLURL,
 			Segments: []model.ActivitySegment{{State: finishedState(e.Conclusion), From: e.StartedAt.In(loc), To: &to}},
+		})
+	}
+	for _, p := range in.Pending {
+		if seen[p.ID] {
+			continue
+		}
+		seen[p.ID] = true
+		to := p.FinishedAt.In(loc)
+		out = append(out, model.ActivityRun{
+			InstanceID: p.ID, Repo: p.Repo, Workflow: p.Workflow, Job: p.JobName, RunNumber: p.RunNumber, HTMLURL: p.HTMLURL,
+			Segments: []model.ActivitySegment{{State: "finishing", From: p.StartedAt.In(loc), To: &to}},
 		})
 	}
 	for _, i := range in.Instances {

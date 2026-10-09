@@ -38,6 +38,8 @@ type fakeManager struct {
 	scopes    []string         // scopes StartPruneScope was asked for
 	lastPrune *model.LastPrune // returned by LastPrune
 	diskPct   int              // Status().DiskPct
+	pending   []model.HistoryEntry
+	onPending func() // runs when Pending is read, before it returns
 }
 
 func (f *fakeManager) PausedUntil() time.Time { return f.paused }
@@ -59,6 +61,13 @@ func (f *fakeManager) StartPruneScope(scope string) error {
 }
 
 func (f *fakeManager) LastPrune() *model.LastPrune { return f.lastPrune }
+
+func (f *fakeManager) Pending() []model.HistoryEntry {
+	if f.onPending != nil {
+		f.onPending()
+	}
+	return f.pending
+}
 
 func (f *fakeManager) Status() model.Status {
 	return model.Status{Instances: f.insts, Degraded: f.degraded != "", DegradedReason: f.degraded, DiskPct: f.diskPct}
@@ -908,6 +917,8 @@ func TestActivityBuildsFromHistoryAndInstances(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.insts = []model.InstanceStatus{{ID: "r", Repo: "darkmem", State: "busy", Since: now.Add(-time.Minute)}}
+	m.pending = []model.HistoryEntry{{ID: "p", Repo: "darkmem", Conclusion: "unknown",
+		StartedAt: now.Add(-45 * time.Minute), FinishedAt: now.Add(-2 * time.Minute)}}
 	a, err := b.Activity(context.Background(), "1h", "", time.UTC)
 	if err != nil {
 		t.Fatal(err)
@@ -915,8 +926,37 @@ func TestActivityBuildsFromHistoryAndInstances(t *testing.T) {
 	if a.Capacity == nil || *a.Capacity != 2 || len(a.Lanes) != 2 || !a.HistoryFrom.Equal(now.Add(-30*24*time.Hour)) {
 		t.Fatalf("activity %+v", a)
 	}
+	states := map[string]string{}
+	for _, l := range a.Lanes {
+		for _, r := range l.Runs {
+			states[r.InstanceID] = r.Segments[0].State
+		}
+	}
+	if states["a"] != "succeeded" || states["r"] != "running" || states["p"] != "finishing" {
+		t.Fatalf("states %v", states)
+	}
 	if len(a.Repos) != 2 || a.Repos[0].Repo != "darkcloud" || a.Repos[1].Repo != "darkmem" {
 		t.Fatalf("repos %+v", a.Repos)
+	}
+}
+
+// A job finalized while the view is built has left pending for history.
+func TestActivityKeepsAJobFinalizedMidBuild(t *testing.T) {
+	b, m, _ := newBackend(t)
+	now := time.Date(2026, 10, 3, 14, 5, 0, 0, time.UTC)
+	b.Now = func() time.Time { return now }
+	m.onPending = func() {
+		if err := b.Hist.Append(model.HistoryEntry{ID: "p", Repo: "darkmem", RunID: 1, Conclusion: "success",
+			StartedAt: now.Add(-20 * time.Minute), FinishedAt: now.Add(-10 * time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := b.Activity(context.Background(), "1h", "", time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Lanes) == 0 || len(a.Lanes[0].Runs) != 1 || a.Lanes[0].Runs[0].InstanceID != "p" {
+		t.Fatalf("lanes %+v", a.Lanes)
 	}
 }
 

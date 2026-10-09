@@ -482,6 +482,28 @@ func (m *Manager) finalize(ctx context.Context, path string) {
 		e.FinishedAt.Sub(e.StartedAt).Round(time.Second), p.Cleanup)
 }
 
+// Pending lists the history records waiting for their job's conclusion,
+// including those whose instance is still cleaning up. Unreadable records are
+// skipped; finalize deals with them.
+func (m *Manager) Pending() []model.HistoryEntry {
+	entries, err := os.ReadDir(m.Paths.Pending)
+	if err != nil {
+		return nil
+	}
+	var out []model.HistoryEntry
+	for _, e := range entries {
+		id, ok := strings.CutSuffix(e.Name(), ".json")
+		if !ok || !idRe.MatchString(id) {
+			continue
+		}
+		var p pending
+		if err := readJSON(filepath.Join(m.Paths.Pending, e.Name()), &p); err == nil {
+			out = append(out, p.Entry)
+		}
+	}
+	return out
+}
+
 // finalizePending retries every pending history record whose instance is gone.
 func (m *Manager) finalizePending(ctx context.Context) {
 	entries, err := os.ReadDir(m.Paths.Pending)

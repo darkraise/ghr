@@ -392,7 +392,7 @@ Persistence:
 
 **Lanes (1h and 3h; `buckets` is empty).**
 - A run is one runner instance: its history entry (`HistoryEntry.ID` is the instance ID), plus its live state when it is still alive. Live segments use the instance's states: `starting` from `since`, `warm` from `since` while idle, and `running` from the job's `started_at` while busy.
-- A finished run is one segment whose state is the job's conclusion: `succeeded`, `failed`, `cancelled` or `skipped`. Instances in `cleaning` that have no history entry yet are left out.
+- A finished run is one segment whose state is the job's conclusion: `succeeded`, `failed`, `cancelled`, `skipped`, or `unknown` when ghr never learned it. A job whose history entry has not landed yet (ghr is cleaning up or waiting for the conclusion) is one `finishing` segment built from its pending record, from the job's start to its finish. A `cleaning` instance with neither record is left out. (Amended 2026-10-09, overhaul register rows 4 and 5.)
 - **Packing:**
   - Runs whose span overlaps the window are sorted by start, then instance ID, and each goes into the first lane free at its start. A lane is free when its last run ended at or before that moment.
   - There are `max(capacity, lanes needed)` lanes, or just the lanes needed when `capacity` is null.
@@ -475,7 +475,7 @@ Each new field is added to the TypeScript mirrors and the shared JSON fixtures, 
   - ties order by instance ID;
   - there are `capacity` lanes when fewer are needed, and more when needed;
   - a live instance's starting, warm and running segments are placed correctly;
-  - a `cleaning` instance without history is left out;
+  - a pending job is one `finishing` segment, and history wins over it; a `cleaning` instance with no record is left out;
   - a run without `html_url` serializes without it.
 - **Activity, buckets:**
   - minutes split across bucket boundaries;

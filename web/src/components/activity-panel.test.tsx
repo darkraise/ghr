@@ -29,7 +29,7 @@ describe("ActivityPanel", () => {
     draw()
     expect(screen.getByRole("heading", { name: "Activity" })).toBeInTheDocument()
     expect(screen.getByText("13:05 to 14:05")).toBeInTheDocument()
-    for (const key of ["Succeeded", "Failed", "Unknown", "Running", "Warm", "Starting", "Jobs waiting", "Memory"]) {
+    for (const key of ["Succeeded", "Failed", "Unknown", "Running", "Finishing", "Warm", "Starting", "Jobs waiting", "Memory"]) {
       expect(legend().getByText(key)).toBeInTheDocument()
     }
     expect(screen.getByRole("group", { name: "Runner lanes for the last hour" })).toBeInTheDocument()

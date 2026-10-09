@@ -8,7 +8,7 @@ export const GUTTER = 64
 export const PAD_RIGHT = 8
 
 const HOUR = 3_600_000
-const JOB_STATES = new Set(["running", "succeeded", "failed", "cancelled", "skipped", "unknown"])
+const JOB_STATES = new Set(["running", "finishing", "succeeded", "failed", "cancelled", "skipped", "unknown"])
 
 const WORDS: Record<string, string | undefined> = {
   "1h": "the last hour",
@@ -22,6 +22,7 @@ const RESULT: Record<string, string | undefined> = {
   starting: "starting",
   warm: "warm, waiting for a job",
   running: "running",
+  finishing: "finishing, result pending",
   succeeded: "succeeded",
   failed: "failed",
   cancelled: "cancelled",

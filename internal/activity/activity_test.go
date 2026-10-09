@@ -188,6 +188,46 @@ func TestEmptySlicesMarshalAsArrays(t *testing.T) {
 	}
 }
 
+func TestPendingJobsShowAsFinishing(t *testing.T) {
+	waiting := job("p", at(13, 30), at(13, 40), "unknown")
+	waiting.HTMLURL = "https://example/p"
+	landed := job("done", at(13, 10), at(13, 20), "unknown")
+	a := Build(Input{Window: "1h", Now: now,
+		History: []model.HistoryEntry{job("done", at(13, 10), at(13, 20), "success")},
+		Pending: []model.HistoryEntry{waiting, landed},
+		Instances: []model.InstanceStatus{
+			{ID: "p", Repo: "darkmem", State: "cleaning", Since: at(13, 40)},
+		}})
+	runs := map[string]model.ActivityRun{}
+	n := 0
+	for _, l := range a.Lanes {
+		for _, r := range l.Runs {
+			runs[r.InstanceID] = r
+			n++
+		}
+	}
+	if n != 2 {
+		t.Fatalf("runs %v", laneIDs(a))
+	}
+	p := runs["p"]
+	if sg := p.Segments; len(sg) != 1 || sg[0].State != "finishing" || !sg[0].From.Equal(at(13, 30)) || sg[0].To == nil || !sg[0].To.Equal(at(13, 40)) {
+		t.Fatalf("pending segments %+v", sg)
+	}
+	if p.Job != "build" || p.RunNumber != "41" || p.Workflow != "ci" || p.HTMLURL != "https://example/p" {
+		t.Fatalf("pending run %+v", p)
+	}
+	if sg := runs["done"].Segments; sg[0].State != "succeeded" {
+		t.Fatalf("landed run %+v", sg)
+	}
+}
+
+func TestPendingJobsCountAsBusyButNotAsRuns(t *testing.T) {
+	a := Build(Input{Window: "24h", Now: now, Pending: []model.HistoryEntry{job("p", at(13, 0), at(13, 10), "unknown")}})
+	if b := bucketAt(t, a, at(13, 0)); b.BusyMinutes != 10 || b.Succeeded+b.Failed+b.Cancelled+b.Unknown != 0 {
+		t.Fatalf("13:00 bucket %+v", b)
+	}
+}
+
 func TestRepoFilter(t *testing.T) {
 	hist := []model.HistoryEntry{
 		job("mine", at(13, 10), at(13, 20), "success"),
@@ -200,8 +240,9 @@ func TestRepoFilter(t *testing.T) {
 	minutes := []model.MetricSample{{At: at(14, 0), Queued: 2, CPU: ptr(10.0)}}
 	hours := []model.MetricRollup{{At: at(13, 0), Samples: 60, QueuedMax: 3, CPUAvg: ptr(20.0)}}
 
+	pend := []model.HistoryEntry{{ID: "p2", Repo: "ghr", StartedAt: at(13, 30), FinishedAt: at(13, 40)}}
 	lanes := Build(Input{Window: "1h", Now: now, Repo: "darkmem", Capacity: ptr(4), Repos: []string{"DarkMem", "ghr"},
-		History: hist, Instances: insts, Minutes: minutes, Hours: hours})
+		History: hist, Pending: pend, Instances: insts, Minutes: minutes, Hours: hours})
 	ids := laneIDs(lanes)
 	if lanes.Capacity != nil || len(ids) != 1 || strings.Join(ids[0], ",") != "mine,r1" {
 		t.Fatalf("lanes %v capacity %v", ids, lanes.Capacity)

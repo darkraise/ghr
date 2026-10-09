@@ -38,6 +38,7 @@ type Manager interface {
 	LastPrune() *model.LastPrune
 	QueueUpdate(ctx context.Context) error
 	CancelUpdate() error
+	Pending() []model.HistoryEntry
 }
 
 // GitHub is the part of the GitHub client the backend uses.
@@ -138,13 +139,16 @@ func (b *Backend) Activity(ctx context.Context, window, repo string, loc *time.L
 		return e.val, nil
 	}
 	cfg := b.Store.Config()
+	// Pending before history: finalize appends to history before it removes
+	// the pending record, so a job in between is in at least one of them.
+	pend := b.M.Pending()
 	hist, err := b.Hist.Query("", "", time.Time{}, 0)
 	if err != nil {
 		return model.Activity{}, err
 	}
 	in := activity.Input{
 		Window: window, Loc: loc, Now: now, Retention: cfg.HistoryRetention.D(), Repo: repo,
-		History: hist, Instances: b.M.Status().Instances,
+		History: hist, Pending: pend, Instances: b.M.Status().Instances,
 	}
 	if cfg.Mode == config.ModeQueue {
 		c := cfg.GlobalMax

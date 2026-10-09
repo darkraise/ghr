@@ -588,6 +588,28 @@ func TestKill(t *testing.T) {
 	}
 }
 
+func TestPendingListsJobsAwaitingTheirConclusion(t *testing.T) {
+	h := newHarness(t)
+	e := model.HistoryEntry{ID: "aaaaaa", Repo: "darkmem", RunID: 7, JobName: "build", Conclusion: "unknown",
+		StartedAt: time.Date(2026, 10, 3, 13, 0, 0, 0, time.UTC), FinishedAt: time.Date(2026, 10, 3, 13, 5, 0, 0, time.UTC)}
+	if err := os.MkdirAll(h.m.Paths.Pending, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSONAtomic(h.m.pendingPath("aaaaaa"), pending{Entry: e, RunnerName: "ghr-aaaaaa"}); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(h.m.pendingPath("bbbbbb"), []byte("{not json"), 0o644)
+	os.WriteFile(filepath.Join(h.m.Paths.Pending, "notes.txt"), []byte("x"), 0o644)
+	os.MkdirAll(h.m.pendingPath("cccccc"), 0o755)
+	got := h.m.Pending()
+	if len(got) != 1 || got[0].ID != "aaaaaa" || got[0].JobName != "build" || !got[0].FinishedAt.Equal(e.FinishedAt) {
+		t.Fatalf("pending %+v", got)
+	}
+	if _, err := os.Stat(h.m.pendingPath("bbbbbb")); err != nil {
+		t.Fatalf("Pending removed an unreadable record: %v", err)
+	}
+}
+
 // A read error that is not a decode error is retried, not deleted.
 func TestFinalizeKeepsUnreadablePending(t *testing.T) {
 	h := newHarness(t)

@@ -13,6 +13,7 @@ const SEGMENT: Record<string, string | undefined> = {
   starting: "fill-none stroke-muted-foreground",
   warm: "fill-none stroke-primary",
   running: "fill-primary stroke-primary",
+  finishing: "fill-primary/25 stroke-primary/60",
   succeeded: "fill-success/30 stroke-success/60",
   failed: "fill-destructive/30 stroke-destructive/70",
   cancelled: "fill-muted stroke-muted-foreground",
