@@ -1,0 +1,93 @@
+{
+  "fetched_at": "2026-10-03T14:05:00Z",
+  "runs": [
+    {
+      "repo": "docs",
+      "id": 300,
+      "run_number": 9,
+      "workflow": "pages",
+      "title": "Publish the guide",
+      "branch": "main",
+      "event": "push",
+      "actor": "darkraise",
+      "status": "queued",
+      "conclusion": "",
+      "started_at": "2026-10-03T14:04:00Z",
+      "updated_at": "2026-10-03T14:04:00Z",
+      "html_url": "https://github.com/darkraise/docs/actions/runs/300",
+      "ghr": false,
+      "watched": true
+    },
+    {
+      "repo": "darkmem",
+      "id": 102,
+      "run_number": 42,
+      "workflow": "ci",
+      "title": "Fix the cache key",
+      "branch": "master",
+      "event": "push",
+      "actor": "darkraise",
+      "status": "in_progress",
+      "conclusion": "",
+      "started_at": "2026-10-03T14:01:00Z",
+      "updated_at": "2026-10-03T14:04:00Z",
+      "html_url": "https://github.com/darkraise/darkmem/actions/runs/102",
+      "ghr": true,
+      "watched": false
+    },
+    {
+      "repo": "darkmem",
+      "id": 101,
+      "run_number": 41,
+      "workflow": "ci",
+      "title": "Bump the runner",
+      "branch": "renovate/runner",
+      "event": "pull_request",
+      "actor": "renovate[bot]",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-10-03T13:35:00Z",
+      "updated_at": "2026-10-03T13:40:00Z",
+      "html_url": "https://github.com/darkraise/darkmem/actions/runs/101",
+      "ghr": true,
+      "watched": false
+    },
+    {
+      "repo": "darkcloud",
+      "id": 90,
+      "run_number": 7,
+      "workflow": "deploy",
+      "title": "deploy",
+      "branch": "master",
+      "event": "workflow_dispatch",
+      "actor": "darkraise",
+      "status": "completed",
+      "conclusion": "failure",
+      "started_at": "2026-10-02T14:05:00Z",
+      "updated_at": "2026-10-02T14:06:30Z",
+      "html_url": "https://github.com/darkraise/darkcloud/actions/runs/90",
+      "ghr": false,
+      "watched": false
+    }
+  ],
+  "repos": [
+    {
+      "repo": "darkmem",
+      "watched": false
+    },
+    {
+      "repo": "darkcloud",
+      "watched": false
+    },
+    {
+      "repo": "docs",
+      "watched": true
+    },
+    {
+      "repo": "old-docs",
+      "watched": true,
+      "error": "GitHub rate limit; API calls are paused",
+      "retry_at": "2026-10-03T14:30:00Z"
+    }
+  ]
+}

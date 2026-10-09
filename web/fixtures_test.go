@@ -155,7 +155,8 @@ func fixtureValues() map[string]any {
 				{Name: "darkmem", Max: ptr(2), Warm: ptr(1), Labels: []string{"gpu"}, CleanupNamePrefixes: []string{"darkmem-"}},
 				{Name: "darkcloud", Paused: true},
 			},
-			Web: config.Web{Listen: "0.0.0.0:8080", Hosts: []string{"ghr.lan"}},
+			WatchRepos: []string{"docs", "old-docs"},
+			Web:        config.Web{Listen: "0.0.0.0:8080", Hosts: []string{"ghr.lan"}},
 		},
 		"storage": model.Storage{
 			Toolchains: []model.Toolchain{{Tool: "node", Version: "22.11.0", Arch: "x64",
@@ -191,7 +192,36 @@ func fixtureValues() map[string]any {
 				Count: 12, LastSeen: at(-time.Hour)}}},
 		"registrations": []model.Registration{{ID: 5, Name: "ghr-aaaaaa", Status: "online", Busy: true,
 			Labels: []string{"self-hosted", "homelab"}, GHR: true}},
-		"available-repos":   []model.AvailableRepo{{Name: "darkmem", Private: true, Configured: true}, {Name: "new-repo", Private: true}},
+		"available-repos": []model.AvailableRepo{
+			{Name: "darkmem", Private: true, Configured: true},
+			{Name: "docs", Watched: true},
+			{Name: "new-repo", Private: true},
+		},
+		"actions": model.Actions{
+			FetchedAt: fixtureTime,
+			Runs: []model.ActionsRun{
+				{Repo: "docs", ID: 300, RunNumber: 9, Workflow: "pages", Title: "Publish the guide", Branch: "main",
+					Event: "push", Actor: "darkraise", Status: "queued", StartedAt: at(-time.Minute),
+					UpdatedAt: at(-time.Minute), HTMLURL: "https://github.com/darkraise/docs/actions/runs/300", Watched: true},
+				{Repo: "darkmem", ID: 102, RunNumber: 42, Workflow: "ci", Title: "Fix the cache key", Branch: "master",
+					Event: "push", Actor: "darkraise", Status: "in_progress", StartedAt: at(-4 * time.Minute),
+					UpdatedAt: at(-time.Minute), HTMLURL: "https://github.com/darkraise/darkmem/actions/runs/102", GHR: true},
+				{Repo: "darkmem", ID: 101, RunNumber: 41, Workflow: "ci", Title: "Bump the runner", Branch: "renovate/runner",
+					Event: "pull_request", Actor: "renovate[bot]", Status: "completed", Conclusion: "success",
+					StartedAt: at(-30 * time.Minute), UpdatedAt: at(-25 * time.Minute),
+					HTMLURL: "https://github.com/darkraise/darkmem/actions/runs/101", GHR: true},
+				{Repo: "darkcloud", ID: 90, RunNumber: 7, Workflow: "deploy", Title: "deploy", Branch: "master",
+					Event: "workflow_dispatch", Actor: "darkraise", Status: "completed", Conclusion: "failure",
+					StartedAt: at(-24 * time.Hour), UpdatedAt: at(-24*time.Hour + 90*time.Second),
+					HTMLURL: "https://github.com/darkraise/darkcloud/actions/runs/90"},
+			},
+			Repos: []model.ActionsRepo{
+				{Repo: "darkmem"},
+				{Repo: "darkcloud"},
+				{Repo: "docs", Watched: true},
+				{Repo: "old-docs", Watched: true, Error: "GitHub rate limit; API calls are paused", RetryAt: ptr(at(25 * time.Minute))},
+			},
+		},
 		"toolchain-choices": []model.ToolchainChoice{{Spec: "22.11.0", Version: "22.11.0", LTS: true}, {Spec: "24.9.0", Version: "24.9.0"}},
 	}
 }

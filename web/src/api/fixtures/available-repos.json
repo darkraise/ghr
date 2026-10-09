@@ -6,6 +6,12 @@
     "watched": false
   },
   {
+    "name": "docs",
+    "private": false,
+    "configured": false,
+    "watched": true
+  },
+  {
     "name": "new-repo",
     "private": true,
     "configured": false,

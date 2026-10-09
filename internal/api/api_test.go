@@ -54,6 +54,8 @@ type fakeBackend struct {
 	storageCalls  []string
 	watched       []string
 	unwatched     []string
+	actions       model.Actions
+	actionsCalls  int
 }
 
 func (f *fakeBackend) AvailableRepos(context.Context) ([]model.AvailableRepo, error) {
@@ -68,6 +70,11 @@ func (f *fakeBackend) WatchRepo(ctx context.Context, name string) error {
 func (f *fakeBackend) UnwatchRepo(name string) error {
 	f.unwatched = append(f.unwatched, name)
 	return nil
+}
+
+func (f *fakeBackend) Actions(context.Context) (model.Actions, error) {
+	f.actionsCalls++
+	return f.actions, nil
 }
 
 func (f *fakeBackend) QueueRunnerUpdate(context.Context) error {
@@ -595,5 +602,17 @@ func TestWatchRoutes(t *testing.T) {
 	}
 	if !reflect.DeepEqual(b.watched, []string{"docs"}) || !reflect.DeepEqual(b.unwatched, []string{"old-docs"}) {
 		t.Fatalf("watched %v unwatched %v", b.watched, b.unwatched)
+	}
+}
+
+func TestActionsRoute(t *testing.T) {
+	c, b := setup(t)
+	b.actions = model.Actions{Runs: []model.ActionsRun{{Repo: "darkmem", ID: 7}}, Repos: []model.ActionsRepo{{Repo: "darkmem"}}}
+	var got model.Actions
+	if err := c.call(context.Background(), http.MethodGet, "/actions", nil, &got); err != nil {
+		t.Fatal(err)
+	}
+	if b.actionsCalls != 1 || len(got.Runs) != 1 || got.Runs[0].ID != 7 || len(got.Repos) != 1 {
+		t.Fatalf("calls %d actions %+v", b.actionsCalls, got)
 	}
 }
