@@ -43,6 +43,16 @@ describe("Run page", () => {
     )
   })
 
+  it("draws the jobs timeline with the reason when there is no graph", async () => {
+    const note = "Add Contents: read to the token to see which jobs depend on which."
+    mockApi(runRoutes({ "GET /api/actions/darkmem/runs/102": { ...fixtures.runDetail, graph: undefined, graph_note: note } }))
+    renderApp("/actions/darkmem/runs/102")
+    const timeline = within(await screen.findByRole("region", { name: "Jobs timeline" }))
+    expect(timeline.getByText(note)).toBeInTheDocument()
+    expect(timeline.getByRole("link", { name: /Backend tests/ })).toHaveAttribute("href", "/actions/darkmem/runs/102/jobs/1002?attempt=2")
+    expect(screen.queryByRole("group", { name: "Job graph" })).toBeNull()
+  })
+
   it("links each annotation to its line in the job's log", async () => {
     mockApi(runRoutes())
     renderApp("/actions/darkmem/runs/102")
