@@ -33,6 +33,16 @@ describe("Run page", () => {
     expect(artifacts.getByText("Expired")).toBeInTheDocument()
   })
 
+  it("draws the job graph with tiles linking to the job pages", async () => {
+    mockApi(runRoutes())
+    renderApp("/actions/darkmem/runs/102")
+    const graph = within(await screen.findByRole("region", { name: "ci.yml" }))
+    expect(graph.getByRole("link", { name: "Backend tests, Failed, needs Pick runner" })).toHaveAttribute(
+      "href",
+      "/actions/darkmem/runs/102/jobs/1002?attempt=2",
+    )
+  })
+
   it("links each annotation to its line in the job's log", async () => {
     mockApi(runRoutes())
     renderApp("/actions/darkmem/runs/102")

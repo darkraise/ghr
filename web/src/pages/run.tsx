@@ -11,6 +11,7 @@ import { RouteError } from "@/components/route-error"
 import { AnnotationsSection } from "@/components/run-annotations"
 import { ArtifactsSection } from "@/components/run-artifacts"
 import { RunFrame, type JobLinkFn, type SummaryLinkFn } from "@/components/run-frame"
+import { JobGraph } from "@/components/run-graph"
 import { RunStatusIcon } from "@/components/run-status-icon"
 import { StepList } from "@/components/step-list"
 import { dateTimeSec, dur } from "@/lib/format"
@@ -194,6 +195,7 @@ function RunSummary({ run, owner }: { run: RunDetail; owner: string }) {
       <Section title="Summary">
         <SummaryFacts run={run} owner={owner} now={now} />
       </Section>
+      {run.graph && <JobGraph graph={run.graph} jobs={run.jobs} path={run.path} event={run.event} now={now} jobLink={jobLink} />}
       <AnnotationsSection data={annotations.data} error={annotations.error} onRetry={() => void annotations.refetch()} jobLink={jobLink} />
       <ArtifactsSection repo={run.repo} artifacts={run.artifacts} />
     </RunFrame>
