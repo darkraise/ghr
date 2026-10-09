@@ -2,7 +2,7 @@ import { screen } from "@testing-library/react"
 import axe from "axe-core"
 import { beforeEach, describe, expect, it } from "vitest"
 import { mockApi } from "@/test/api"
-import { authedRoutes, fixtures } from "@/test/fixtures"
+import { authedRoutes, fixtures, runRoutes } from "@/test/fixtures"
 import { setViewport } from "@/test/media"
 import { renderApp } from "@/test/render"
 
@@ -162,6 +162,35 @@ describe("Settings accessibility", () => {
       renderApp("/settings")
       await screen.findByRole("navigation", { name: "Sections" })
       await screen.findByText("4,980 of 5,000, resets 14:45")
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})
+
+describe("Run details accessibility", () => {
+  it.each([
+    [1280, "the side rail"],
+    [390, "the stacked rail"],
+  ])(
+    "has no axe violations on the run page at %ipx (%s)",
+    async (width) => {
+      setViewport(width)
+      mockApi(runRoutes())
+      renderApp("/actions/darkmem/runs/102")
+      await screen.findByRole("group", { name: "Job graph" })
+      await screen.findByRole("link", { name: "Log line 5, Backend tests / Lint (ruff)" })
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+
+  it(
+    "has no axe violations on the job page",
+    async () => {
+      mockApi(runRoutes())
+      renderApp("/actions/darkmem/runs/102/jobs/1002?attempt=2&step=3&line=5")
+      await screen.findByLabelText("Search logs")
       expect(await violations()).toEqual([])
     },
     30_000,

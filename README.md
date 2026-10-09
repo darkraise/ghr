@@ -18,7 +18,8 @@ configured caps:
 - Every configured repo is **private** and does **not** enable "Run workflows from fork
   pull requests".
 - A fine-grained PAT scoped to exactly those repos, with **Administration: read/write** and
-  **Actions: read**, and an expiry.
+  **Actions: read**, and an expiry. **Contents: read** is optional: with it, a run's page in
+  the web UI draws the job graph from the workflow file; without it, a jobs timeline.
 
 ## Install / upgrade
 
