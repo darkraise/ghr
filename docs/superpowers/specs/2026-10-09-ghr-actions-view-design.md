@@ -30,7 +30,7 @@ This is spec 3 of the web UI overhaul.
 - Names are bare repository names under `owner`, like `repos[].name`. GitHub calls go through the same `repoURL`, so a repository of another owner cannot be watched.
 - Validation, in `config.Validate`: every name is non-empty, contains no `/`, appears once ignoring case, and is not a configured repository's name ignoring case.
 - A watched repository gets no runners, no demand polling, no label check and no activity rows. Only `GET /actions` reads the list.
-- `config.Parse` decodes with `KnownFields(true)`, so a binary older than this change refuses a config that has `watch_repos`. A downgrade needs the key removed first; the release notes say so.
+- `config.Parse` decodes with `KnownFields(true)`, so a binary older than this change refuses a config that has `watch_repos`. A downgrade needs the key removed first; the README's Install / upgrade section says so, because CI generates the release notes.
 - Nothing else writes the key: `PATCH /config` cannot touch it (`model.ConfigPatch` has no such field), and `Store.Update` and the first-run `Configure` work on a clone of the current config, so they keep it.
 
 ### 1.2 API
@@ -120,8 +120,8 @@ The existing callers, the tick's demand poll and the label check, read only `ID`
 
 - One entry with one lock, holding the last response, the time it was built, and the `*config.Config` it was built from.
 - An entry built less than 15 seconds ago from the same config pointer is returned as is. Otherwise it is rebuilt.
-- The store installs a new config pointer on every `Update`, `Reload` and `Configure` (`internal/daemon/store.go`), and `spawnPlanned` already relies on that identity. So watching, unwatching, adding, removing, `FinalizeRemovals`, a reload and setup all invalidate the entry with no hooks.
-- **Memory:** one response, at most 50 runs per covered repository. The GitHub client's ETag cache holds one 50-run body per repository, roughly 150 to 300 KB each.
+- The store installs a new config pointer on every `Update` and `Reload` (`internal/daemon/store.go`), and `spawnPlanned` already relies on that identity. So watching, unwatching, adding, removing, `FinalizeRemovals` and a reload all invalidate the entry with no hooks. `Configure` keeps the pointer when the owner is unchanged, but it never changes `repos` or `watch_repos`, so the covered set cannot change without a new pointer.
+- **Memory:** the last response, plus each repository's runs from its last successful call (for the degraded rule in §2.2); both hold at most 50 runs per covered repository. The GitHub client's ETag cache holds one 50-run body per repository, roughly 150 to 300 KB each.
 
 ### 2.4 API budget
 
@@ -148,7 +148,7 @@ The existing callers, the tick's demand poll and the label check, read only `ID`
 
 - **Errors:** one alert above the lists, one line per repository with an error. It uses `errorText`'s form: "darkcloud: GitHub rate limit; API calls are paused. Retry after 14:30", with `retry_at` in local time. The other repositories' runs still show.
 - **In progress:** the runs that are not completed, as one table. Elapsed time is `now − start`, ticking each second like the Dashboard's running bars. The section is hidden when empty, unless the status filter is Active; then it reads "Nothing is running or queued."
-- **Recent:** completed runs, filtered first and then capped at 100 rows, grouped by local day of their start. This uses `groupByDay`, made generic over a date accessor, `groupByDay<T>(rows: T[], at: (row: T) => string)`. History passes `finished_at`. As on History, each day is one `<tbody>` whose first row is a `<th scope="rowgroup">`.
+- **Recent:** completed runs, filtered first and then capped at 100 rows, grouped by local day of their start. This uses a generic `groupByDayOf<T>(rows: T[], at: (row: T) => string, now)`; History's `groupByDay` becomes a wrapper that passes `finished_at`. As on History, each day is one `<tbody>` whose first row is a `<th scope="rowgroup">`.
 - **A row:**
   - A status cell. Completed runs use `ResultIcon`, whose `aria-label` supplies the result word. Queued runs use a muted lucide `Clock` labelled "Queued". Running runs use the kit `Spinner` labelled "Running", as spec 2 does for an in-progress step; the plan checks that it stops under reduced motion.
   - A title cell: `display_title`, falling back to the workflow name, as a link to `html_url` in a new tab. Visually hidden text completes its name as "{title}, {repo} #{run number}, opens in a new tab".
@@ -164,7 +164,7 @@ The existing callers, the tick's demand poll and the label check, read only `ID`
 
 - A section "Watched repositories" below the configured table. `Section` gains an optional `id` prop, and this one uses `id="watched"`. Its description reads "Their workflow runs show on the Actions page. ghr runs no runners for them."
 - Each watched name (mono) has a Remove icon button labelled "Stop watching {name}". There is no confirmation because nothing is lost, and the toast reads "Stopped watching {name}".
-- A "Watch a repository" button opens a dialog. The add-repository dialog's listbox, filter and keyboard handling are extracted into a shared `RepoPicker` that both dialogs use. In the picker, configured entries are disabled with the word "added" (as today) and watched ones with the word "watched". Public repositories are listed without the public warning. Choosing one posts `/watch` and toasts "Watching {name}".
+- A "Watch a repository" button opens a dialog. The add-repository dialog's listbox, filter and keyboard handling are extracted into a shared `RepoPicker` that both dialogs use. In the picker, configured entries are disabled with the word "added" (as today) and watched ones carry the word "watched". The watch dialog disables watched entries; the add dialog keeps them pickable, because adding a watched repository takes it over (§1.2). Public repositories are listed without the public warning. Choosing one posts `/watch` and toasts "Watching {name}".
 - When nothing is watched, the section shows its description and the button only.
 
 ## 4. Testing
