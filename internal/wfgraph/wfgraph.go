@@ -20,6 +20,14 @@ var (
 	ErrMismatch = errors.New("wfgraph: a job matches no workflow job")
 )
 
+// Limits on what a workflow file may ask of the daemon. Build compiles one
+// pattern per job from its label, and an alias lets thousands of jobs share
+// one very long label, so both are bounded here.
+const (
+	maxJobs  = 1000
+	maxLabel = 512
+)
+
 // Job is one workflow job: Name is its YAML name, "" when it has none.
 type Job struct {
 	Key, Name    string
@@ -77,11 +85,23 @@ func Parse(data []byte) (*Workflow, error) {
 	if jobs.Kind != yaml.MappingNode || len(jobs.Content) == 0 {
 		return nil, fmt.Errorf("%w: no jobs", ErrInvalid)
 	}
+	if len(jobs.Content)/2 > maxJobs {
+		return nil, fmt.Errorf("%w: more than %d jobs", ErrInvalid, maxJobs)
+	}
 	w := &Workflow{}
+	seen := map[string]bool{}
 	for i := 0; i+1 < len(jobs.Content); i += 2 {
+		key := jobs.Content[i].Value
+		if seen[key] {
+			return nil, fmt.Errorf("%w: job %s appears twice", ErrInvalid, key)
+		}
+		seen[key] = true
 		var raw rawJob
 		if err := jobs.Content[i+1].Decode(&raw); err != nil {
 			return nil, fmt.Errorf("%w: job %s: %v", ErrInvalid, jobs.Content[i].Value, err)
+		}
+		if len(jobs.Content[i].Value) > maxLabel || len(raw.Name) > maxLabel {
+			return nil, fmt.Errorf("%w: a job key or name is longer than %d bytes", ErrInvalid, maxLabel)
 		}
 		w.Jobs = append(w.Jobs, Job{Key: jobs.Content[i].Value, Name: raw.Name, Needs: raw.Needs,
 			Matrix: raw.Strategy.Matrix != nil, Uses: raw.Uses != ""})

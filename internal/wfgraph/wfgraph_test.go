@@ -2,7 +2,9 @@ package wfgraph
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/darkraise/ghr/internal/model"
@@ -67,12 +69,38 @@ func TestParseRefusesInvalidFiles(t *testing.T) {
 		"cycle":         "jobs:\n  a:\n    needs: c\n  b:\n    needs: a\n  c:\n    needs: [b]\n",
 		"self cycle":    "jobs:\n  a:\n    needs: a\n",
 		"bad needs":     "jobs:\n  a:\n    needs: {x: 1}\n",
+		"duplicate job": "jobs:\n  a: {runs-on: x}\n  a: {runs-on: y}\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Parse([]byte(src)); !errors.Is(err, ErrInvalid) {
 				t.Fatalf("err %v", err)
 			}
 		})
+	}
+}
+
+func TestParseBoundsWhatBuildWouldCompile(t *testing.T) {
+	long := strings.Repeat("x", maxLabel+1)
+	var many strings.Builder
+	many.WriteString("jobs:\n")
+	for i := 0; i <= maxJobs; i++ {
+		fmt.Fprintf(&many, "  j%d: {runs-on: x}\n", i)
+	}
+	for name, src := range map[string]string{
+		"a long name":          "jobs:\n  a:\n    name: " + long + "\n",
+		"a long key":           "jobs:\n  " + long + ": {runs-on: x}\n",
+		"a long name by alias": "jobs:\n  a: {name: &n " + long + "}\n  b: {name: *n}\n",
+		"too many jobs":        many.String(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse([]byte(src)); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("Parse err = %v, want ErrInvalid", err)
+			}
+		})
+	}
+	ok := "jobs:\n  a:\n    name: " + strings.Repeat("x", maxLabel) + "\n"
+	if _, err := Parse([]byte(ok)); err != nil {
+		t.Fatalf("a name of %d bytes: %v", maxLabel, err)
 	}
 }
 
