@@ -98,6 +98,26 @@ describe("ghr palette", () => {
   })
 })
 
+const LOG_COLOURS = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"].flatMap((c) => [
+  `--log-ansi-${c}`,
+  `--log-ansi-bright-${c}`,
+])
+
+describe("log palette", () => {
+  it.each(["dark", "light"] as const)("is dark and readable in %s mode", (mode) => {
+    const t = tokens(mode)
+    expect(luminance(t["--log-bg"] ?? "")).toBeLessThan(0.02)
+    for (const fg of ["--log-fg", "--log-muted", "--log-command", ...LOG_COLOURS]) {
+      expect(contrast(t[fg], t["--log-bg"]), `${fg} on --log-bg`).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(t[fg], t["--log-target-bg"]), `${fg} on --log-target-bg`).toBeGreaterThanOrEqual(4.5)
+    }
+    expect(contrast(t["--log-error-fg"], t["--log-error-bg"])).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(t["--log-warning-fg"], t["--log-warning-bg"])).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(t["--log-fg"], t["--log-match-bg"])).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(t["--log-current"], t["--log-bg"])).toBeGreaterThanOrEqual(3)
+  })
+})
+
 describe("ghr chrome styles", () => {
   it("keeps the light-mode rail readable with the dark palette", () => {
     const light = tokens("light")
