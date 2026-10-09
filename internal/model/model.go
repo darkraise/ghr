@@ -273,6 +273,41 @@ type AvailableRepo struct {
 	Watched    bool   `json:"watched"`
 }
 
+// Actions is GET /actions: the recent workflow runs of every configured and
+// watched repository, whoever ran them.
+type Actions struct {
+	FetchedAt time.Time     `json:"fetched_at"`
+	Runs      []ActionsRun  `json:"runs"`
+	Repos     []ActionsRepo `json:"repos"`
+}
+
+type ActionsRun struct {
+	Repo       string    `json:"repo"`
+	ID         int64     `json:"id"`
+	RunNumber  int64     `json:"run_number"`
+	Workflow   string    `json:"workflow"`
+	Title      string    `json:"title"`
+	Branch     string    `json:"branch"`
+	Event      string    `json:"event"`
+	Actor      string    `json:"actor"`
+	Status     string    `json:"status"`
+	Conclusion string    `json:"conclusion"`
+	StartedAt  time.Time `json:"started_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	HTMLURL    string    `json:"html_url"`
+	GHR        bool      `json:"ghr"`
+	Watched    bool      `json:"watched"`
+}
+
+// ActionsRepo is one covered repository; Error is set when its runs could
+// not be read, and RetryAt when GitHub calls are paused.
+type ActionsRepo struct {
+	Repo    string     `json:"repo"`
+	Watched bool       `json:"watched"`
+	Error   string     `json:"error,omitempty"`
+	RetryAt *time.Time `json:"retry_at,omitempty"`
+}
+
 // Activity is GET /activity: what the runners did over a window, as lanes of
 // runs (1h, 3h) or time buckets (24h, 7d, 30d), with every time in TZ.
 type Activity struct {
