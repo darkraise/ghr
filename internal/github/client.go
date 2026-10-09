@@ -40,9 +40,22 @@ type APIError struct {
 
 func (e *APIError) Error() string { return fmt.Sprintf("github: %d %s", e.Status, e.Message) }
 
+// Run is a workflow run. The tick and the label check read only ID; the
+// Actions page reads the rest. GitHub may leave run_started_at out.
 type Run struct {
-	ID     int64  `json:"id"`
-	Status string `json:"status"`
+	ID           int64      `json:"id"`
+	Name         string     `json:"name"`
+	DisplayTitle string     `json:"display_title"`
+	RunNumber    int64      `json:"run_number"`
+	HeadBranch   string     `json:"head_branch"`
+	Event        string     `json:"event"`
+	Actor        Account    `json:"actor"`
+	Status       string     `json:"status"`
+	Conclusion   string     `json:"conclusion"`
+	CreatedAt    time.Time  `json:"created_at"`
+	RunStartedAt *time.Time `json:"run_started_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	HTMLURL      string     `json:"html_url"`
 }
 
 type Step struct {

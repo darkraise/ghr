@@ -627,3 +627,33 @@ func TestJobStepTimes(t *testing.T) {
 		t.Fatalf("steps %+v", s)
 	}
 }
+
+func TestRunFieldsDecode(t *testing.T) {
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"workflow_runs":[
+			{"id":102,"name":"ci","display_title":"Fix the cache key","run_number":42,"head_branch":"master",
+			 "event":"push","actor":{"login":"darkraise"},"status":"in_progress","conclusion":null,
+			 "created_at":"2026-10-09T14:00:00Z","run_started_at":"2026-10-09T14:01:00Z",
+			 "updated_at":"2026-10-09T14:04:00Z","html_url":"https://github.com/darkraise/darkmem/actions/runs/102"},
+			{"id":101,"name":"ci","run_number":41,"status":"completed","conclusion":"success",
+			 "created_at":"2026-10-09T13:00:00Z","updated_at":"2026-10-09T13:05:00Z"}]}`)
+	})
+	runs, err := c.ListRecentRuns(context.Background(), "darkmem", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("runs %+v", runs)
+	}
+	r := runs[0]
+	start := time.Date(2026, 10, 9, 14, 1, 0, 0, time.UTC)
+	if r.ID != 102 || r.Name != "ci" || r.DisplayTitle != "Fix the cache key" || r.RunNumber != 42 || r.HeadBranch != "master" ||
+		r.Event != "push" || r.Actor.Login != "darkraise" || r.Status != "in_progress" || r.Conclusion != "" ||
+		!r.CreatedAt.Equal(start.Add(-time.Minute)) || r.RunStartedAt == nil || !r.RunStartedAt.Equal(start) ||
+		!r.UpdatedAt.Equal(start.Add(3*time.Minute)) || r.HTMLURL != "https://github.com/darkraise/darkmem/actions/runs/102" {
+		t.Fatalf("run %+v", r)
+	}
+	if runs[1].RunStartedAt != nil || runs[1].Conclusion != "success" {
+		t.Fatalf("run without run_started_at %+v", runs[1])
+	}
+}
