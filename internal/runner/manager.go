@@ -488,10 +488,12 @@ type ErrUnknownRunner string
 
 func (e ErrUnknownRunner) Error() string { return "unknown runner " + string(e) }
 
-// Kill stops a runner's unit and marks the runner stopping until a tick
-// handles its exit. The stop does not end with ctx: a caller that gives up
-// would kill systemctl while the unit may still be stopping, and the runner
-// would read as running again.
+// Kill stops a runner's unit, marks the runner stopping while the unit stops,
+// and starts its cleanup once systemd confirms the unit is down. It does not
+// leave the exit to a tick: one in flight can take seconds. Neither the stop
+// nor the check ends with ctx: a caller that gives up would kill systemctl
+// while the unit may still be stopping, and the runner would read as running
+// again.
 func (m *Manager) Kill(ctx context.Context, id string) error {
 	m.mu.Lock()
 	i, ok := m.insts[id]
@@ -502,7 +504,8 @@ func (m *Manager) Kill(ctx context.Context, id string) error {
 	if !ok {
 		return ErrUnknownRunner(id)
 	}
-	if err := m.SD.Stop(context.WithoutCancel(ctx), UnitPrefix+id); err != nil {
+	ctx = context.WithoutCancel(ctx)
+	if err := m.SD.Stop(ctx, UnitPrefix+id); err != nil {
 		m.mu.Lock()
 		if cur, ok := m.insts[id]; ok {
 			cur.stopping = false
@@ -511,6 +514,9 @@ func (m *Manager) Kill(ctx context.Context, id string) error {
 		return err
 	}
 	m.Events.Add("warn", i.Repo, "runner %s stopped by user", id)
+	if active, err := m.SD.Active(ctx, UnitPrefix+id); err == nil && !active {
+		m.startFinish(id, true)
+	}
 	return nil
 }
 

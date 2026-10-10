@@ -171,6 +171,11 @@ type fakeSD struct {
 	// context ends; stopEntered receives once per held call.
 	stopGate    chan struct{}
 	stopEntered chan struct{}
+	// keepActive makes Stop succeed while the unit still reads active.
+	keepActive bool
+	// onActive, when set, runs at the start of every Active call, before the
+	// unit's state is read.
+	onActive func(unit string)
 }
 
 func newFakeSD() *fakeSD {
@@ -203,11 +208,23 @@ func (f *fakeSD) Stop(ctx context.Context, unit string) error {
 		return err
 	}
 	f.stopped = append(f.stopped, unit)
-	f.active[unit] = false
+	if !f.keepActive {
+		f.active[unit] = false
+	}
 	return nil
 }
 
-func (f *fakeSD) Active(_ context.Context, unit string) (bool, error) {
+func (f *fakeSD) Active(ctx context.Context, unit string) (bool, error) {
+	f.mu.Lock()
+	hook := f.onActive
+	f.mu.Unlock()
+	if hook != nil {
+		hook(unit)
+	}
+	// The real client answers a context that has ended with its error.
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.activeErr[unit]; err != nil {
@@ -580,6 +597,9 @@ func newHarness(t *testing.T) *harness {
 	if err := h.m.Init(); err != nil {
 		t.Fatal(err)
 	}
+	// A cleanup started by a kill would otherwise outlive its test and race
+	// the removal of the temporary directory.
+	t.Cleanup(func() { h.m.Wait() })
 	if err := os.MkdirAll(h.m.Paths.Instances, 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -624,8 +626,9 @@ func TestKillMarksTheRunnerStoppingWhileItsUnitStops(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if !stoppingOf(h, "aaaaaa") || !strings.Contains(h.eventText(), "runner aaaaaa stopped by user") {
-		t.Fatalf("after the stop: stopping %v events %s", stoppingOf(h, "aaaaaa"), h.eventText())
+	h.m.Wait()
+	if s := h.state("aaaaaa"); s == "starting" || stoppingOf(h, "aaaaaa") || !strings.Contains(h.eventText(), "runner aaaaaa stopped by user") {
+		t.Fatalf("after the stop: state %s stopping %v events %s", s, stoppingOf(h, "aaaaaa"), h.eventText())
 	}
 }
 
@@ -641,8 +644,8 @@ func TestKillClearsStoppingWhenTheStopFails(t *testing.T) {
 	}
 }
 
-// The flag stays on the instance after a stop; Status hides it once the tick
-// has seen the unit exit.
+// A successful stop reaches cleaning without a tick, and Status hides the
+// flag from then on.
 func TestACleaningRunnerNeverReportsStopping(t *testing.T) {
 	h := newHarness(t)
 	h.m.spawn(context.Background(), h.cfg, "darkcloud")
@@ -652,13 +655,271 @@ func TestACleaningRunnerNeverReportsStopping(t *testing.T) {
 	if err := h.m.Kill(context.Background(), "aaaaaa"); err != nil {
 		t.Fatal(err)
 	}
-	if !stoppingOf(h, "aaaaaa") {
-		t.Fatal("flag cleared by a successful stop")
-	}
-	h.m.refreshUnits(context.Background())
 	h.m.Wait()
 	if h.state("aaaaaa") != "cleaning" || stoppingOf(h, "aaaaaa") {
 		t.Fatalf("state %s stopping %v", h.state("aaaaaa"), stoppingOf(h, "aaaaaa"))
+	}
+}
+
+func TestKillLeavesAFailedCleanupToItsRetry(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud")
+	h.writeJob(t, "aaaaaa", 55)
+	h.gh.setJobs(55, completedJob(h, 55, "ghr-darkcloud-aaaaaa", "success"))
+	h.docker.setErr("RemoveVolumesByLabel", errors.New("volume in use"))
+	if err := h.m.Kill(context.Background(), "aaaaaa"); err != nil {
+		t.Fatal(err)
+	}
+	h.m.Wait()
+	h.docker.setErr("RemoveVolumesByLabel", nil)
+	if err := h.m.Kill(context.Background(), "aaaaaa"); err != nil {
+		t.Fatal(err)
+	}
+	h.m.Wait()
+	if h.state("aaaaaa") != "cleaning" {
+		t.Fatalf("state %s: a kill retried a failed cleanup before finishRetry", h.state("aaaaaa"))
+	}
+	h.now = h.now.Add(finishRetry)
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if h.state("aaaaaa") != "gone" || !reflect.DeepEqual(h.history(t), []string{"aaaaaa success"}) {
+		t.Fatalf("state %s history %v", h.state("aaaaaa"), h.history(t))
+	}
+}
+
+// A tick can read a runner as running, wait on systemd, and resume after a
+// stop has started the cleanup and the cleanup has failed.
+func TestKillLeavesNoEarlyRetryToATickThatSawTheRunnerRunning(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud")
+	h.writeJob(t, "aaaaaa", 55)
+	h.gh.setJobs(55, completedJob(h, 55, "ghr-darkcloud-aaaaaa", "success"))
+	h.docker.setErr("RemoveVolumesByLabel", errors.New("volume in use"))
+	entered, release := make(chan struct{}), make(chan struct{})
+	var held atomic.Bool
+	h.sd.onActive = func(string) {
+		if held.CompareAndSwap(false, true) {
+			close(entered)
+			<-release
+		}
+	}
+	refreshed := make(chan struct{})
+	go func() {
+		h.m.refreshUnits(context.Background())
+		close(refreshed)
+	}()
+	<-entered
+	if err := h.m.Kill(context.Background(), "aaaaaa"); err != nil {
+		t.Fatal(err)
+	}
+	h.m.Wait()
+	close(release)
+	<-refreshed
+	h.m.Wait()
+	if n := strings.Count(h.eventText(), "cleanup of aaaaaa failed"); n != 1 || h.state("aaaaaa") != "cleaning" {
+		t.Fatalf("%d cleanup attempts, state %s; want one attempt and cleaning", n, h.state("aaaaaa"))
+	}
+}
+
+// The job's conclusion is not known yet: the record waits in pending, where
+// the UI reads it as finishing.
+func TestKillBeforeAnyTickLeavesAPendingRecord(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud")
+	h.writeJob(t, "aaaaaa", 55)
+	if err := h.m.Kill(context.Background(), "aaaaaa"); err != nil {
+		t.Fatal(err)
+	}
+	h.m.Wait()
+	got := h.m.Pending()
+	if len(got) != 1 || got[0].ID != "aaaaaa" || got[0].RunID != 55 || got[0].RunNumber != "412" || got[0].Workflow != "CI" {
+		t.Fatalf("pending %+v", got)
+	}
+	if hist := h.history(t); len(hist) != 0 {
+		t.Fatalf("history %v before the job's conclusion is known", hist)
+	}
+}
+
+func TestKillFinishesWhileATickIsBlockedInTheAPI(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud")
+	h.writeJob(t, "aaaaaa", 55)
+	h.gh.setJobs(55, completedJob(h, 55, "ghr-darkcloud-aaaaaa", "success"))
+	h.docker.setErr("RemoveVolumesByLabel", errors.New("volume in use"))
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	h.gh.hook = func(method string) {
+		if method == "ListRuns" {
+			once.Do(func() {
+				close(entered)
+				<-release
+			})
+		}
+	}
+	ticked := make(chan struct{})
+	go func() {
+		h.m.Tick(context.Background())
+		close(ticked)
+	}()
+	<-entered
+	if err := h.m.Kill(context.Background(), "aaaaaa"); err != nil {
+		t.Fatal(err)
+	}
+	if h.state("aaaaaa") != "cleaning" {
+		t.Fatalf("state %s while the tick is still in its first ListRuns", h.state("aaaaaa"))
+	}
+	close(release)
+	<-ticked
+}
+
+func TestKillLeavesAnUnconfirmedExitToTheTick(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(h *harness)
+	}{
+		{"the check fails", func(h *harness) { h.sd.activeErr["ghr-runner-aaaaaa"] = errors.New("bus error") }},
+		{"the unit still reads active", func(h *harness) { h.sd.keepActive = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.m.spawn(context.Background(), h.cfg, "darkmem")
+			tc.set(h)
+			if err := h.m.Kill(context.Background(), "aaaaaa"); err != nil {
+				t.Fatal(err)
+			}
+			h.m.Wait()
+			if h.state("aaaaaa") != "starting" || !stoppingOf(h, "aaaaaa") {
+				t.Fatalf("state %s stopping %v, want starting and stopping", h.state("aaaaaa"), stoppingOf(h, "aaaaaa"))
+			}
+			delete(h.sd.activeErr, "ghr-runner-aaaaaa")
+			h.sd.active["ghr-runner-aaaaaa"] = false
+			h.m.refreshUnits(context.Background())
+			h.m.Wait()
+			if h.state("aaaaaa") != "gone" {
+				t.Fatalf("state %s after the tick saw the exit", h.state("aaaaaa"))
+			}
+		})
+	}
+}
+
+// The first cleanup is held at its last step until both kills have returned,
+// so a second one would have been started while it ran, and would by now have
+// failed on the first one's work or reached the same step.
+func TestTwoKillsStartOneCleanup(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	entered, release := make(chan struct{}, 2), make(chan struct{})
+	h.gh.hook = func(method string) {
+		if method == "DeleteRunner" {
+			entered <- struct{}{}
+			<-release
+		}
+	}
+	h.sd.stopGate, h.sd.stopEntered = make(chan struct{}), make(chan struct{}, 2)
+	done := make(chan error, 2)
+	for range 2 {
+		go func() { done <- h.m.Kill(context.Background(), "aaaaaa") }()
+	}
+	<-h.sd.stopEntered
+	<-h.sd.stopEntered
+	close(h.sd.stopGate)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if h.state("aaaaaa") != "cleaning" {
+		t.Fatalf("state %s after both kills, want cleaning", h.state("aaaaaa"))
+	}
+	<-entered
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	h.m.Wait()
+	if n := len(h.gh.deleted); n != 1 || strings.Contains(h.eventText(), "cleanup of aaaaaa failed") || h.state("aaaaaa") != "gone" {
+		t.Fatalf("%d cleanups completed, state %s, events %s; want one cleanup, none failed, and gone", n, h.state("aaaaaa"), h.eventText())
+	}
+}
+
+func TestKillCleanupHoldsShutdownUntilItEnds(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	h.gh.hook = func(method string) {
+		if method == "DeleteRunner" {
+			close(entered)
+			<-release
+		}
+	}
+	if err := h.m.Kill(context.Background(), "aaaaaa"); err != nil {
+		t.Fatal(err)
+	}
+	if h.state("aaaaaa") != "cleaning" {
+		t.Fatalf("state %s after the kill, want cleaning", h.state("aaaaaa"))
+	}
+	<-entered
+	h.m.Close()
+	waited := make(chan struct{})
+	go func() {
+		h.m.Wait()
+		close(waited)
+	}()
+	select {
+	case <-waited:
+		t.Fatal("Wait returned while the cleanup a kill started was still running")
+	case <-time.After(50 * time.Millisecond):
+	}
+	unblock()
+	<-waited
+	if h.state("aaaaaa") != "gone" {
+		t.Fatalf("state %s after Wait, want gone", h.state("aaaaaa"))
+	}
+}
+
+// A kill can outlive the daemon's shutdown: its stop completes after Close
+// and Wait have returned.
+func TestKillAfterCloseStartsNoCleanup(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.sd.stopGate, h.sd.stopEntered = make(chan struct{}), make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() { done <- h.m.Kill(context.Background(), "aaaaaa") }()
+	<-h.sd.stopEntered
+	h.m.Close()
+	h.m.Wait()
+	close(h.sd.stopGate)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	h.m.Wait()
+	if h.state("aaaaaa") != "starting" || !stoppingOf(h, "aaaaaa") {
+		t.Fatalf("state %s stopping %v, want starting and stopping", h.state("aaaaaa"), stoppingOf(h, "aaaaaa"))
+	}
+	if _, err := os.Stat(h.m.instanceDir("aaaaaa")); err != nil {
+		t.Fatalf("instance dir after Close: %v", err)
+	}
+}
+
+// Under the race detector this is what catches a cleanup counted outside the
+// manager lock. Whichever of the kill and the shutdown wins, the runner is in
+// the same state when Wait returns as it is afterwards.
+func TestKillRacingShutdownLeavesNoCleanupRunning(t *testing.T) {
+	for range 50 {
+		h := newHarness(t)
+		h.m.spawn(context.Background(), h.cfg, "darkmem")
+		killed := make(chan error, 1)
+		go func() { killed <- h.m.Kill(context.Background(), "aaaaaa") }()
+		h.m.Close()
+		h.m.Wait()
+		atWait := h.state("aaaaaa")
+		if err := <-killed; err != nil {
+			t.Fatal(err)
+		}
+		h.m.Wait()
+		if s := h.state("aaaaaa"); s != atWait {
+			t.Fatalf("state %s when Wait returned and %s afterwards: a cleanup started after Wait", atWait, s)
+		}
 	}
 }
 

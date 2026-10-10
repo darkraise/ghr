@@ -222,7 +222,9 @@ func (m *Manager) refreshUnits(ctx context.Context) {
 		}
 		active, err := m.SD.Active(ctx, UnitPrefix+i.ID)
 		if err == nil && !active {
-			m.beginFinish(i.ID)
+			// The snapshot can be out of date by now: a stop may have started
+			// the cleanup, and one that failed waits for its retry time.
+			m.startFinish(i.ID, true)
 		}
 	}
 }
@@ -231,10 +233,15 @@ func (m *Manager) refreshUnits(ctx context.Context) {
 // A failed finish leaves it cleaning (holding its repo slot) for refreshUnits to retry.
 // It starts nothing once Close has been called: the instance dir stays, and
 // adoption cleans the runner up at the next start.
-func (m *Manager) beginFinish(id string) {
+func (m *Manager) beginFinish(id string) { m.startFinish(id, false) }
+
+// startFinish is beginFinish; with skipCleaning it leaves an instance that is
+// already cleaning alone, so that only refreshUnits retries a failed finish,
+// when its delay has passed.
+func (m *Manager) startFinish(id string, skipCleaning bool) {
 	m.mu.Lock()
 	i, ok := m.insts[id]
-	if !ok || i.finishing || m.closed {
+	if !ok || i.finishing || m.closed || (skipCleaning && i.State == sched.Cleaning) {
 		m.mu.Unlock()
 		return
 	}
