@@ -136,12 +136,22 @@ describe("Run page", () => {
 })
 
 describe("Job page", () => {
+  it("keeps Raw log and shows the job's name in the log panel", async () => {
+    mockApi(runRoutes())
+    renderApp("/actions/darkmem/runs/102/jobs/1002")
+    const search = await screen.findByLabelText("Search logs")
+    const panel = search.closest(".ghr-log-panel") as HTMLElement
+    expect(within(panel).getByRole("button", { name: "Raw log" })).toBeInTheDocument()
+    const job = fixtures.runDetail.jobs.find((j) => j.id === 1002)
+    expect(within(panel).getByText(job?.name ?? "")).toBeInTheDocument()
+  })
+
   it("shows the job's heading, runner, labels and steps", async () => {
     mockApi(runRoutes())
     renderApp("/actions/darkmem/runs/102/jobs/1002")
     const heading = await screen.findByRole("heading", { name: "Backend tests", level: 2 })
     const job = within(heading.closest("section") as HTMLElement)
-    expect(job.getByText("2m15s")).toHaveClass("font-mono")
+    expect(within(heading.parentElement as HTMLElement).getByText("2m15s")).toHaveClass("font-mono")
     expect(job.getByText("ghr-darkmem-d4e5f6")).toHaveClass("font-mono")
     expect(job.getByText("homelab")).toBeInTheDocument()
     expect(job.getByText("ghr")).toHaveClass("font-mono")

@@ -251,7 +251,7 @@ function saveBlob(blob: Blob, fileName: string) {
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-function JobLogs({ repo, job, search }: { repo: string; job: RunJob; search: JobSearch }) {
+function JobLogs({ repo, job, search, ms }: { repo: string; job: RunJob; search: JobSearch; ms: number | undefined }) {
   const log = useJobLog(repo, job.id, true)
   const raw = useMutation({
     mutationFn: () => api.rawJobLog(repo, job.id),
@@ -284,6 +284,13 @@ function JobLogs({ repo, job, search }: { repo: string; job: RunJob; search: Job
       step={search.step}
       line={search.line}
       toolbar={rawButton}
+      heading={
+        <>
+          <RunStatusIcon status={job.status} conclusion={job.conclusion} />
+          <span className="min-w-0 truncate">{job.name}</span>
+          {ms !== undefined && <span className="font-mono text-xs font-normal text-muted-foreground">{dur(ms)}</span>}
+        </>
+      }
     />
   )
 }
@@ -307,7 +314,7 @@ function JobView({ run, owner, jobId, search }: { run: RunDetail; owner: string;
   const ms = jobMs(job, now)
   return (
     <RunFrame run={run} owner={owner} now={now} current={job.id} job={job} jobLink={jobLink} summaryLink={summaryLink} onAttempt={onAttempt}>
-      <section aria-labelledby={headingId} className="min-w-0 rounded-[10px] border border-border bg-card p-4">
+      <section aria-labelledby={headingId} className="min-w-0 rounded-md border border-border bg-card p-4">
         <div className="flex flex-wrap items-center gap-2">
           <RunStatusIcon status={job.status} conclusion={job.conclusion} />
           <h2 id={headingId} className="text-base font-semibold">
@@ -318,9 +325,9 @@ function JobView({ run, owner, jobId, search }: { run: RunDetail; owner: string;
         <JobMeta job={job} />
         <div className="mt-4">
           {job.status === "completed" ? (
-            <JobLogs repo={run.repo} job={job} search={search} />
+            <JobLogs repo={run.repo} job={job} search={search} ms={ms} />
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="ghr-log-panel flex flex-col gap-2 overflow-hidden rounded-md border border-border p-3">
               <p className="text-sm text-muted-foreground">Logs appear when the job finishes.</p>
               <StepList steps={job.steps} now={now} live />
             </div>
