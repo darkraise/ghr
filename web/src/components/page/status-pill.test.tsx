@@ -32,6 +32,21 @@ describe("the status vocabulary", () => {
     expect(icon).toHaveAttribute("aria-hidden", "true")
   })
 
+  it.each([
+    ["Running", "run"],
+    ["matched", "accent"],
+    ["starting", "warn"],
+    ["expires soon", "warn"],
+    ["refused", "warn"],
+    ["offline", "bad"],
+    ["rejected", "bad"],
+    ["ok", "ok"],
+    ["up to date", "ok"],
+    ["finished", "muted"],
+  ])("reads %s as %s", (state, tone) => {
+    expect(stateTone(state)).toBe(tone)
+  })
+
   it("shows a given label in place of the state's word", () => {
     render(<StatusPill state="success" label="Up to date" />)
     expect(screen.getByText("Up to date")).toBeInTheDocument()
