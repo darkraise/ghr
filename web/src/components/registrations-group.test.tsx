@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { Registration } from "@/api/types"
 import { mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
+import { expectPill } from "@/test/pill"
 import { renderApp } from "@/test/render"
 
 const stale: Registration = { id: 9, name: "old-runner", status: "offline", busy: false, labels: ["self-hosted", "linux"], ghr: false }
@@ -24,8 +25,8 @@ describe("GitHub registrations group", () => {
     expect(screen.getByText("old-runner")).toBeInTheDocument()
     expect(screen.getByText("self-hosted linux")).toBeInTheDocument()
     const region = within(screen.getByRole("region", { name: "GitHub registrations" }))
-    expect(region.getByText("Offline")).toHaveClass("text-foreground")
-    expect(region.getByText("Running")).toHaveClass("text-foreground")
+    expectPill(region.getByText("Offline"), "bg-destructive/15", "text-destructive")
+    expectPill(region.getByText("Running"), "bg-running/15", "text-running")
     expect(region.getByText("ghr")).toHaveClass("text-muted-foreground")
     expect(region.getByText("self-hosted linux")).toHaveClass("font-mono")
     expect(screen.getByRole("button", { name: "Delete old-runner" })).toBeInTheDocument()

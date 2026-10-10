@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { RunnerUpdate } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
+import { expectPill } from "@/test/pill"
 import { renderApp } from "@/test/render"
 
 const DAY = 86_400_000
@@ -24,7 +25,7 @@ describe("Runner software section", () => {
     const { user } = renderApp("/settings/runner")
     const s = await section()
     expect(await s.findByText("2.337.0 to 2.338.0")).toHaveClass("font-mono")
-    expect(s.getByText("Waiting")).toHaveClass("text-foreground")
+    expectPill(s.getByText("Waiting"), "bg-warning/15", "text-warning")
     expect(s.getByText("Runs when no job is running or queued")).toBeInTheDocument()
     await user.click(s.getByRole("button", { name: "Cancel update" }))
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/runner-update")).toBe(true))
@@ -57,7 +58,7 @@ describe("Runner software section", () => {
     mockApi(withUpdate({ installed: "2.338.0", checked_at: new Date(DAEMON_NOW - 2 * 3_600_000).toISOString() }))
     renderApp("/settings/runner")
     const s = await section()
-    expect(await s.findByText("Up to date")).toHaveClass("text-foreground")
+    expectPill(await s.findByText("Up to date"), "bg-success/15", "text-success")
     expect(s.getByText("checked 2h ago")).toBeInTheDocument()
     expect(s.queryByRole("button", { name: "Queue update" })).toBeNull()
   })

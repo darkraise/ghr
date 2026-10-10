@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { Storage } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
+import { expectPill } from "@/test/pill"
 import { renderApp } from "@/test/render"
 
 const routes = (over: Record<string, unknown> = {}) => authedRoutes({ "GET /api/storage": fixtures.storage, ...over })
@@ -197,7 +198,7 @@ describe("Recent operations", () => {
     expect(row.getByText("13:06")).toHaveClass("font-mono")
     expect(row.getByText("clear")).toBeInTheDocument()
     expect(row.getByText("nuget")).toBeInTheDocument()
-    expect(row.getByText("OK")).toHaveClass("text-foreground")
+    expectPill(row.getByText("OK"), "bg-success/15", "text-success")
     expect(row.getByText("cleared NuGet (3.6 GB freed)")).toHaveClass("text-muted-foreground")
   })
 

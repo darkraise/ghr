@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
+import { expectPill } from "@/test/pill"
 import { renderRoutes } from "@/test/routes"
 import { RunnerPanel, type DetailTab } from "./runner-panel"
 
@@ -37,7 +38,7 @@ describe("RunnerPanel", () => {
     draw()
     expect(await screen.findByRole("heading", { name: "aaaaaa", level: 2 })).toBeInTheDocument()
     expect(await screen.findByText("Run tests")).toBeInTheDocument()
-    expect(screen.getAllByText("Running")[0]).toHaveClass("text-foreground")
+    expectPill(screen.getAllByText("Running")[0] as HTMLElement, "bg-running/15", "text-running")
     expect(screen.getByText("darkmem")).toBeInTheDocument()
     expect(screen.getByText("Running for")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Open run" })).toHaveAttribute("href", "https://github.com/darkraise/darkmem/actions/runs/102/job/2")
@@ -132,7 +133,7 @@ describe("RunnerPanel", () => {
       }),
     )
     draw()
-    expect(await screen.findByText("Stopping")).toHaveClass("text-foreground")
+    expectPill(await screen.findByText("Stopping"), "bg-muted-foreground/15", "text-muted-foreground")
     expect(screen.queryByText("Running")).toBeNull()
     expect(screen.getByRole("button", { name: "Stop runner" })).toBeDisabled()
   })

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { LabelCheck } from "@/api/types"
 import { json, mockApi } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
+import { expectPill } from "@/test/pill"
 import { renderApp } from "@/test/render"
 
 const unmatched: LabelCheck = {
@@ -26,7 +27,7 @@ describe("Workflow labels group", () => {
     mockApi(routes())
     renderApp("/repositories/darkmem/labels")
     expect(await screen.findByText("homelab, self-hosted")).toBeInTheDocument()
-    expect(screen.getByText("Matched")).toHaveClass("text-foreground")
+    expectPill(screen.getByText("Matched"), "bg-primary/15", "text-primary")
     expect(screen.getByText("ci / build, ci / test")).toBeInTheDocument()
     expect(screen.getByText(/^Checked /)).toBeInTheDocument()
     expect(screen.getByText("12 jobs, last seen 1h ago")).toBeInTheDocument()
@@ -37,7 +38,7 @@ describe("Workflow labels group", () => {
     const { calls } = mockApi(routes({ "GET /api/repos/darkmem/label-check": unmatched }))
     const { user } = renderApp("/repositories/darkmem/labels")
     expect(await screen.findByText("Missing arm64, big")).toBeInTheDocument()
-    expect(screen.getByText("Unmatched")).toHaveClass("text-foreground")
+    expectPill(screen.getByText("Unmatched"), "bg-destructive/15", "text-destructive")
     expect(screen.getByText(/, partial$/)).toBeInTheDocument()
     expect(screen.getByText("ci / build +2 more")).toBeInTheDocument()
     expect(screen.getByText("Needs a different OS or architecture")).toBeInTheDocument()

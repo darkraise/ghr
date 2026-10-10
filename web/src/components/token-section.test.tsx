@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { TokenStatus } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
+import { expectPill } from "@/test/pill"
 import { renderApp } from "@/test/render"
 
 const DAY = 86_400_000
@@ -24,7 +25,7 @@ describe("GitHub token section", () => {
     renderApp("/settings/token")
     expect(await screen.findByText("Expires Dec 2, in 60 days")).toBeInTheDocument()
     const section = within(screen.getByRole("region", { name: "GitHub token" }))
-    expect(section.getByText("Valid")).toHaveClass("text-foreground")
+    expectPill(section.getByText("Valid"), "bg-success/15", "text-success")
     expect(section.getByText("1m ago")).toBeInTheDocument()
     expect(section.getByText("4,980 of 5,000, resets 14:45")).toHaveClass("font-mono")
   })

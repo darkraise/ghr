@@ -4,6 +4,7 @@ import { RouterAdapterProvider, type RouterAdapter } from "darkraise-ui/router"
 import { describe, expect, it, vi } from "vitest"
 import type { RunDetail } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
+import { expectPill } from "@/test/pill"
 import { RunFrame, type JobLinkFn, type SummaryLinkFn } from "./run-frame"
 
 // PageHeader's breadcrumbs link through the kit's router adapter; plain
@@ -124,16 +125,16 @@ describe("RunFrame", () => {
   })
 
   it.each([
-    [{ status: "completed", conclusion: "failure" }, "Failed"],
-    [{ status: "completed", conclusion: "success" }, "Succeeded"],
-    [{ status: "in_progress", conclusion: "" }, "Running"],
-    [{ status: "queued", conclusion: "" }, "Waiting"],
-  ])("shows the run's state as a pill before the header actions (%o)", (over, word) => {
+    [{ status: "completed", conclusion: "failure" }, "Failed", "bg-destructive/15", "text-destructive"],
+    [{ status: "completed", conclusion: "success" }, "Succeeded", "bg-success/15", "text-success"],
+    [{ status: "in_progress", conclusion: "" }, "Running", "bg-running/15", "text-running"],
+    [{ status: "queued", conclusion: "" }, "Waiting", "bg-warning/15", "text-warning"],
+  ])("shows the run's state as a pill before the header actions (%o)", (over, word, fill, text) => {
     renderFrame({}, { ...fixtures.runDetail, ...over })
     const github = screen.getByRole("link", { name: "Open on GitHub" })
     const actions = github.closest("div") as HTMLElement
     const pill = within(actions).getByText(word)
-    expect(pill.parentElement).toHaveClass("rounded-full")
+    expectPill(pill, fill, text)
     expect(actions.firstElementChild).toContainElement(pill)
   })
 
