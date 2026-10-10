@@ -1,9 +1,13 @@
 package history
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -162,5 +166,63 @@ func TestQueryFailureMeansEveryFailedConclusion(t *testing.T) {
 		if strings.Join(ids, ",") != want {
 			t.Errorf("Query(%q) = %v, want %s", conclusion, ids, want)
 		}
+	}
+}
+
+func TestWritesCountsOnlyRealWrites(t *testing.T) {
+	s := &Store{Path: filepath.Join(t.TempDir(), "history.jsonl")}
+	var seen []int64
+	// The hook reads the store, which deadlocks unless the lock was released first.
+	s.SetOnChange(func() { seen = append(seen, s.Writes()) })
+	if err := s.Prune(time.Now()); err != nil || s.Writes() != 0 {
+		t.Fatalf("prune with no file: writes %d err %v", s.Writes(), err)
+	}
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	e := model.HistoryEntry{ID: "a1", Repo: "a", RunID: 1, FinishedAt: t0}
+	if err := s.Append(e); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Append(e); err != nil {
+		t.Fatal(err)
+	}
+	if s.Writes() != 1 {
+		t.Fatalf("a duplicate append counted: writes %d", s.Writes())
+	}
+	if err := s.Prune(t0.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if s.Writes() != 2 || !slices.Equal(seen, []int64{1, 2}) {
+		t.Fatalf("writes %d, hook saw %v", s.Writes(), seen)
+	}
+	s.SetOnChange(nil)
+	if err := s.Append(model.HistoryEntry{ID: "b1", Repo: "b", RunID: 2, FinishedAt: t0}); err != nil {
+		t.Fatal(err)
+	}
+	if s.Writes() != 3 || len(seen) != 2 {
+		t.Fatalf("after removing the hook: writes %d, hook saw %v", s.Writes(), seen)
+	}
+}
+
+func TestHistoryHookUnderConcurrency(t *testing.T) {
+	s := &Store{Path: filepath.Join(t.TempDir(), "history.jsonl")}
+	var calls atomic.Int64
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if err := s.Append(model.HistoryEntry{ID: fmt.Sprint(i), RunID: int64(i)}); err != nil {
+				t.Error(err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			s.SetOnChange(func() { calls.Add(1) })
+			s.Writes()
+		}()
+	}
+	wg.Wait()
+	if s.Writes() != 4 {
+		t.Fatalf("writes %d, want 4", s.Writes())
 	}
 }

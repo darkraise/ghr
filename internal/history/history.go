@@ -15,52 +15,89 @@ import (
 )
 
 type Store struct {
-	Path string
-	mu   sync.Mutex
+	Path     string
+	mu       sync.Mutex
+	writes   int64
+	onChange func()
+}
+
+// SetOnChange installs fn, which Append and Prune call after a counted write,
+// once the store's lock is released; nil removes it.
+func (s *Store) SetOnChange(fn func()) {
+	s.mu.Lock()
+	s.onChange = fn
+	s.mu.Unlock()
+}
+
+// Writes counts the appends that wrote a line and the prunes that replaced
+// the file.
+func (s *Store) Writes() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writes
+}
+
+// counted bumps the write counter when wrote is set and returns the hook to
+// call once s.mu is released. s.mu is held.
+func (s *Store) counted(wrote bool) func() {
+	if !wrote {
+		return nil
+	}
+	s.writes++
+	return s.onChange
 }
 
 // Append records e unless an entry with the same instance ID and run ID is
 // already stored, so a finalization repeated after a crash adds no duplicate.
 func (s *Store) Append(e model.HistoryEntry) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	wrote, err := s.append(e)
+	fn := s.counted(wrote)
+	s.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+	return err
+}
+
+func (s *Store) append(e model.HistoryEntry) (bool, error) {
 	all, err := s.readAll()
 	if err != nil {
-		return err
+		return false, err
 	}
 	for _, x := range all {
 		if x.ID == e.ID && x.RunID == e.RunID {
-			return nil
+			return false, nil
 		}
 	}
 	line, err := json.Marshal(e)
 	if err != nil {
-		return err
+		return false, err
 	}
 	f, err := os.OpenFile(s.Path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o644)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer f.Close()
 	// A crash mid-write can leave a fragment with no trailing newline; start a
 	// new line so this record is not merged into the fragment and lost.
 	st, err := f.Stat()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if st.Size() > 0 {
 		last := make([]byte, 1)
 		if _, err := f.ReadAt(last, st.Size()-1); err != nil {
-			return err
+			return false, err
 		}
 		if last[0] != '\n' {
 			line = append([]byte{'\n'}, line...)
 		}
 	}
 	if _, err := f.Write(append(line, '\n')); err != nil {
-		return err
+		return false, err
 	}
-	return f.Close()
+	return true, f.Close()
 }
 
 func (s *Store) readAll() ([]model.HistoryEntry, error) {
@@ -120,14 +157,23 @@ func matchConclusion(got, want string) bool {
 // Prune drops entries that finished before cutoff, rewriting the file atomically.
 func (s *Store) Prune(cutoff time.Time) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	wrote, err := s.prune(cutoff)
+	fn := s.counted(wrote)
+	s.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+	return err
+}
+
+func (s *Store) prune(cutoff time.Time) (bool, error) {
 	all, err := s.readAll()
 	if err != nil || all == nil {
-		return err
+		return false, err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(s.Path), ".history-*.jsonl")
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer os.Remove(tmp.Name())
 	w := bufio.NewWriter(tmp)
@@ -140,10 +186,13 @@ func (s *Store) Prune(cutoff time.Time) error {
 	}
 	if err := w.Flush(); err != nil {
 		tmp.Close()
-		return err
+		return false, err
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return false, err
 	}
-	return os.Rename(tmp.Name(), s.Path)
+	if err := os.Rename(tmp.Name(), s.Path); err != nil {
+		return false, err
+	}
+	return true, nil
 }
