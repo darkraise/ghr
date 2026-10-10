@@ -1,8 +1,8 @@
 # ghr: show a runner as stopping
 
 **Date:** 2026-10-10
-**Status:** design approved in chat on 2026-10-10 (approach and full design); revised after the spec review and approved the same day. Amended later that day for register item 33 (the stop starts the cleanup itself: Decisions, §1.1, §1.2, §2 and §4), approved in chat after the Fable review in docs/superpowers/notes/2026-10-10-ghr-stop-starts-cleanup-fable-review.md.
-**Register:** docs/superpowers/registers/2026-10-10-ghr-ui-polish-realtime.md (items 25 and 33)
+**Status:** design approved in chat on 2026-10-10 (approach and full design); revised after the spec review and approved the same day. Amended later that day for register item 33 (the stop starts the cleanup itself: Decisions, §1.1, §1.2, §2 and §4), approved in chat after the Fable review in docs/superpowers/notes/2026-10-10-ghr-stop-starts-cleanup-fable-review.md. Amended once more that day for register item 38 (§1.1 and §4 state two guards the code already had and name `startFinish`), approved in chat; no behaviour changed.
+**Register:** docs/superpowers/registers/2026-10-10-ghr-ui-polish-realtime.md (items 25, 33 and 38)
 **Code:** `internal/model`, `internal/runner`, `internal/daemon`, `internal/activity`, `cmd/ghr`, `web/src`
 
 ## Goal
@@ -27,13 +27,14 @@ Stopping a runner must show in the UI in under a second. Today it does not. On t
   - sets `stopping` under `m.mu` before it calls `SD.Stop`;
   - calls `SD.Stop` with `context.WithoutCancel(ctx)`, so the stop does not end when the caller's context does. `system.CommandTimeout` (10 minutes) still bounds the command;
   - if `SD.Stop` fails, clears `stopping` under `m.mu` when the instance still exists, and returns the error;
-  - on success adds the `runner %s stopped by user` event as today, then asks `SD.Active` for the unit on the same uncancellable context. When it answers not active with no error, the test `refreshUnits` applies, and the instance is not already `cleaning`, `Kill` calls `beginFinish`: the instance moves to `cleaning` and `finish` runs in the background, as it does for an exit a tick finds. Otherwise `Kill` leaves `stopping` set and the next tick's `refreshUnits` handles the exit.
-- `Kill` never calls `beginFinish` for an instance that is already `cleaning`. A failed cleanup is retried only when `refreshUnits` finds `retryFinish` due, so repeated kills cannot spend the cleanup's failure allowance.
+  - on success adds the `runner %s stopped by user` event as today, then asks `SD.Active` for the unit on the same uncancellable context. When it answers not active with no error, the test `refreshUnits` applies, `Kill` calls `startFinish(id, true)`, which is `beginFinish` except that it leaves an instance that is already `cleaning` alone: the instance moves to `cleaning` and `finish` runs in the background, as it does for an exit a tick finds. Otherwise `Kill` leaves `stopping` set and the next tick's `refreshUnits` handles the exit.
+- `Kill` never starts a finish for an instance that is already `cleaning`. A failed cleanup is retried only when `refreshUnits` finds `retryFinish` due, so repeated kills cannot spend the cleanup's failure allowance.
 - `beginFinish` starts nothing once `Close` has been called. It reads `closed` and calls `wg.Add` inside its `m.mu` section, as `StartPruneScope` does, because a `Kill` can outlive the HTTP shutdown and would otherwise race `Wait`. The instance directory stays as it is, and adoption cleans the runner up at the next start.
 - `stopStartTimedOut` skips an ID whose instance is gone. Until now an instance could leave `starting` only at the start of a tick; a `Kill` can now move it to `cleaning`, and its finish can remove it, while a tick is in one of its steps.
+- `stopIdleRunner` returns at once, counting the runner as stopped, for an instance that is gone or `cleaning`. A `Kill` can move it there after `stopIdle`'s snapshot, and that cleanup deletes the registration itself, so the tick makes no GitHub call and no unit stop for it.
 - A second `Kill` of a runner that is already stopping behaves like the first: it calls `SD.Stop` again and returns its result, and a second success adds a second event. If that second call fails it clears the flag even while the first is still in progress; the runner then reads as its state again until its unit exits, which is accepted. Two kills that both succeed start one finish: `beginFinish` returns when a finish is already running.
 - `Manager.Status` copies the flag to `InstanceStatus.Stopping` while the state is `starting`, `idle` or `busy`, and never for a `cleaning` instance.
-- Nothing else in the manager reads the flag. `refreshUnits` moves the instance to `cleaning` when its unit has exited, whatever the flag says.
+- Nothing else in the manager reads the flag. `refreshUnits` moves the instance to `cleaning` when its unit has exited, whatever the flag says. It starts that cleanup with `startFinish(id, true)` as `Kill` does: its snapshot can predate a cleanup a `Kill` started and that has since failed, and that cleanup waits for its retry time.
 - Accepted, because nothing reads the flag:
   - a tick that runs during the stop may pick the runner for the idle timeout or the start timeout, stop its unit again and add its own event. Both stops end the same unit;
   - the scheduler counts a stopping `starting` or `idle` runner as able to take a job until its unit exits, so it starts no replacement before then;
@@ -85,6 +86,8 @@ Stopping a runner must show in the UI in under a second. Today it does not. On t
   - when `SD.Active` errors, or answers active, `Kill` starts no finish and the flag stays; the next `refreshUnits` that sees the unit inactive starts it;
   - two concurrent `Kill`s of one runner start one finish;
   - a `Kill` of a `cleaning` instance whose `retryFinish` is not due starts no finish;
+  - a `refreshUnits` that took its snapshot before a `Kill`, and asks systemd after that `Kill`'s cleanup has failed, starts no second finish;
+  - `stopIdleRunner`, given a snapshot from before a `Kill`, makes no GitHub call and no unit stop for an instance that is `cleaning` or gone;
   - a `Kill` after `Close` starts no finish and leaves the instance directory; `Kill` racing `Close` and `Wait`, repeated under the race detector, neither panics nor leaves a finish running after `Wait` returns;
   - a `Kill`, before any tick, of a runner whose `job.json` is written leaves a pending record with the run number and workflow;
   - `stopStartTimedOut` skips an instance that is gone;
