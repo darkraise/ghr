@@ -46,6 +46,8 @@ describe("Workflow labels group", () => {
       screen.getByText("Adding a label changes which jobs ghr accepts. It does not install anything on the runner."),
     ).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Add label big" }))
+    expect(screen.queryByRole("button", { name: "Add label big" })).toBeNull()
+    expect(screen.getByText("Missing arm64")).toBeInTheDocument()
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
     expect(calls.some((c) => c.method !== "GET")).toBe(false)
   })
