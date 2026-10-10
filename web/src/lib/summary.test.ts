@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { InstanceStatus, RepoStatus, Status } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
+import { capacity } from "./capacity"
 import { dashboardSummary, runnersSummary } from "./summary"
 
 const repo = (over: Partial<RepoStatus>): RepoStatus => ({ name: "darkmem", paused: false, max: 2, active: 0, queued: 0, ...over })
@@ -52,5 +53,21 @@ describe("runnersSummary", () => {
   it("names a single waiting job", () => {
     const repos = fixtures.status.repos.map((r) => ({ ...r, queued: r.name === "darkmem" ? 1 : 0 }))
     expect(runnersSummary({ ...fixtures.status, repos })).toBe("2 live, 1 job waiting")
+  })
+})
+
+describe("a stopping runner", () => {
+  it("counts as it did before it was stopped", () => {
+    const instances = [inst("busy", "a"), inst("busy", "b"), inst("starting", "c"), inst("idle", "d")].map((i) => ({ ...i, stopping: true }))
+    const stopping = st({ global_max: 5, instances, repos: [repo({})] })
+    expect(capacity(stopping)).toEqual({
+      segments: ["busy", "busy", "starting", "warm", "free"],
+      over: 0,
+      busy: 2,
+      text: "2 of 5 busy",
+      label: "2 of 5 busy, 1 starting, 1 warm, 1 free",
+    })
+    expect(dashboardSummary(stopping)).toBe("2 of 5 runners busy.")
+    expect(runnersSummary(stopping)).toBe("4 live")
   })
 })

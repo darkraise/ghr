@@ -19,6 +19,7 @@ export interface InstanceStatus {
   state: string
   since: string
   job?: JobInfo
+  stopping?: boolean
 }
 
 export interface HistoryEntry {
@@ -371,6 +372,7 @@ export interface ActivityRun {
   run_number?: string
   segments: ActivitySegment[]
   html_url?: string
+  stopping?: boolean
 }
 
 export interface ActivityLane {

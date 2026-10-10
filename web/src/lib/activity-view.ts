@@ -90,7 +90,7 @@ export function runAria(run: ActivityRun, now: number): string {
   const job = [...run.segments].reverse().find((s) => JOB_STATES.has(s.state)) ?? last
   const ms = job ? (job.to === null ? now : Date.parse(job.to)) - Date.parse(job.from) : 0
   const who = run.job ? [run.repo, run.workflow, run.job, run.run_number && `run ${run.run_number}`] : [run.repo, `runner ${run.instance_id}`]
-  const state = last ? (RESULT[last.state] ?? last.state) : ""
+  const state = run.stopping ? "stopping" : last ? (RESULT[last.state] ?? last.state) : ""
   return [...who, state, dur(ms)].filter(Boolean).join(", ")
 }
 

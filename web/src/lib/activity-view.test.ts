@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { ActivityBucket } from "@/api/types"
+import type { ActivityBucket, ActivityRun } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
 import {
   activitySummary,
@@ -72,6 +72,22 @@ describe("activity view", () => {
     ])
     expect(runs.map(runLabel)).toEqual(["darkmem lint #40", "darkmem build #41", "darkmem test #42", ""])
     expect(runs.map((r) => runEnd(r, now))).toEqual([Date.parse("2026-10-03T13:21:00Z"), Date.parse("2026-10-03T13:40:00Z"), now, now])
+  })
+
+  it("says stopping for a stopping run in each live state", () => {
+    const live = (state: string): ActivityRun => ({
+      instance_id: "cccccc",
+      repo: "darkmem",
+      stopping: true,
+      segments: [{ state, from: "2026-10-03T14:04:00Z", to: null }],
+    })
+    expect(["starting", "warm", "running"].map((s) => runAria(live(s), now))).toEqual([
+      "darkmem, runner cccccc, stopping, 1m00s",
+      "darkmem, runner cccccc, stopping, 1m00s",
+      "darkmem, runner cccccc, stopping, 1m00s",
+    ])
+    const running = lanes.lanes.flatMap((l) => l.runs).find((r) => r.instance_id === "aaaaaa") as ActivityRun
+    expect(runAria({ ...running, stopping: true }, now)).toBe("darkmem, ci, test, run 42, stopping, 4m00s")
   })
 
   it("describes each bucket", () => {
