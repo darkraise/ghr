@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/darkraise/ghr/internal/api"
+	"github.com/darkraise/ghr/internal/changes"
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/events"
 	"github.com/darkraise/ghr/internal/github"
@@ -31,6 +32,10 @@ import (
 	"github.com/darkraise/ghr/internal/webui"
 	"github.com/darkraise/ghr/web"
 )
+
+// hubOptions configures the daemon's change hub; the zero value takes the
+// hub's defaults. Tests lengthen the tick so only wakes publish.
+var hubOptions changes.Options
 
 type Options struct {
 	ConfigPath  string
@@ -151,13 +156,14 @@ type running struct {
 
 // start reads the owner once, then adopts and reconciles the runners already
 // on the host before anything serves the full API.
-func start(ctx context.Context, o Options, store *Store, ev *events.Ring, epoch string, webCfg config.Web, webSetupRequired func() bool) (*running, error) {
+func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *changes.Hub, epoch string, webCfg config.Web, webSetupRequired func() bool) (*running, error) {
 	owner := store.Config().Owner
 	gh := github.New(owner, store.Token)
 	if o.GitHubURL != "" {
 		gh.BaseURL = o.GitHubURL
 	}
 	hist := &history.Store{Path: o.HistoryPath}
+	hist.SetOnChange(hub.Wake)
 	m := &runner.Manager{
 		Config: store.Config, GH: gh, SD: o.Systemd, Docker: o.Docker, Disk: o.Disk, Host: o.Host, Fetch: o.Fetch,
 		Paths: o.Paths, Events: ev, History: hist, Now: time.Now, NewID: runner.RandomID, Epoch: epoch,
@@ -222,6 +228,7 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, epoch 
 		WebApplied:       webCfg,
 		WebSetupRequired: webSetupRequired,
 		SetupPending:     func() bool { return exists(o.SetupPendingPath) },
+		Changes:          hub,
 		Wake: func() {
 			select {
 			case wake <- struct{}{}:
@@ -229,6 +236,7 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, epoch 
 			}
 		},
 	}
+	hub.SetSources(b.fingerprints, b.staleActivity)
 	return &running{m: m, space: space, b: b, sampled: sampled, wake: wake}, nil
 }
 
@@ -287,6 +295,12 @@ func Run(ctx context.Context, o Options) error {
 	auth := webui.NewAuth(o.WebPasswordPath, time.Now, rand.Reader)
 
 	ev := events.New()
+	// Built before any listener serves, so both servers can end open change
+	// streams when they shut down, during first-run setup too.
+	hub := changes.New(hubOptions)
+	ev.SetOnChange(hub.Wake)
+	srv.RegisterOnShutdown(hub.Close)
+	webSrv.RegisterOnShutdown(hub.Close)
 	for _, w := range warnings {
 		ev.Add("warn", "", "config: %s", w)
 	}
@@ -400,7 +414,7 @@ func Run(ctx context.Context, o Options) error {
 		}
 	}
 
-	rt, err := start(ctx, o, store, ev, epoch, webCfg, webSetupRequired)
+	rt, err := start(ctx, o, store, ev, hub, epoch, webCfg, webSetupRequired)
 	if err != nil {
 		if served {
 			teardown()
@@ -432,6 +446,9 @@ func Run(ctx context.Context, o Options) error {
 		select {
 		case <-ctx.Done():
 			teardown()
+			// Shutdown starts its hooks without waiting for them, and no
+			// fingerprint may read the manager once it closes.
+			hub.Close()
 			m.Close()
 			rt.space.Close()
 			rt.b.Close()

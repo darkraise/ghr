@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/darkraise/ghr/internal/api"
+	"github.com/darkraise/ghr/internal/changes"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/runner"
@@ -824,5 +826,105 @@ func TestRunReportsAPendingSetup(t *testing.T) {
 	}
 	if st, _ := setupStateOver(o.Socket); !st.Configured || !st.SetupPending || st.Owner != "darkraise" {
 		t.Fatalf("setup state %+v", st)
+	}
+}
+
+// A configured daemon streams changes on its socket, and shutting it down
+// ends an open stream instead of waiting on it.
+func TestRunStreamsChangesAndEndsThemOnShutdown(t *testing.T) {
+	// With an hour-long tick, only the event ring's wake can publish the change.
+	old := hubOptions
+	hubOptions = changes.Options{Tick: time.Hour}
+	t.Cleanup(func() { hubOptions = old })
+	o := testOptions(t, cfgYAML)
+	reload := make(chan os.Signal, 1)
+	o.Reload = reload
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, o) }()
+	returned := false
+	defer func() {
+		cancel()
+		if !returned {
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+			}
+		}
+	}()
+	c := api.NewUnixClient(o.Socket)
+	waitFor(t, "the socket to serve status", func() bool { _, err := c.Status(context.Background()); return err == nil })
+
+	stream := &http.Client{Transport: c.HTTP.Transport}
+	req, err := http.NewRequest(http.MethodGet, "http://ghr/changes", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := stream.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /changes: %d", resp.StatusCode)
+	}
+	frames := make(chan string, 16)
+	go func() {
+		defer close(frames)
+		rd := bufio.NewReader(resp.Body)
+		var sb strings.Builder
+		for {
+			line, err := rd.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if line == "\n" {
+				frames <- sb.String()
+				sb.Reset()
+				continue
+			}
+			sb.WriteString(line)
+		}
+	}()
+	next := func(what string) string {
+		t.Helper()
+		select {
+		case f, ok := <-frames:
+			if !ok {
+				t.Fatalf("the stream ended while waiting for %s", what)
+			}
+			return f
+		case <-time.After(10 * time.Second):
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		return ""
+	}
+	if f := next("hello"); f != "event: hello\ndata: {}\n" {
+		t.Fatalf("first frame %q", f)
+	}
+	reload <- os.Interrupt
+	for !strings.Contains(next(`a change naming "events"`), `"events"`) {
+	}
+
+	cancel()
+	// Shutdown gives up on open connections after 5 s; the stream must end
+	// well before that, through the hub closing it.
+	deadline := time.After(3 * time.Second)
+	for closed := false; !closed; {
+		select {
+		case _, ok := <-frames:
+			closed = !ok
+		case <-deadline:
+			t.Fatal("the change stream was still open 3 s into shutdown")
+		}
+	}
+	select {
+	case err := <-done:
+		returned = true
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return within 10 s")
 	}
 }
