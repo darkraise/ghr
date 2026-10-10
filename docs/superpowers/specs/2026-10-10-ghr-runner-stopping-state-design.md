@@ -1,8 +1,8 @@
 # ghr: show a runner as stopping
 
 **Date:** 2026-10-10
-**Status:** design approved in chat on 2026-10-10 (approach and full design); revised after the spec review and approved the same day.
-**Register:** docs/superpowers/registers/2026-10-10-ghr-ui-polish-realtime.md (item 25)
+**Status:** design approved in chat on 2026-10-10 (approach and full design); revised after the spec review and approved the same day. Amended later that day for register item 33 (the stop starts the cleanup itself: Decisions, §1.1, §1.2, §2 and §4), approved in chat after the Fable review in docs/superpowers/notes/2026-10-10-ghr-stop-starts-cleanup-fable-review.md.
+**Register:** docs/superpowers/registers/2026-10-10-ghr-ui-polish-realtime.md (items 25 and 33)
 **Code:** `internal/model`, `internal/runner`, `internal/daemon`, `internal/activity`, `cmd/ghr`, `web/src`
 
 ## Goal
@@ -12,7 +12,7 @@ Stopping a runner must show in the UI in under a second. Today it does not. On t
 ## Decisions
 
 - **A flag beside the state, not a new state.** A runner being stopped keeps its state (`starting`, `idle` or `busy`) and gains `stopping`. It still holds its slot until its unit exits, so the scheduler, capacity counts, busy totals and runner-update gating stay as they are. Chosen over a `stopping` state, which every switch on state would have to learn and which loses whether the runner was busy, and over a browser-only indicator, which shows nothing for `ghr kill` or a stop from another tab.
-- **Wake the manager loop after the unit stops**, so the exit is handled at once and not on the next poll.
+- **The stop starts the cleanup itself.** `Manager.Kill` moves the runner to `cleaning` as soon as systemd confirms its unit is down, without waiting for the manager loop. The first version only woke the loop, and a woken tick waits for a tick in flight: on the LXC a tick takes about 6.5 s (15 GitHub list calls in sequence, three for each of five repositories), and on 2026-10-10 a stopped runner kept reading "stopping" 6.1 s and 7.0 s after its unit was down. The loop is still woken, so a replacement runner starts promptly and an exit systemd did not confirm is retried. Chosen over polling the repositories concurrently, which only shortens the wait (1.9 s measured) and goes against GitHub's advice to make requests serially, and over checking for the exit at points inside a tick, which leaves gaps as long as one repository's calls.
 - **Only stops a person asks for.** The flag covers `Manager.Kill`, which the UI's Stop button and `ghr kill` both reach. Stops the daemon makes itself are out of scope (see below).
 - **The stop outlives its request.** `Manager.Kill` runs the unit stop on a context its caller cannot cancel. A caller that gives up (Ctrl-C on `ghr kill`, a browser reload, the CLI client's 30-second timeout) would otherwise kill `systemctl` and fail the call while the unit may still be stopping; the flag would clear, nothing would wake the loop, and the runner would read as running again.
 - **Stopping is visible without hovering.** Every place that shows a runner shows the flag in what a sighted person sees, the Dashboard lane and a busy runner's list row included, not only in labels and screen-reader text.
@@ -27,8 +27,11 @@ Stopping a runner must show in the UI in under a second. Today it does not. On t
   - sets `stopping` under `m.mu` before it calls `SD.Stop`;
   - calls `SD.Stop` with `context.WithoutCancel(ctx)`, so the stop does not end when the caller's context does. `system.CommandTimeout` (10 minutes) still bounds the command;
   - if `SD.Stop` fails, clears `stopping` under `m.mu` when the instance still exists, and returns the error;
-  - on success adds the `runner %s stopped by user` event as today and leaves `stopping` set. The instance is removed by the existing exit path.
-- A second `Kill` of a runner that is already stopping behaves like the first: it calls `SD.Stop` again and returns its result, and a second success adds a second event. If that second call fails it clears the flag even while the first is still in progress; the runner then reads as its state again until its unit exits, which is accepted.
+  - on success adds the `runner %s stopped by user` event as today, then asks `SD.Active` for the unit on the same uncancellable context. When it answers not active with no error, the test `refreshUnits` applies, and the instance is not already `cleaning`, `Kill` calls `beginFinish`: the instance moves to `cleaning` and `finish` runs in the background, as it does for an exit a tick finds. Otherwise `Kill` leaves `stopping` set and the next tick's `refreshUnits` handles the exit.
+- `Kill` never calls `beginFinish` for an instance that is already `cleaning`. A failed cleanup is retried only when `refreshUnits` finds `retryFinish` due, so repeated kills cannot spend the cleanup's failure allowance.
+- `beginFinish` starts nothing once `Close` has been called. It reads `closed` and calls `wg.Add` inside its `m.mu` section, as `StartPruneScope` does, because a `Kill` can outlive the HTTP shutdown and would otherwise race `Wait`. The instance directory stays as it is, and adoption cleans the runner up at the next start.
+- `stopStartTimedOut` skips an ID whose instance is gone. Until now an instance could leave `starting` only at the start of a tick; a `Kill` can now move it to `cleaning`, and its finish can remove it, while a tick is in one of its steps.
+- A second `Kill` of a runner that is already stopping behaves like the first: it calls `SD.Stop` again and returns its result, and a second success adds a second event. If that second call fails it clears the flag even while the first is still in progress; the runner then reads as its state again until its unit exits, which is accepted. Two kills that both succeed start one finish: `beginFinish` returns when a finish is already running.
 - `Manager.Status` copies the flag to `InstanceStatus.Stopping` while the state is `starting`, `idle` or `busy`, and never for a `cleaning` instance.
 - Nothing else in the manager reads the flag. `refreshUnits` moves the instance to `cleaning` when its unit has exited, whatever the flag says.
 - Accepted, because nothing reads the flag:
@@ -38,7 +41,7 @@ Stopping a runner must show in the UI in under a second. Today it does not. On t
 
 ### 1.2 Backend (`internal/daemon`)
 
-- `Backend.KillRunner` calls `b.Wake` (when set) after `Manager.Kill` returns nil, as `update` does after a config change. The next tick runs at once and `refreshUnits` starts the cleanup. A tick already in flight finishes first, and the woken tick follows it.
+- `Backend.KillRunner` calls `b.Wake` (when set) after `Manager.Kill` returns nil, as `update` does after a config change. The wake does not start the cleanup, which `Kill` has already done (§1.1). It makes the next tick run at once, so a replacement runner is started without waiting for the poll interval, and `refreshUnits` handles the exit when `SD.Active` did not confirm it. A tick already in flight finishes first, and the woken tick follows it.
 - No change to the change hub. The `status` topic's fingerprint covers `Status.Instances`, so the flag publishes `status` at the hub's next check, within 250 ms.
 
 ## 2. Wire
@@ -46,7 +49,7 @@ Stopping a runner must show in the UI in under a second. Today it does not. On t
 - `model.InstanceStatus` gains `Stopping bool` with JSON `stopping,omitempty`. `GET /status` carries it.
 - `model.ActivityRun` gains `Stopping bool` with JSON `stopping,omitempty`. `internal/activity` sets it on the run it builds for a live instance whose `Stopping` is true. Runs built from finished jobs never carry it. Segments are unchanged.
 - A cleaning instance never reports `stopping` (§1.1).
-- `DELETE /runners/{id}` still answers when the unit has stopped. A caller that disconnects first no longer ends the stop (§1.1): the stop runs to its end, the flag stays, and the loop is woken.
+- `DELETE /runners/{id}` still answers when the unit has stopped, now after the one `SD.Active` call that follows the stop. A caller that disconnects first no longer ends the stop (§1.1): the stop runs to its end, the flag stays, and the loop is woken.
 
 ## 3. Clients
 
@@ -76,8 +79,16 @@ Stopping a runner must show in the UI in under a second. Today it does not. On t
 - `internal/runner`:
   - while `SD.Stop` is blocked, `Status` reports the instance with `Stopping` true and its state unchanged;
   - a failed `SD.Stop` clears the flag and returns the error;
-  - a `Kill` whose context is cancelled while `SD.Stop` is blocked keeps the flag, and returns nil once the stop completes;
-  - after a successful `Kill` and a tick that sees the unit inactive, the instance is `cleaning` and reports no `Stopping`;
+  - a `Kill` whose context is cancelled while `SD.Stop` is blocked keeps the flag while the stop is blocked, and returns nil once the stop completes;
+  - after a successful `Kill`, with no tick run, the instance is `cleaning` and reports no `Stopping`;
+  - a `Kill` that completes while a tick is blocked in a GitHub call leaves the instance `cleaning` before that tick ends;
+  - when `SD.Active` errors, or answers active, `Kill` starts no finish and the flag stays; the next `refreshUnits` that sees the unit inactive starts it;
+  - two concurrent `Kill`s of one runner start one finish;
+  - a `Kill` of a `cleaning` instance whose `retryFinish` is not due starts no finish;
+  - a `Kill` after `Close` starts no finish and leaves the instance directory; `Kill` racing `Close` and `Wait`, repeated under the race detector, neither panics nor leaves a finish running after `Wait` returns;
+  - a `Kill`, before any tick, of a runner whose `job.json` is written leaves a pending record with the run number and workflow;
+  - `stopStartTimedOut` skips an instance that is gone;
+  - every test that kills a runner waits for the manager's background work before its temporary directory is removed;
   - `Kill` of an unknown ID still returns `ErrUnknownRunner`.
 - `internal/daemon`:
   - `KillRunner` calls `Wake` once after a successful stop and not after a failed one;
@@ -97,11 +108,13 @@ Stopping a runner must show in the UI in under a second. Today it does not. On t
 
 ### Manual, before release
 
-- On a daemon with a busy runner and the Dashboard open: within a second of `ghr kill <id>` the runner's bar turns into the dashed grey outline and its tooltip says "stopping". Within a second of the command returning, or of a tick in flight ending if one is, the lane reads "finishing, result pending" or the job's result.
-- The same with Ctrl-C on `ghr kill` two seconds in: the bar stays the dashed grey outline until the unit exits, and the lane reads "finishing, result pending" or the job's result within a second of that, or of a tick in flight ending.
+- On a daemon with a busy runner and the Dashboard open: within a second of `ghr kill <id>` the runner's bar turns into the dashed grey outline and its tooltip says "stopping". Within a second of the command returning, whether or not a tick is in flight, the lane reads "finishing, result pending" or the job's result.
+- The same with Ctrl-C on `ghr kill` two seconds in: the bar stays the dashed grey outline until the unit exits, and the lane reads "finishing, result pending" or the job's result within a second of that, whether or not a tick is in flight.
+- Both checks are run several times, with the daemon's status sampled alongside the browser, so that at least one stop of each kind ends while a tick is in flight.
 
 ## Out of scope
 
 - Stops the daemon makes itself: idle timeout, start timeout, repository removal and runner updates. They happen inside a tick and show on the next one.
 - Making the unit stop faster. A busy runner took 8.4 s to stop on the LXC; it reads "stopping" for that time.
+- The length of a tick. It takes about 6.5 s on the LXC, so the daemon polls about every 16.5 s with `poll_interval: 10s`, and a job that ends or is queued on its own is noticed that much later (register item 37).
 - Cancelling a stop.
