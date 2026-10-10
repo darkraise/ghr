@@ -37,6 +37,7 @@ function Legend({ lanes, capacity }: { lanes: boolean; capacity: number | null }
         ["Finishing", <Swatch className="fill-primary/25 stroke-primary/60" />],
         ["Warm", <Swatch className="fill-none stroke-primary" dash />],
         ["Starting", <Swatch className="fill-none stroke-muted-foreground" />],
+        ["Stopping", <Swatch className="fill-none stroke-muted-foreground" dash />],
         ["Jobs waiting", <Swatch className="fill-warning/25 stroke-warning" />],
         ["CPU", <LineSwatch className="stroke-primary" />],
         ["Memory", <LineSwatch className="stroke-muted-foreground" dash />],

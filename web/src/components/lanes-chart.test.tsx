@@ -46,6 +46,29 @@ describe("LanesChart", () => {
     expect(container.querySelector(".ghr-pulse")).not.toBeNull()
   })
 
+  it("draws a stopping run as a dashed grey outline with no pulse", () => {
+    const lanes = fixtures.activityLanes.lanes.map((l) => ({
+      runs: l.runs.map((r) =>
+        r.instance_id === "aaaaaa"
+          ? { ...r, stopping: true, segments: [{ state: "running", from: "2026-10-03T13:45:00Z", to: null }] }
+          : r.instance_id === "bbbbbb"
+            ? { ...r, stopping: true }
+            : r,
+      ),
+    }))
+    const { container } = draw({ lanes })
+    for (const state of ["running", "warm"]) {
+      const box = container.querySelector(`rect[data-state="${state}"]`)
+      expect(box).toHaveClass("fill-none", "stroke-muted-foreground")
+      expect(box).not.toHaveClass("fill-primary", "stroke-primary")
+      expect(box).toHaveAttribute("stroke-dasharray", "3 2")
+    }
+    expect(container.querySelector(".ghr-pulse")).toBeNull()
+    expect(screen.getByText("darkmem test #42")).toHaveClass("fill-foreground")
+    expect(screen.getByRole("link", { name: "darkmem, ci, test, run 42, stopping, 20m00s" })).toBeInTheDocument()
+    expect(container.querySelector('rect[data-state="succeeded"]')).not.toHaveAttribute("stroke-dasharray")
+  })
+
   it("links a finished job to GitHub", () => {
     draw()
     const link = screen.getByRole("link", { name: "darkmem, ci, build, run 41, succeeded, 5m00s" })

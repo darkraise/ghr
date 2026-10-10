@@ -21,6 +21,10 @@ const SEGMENT: Record<string, string | undefined> = {
   unknown: "fill-muted stroke-muted-foreground",
 }
 
+// The open segment of a run being stopped, whatever its state: the only
+// unfilled dashed grey outline in the chart.
+const STOPPING = "fill-none stroke-muted-foreground"
+
 type Point = { x: number; y: number }
 const points = (run: Point[]) => run.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")
 
@@ -50,6 +54,7 @@ function RunMark({
       {run.segments.map((s, i) => {
         const x1 = x(Date.parse(s.from))
         const x2 = x(s.to === null ? now : Date.parse(s.to))
+        const stopping = run.stopping === true && s.to === null
         return (
           <rect
             key={i}
@@ -60,19 +65,19 @@ function RunMark({
             height={LANE_H - 1}
             rx={2}
             strokeWidth={1}
-            strokeDasharray={s.state === "warm" || s.state === "unknown" ? "3 2" : undefined}
-            className={`ghr-mark-box ${SEGMENT[s.state] ?? "fill-muted stroke-muted-foreground"}`}
+            strokeDasharray={stopping || s.state === "warm" || s.state === "unknown" ? "3 2" : undefined}
+            className={`ghr-mark-box ${stopping ? STOPPING : (SEGMENT[s.state] ?? "fill-muted stroke-muted-foreground")}`}
           />
         )
       })}
-      {last?.state === "running" && last.to === null && (
+      {last?.state === "running" && last.to === null && !run.stopping && (
         <rect x={endX - 3} y={top + 0.5} width={3} height={LANE_H - 1} className="ghr-pulse fill-foreground/70" />
       )}
       {fits && (
         <text
           x={startX + 4}
           y={top + LANE_H / 2 + 4}
-          className={`pointer-events-none ${last?.state === "running" ? "fill-primary-foreground" : "fill-foreground"}`}
+          className={`pointer-events-none ${last?.state === "running" && !run.stopping ? "fill-primary-foreground" : "fill-foreground"}`}
         >
           {text}
         </text>
