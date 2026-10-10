@@ -1,7 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { useRef, type KeyboardEvent } from "react"
-import type { Status } from "@/api/types"
+import type { InstanceStatus, Status } from "@/api/types"
 import type { DetailTab } from "@/components/runner-panel"
 import { elapsed } from "@/lib/format"
 import { waitingRepos } from "@/lib/status"
@@ -16,6 +16,9 @@ const LIGHT: Record<string, string> = {
 }
 
 const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+// A stopping runner has no light of its own: it takes the muted fallback.
+const shown = (i: InstanceStatus) => (i.stopping ? "stopping" : i.state)
 
 export function RunnerList({
   status,
@@ -86,10 +89,10 @@ export function RunnerList({
                   i.id === selected ? "bg-muted" : ""
                 }`}
               >
-                <span aria-hidden="true" className={`size-2.5 rounded-[2px] ${LIGHT[i.state] ?? "bg-muted-foreground"}`} />
+                <span aria-hidden="true" className={`size-2.5 rounded-[2px] ${LIGHT[shown(i)] ?? "bg-muted-foreground"}`} />
                 <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
                   <span className="font-mono font-medium">{i.id}</span>
-                  <span className="sr-only">{sentence(i.state)}</span>
+                  <span className="sr-only">{sentence(shown(i))}</span>
                   <span className="text-muted-foreground">{i.repo}</span>
                 </span>
                 <span className="font-mono text-xs text-muted-foreground">{elapsed(i, now)}</span>
@@ -97,10 +100,11 @@ export function RunnerList({
                 <span className="col-span-2 text-muted-foreground">
                   {i.job ? (
                     <>
+                      {i.stopping && <span aria-hidden="true">Stopping, </span>}
                       {i.job.name} <span className="font-mono">#{i.job.run_number}</span>
                     </>
                   ) : (
-                    <span aria-hidden="true">{sentence(i.state)}</span>
+                    <span aria-hidden="true">{sentence(shown(i))}</span>
                   )}
                 </span>
               </Link>

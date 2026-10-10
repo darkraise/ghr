@@ -39,6 +39,23 @@ describe("RunnerList", () => {
     expect(await link("bbbbbb")).toHaveTextContent("Idle")
   })
 
+  it("says a stopping runner is stopping, with a job and without", async () => {
+    draw({ ...fixtures.status, instances: fixtures.status.instances.map((i) => ({ ...i, stopping: true })) })
+    // The second line is the visible state; the sr-only text is for screen readers.
+    const secondLine = (row: HTMLElement) => row.querySelector(".col-span-2")
+    const busy = await link("aaaaaa")
+    expect(secondLine(busy)).toHaveTextContent(/^Stopping, test #42$/)
+    expect(busy.querySelector(".sr-only")).toHaveTextContent(/^Stopping$/)
+    expect(busy).not.toHaveTextContent("Busy")
+    const light = busy.querySelector("span")
+    expect(light).toHaveClass("bg-muted-foreground")
+    expect(light).not.toHaveClass("ghr-pulse")
+    const idle = await link("bbbbbb")
+    expect(secondLine(idle)).toHaveTextContent(/^Stopping$/)
+    expect(idle.querySelector(".sr-only")).toHaveTextContent(/^Stopping$/)
+    expect(idle).not.toHaveTextContent("Idle")
+  })
+
   it("marks the selected runner and makes only it tabbable", async () => {
     draw()
     const selected = await link("aaaaaa")
