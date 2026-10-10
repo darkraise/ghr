@@ -205,6 +205,17 @@ func TestWakeChecksBeforeTheTick(t *testing.T) {
 	}
 }
 
+func TestTopicMissingFromTheBaselinePublishesWhenItAppears(t *testing.T) {
+	src := newSource(map[string]uint64{"status": 1})
+	h, _ := newHub(t, time.Hour, 10*time.Millisecond, src)
+	s := subscribe(t, h)
+	src.set(map[string]uint64{"storage": 1})
+	h.Wake()
+	if got := recv(t, s); !slices.Equal(got, []string{"storage"}) {
+		t.Fatalf("got %v", got)
+	}
+}
+
 func TestBurstOfWakesCausesOneCheck(t *testing.T) {
 	src := newSource(map[string]uint64{"events": 1})
 	h, _ := newHub(t, time.Hour, 50*time.Millisecond, src)

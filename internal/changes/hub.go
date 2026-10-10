@@ -221,6 +221,9 @@ func (h *Hub) check(stop chan struct{}) {
 		}
 	}
 	for k, v := range cur {
+		if _, seen := h.prev[k]; !seen {
+			topics = append(topics, k)
+		}
 		h.prev[k] = v
 	}
 	if len(topics) == 0 {
