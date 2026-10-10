@@ -151,9 +151,11 @@ describe("ghr chrome styles", () => {
     expect(css).toMatch(/@media \(min-width: 768px\) \{\s*\.dr-sidebar-layout > \.dr-layout-header \{\s*display: none;/)
   })
 
-  it("pins two radii: 6px on controls and 10px on surfaces", () => {
-    expect(block(":root[data-radius]")).toEqual({ "--radius": "10px", "--radius-button": "6px" })
+  it("pins one radius: 6px on controls and on surfaces", () => {
+    expect(block(":root[data-radius]")).toEqual({ "--radius": "6px", "--radius-button": "6px" })
     expect(css).toMatch(/--radius-md: 6px;/)
+    expect(css).toMatch(/--radius-lg: 6px;/)
+    expect(css).toMatch(/--radius-xl: 6px;/)
   })
 
   it("stops the pulse and the spinner when motion is reduced", () => {
