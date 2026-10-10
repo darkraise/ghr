@@ -10,7 +10,7 @@ export const themeConfig: ThemeConfig = {
     backgroundStyle: "solid",
     backgroundIntensity: "balanced",
     gradientPattern: "blobs",
-    mode: "dark",
+    mode: "system",
     density: "compact",
     elevation: "low",
     buttonElevation: "flat",

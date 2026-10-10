@@ -17,7 +17,7 @@
     mode = null
   }
   var dark =
-    mode === "system" ? window.matchMedia("(prefers-color-scheme: dark)").matches : mode !== "light"
+    mode === "dark" ? true : mode === "light" ? false : window.matchMedia("(prefers-color-scheme: dark)").matches
   root.setAttribute("data-mode", dark ? "dark" : "light")
 
   // The attribute-driven pins from theme.config.ts that change the first

@@ -194,7 +194,7 @@ describe("theme config", () => {
       backgroundStyle: "solid",
       outerGlow: "none",
       innerGlow: "none",
-      mode: "dark",
+      mode: "system",
     })
   })
 })

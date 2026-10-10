@@ -34,9 +34,41 @@ describe("theme-init.js", () => {
     expect(localStorage.getItem("theme-radius")).toBe("pill")
   })
 
-  it("falls back to dark", () => {
-    run()
-    expect(root.getAttribute("data-mode")).toBe("dark")
+  function prefersDark(matches: boolean) {
+    const original = window.matchMedia
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      configurable: true,
+      value: (query: string) => ({ matches: query.includes("dark") ? matches : false, media: query, addEventListener() {}, removeEventListener() {} }),
+    })
+    return () => Object.defineProperty(window, "matchMedia", { writable: true, configurable: true, value: original })
+  }
+
+  it.each([
+    [true, "dark"],
+    [false, "light"],
+  ])("follows the system when no mode is saved (prefers dark: %s)", (matches, expected) => {
+    const restore = prefersDark(matches)
+    try {
+      run()
+      expect(root.getAttribute("data-mode")).toBe(expected)
+    } finally {
+      restore()
+    }
+  })
+
+  it.each([
+    ["dark", false],
+    ["light", true],
+  ])("keeps a saved %s mode whatever the system prefers", (saved, systemDark) => {
+    const restore = prefersDark(systemDark)
+    try {
+      localStorage.setItem("mode", saved)
+      run()
+      expect(root.getAttribute("data-mode")).toBe(saved)
+    } finally {
+      restore()
+    }
   })
 
   it.each([

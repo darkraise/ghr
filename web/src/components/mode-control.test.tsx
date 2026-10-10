@@ -21,10 +21,10 @@ function draw() {
 describe("ModeControl", () => {
   beforeEach(() => localStorage.clear())
 
-  it("starts on dark and saves the chosen mode", async () => {
+  it("starts on system and saves the chosen mode", async () => {
     const user = draw()
     expect(screen.getByRole("radiogroup", { name: "Colour mode" })).toBeInTheDocument()
-    expect(screen.getByRole("radio", { name: "Dark" })).toBeChecked()
+    expect(screen.getByRole("radio", { name: "System" })).toBeChecked()
     await user.click(screen.getByRole("radio", { name: "Light" }))
     expect(screen.getByRole("radio", { name: "Light" })).toBeChecked()
     expect(localStorage.getItem("mode")).toBe("light")
