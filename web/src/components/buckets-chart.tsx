@@ -189,7 +189,7 @@ export function BucketsChart({
       {!jobs && (
         <>
           <Line runs={waitRuns} track="waiting" stroke="stroke-warning" fill="fill-warning" />
-          <Line runs={cpuRuns} track="cpu" stroke="stroke-primary" fill="fill-primary" />
+          <Line runs={cpuRuns} track="cpu" stroke="stroke-foreground" fill="fill-foreground" />
           {collecting(waits, 2)}
           {collecting(cpus, 3)}
         </>

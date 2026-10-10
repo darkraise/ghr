@@ -7,6 +7,15 @@ const now = Date.parse("2026-10-03T14:05:00Z")
 const card = (name: string) => within(screen.getByRole("region", { name }))
 
 describe("StatCards", () => {
+  it("holds the four stats in one box split by dividers", () => {
+    const { container } = render(<StatCards status={fixtures.status} metrics={fixtures.metrics} now={now} />)
+    const box = container.firstElementChild as HTMLElement
+    expect(box).toHaveClass("rounded-md", "border", "bg-card", "min-[641px]:divide-x")
+    const stats = within(box).getAllByRole("region")
+    expect(stats.map((s) => s.getAttribute("aria-label"))).toEqual(["Runners", "Waiting jobs", "API budget", "Host"])
+    for (const stat of stats) expect(stat).not.toHaveClass("border")
+  })
+
   it("shows runners, waiting jobs, the API budget and the host", () => {
     render(<StatCards status={fixtures.status} metrics={fixtures.metrics} now={now} />)
     expect(card("Runners").getByText("1")).toHaveClass("font-mono")

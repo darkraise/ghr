@@ -30,11 +30,16 @@ const cell = (name: string, index: number) => row(name).querySelectorAll("td")[i
 describe("RepoTable", () => {
   it("names each state in a word", () => {
     draw([darkmem, darkcloud, oldRepo, { ...darkmem, name: "idle-repo", active: 0 }, { ...darkcloud, name: "leaving", paused: false, removing: true }])
-    expect(within(row("darkmem")).getByText("Running")).toHaveClass("text-primary")
-    expect(within(row("darkcloud")).getByText("Paused")).toHaveClass("text-muted-foreground")
-    expect(within(row("old-repo")).getByText("Error")).toHaveClass("text-destructive")
-    expect(within(row("idle-repo")).getByText("Idle")).toBeInTheDocument()
-    expect(within(row("leaving")).getByText("Removing")).toHaveClass("text-muted-foreground")
+    const pill = (name: string, word: string, fill: string, text: string) => {
+      const label = within(row(name)).getByText(word)
+      expect(label.parentElement).toHaveClass("rounded-full", fill)
+      expect(label.parentElement?.querySelector("svg")).toHaveClass(text)
+    }
+    pill("darkmem", "Running", "bg-running/15", "text-running")
+    pill("darkcloud", "Paused", "bg-muted-foreground/15", "text-muted-foreground")
+    pill("old-repo", "Error", "bg-destructive/15", "text-destructive")
+    pill("idle-repo", "Idle", "bg-muted-foreground/15", "text-muted-foreground")
+    pill("leaving", "Removing", "bg-muted-foreground/15", "text-muted-foreground")
   })
 
   it("shows a repository's raw error under its name", () => {

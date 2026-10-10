@@ -3,6 +3,7 @@ import type { ReactNode } from "react"
 import type { Activity, ActivityWindow } from "@/api/types"
 import { BucketsChart } from "@/components/buckets-chart"
 import { LanesChart } from "@/components/lanes-chart"
+import { Section } from "@/components/page/section"
 import { WindowControl } from "@/components/window-control"
 import { activitySummary, bucketAria, isLaneWindow, rangeText, runAria } from "@/lib/activity-view"
 import { useWidth } from "@/lib/use-width"
@@ -33,13 +34,13 @@ function Legend({ lanes, capacity }: { lanes: boolean; capacity: number | null }
         ["Failed", <Swatch className="fill-destructive/30 stroke-destructive/70" />],
         ["Cancelled", <Swatch className="fill-muted stroke-muted-foreground" />],
         ["Unknown", <Swatch className="fill-muted stroke-muted-foreground" dash />],
-        ["Running", <Swatch className="fill-primary stroke-primary" />],
-        ["Finishing", <Swatch className="fill-primary/25 stroke-primary/60" />],
-        ["Warm", <Swatch className="fill-none stroke-primary" dash />],
+        ["Running", <Swatch className="fill-running stroke-running" />],
+        ["Finishing", <Swatch className="fill-running/25 stroke-running/60" />],
+        ["Warm", <Swatch className="fill-none stroke-running" dash />],
         ["Starting", <Swatch className="fill-none stroke-muted-foreground" />],
         ["Stopping", <Swatch className="fill-none stroke-muted-foreground" dash />],
         ["Jobs waiting", <Swatch className="fill-warning/25 stroke-warning" />],
-        ["CPU", <LineSwatch className="stroke-primary" />],
+        ["CPU", <LineSwatch className="stroke-foreground" />],
         ["Memory", <LineSwatch className="stroke-muted-foreground" dash />],
       ]
     : [
@@ -47,7 +48,7 @@ function Legend({ lanes, capacity }: { lanes: boolean; capacity: number | null }
         ["Succeeded", <Swatch className="fill-success/60 stroke-success/60" />],
         ["Failed", <Swatch className="fill-destructive/70 stroke-destructive/70" />],
         ["Most jobs waiting", <LineSwatch className="stroke-warning" />],
-        ["Average CPU", <LineSwatch className="stroke-primary" />],
+        ["Average CPU", <LineSwatch className="stroke-foreground" />],
       ]
   return (
     <ul aria-label="Legend" className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -113,16 +114,17 @@ export function ActivityPanel({
   const failed = error !== null && error !== undefined
   const lanes = activity !== undefined && isLaneWindow(activity.window)
   return (
-    <section aria-labelledby="activity-title" className="rounded-[10px] border border-border bg-card p-4">
-      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h2 id="activity-title" className="text-base font-semibold">
-          Activity
-        </h2>
-        {activity && <span className="font-mono text-sm text-muted-foreground">{rangeText(activity.window, activity.from, activity.to)}</span>}
-        <div className="ml-auto">
-          <WindowControl value={selected} onChange={onSelect} />
-        </div>
-      </div>
+    <Section
+      title="Activity"
+      aside={
+        <>
+          {activity && <span className="font-mono text-sm text-muted-foreground">{rangeText(activity.window, activity.from, activity.to)}</span>}
+          <div className="ml-auto">
+            <WindowControl value={selected} onChange={onSelect} />
+          </div>
+        </>
+      }
+    >
       {failed && (
         <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-destructive">
           <span>{`Couldn't load activity: ${errorText(error)}`}</span>
@@ -149,6 +151,6 @@ export function ActivityPanel({
           <ActivityTable activity={activity} now={now} />
         </>
       )}
-    </section>
+    </Section>
   )
 }
