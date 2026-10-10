@@ -23,3 +23,4 @@
 - 2026-10-09 `docs/superpowers/plans/2026-10-07-ghr-web-setup-loopback.md` — recorded late: its loopback guard (e87935d) was reverted on the owner's ruling in first-run-setup register rows 2 and 3, shipped in v0.1.16
 - 2026-10-09 `docs/superpowers/plans/2026-10-09-ghr-run-details.md` — merged into `master` at c5955eb
 - 2026-10-10 `docs/superpowers/plans/2026-10-10-ghr-run-details-log-fixes.md` — merged into `master` at 785f9d3
+- 2026-10-10 `docs/superpowers/plans/2026-10-10-ghr-realtime-ui.md` — merged into `master` at ed9e3a4
