@@ -1,11 +1,19 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "./client"
+import { useLive } from "./live"
 import type { ActivityWindow, GhrEvent, LogChunk, RunAnnotations, RunDetail, Status, Storage } from "./types"
 
 export const POLL_FAST = 1000
 export const POLL_SLOW = 5000
 // GET /actions caches for 15 seconds, so polling faster would read the same build.
 export const POLL_ACTIONS = 15_000
+// While the change stream is live it triggers the refetches; this slow poll
+// only catches a change the stream missed.
+export const POLL_SAFETY = 60_000
+
+export function livePoll(live: boolean, interval: number): number {
+  return live ? POLL_SAFETY : interval
+}
 export const MAX_EVENTS = 200
 export const MAX_LOG = 256 * 1024
 
@@ -36,7 +44,8 @@ export const keys = {
 }
 
 export function useStatus() {
-  return useQuery({ queryKey: keys.status, queryFn: ({ signal }) => api.status(signal), refetchInterval: POLL_FAST })
+  const live = useLive()
+  return useQuery({ queryKey: keys.status, queryFn: ({ signal }) => api.status(signal), refetchInterval: livePoll(live, POLL_FAST) })
 }
 
 // How long the wizard waits for ghr to start after saving owner and token;
@@ -54,11 +63,13 @@ export function useSetupState(poll: boolean) {
 }
 
 export function useConfig() {
-  return useQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), refetchInterval: POLL_SLOW })
+  const live = useLive()
+  return useQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), refetchInterval: livePoll(live, POLL_SLOW) })
 }
 
 export function useMetrics() {
-  return useQuery({ queryKey: keys.metrics, queryFn: ({ signal }) => api.metrics(signal), refetchInterval: POLL_SLOW })
+  const live = useLive()
+  return useQuery({ queryKey: keys.metrics, queryFn: ({ signal }) => api.metrics(signal), refetchInterval: livePoll(live, POLL_SLOW) })
 }
 
 export function useActions() {
@@ -108,10 +119,11 @@ export function browserZone(): string {
 // own and the columns line up with the viewer's clock.
 export function useActivity(window: ActivityWindow, repo = "") {
   const tz = browserZone()
+  const live = useLive()
   return useQuery({
     queryKey: keys.activity(window, tz, repo),
     queryFn: ({ signal }) => api.activity(window, tz, repo, signal),
-    refetchInterval: POLL_SLOW,
+    refetchInterval: livePoll(live, POLL_SLOW),
     // Keeps the panel and the repository strips drawn while a new window loads;
     // ActivityPanel reads lanes or buckets from the data's own window.
     placeholderData: keepPreviousData,
@@ -123,11 +135,12 @@ export const HISTORY_LIMIT = 500
 // History passes the from of its activity response as since, so the table
 // and the chart cover one span; the query waits until it is known.
 export function useHistory(repo: string, conclusion: string, since: string | undefined) {
+  const live = useLive()
   return useQuery({
     queryKey: keys.history(repo, conclusion, since ?? ""),
     queryFn: ({ signal }) => api.history(repo, conclusion, since ?? "", HISTORY_LIMIT, signal),
     enabled: since !== undefined,
-    refetchInterval: POLL_SLOW,
+    refetchInterval: livePoll(live, POLL_SLOW),
     placeholderData: keepPreviousData,
   })
 }
@@ -162,6 +175,7 @@ export function appendEvents(prev: GhrEvent[], next: GhrEvent[]): GhrEvent[] {
 export function useEvents(epoch: string | undefined): GhrEvent[] {
   const queryClient = useQueryClient()
   const key = keys.events(epoch ?? "")
+  const live = useLive()
   const q = useQuery({
     queryKey: key,
     queryFn: async ({ signal }) => {
@@ -169,7 +183,7 @@ export function useEvents(epoch: string | undefined): GhrEvent[] {
       return appendEvents(prev, await api.events(prev.at(-1)?.seq ?? 0, signal))
     },
     enabled: epoch !== undefined,
-    refetchInterval: POLL_FAST,
+    refetchInterval: livePoll(live, POLL_FAST),
   })
   return q.data ?? []
 }
@@ -201,7 +215,8 @@ export function useLogTail(id: string, enabled: boolean, poll = true) {
 }
 
 export function useToken() {
-  return useQuery({ queryKey: keys.token, queryFn: ({ signal }) => api.token(signal), refetchInterval: POLL_SLOW })
+  const live = useLive()
+  return useQuery({ queryKey: keys.token, queryFn: ({ signal }) => api.token(signal), refetchInterval: livePoll(live, POLL_SLOW) })
 }
 
 // A prune shows in /status, not /storage; either one running makes the
@@ -213,10 +228,11 @@ export function storageBusy(storage?: Storage, status?: Status): boolean {
 }
 
 export function useStorage(status: Status | undefined) {
+  const live = useLive()
   return useQuery({
     queryKey: keys.storage,
     queryFn: ({ signal }) => api.storage(signal),
-    refetchInterval: (q) => (storageBusy(q.state.data, status) ? POLL_FAST : POLL_SLOW),
+    refetchInterval: (q) => livePoll(live, storageBusy(q.state.data, status) ? POLL_FAST : POLL_SLOW),
   })
 }
 
