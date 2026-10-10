@@ -110,23 +110,20 @@ export function RepositoriesPage() {
   )
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader title="Repositories" actions={st.repos.length === 0 ? add : undefined} />
-      {st.repos.length === 0 ? (
-        <div className="flex flex-col items-start gap-2">
-          <p className="text-sm text-muted-foreground">No repositories yet</p>
-          {add}
-        </div>
-      ) : (
-        <Section
-          title="Configured repositories"
-          aside={
-            <>
-              <span className="text-sm text-muted-foreground">{reposSummary(st)}</span>
-              <span className="ml-auto">{add}</span>
-            </>
-          }
-          flush
-        >
+      <PageHeader title="Repositories" />
+      <Section
+        title="Configured repositories"
+        aside={
+          <>
+            <span className="text-sm text-muted-foreground">{reposSummary(st)}</span>
+            <span className="ml-auto">{add}</span>
+          </>
+        }
+        flush
+      >
+        {st.repos.length === 0 ? (
+          <p className="px-4 py-3 text-sm text-muted-foreground">No repositories yet</p>
+        ) : (
           <RepoList
             repos={st.repos}
             config={config.data}
@@ -134,8 +131,8 @@ export function RepositoriesPage() {
             offline={offline}
             onEdit={(name) => void navigate({ to: "/repositories/$name/$section", params: { name, section: "settings" } })}
           />
-        </Section>
-      )}
+        )}
+      </Section>
       {(config.data || config.isError) && (
         <WatchedSection
           names={watchedNames ?? []}

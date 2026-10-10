@@ -1,5 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
+import { keys } from "@/api/hooks"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
@@ -52,8 +53,22 @@ describe("Repositories page", () => {
     mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, repos: [] } }))
     renderApp("/repositories")
     expect(await screen.findByText("No repositories yet")).toBeInTheDocument()
-    expect(screen.getAllByRole("button", { name: "Add repository" })).toHaveLength(2)
-    expect(screen.queryByRole("region", { name: "Configured repositories" })).toBeNull()
+    const box = screen.getByRole("region", { name: "Configured repositories" })
+    expect(within(box).getByText("No repositories yet")).toBeInTheDocument()
+    expect(within(box).getByRole("button", { name: "Add repository" })).toBeEnabled()
+    expect(screen.getAllByRole("button", { name: "Add repository" })).toHaveLength(1)
+  })
+
+  it("keeps the same Add button when the first repository appears", async () => {
+    let repos = [] as typeof fixtures.status.repos
+    mockApi(authedRoutes({ "GET /api/status": () => json({ ...fixtures.status, repos }) }))
+    const { queryClient } = renderApp("/repositories")
+    await screen.findByText("No repositories yet")
+    const add = screen.getByRole("button", { name: "Add repository" })
+    repos = fixtures.status.repos
+    await queryClient.invalidateQueries({ queryKey: keys.status })
+    await screen.findByRole("link", { name: "darkmem" })
+    expect(screen.getByRole("button", { name: "Add repository" })).toBe(add)
   })
 
   it("pauses a repository from its row menu", async () => {

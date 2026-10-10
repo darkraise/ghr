@@ -24,6 +24,12 @@ function draw(repos: RepoStatus[] = fixtures.status.repos, mode = fixtures.statu
 
 const row = async (name: string) => within((await screen.findByRole("link", { name })).closest("li") as HTMLElement)
 
+const pill = async (name: string, word: string, fill: string, text: string) => {
+  const label = (await row(name)).getByText(word)
+  expect(label.parentElement).toHaveClass("rounded-full", fill)
+  expect(label.parentElement?.querySelector("svg")).toHaveClass(text)
+}
+
 describe("RepoList", () => {
   it("shows one row per repository, with its name as a link and its state as a pill", async () => {
     draw()
@@ -31,7 +37,18 @@ describe("RepoList", () => {
     const link = await screen.findByRole("link", { name: repo.name })
     expect(link).toHaveAttribute("href", `/repositories/${repo.name}`)
     expect(screen.getAllByRole("listitem")).toHaveLength(fixtures.status.repos.length)
-    expect((link.closest("li") as HTMLElement).querySelector("span[class*='rounded-full']")).not.toBeNull()
+    await pill("darkmem", "Running", "bg-running/15", "text-running")
+    await pill("darkcloud", "Paused", "bg-muted-foreground/15", "text-muted-foreground")
+    await pill("old-repo", "Error", "bg-destructive/15", "text-destructive")
+  })
+
+  it("draws idle and removing repositories as muted pills", async () => {
+    draw([
+      { ...first, name: "idle-repo", active: 0 },
+      { ...first, name: "leaving", removing: true },
+    ])
+    await pill("idle-repo", "Idle", "bg-muted-foreground/15", "text-muted-foreground")
+    await pill("leaving", "Removing", "bg-muted-foreground/15", "text-muted-foreground")
   })
 
   it("keeps a repository's error text under its name", async () => {
