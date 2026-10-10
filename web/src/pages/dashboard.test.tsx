@@ -81,7 +81,7 @@ describe("Dashboard page", () => {
     renderApp("/")
     await screen.findByRole("region", { name: "Disk" })
     await waitFor(() => expect(region("Disk").getByText("146.0 GB of 240.0 GB used, prunes at 80%")).toBeInTheDocument())
-    expect(region("Disk").getByRole("link", { name: "Storage" })).toHaveAttribute("href", "/storage")
+    expect(region("Disk").getByRole("link", { name: "Storage" })).toHaveAttribute("href", "/settings/storage")
     await waitFor(() => expect(region("Disk").getByText("Images")).toBeInTheDocument())
   })
 
@@ -143,5 +143,12 @@ describe("Dashboard page", () => {
     await user.click(await screen.findByRole("button", { name: `More actions for ${name}` }))
     await user.click(await screen.findByRole("menuitem", { name: "Edit" }))
     await waitFor(() => expect(router.state.location.pathname).toBe(`/repositories/${name}/settings`))
+  })
+
+  it("links the disk box to the storage section", async () => {
+    mockApi(authedRoutes())
+    renderApp("/")
+    await screen.findByRole("region", { name: "Disk" })
+    expect(await region("Disk").findByRole("link", { name: "Storage" })).toHaveAttribute("href", "/settings/storage")
   })
 })

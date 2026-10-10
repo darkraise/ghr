@@ -114,7 +114,7 @@ export function DashboardPage() {
             aside={
               <>
                 {st.disk_root && <span className="font-mono text-sm text-muted-foreground">{st.disk_root}</span>}
-                <Link to="/storage" className="ml-auto text-sm text-primary hover:underline">
+                <Link to="/settings/$section" params={{ section: "storage" }} className="ml-auto text-sm text-primary hover:underline">
                   Storage
                 </Link>
               </>

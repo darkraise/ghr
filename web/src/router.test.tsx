@@ -163,4 +163,16 @@ describe("routes", () => {
     renderAt("/history")
     expect(await screen.findByRole("heading", { name: "History" })).toBeInTheDocument()
   })
+
+  it.each([
+    ["/toolchains", "/settings/toolchains", ""],
+    ["/storage", "/settings/storage", ""],
+    ["/toolchains#installed", "/settings/toolchains", "installed"],
+    ["/storage#prune", "/settings/storage", "prune"],
+  ])("sends %s to its settings section, keeping the hash", async (from, to, hash) => {
+    mockApi(authedRoutes())
+    const { router } = renderApp(from)
+    await waitFor(() => expect(router.state.location.pathname).toBe(to))
+    expect(router.state.location.hash).toBe(hash)
+  })
 })

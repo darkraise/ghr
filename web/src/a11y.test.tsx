@@ -147,7 +147,7 @@ describe("Toolchains accessibility", () => {
     "has no axe violations",
     async () => {
       mockApi(authedRoutes())
-      renderApp("/toolchains")
+      renderApp("/settings/toolchains")
       await screen.findByRole("img", { name: /^Tool cache: / })
       await screen.findByText("Installing node 24, extracting, 1 more queued")
       expect(await violations()).toEqual([])
@@ -161,7 +161,7 @@ describe("Storage accessibility", () => {
     "has no axe violations",
     async () => {
       mockApi(authedRoutes())
-      renderApp("/storage")
+      renderApp("/settings/storage")
       await screen.findByText("cleared NuGet (3.6 GB freed)")
       await screen.findByText("Last prune: manual build-cache-all at 13:16, ok")
       expect(await violations()).toEqual([])

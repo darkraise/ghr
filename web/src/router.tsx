@@ -27,8 +27,6 @@ import { JobPage, RunNotFound, RunPage } from "./pages/run"
 import { RunnerPage, RunnersPage } from "./pages/runners"
 import { SettingsPage } from "./pages/settings"
 import { SetupPage } from "./pages/setup"
-import { StoragePage } from "./pages/storage"
-import { ToolchainsPage } from "./pages/toolchains"
 
 // staleTime 0: every navigation into or out of the gated pages asks the
 // daemon again, so a logout or an expired session is seen at once.
@@ -156,8 +154,20 @@ const jobRoute = createRoute({
   component: JobPage,
   errorComponent: RunNotFound,
 })
-const toolchainsRoute = createRoute({ getParentRoute: () => appRoute, path: "/toolchains", component: ToolchainsPage })
-const storageRoute = createRoute({ getParentRoute: () => appRoute, path: "/storage", component: StoragePage })
+const toolchainsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/toolchains",
+  beforeLoad: ({ location }) => {
+    throw redirect({ to: "/settings/$section", params: { section: "toolchains" }, hash: location.hash, replace: true })
+  },
+})
+const storageRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/storage",
+  beforeLoad: ({ location }) => {
+    throw redirect({ to: "/settings/$section", params: { section: "storage" }, hash: location.hash, replace: true })
+  },
+})
 const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings", component: SettingsPage })
 // The section pages read $section themselves, so the route table does not
 // change when a page gains or loses a section.
