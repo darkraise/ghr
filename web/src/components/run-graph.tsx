@@ -129,7 +129,7 @@ export function JobGraph({
               return (
                 <div key={node.key} className="absolute" style={style}>
                   {jobLink(single.id, <JobLine job={single} now={now} />, {
-                    className: "flex h-full items-center gap-2 rounded-md border border-border bg-card hover:border-primary focus-within:border-primary px-3 text-sm",
+                    className: "flex h-full items-center gap-2 rounded-md border border-border bg-card hover:border-primary focus-visible:border-primary px-3 text-sm",
                     label: label(single, node),
                   })}
                 </div>
