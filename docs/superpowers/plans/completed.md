@@ -25,3 +25,4 @@
 - 2026-10-10 `docs/superpowers/plans/2026-10-10-ghr-run-details-log-fixes.md` — merged into `master` at 785f9d3
 - 2026-10-10 `docs/superpowers/plans/2026-10-10-ghr-realtime-ui.md` — merged into `master` at ed9e3a4
 - 2026-10-10 `docs/superpowers/plans/2026-10-10-ghr-runner-stopping-state.md` — merged into `master` at 2119f6e
+- 2026-10-10 `docs/superpowers/plans/2026-10-10-ghr-stop-starts-cleanup.md` — merged into `master` at 66e7616
