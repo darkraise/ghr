@@ -11,11 +11,13 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/iotest"
 	"time"
 
+	"github.com/darkraise/ghr/internal/changes"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 )
@@ -59,16 +61,32 @@ type fakeBackend struct {
 	watchErr      error // returned by WatchRepo and UnwatchRepo
 	actions       model.Actions
 	actionsCalls  int
-	runCalls      []string      // "<method> <repo> <id>", plus the attempt for run calls
-	runErr        error         // returned by the five run details methods
-	rawBody       io.Reader     // what RawJobLog streams; "raw log" when nil
-	rawSize       int64         // rawBody's length
-	rawDelay      time.Duration // RawJobLog sleeps this long before answering
-	rawClosed     atomic.Int32  // RawJobLog readers closed
+	runCalls      []string       // "<method> <repo> <id>", plus the attempt for run calls
+	runErr        error          // returned by the five run details methods
+	rawBody       io.Reader      // what RawJobLog streams; "raw log" when nil
+	rawSize       int64          // rawBody's length
+	rawDelay      time.Duration  // RawJobLog sleeps this long before answering
+	rawClosed     atomic.Int32   // RawJobLog readers closed
+	hub           *changes.Hub   // Subscribe's hub; nil answers changes.ErrNotReady
+	subMu         sync.Mutex     // guards subs
+	subs          []*changes.Sub // subscriptions Subscribe opened
 }
 
 func (f *fakeBackend) AvailableRepos(context.Context) ([]model.AvailableRepo, error) {
 	return f.avail, f.availErr
+}
+
+func (f *fakeBackend) Subscribe() (*changes.Sub, error) {
+	if f.hub == nil {
+		return nil, changes.ErrNotReady
+	}
+	s, err := f.hub.Subscribe()
+	if err == nil {
+		f.subMu.Lock()
+		f.subs = append(f.subs, s)
+		f.subMu.Unlock()
+	}
+	return s, err
 }
 
 func (f *fakeBackend) WatchRepo(ctx context.Context, name string) error {

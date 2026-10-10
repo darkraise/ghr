@@ -16,6 +16,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/darkraise/ghr/internal/activity"
+	"github.com/darkraise/ghr/internal/changes"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 )
@@ -101,6 +102,7 @@ type Backend interface {
 	RemoveToolchain(tool, version string) error
 	ClearCache(name string) error
 	PruneScope(scope string) error
+	Subscribe() (*changes.Sub, error)
 }
 
 func NewServer(b Backend) http.Handler {
@@ -188,6 +190,15 @@ func NewServer(b Backend) http.Handler {
 			ev = []model.Event{}
 		}
 		writeJSON(w, ev)
+	})
+	mux.HandleFunc("GET /changes", func(w http.ResponseWriter, r *http.Request) {
+		sub, err := b.Subscribe()
+		if err != nil {
+			respond(w, nil, changesErr(err))
+			return
+		}
+		defer sub.Close()
+		streamChanges(w, r, sub)
 	})
 	mux.HandleFunc("GET /history", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -476,5 +487,70 @@ func streamLog(w http.ResponseWriter, body io.Reader, size int64, deadline time.
 	}
 	if _, err := io.CopyBuffer(w, body, buf); err != nil {
 		panic(http.ErrAbortHandler)
+	}
+}
+
+// heartbeat is how often an idle change stream sends a comment, so the
+// browser and any proxy see the connection alive; tests shorten it.
+var heartbeat = 15 * time.Second
+
+// changesWriteWindow bounds each write to a change stream. Every write
+// extends it, so the web listener's WriteTimeout never ends a stream.
+var changesWriteWindow = 30 * time.Second
+
+func changesErr(err error) error {
+	switch {
+	case errors.Is(err, changes.ErrNotReady):
+		return &Error{Status: http.StatusServiceUnavailable, Msg: "not ready"}
+	case errors.Is(err, changes.ErrFull):
+		return &Error{Status: http.StatusServiceUnavailable, Msg: "too many live connections"}
+	case errors.Is(err, changes.ErrClosed):
+		return &Error{Status: http.StatusServiceUnavailable, Msg: "shutting down"}
+	}
+	return err
+}
+
+// streamChanges sends the subscription's topic sets as server-sent events
+// until the client leaves, the hub ends the subscription, or a write fails.
+func streamChanges(w http.ResponseWriter, r *http.Request, sub *changes.Sub) {
+	rc := http.NewResponseController(w)
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-store")
+	h.Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	send := func(frame string) bool {
+		// The Unix socket and test writers have no write deadline.
+		_ = rc.SetWriteDeadline(time.Now().Add(changesWriteWindow))
+		if _, err := io.WriteString(w, frame); err != nil {
+			return false
+		}
+		return rc.Flush() == nil
+	}
+	if !send("event: hello\ndata: {}\n\n") {
+		return
+	}
+	ping := time.NewTicker(heartbeat)
+	defer ping.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case topics, ok := <-sub.C:
+			if !ok {
+				return
+			}
+			data, _ := json.Marshal(struct {
+				Topics []string `json:"topics"`
+			}{topics})
+			if !send("event: change\ndata: " + string(data) + "\n\n") {
+				return
+			}
+			ping.Reset(heartbeat)
+		case <-ping.C:
+			if !send(": ping\n\n") {
+				return
+			}
+		}
 	}
 }
