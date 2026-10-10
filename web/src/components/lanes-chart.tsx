@@ -11,9 +11,9 @@ const MINUTE = 60_000
 
 const SEGMENT: Record<string, string | undefined> = {
   starting: "fill-none stroke-muted-foreground",
-  warm: "fill-none stroke-primary",
-  running: "fill-primary stroke-primary",
-  finishing: "fill-primary/25 stroke-primary/60",
+  warm: "fill-none stroke-running",
+  running: "fill-running stroke-running",
+  finishing: "fill-running/25 stroke-running/60",
   succeeded: "fill-success/30 stroke-success/60",
   failed: "fill-destructive/30 stroke-destructive/70",
   cancelled: "fill-muted stroke-muted-foreground",
@@ -237,9 +237,9 @@ export function LanesChart({
       <rect x={GUTTER} y={cpuTop} width={plotW} height={TRACK_H} className="fill-muted/30" />
       {cpuLines.map((run, i) =>
         run.length > 1 ? (
-          <polyline key={i} data-track="cpu" points={points(run)} strokeWidth={1.5} className="fill-none stroke-primary" />
+          <polyline key={i} data-track="cpu" points={points(run)} strokeWidth={1.5} className="fill-none stroke-foreground" />
         ) : (
-          <circle key={i} data-track="cpu" cx={run[0]?.x} cy={run[0]?.y} r={1.5} className="fill-primary" />
+          <circle key={i} data-track="cpu" cx={run[0]?.x} cy={run[0]?.y} r={1.5} className="fill-foreground" />
         ),
       )}
       {memLines.map((run, i) =>

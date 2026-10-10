@@ -7,10 +7,10 @@ import { fmtMem, series } from "@/lib/format"
 
 export function StatCard({ label, value, unit, children }: { label: string; value?: ReactNode; unit?: string; children?: ReactNode }) {
   return (
-    <section aria-label={label} className="flex min-w-0 flex-col gap-1 rounded-[10px] border border-border bg-card p-3">
+    <section aria-label={label} className="flex min-w-0 flex-col gap-1 p-3">
       <h2 className="text-sm text-muted-foreground">{label}</h2>
       <p className="flex flex-wrap items-baseline gap-x-1.5">
-        {value !== undefined && <span className="font-mono text-2xl font-medium">{value}</span>}
+        {value !== undefined && <span className="font-mono text-2xl font-semibold">{value}</span>}
         {unit && <span className="text-sm text-muted-foreground">{unit}</span>}
       </p>
       {children}
@@ -38,7 +38,7 @@ export function StatCards({ status, metrics, now }: { status: Status; metrics: M
   const memory =
     metrics?.mem_used !== undefined && metrics.mem_total !== undefined ? `, ${fmtMem(metrics.mem_used)} of ${fmtMem(metrics.mem_total)} memory` : ""
   return (
-    <div className="grid grid-cols-2 gap-3 min-[641px]:grid-cols-4">
+    <div className="grid grid-cols-2 divide-border rounded-md border border-border bg-card min-[641px]:grid-cols-4 min-[641px]:divide-x">
       <StatCard label="Runners" value={c.busy} unit={status.mode === "all" ? "busy" : `of ${status.global_max} busy`}>
         <div className="mt-2">
           <CapacitySegments status={status} size="lg" />

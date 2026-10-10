@@ -42,7 +42,7 @@ describe("LanesChart", () => {
     expect(container.querySelector('rect[data-state="unknown"]')).toHaveAttribute("stroke-dasharray", "3 2")
     expect(screen.getByRole("img", { name: "darkmem, pack, result unknown, 1m00s" })).toBeInTheDocument()
     expect(screen.getByRole("img", { name: "darkmem, ship, finishing, result pending, 2m00s" })).toBeInTheDocument()
-    expect(container.querySelector('rect[data-state="finishing"]')).toHaveClass("fill-primary/25")
+    expect(container.querySelector('rect[data-state="finishing"]')).toHaveClass("fill-running/25")
     expect(container.querySelector(".ghr-pulse")).not.toBeNull()
   })
 
@@ -60,7 +60,7 @@ describe("LanesChart", () => {
     for (const state of ["running", "warm"]) {
       const box = container.querySelector(`rect[data-state="${state}"]`)
       expect(box).toHaveClass("fill-none", "stroke-muted-foreground")
-      expect(box).not.toHaveClass("fill-primary", "stroke-primary")
+      expect(box).not.toHaveClass("fill-running", "stroke-running")
       expect(box).toHaveAttribute("stroke-dasharray", "3 2")
     }
     expect(container.querySelector(".ghr-pulse")).toBeNull()

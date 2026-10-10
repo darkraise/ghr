@@ -30,11 +30,11 @@ const cell = (name: string, index: number) => row(name).querySelectorAll("td")[i
 describe("RepoTable", () => {
   it("names each state in a word", () => {
     draw([darkmem, darkcloud, oldRepo, { ...darkmem, name: "idle-repo", active: 0 }, { ...darkcloud, name: "leaving", paused: false, removing: true }])
-    expect(within(row("darkmem")).getByText("Running")).toHaveClass("text-primary")
-    expect(within(row("darkcloud")).getByText("Paused")).toHaveClass("text-muted-foreground")
-    expect(within(row("old-repo")).getByText("Error")).toHaveClass("text-destructive")
+    expect(within(row("darkmem")).getByText("Running")).toBeInTheDocument()
+    expect(within(row("darkcloud")).getByText("Paused")).toBeInTheDocument()
+    expect(within(row("old-repo")).getByText("Error")).toBeInTheDocument()
     expect(within(row("idle-repo")).getByText("Idle")).toBeInTheDocument()
-    expect(within(row("leaving")).getByText("Removing")).toHaveClass("text-muted-foreground")
+    expect(within(row("leaving")).getByText("Removing")).toBeInTheDocument()
   })
 
   it("shows a repository's raw error under its name", () => {

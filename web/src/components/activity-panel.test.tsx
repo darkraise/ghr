@@ -35,6 +35,14 @@ describe("ActivityPanel", () => {
     expect(screen.getByRole("group", { name: "Runner lanes for the last hour" })).toBeInTheDocument()
   })
 
+  it("draws Activity as a box with a header band", () => {
+    draw()
+    const heading = screen.getByRole("heading", { level: 2, name: "Activity" })
+    expect(heading.parentElement).toHaveClass("bg-background", "border-b")
+    expect(heading.closest("section")).toHaveClass("rounded-md", "overflow-hidden")
+    expect(heading.closest("section")).not.toHaveClass("p-4")
+  })
+
   it("shows buckets with their own legend", () => {
     draw({ selected: "24h", activity: fixtures.activityBuckets })
     expect(screen.getByText("Oct 2 14:00 to Oct 3 14:05, per hour")).toBeInTheDocument()

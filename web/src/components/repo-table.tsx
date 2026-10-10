@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "darkraise-ui/components
 import { Ellipsis } from "lucide-react"
 import type { ActivityRepo, Config, RepoStatus } from "@/api/types"
 import { ConfirmDialog } from "@/components/confirm-dialog"
+import { StatusPill } from "@/components/page/status-pill"
 import { RepoActivityStrip } from "@/components/repo-activity-strip"
 import { ResultIcon } from "@/components/result-icon"
 import { RunnerMeter } from "@/components/runner-meter"
@@ -12,13 +13,6 @@ import { ago } from "@/lib/format"
 import { weekRate, weekText } from "@/lib/repos"
 import { repoStateWord } from "@/lib/status"
 import { useRepoActions } from "@/lib/use-repo-actions"
-
-const STATE_CLASS: Record<string, string | undefined> = {
-  Running: "text-primary",
-  Paused: "text-muted-foreground",
-  Removing: "text-muted-foreground",
-  Error: "text-destructive",
-}
 
 function RunnerCells({ repo }: { repo: RepoStatus }) {
   if (repo.max === 0) return <span className="font-mono">{repo.active}</span>
@@ -126,7 +120,9 @@ export function RepoTable({
                 {r.error && <p className="text-xs text-destructive">{r.error}</p>}
                 {full && r.removing && <p className="text-xs text-muted-foreground">Removing. Running jobs finish first.</p>}
               </TableCell>
-              <TableCell className={STATE_CLASS[word] ?? ""}>{word}</TableCell>
+              <TableCell>
+                <StatusPill state={word.toLowerCase()} />
+              </TableCell>
               <TableCell>
                 <RunnerCells repo={r} />
               </TableCell>
