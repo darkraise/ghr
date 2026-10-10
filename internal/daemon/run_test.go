@@ -3,6 +3,9 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"crypto/pbkdf2"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -829,6 +832,44 @@ func TestRunReportsAPendingSetup(t *testing.T) {
 	}
 }
 
+// readFrames sends each server-sent event of body, without its closing blank
+// line, and closes the channel when body ends.
+func readFrames(body io.Reader) <-chan string {
+	frames := make(chan string, 16)
+	go func() {
+		defer close(frames)
+		rd := bufio.NewReader(body)
+		var sb strings.Builder
+		for {
+			line, err := rd.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if line == "\n" {
+				frames <- sb.String()
+				sb.Reset()
+				continue
+			}
+			sb.WriteString(line)
+		}
+	}()
+	return frames
+}
+
+func nextFrame(t *testing.T, frames <-chan string, what string) string {
+	t.Helper()
+	select {
+	case f, ok := <-frames:
+		if !ok {
+			t.Fatalf("the stream ended while waiting for %s", what)
+		}
+		return f
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
+	return ""
+}
+
 // A configured daemon streams changes on its socket, and shutting it down
 // ends an open stream instead of waiting on it.
 func TestRunStreamsChangesAndEndsThemOnShutdown(t *testing.T) {
@@ -868,36 +909,10 @@ func TestRunStreamsChangesAndEndsThemOnShutdown(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /changes: %d", resp.StatusCode)
 	}
-	frames := make(chan string, 16)
-	go func() {
-		defer close(frames)
-		rd := bufio.NewReader(resp.Body)
-		var sb strings.Builder
-		for {
-			line, err := rd.ReadString('\n')
-			if err != nil {
-				return
-			}
-			if line == "\n" {
-				frames <- sb.String()
-				sb.Reset()
-				continue
-			}
-			sb.WriteString(line)
-		}
-	}()
+	frames := readFrames(resp.Body)
 	next := func(what string) string {
 		t.Helper()
-		select {
-		case f, ok := <-frames:
-			if !ok {
-				t.Fatalf("the stream ended while waiting for %s", what)
-			}
-			return f
-		case <-time.After(10 * time.Second):
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		return ""
+		return nextFrame(t, frames, what)
 	}
 	if f := next("hello"); f != "event: hello\ndata: {}\n" {
 		t.Fatalf("first frame %q", f)
@@ -926,5 +941,90 @@ func TestRunStreamsChangesAndEndsThemOnShutdown(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Run did not return within 10 s")
+	}
+}
+
+// The web listener's WriteTimeout counts from the moment a request is read.
+// A change stream outlives it only while the handler can still move the
+// connection's write deadline through every wrapper in front of it.
+func TestRunStreamsChangesPastTheWebWriteTimeout(t *testing.T) {
+	oldHub, oldTimeout := hubOptions, webWriteTimeout
+	hubOptions = changes.Options{Tick: time.Hour}
+	webWriteTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { hubOptions, webWriteTimeout = oldHub, oldTimeout })
+	addr := freeAddr(t)
+	o := testOptions(t, cfgYAML+"web:\n  listen: "+addr+"\n")
+	// A login at the default iteration count would outlast the short timeout.
+	const password = "correct horse battery"
+	salt := make([]byte, 16)
+	key, err := pbkdf2.Key(sha256.New, password, salt, 1000, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := base64.RawStdEncoding
+	hash := "pbkdf2-sha256$1000$" + enc.EncodeToString(salt) + "$" + enc.EncodeToString(key) + "\n"
+	if err := os.WriteFile(o.WebPasswordPath, []byte(hash), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reload := make(chan os.Signal, 1)
+	o.Reload = reload
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, o) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+		}
+	}()
+	c := api.NewUnixClient(o.Socket)
+	waitFor(t, "the socket to serve status", func() bool { _, err := c.Status(context.Background()); return err == nil })
+
+	hc := &http.Client{}
+	login, err := http.NewRequest(http.MethodPost, "http://"+addr+"/auth/login", strings.NewReader(`{"password":"`+password+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	login.Header.Set("X-GHR", "1")
+	resp, err := hc.Do(login)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("login: %d", resp.StatusCode)
+	}
+	var session *http.Cookie
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "ghr_session" {
+			session = ck
+		}
+	}
+	if session == nil {
+		t.Fatal("login set no session cookie")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/api/changes", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-GHR", "1")
+	req.AddCookie(session)
+	stream, err := hc.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	if stream.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/changes: %d", stream.StatusCode)
+	}
+	frames := readFrames(stream.Body)
+	if f := nextFrame(t, frames, "hello"); f != "event: hello\ndata: {}\n" {
+		t.Fatalf("first frame %q", f)
+	}
+	time.Sleep(3 * webWriteTimeout)
+	reload <- os.Interrupt
+	for !strings.Contains(nextFrame(t, frames, `a change naming "events" after the write timeout`), `"events"`) {
 	}
 }

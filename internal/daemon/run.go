@@ -37,6 +37,10 @@ import (
 // hub's defaults. Tests lengthen the tick so only wakes publish.
 var hubOptions changes.Options
 
+// webWriteTimeout bounds a web response from the moment its request is read;
+// tests shorten it.
+var webWriteTimeout = 60 * time.Second
+
 type Options struct {
 	ConfigPath  string
 	TokenPath   string
@@ -273,7 +277,7 @@ func Run(ctx context.Context, o Options) error {
 	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second}
 	webSrv := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
-		WriteTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second,
+		WriteTimeout: webWriteTimeout, IdleTimeout: 120 * time.Second,
 		MaxHeaderBytes: 64 << 10,
 	}
 	var webLn net.Listener
