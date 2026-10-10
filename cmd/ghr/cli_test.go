@@ -86,6 +86,31 @@ func TestStatusOutput(t *testing.T) {
 	}
 }
 
+func TestStatusPrintsStoppingForAStoppingRunner(t *testing.T) {
+	now := time.Date(2026, 10, 3, 14, 0, 0, 0, time.UTC)
+	var out bytes.Buffer
+	printStatus(&out, model.Status{Now: now, Mode: "queue", GlobalMax: 3, Instances: []model.InstanceStatus{
+		{ID: "a3f9c1", Repo: "darkcloud", State: "busy", Stopping: true, Since: now.Add(-time.Minute),
+			Job: &model.JobInfo{Name: "e2e", RunNumber: "412"}},
+		{ID: "b7d2e0", Repo: "darkcloud", State: "idle", Since: now.Add(-time.Minute)},
+	}})
+	rows := map[string][]string{}
+	for _, line := range strings.Split(out.String(), "\n") {
+		if f := strings.Fields(line); len(f) > 0 {
+			rows[f[0]] = f
+		}
+	}
+	if got := strings.Join(rows["a3f9c1"], " "); got != "a3f9c1 darkcloud stopping e2e #412 1m0s" {
+		t.Errorf("stopping row %q in:\n%s", got, out.String())
+	}
+	if got := strings.Join(rows["b7d2e0"], " "); got != "b7d2e0 darkcloud idle - 1m0s" {
+		t.Errorf("idle row %q in:\n%s", got, out.String())
+	}
+	if !strings.Contains(out.String(), "global 2/3") {
+		t.Errorf("a stopping runner must still count:\n%s", out.String())
+	}
+}
+
 func TestMutatingCommands(t *testing.T) {
 	reqs := fakeDaemon(t)
 	cases := [][]string{

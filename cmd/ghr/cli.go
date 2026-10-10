@@ -346,7 +346,11 @@ func printStatus(out io.Writer, st model.Status) {
 		if i.Job != nil {
 			job = fmt.Sprintf("%s #%s", i.Job.Name, i.Job.RunNumber)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", i.ID, i.Repo, i.State, job, st.Now.Sub(i.Since).Round(time.Second))
+		state := i.State
+		if i.Stopping {
+			state = "stopping"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", i.ID, i.Repo, state, job, st.Now.Sub(i.Since).Round(time.Second))
 	}
 	w.Flush()
 }
