@@ -44,11 +44,17 @@ export function StopRunnerDialog({ instance, onClose }: { instance: InstanceStat
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.status }),
   })
   const busy = live?.state === "busy"
+  // Only while open: a dialog closing after its own Stop keeps its wording
+  // when the runner turns up as stopping.
+  const stopping = instance !== null && current?.stopping === true
   let title = `Stop runner ${live?.id}?`
   let description = "ghr stops the runner and cleans it up."
   if (gone) {
     title = `Runner ${live?.id} has already finished`
     description = "There is nothing left to stop."
+  } else if (stopping) {
+    title = `Runner ${live?.id} is already stopping`
+    description = "ghr is stopping it and will clean it up."
   } else if (busy) {
     title = `Runner ${live?.id} is running a job. Stop it?`
     description = "The job it is running fails."
@@ -69,7 +75,7 @@ export function StopRunnerDialog({ instance, onClose }: { instance: InstanceStat
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             data-variant="destructive"
-            disabled={gone}
+            disabled={gone || stopping}
             onClick={() => {
               if (live) stop.mutate(live.id)
             }}

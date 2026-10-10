@@ -138,6 +138,27 @@ describe("Runners page", () => {
     expect(calls.some((c) => c.method === "DELETE")).toBe(false)
   })
 
+  it("says a runner that starts stopping while the dialog is open is already stopping", { timeout: 10_000 }, async () => {
+    let stopping = false
+    const { calls } = mockApi(
+      routes({
+        "GET /api/status": () => ({
+          ...fixtures.status,
+          instances: fixtures.status.instances.map((i) => (stopping && i.id === "bbbbbb" ? { ...i, stopping: true } : i)),
+        }),
+      }),
+    )
+    const { user } = renderApp("/runners/bbbbbb")
+    await user.click(await screen.findByRole("button", { name: "Stop runner" }))
+    expect(await screen.findByText("Stop runner bbbbbb?")).toBeInTheDocument()
+    stopping = true
+    const ask = within(screen.getByRole("alertdialog"))
+    expect(await ask.findByText("Runner bbbbbb is already stopping")).toBeInTheDocument()
+    expect(ask.getByText("ghr is stopping it and will clean it up.")).toBeInTheDocument()
+    expect(ask.getByRole("button", { name: "Stop" })).toBeDisabled()
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false)
+  })
+
   it("toasts the runner it stopped", async () => {
     mockApi(routes({ "DELETE /api/runners/aaaaaa": () => noContent() }))
     const { user } = renderApp("/runners/aaaaaa")

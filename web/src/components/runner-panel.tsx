@@ -133,7 +133,7 @@ export function RunnerPanel({ id, tab, backLink }: { id: string; tab: DetailTab;
         )}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h2 className="font-mono text-lg font-semibold">{id}</h2>
-          {finished ? <StateText state="finished" /> : inst && <StateText state={inst.state} />}
+          {finished ? <StateText state="finished" /> : inst && <StateText state={inst.stopping ? "stopping" : inst.state} />}
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {runUrl && (
               <Button variant="outline" asChild>
@@ -143,7 +143,7 @@ export function RunnerPanel({ id, tab, backLink }: { id: string; tab: DetailTab;
                 </a>
               </Button>
             )}
-            <Button variant="destructive" disabled={!live || status.isError} onClick={() => setStopping(true)}>
+            <Button variant="destructive" disabled={!live || status.isError || current.stopping === true} onClick={() => setStopping(true)}>
               Stop runner
             </Button>
             <MoreMenu id={id} runUrl={runUrl} />

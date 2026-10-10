@@ -121,6 +121,21 @@ describe("RunnerPanel", () => {
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/runners/aaaaaa")).toBe(true))
   })
 
+  it("says a stopping runner is stopping and offers no second stop", async () => {
+    mockApi(
+      routes({
+        "GET /api/status": {
+          ...fixtures.status,
+          instances: fixtures.status.instances.map((i) => (i.id === "aaaaaa" ? { ...i, stopping: true } : i)),
+        },
+      }),
+    )
+    draw()
+    expect(await screen.findByText("Stopping")).toHaveClass("text-muted-foreground")
+    expect(screen.queryByText("Busy")).toBeNull()
+    expect(screen.getByRole("button", { name: "Stop runner" })).toBeDisabled()
+  })
+
   it("keeps the last snapshot after the runner ends", async () => {
     let gone = false
     mockApi(
