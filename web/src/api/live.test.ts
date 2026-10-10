@@ -105,6 +105,27 @@ describe("readChanges", () => {
     expect(seen).toEqual([])
   })
 
+  it("logs a throwing handler and ends the connection", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      mockApi({ "GET /api/changes": () => stream(["event: hello\ndata: {}\n\n"]) })
+      const { handlers } = recorder()
+      const end = await readChanges(
+        {
+          ...handlers,
+          onHello: () => {
+            throw new Error("boom")
+          },
+        },
+        new AbortController().signal,
+      )
+      expect(end).toBe("ended")
+      expect(log).toHaveBeenCalledOnce()
+    } finally {
+      log.mockRestore()
+    }
+  })
+
   it("cancels the reader on abort", async () => {
     let cancelled = false
     mockApi({

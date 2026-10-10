@@ -102,12 +102,24 @@ export async function readChanges(h: ChangeHandlers, signal: AbortSignal): Promi
   const parser = new SseParser(h)
   try {
     for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      parser.push(decoder.decode(value, { stream: true }))
+      let chunk: ReadableStreamReadResult<Uint8Array>
+      try {
+        chunk = await reader.read()
+      } catch {
+        // a dropped connection ends the stream like a clean end
+        break
+      }
+      if (chunk.done) break
+      try {
+        parser.push(decoder.decode(chunk.value, { stream: true }))
+      } catch (err) {
+        // End the connection so onEnd clears the live flag; a bug in a
+        // handler must not leave the polling slowed with no stream behind it.
+        console.error("change stream handler failed", err)
+        cancel()
+        break
+      }
     }
-  } catch {
-    // a dropped connection ends the stream like a clean end
   } finally {
     signal.removeEventListener("abort", cancel)
   }
