@@ -59,6 +59,19 @@ describe("Actions page", () => {
     expect(row.getAllByRole("cell")).toHaveLength(3)
   })
 
+  it("keeps the filters, and focus, in the box when they hide every run", async () => {
+    setViewport(1024)
+    mockApi(authedRoutes())
+    const { user } = renderApp("/actions?repo=docs")
+    await screen.findByRole("region", { name: "1 workflow run" })
+    const failed = screen.getByRole("radio", { name: "Failed" })
+    await user.click(failed)
+    const box = await screen.findByRole("region", { name: "0 workflow runs" })
+    expect(within(box).getByText("No runs match these filters.")).toBeInTheDocument()
+    expect(within(box).getByRole("radio", { name: "Failed" })).toBe(failed)
+    expect(failed).toHaveFocus()
+  })
+
   it("sums up the runs and is listed in the nav", async () => {
     const { calls } = mockApi(authedRoutes())
     renderApp("/actions")
@@ -178,7 +191,7 @@ describe("Actions page", () => {
     expect(screen.getByText("0 running, 1 queued in docs. Updated 14:05.")).toBeInTheDocument()
     expect(box().getByRole("link", { name: /^Publish the guide/ })).toBeInTheDocument()
     expect(box().queryByRole("link", { name: /^Fix the cache key/ })).toBeNull()
-    expect(screen.queryByRole("rowheader", { name: "Today" })).toBeNull()
+    expect(box().getAllByRole("rowheader")).toHaveLength(1)
   })
 
   it("drops values it does not know, from the page and the URL", async () => {

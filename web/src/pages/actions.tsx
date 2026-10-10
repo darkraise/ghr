@@ -166,15 +166,23 @@ export function ActionsPage() {
       </div>
     )
   } else if (status !== "active" && data.runs.length === 0) {
-    body = <p className="text-sm text-muted-foreground">No workflow runs in the covered repositories yet.</p>
-  } else if (status !== "active" && active.length === 0 && recent.length === 0) {
+    listed = true
     body = (
-      <div className="flex flex-col items-start gap-2">
-        <p className="text-sm text-muted-foreground">No runs match these filters.</p>
-        <Button size="sm" variant="outline" onClick={() => update({ repo: "", status: "" })}>
-          Clear filters
-        </Button>
-      </div>
+      <Section title="0 workflow runs" aside={<div className="ml-auto flex flex-wrap items-center gap-3">{filters}</div>}>
+        <p className="text-sm text-muted-foreground">No workflow runs in the covered repositories yet.</p>
+      </Section>
+    )
+  } else if (status !== "active" && active.length === 0 && recent.length === 0) {
+    listed = true
+    body = (
+      <Section title="0 workflow runs" aside={<div className="ml-auto flex flex-wrap items-center gap-3">{filters}</div>}>
+        <div className="flex flex-col items-start gap-2">
+          <p className="text-sm text-muted-foreground">No runs match these filters.</p>
+          <Button size="sm" variant="outline" onClick={() => update({ repo: "", status: "" })}>
+            Clear filters
+          </Button>
+        </div>
+      </Section>
     )
   } else {
     listed = true
