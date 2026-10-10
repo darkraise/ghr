@@ -119,36 +119,34 @@ describe("log palette", () => {
 })
 
 describe("ghr chrome styles", () => {
-  it("keeps the light-mode rail readable with the dark palette", () => {
+  it("keeps the light-mode log panel readable with the dark palette", () => {
     const light = tokens("light")
-    const rail = { ...light, ...block(':root[data-mode="light"] .dr-mobile-drawer-content') }
-    const shell = light["--surface-sidebar"]
+    const panel = { ...light, ...block(':root[data-mode="light"] .ghr-log-panel') }
     const checks: [string, number][] = [
       ["--foreground", 4.5],
       ["--muted-foreground", 4.5],
       ["--warning", 4.5],
       ["--destructive", 4.5],
       ["--success", 4.5],
+      ["--running", 4.5],
       ["--primary", 3],
     ]
     for (const [fg, min] of checks) {
-      expect(contrast(rail[fg], shell), `${fg} on the rail`).toBeGreaterThanOrEqual(min)
-      expect(contrast(rail[fg], rail["--card"]), `${fg} on a rail card`).toBeGreaterThanOrEqual(min)
+      expect(contrast(panel[fg], light["--log-bg"]), `${fg} on the log`).toBeGreaterThanOrEqual(min)
+      expect(contrast(panel[fg], panel["--card"]), `${fg} on a panel card`).toBeGreaterThanOrEqual(min)
     }
   })
 
-  it("recomputes the kit's surface fills inside the rail", () => {
+  it("recomputes the kit's surface fills inside the log panel", () => {
     // bg-card paints var(--surface-card-fill), which the kit computes on
-    // <html>; without these the rail's cards stay the light-mode white.
-    const rail = block(':root[data-mode="light"] .dr-mobile-drawer-content')
+    // <html>; without these the panel's cards stay the light-mode white.
+    const rail = block(':root[data-mode="light"] .ghr-log-panel')
     expect(rail["--surface-card-fill"]).toBe("hsl(var(--card))")
     expect(rail["--surface-popover-fill"]).toBe("hsl(var(--popover))")
     expect(rail["--surface-raised-fill"]).toBe("hsl(var(--surface-raised))")
     expect(rail["--surface-overlay-fill"]).toBe("hsl(var(--surface-overlay))")
-  })
-
-  it("hides the header bar at 768px and wider", () => {
-    expect(css).toMatch(/@media \(min-width: 768px\) \{\s*\.dr-sidebar-layout > \.dr-layout-header \{\s*display: none;/)
+    expect(rail["--control-surface"]).toBe("var(--card)")
+    expect(rail["--control-well"]).toBe("var(--card)")
   })
 
   it("pins one radius: 6px on controls and on surfaces", () => {
@@ -165,18 +163,6 @@ describe("ghr chrome styles", () => {
 
   it("draws every Lucide icon at one stroke width", () => {
     expect(css).toMatch(/\.lucide \{\s*stroke-width: 1\.75;/)
-  })
-
-  it("hides the rail's collapse toggle", () => {
-    expect(css).toMatch(/\.dr-sidebar-layout-toggle \{\s*display: none;/)
-  })
-
-  it("widens the rail for the large font step", () => {
-    expect(css).toMatch(/:root \{\s*--sidebar-width-expanded: 18rem;/)
-  })
-
-  it("appends the host to the brand label", () => {
-    expect(css).toMatch(/\.dr-brand-logo-label::after \{\s*content: var\(--ghr-host, ""\);/)
   })
 })
 

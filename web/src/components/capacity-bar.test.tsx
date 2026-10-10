@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { InstanceStatus, Status } from "@/api/types"
 import { capacity } from "@/lib/capacity"
 import { fixtures } from "@/test/fixtures"
-import { CapacityBar, CapacitySegments } from "./capacity-bar"
+import { CapacitySegments } from "./capacity-bar"
 
 const inst = (state: string, id: string): InstanceStatus => ({
   id,
@@ -52,15 +52,14 @@ describe("capacity", () => {
   })
 })
 
-describe("CapacityBar", () => {
-  it("draws one segment per runner and free slot, with the count", () => {
-    render(<CapacityBar status={fixtures.status} />)
-    expect(screen.getByText("Runners")).toBeInTheDocument()
-    expect(screen.getByText("1 of 2 busy")).toHaveClass("font-mono")
+describe("CapacitySegments", () => {
+  it("draws one segment per runner and free slot", () => {
+    render(<CapacitySegments status={fixtures.status} />)
     const bar = screen.getByRole("img", { name: "1 of 2 busy, 1 warm" })
     expect([...bar.children].map((c) => c.getAttribute("data-kind"))).toEqual(["busy", "warm"])
-    expect(bar.children[0]).toHaveClass("ghr-pulse")
+    expect(bar.children[0]).toHaveClass("ghr-pulse", "bg-running")
     expect(bar.children[1]).not.toHaveClass("ghr-pulse")
+    expect(bar.children[1]).toHaveClass("border-running")
   })
 
   it("sets the segments above the max apart", () => {
@@ -70,11 +69,9 @@ describe("CapacityBar", () => {
     expect(segments[1]).not.toHaveClass("ml-[2px]")
   })
 
-  it("draws free slots in the shell colour on the rail and in sunk on a card", () => {
+  it("draws free slots in the sunk colour", () => {
     const free = status({ global_max: 3, instances: [inst("busy", "a")] })
-    const { container, rerender } = render(<CapacitySegments status={free} tone="rail" />)
-    expect(container.querySelector('[data-kind="free"]')).toHaveClass("bg-[hsl(var(--surface-sidebar))]")
-    rerender(<CapacitySegments status={free} />)
+    const { container } = render(<CapacitySegments status={free} />)
     expect(container.querySelector('[data-kind="free"]')).toHaveClass("bg-muted")
   })
 })
