@@ -753,3 +753,50 @@ func TestSpawnResolvesDistThroughHost(t *testing.T) {
 		t.Fatalf("events:\n%s", h.eventText())
 	}
 }
+
+func TestBeginFinishStartsNothingAfterClose(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.sd.active["ghr-runner-bbbbbb"] = false
+	h.m.beginFinish("aaaaaa")
+	h.m.Wait()
+	if h.state("aaaaaa") != "gone" {
+		t.Fatalf("state %s before Close, want gone", h.state("aaaaaa"))
+	}
+	h.m.Close()
+	h.m.beginFinish("bbbbbb")
+	h.m.Wait()
+	if h.state("bbbbbb") != "starting" {
+		t.Fatalf("state %s after Close, want starting", h.state("bbbbbb"))
+	}
+	if _, err := os.Stat(h.m.instanceDir("bbbbbb")); err != nil {
+		t.Fatalf("instance dir after Close: %v", err)
+	}
+}
+
+// A runner can be removed while a tick is stopping another one.
+func TestStartTimeoutSkipsARunnerThatIsGone(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.now = h.now.Add(3 * time.Minute)
+	h.sd.stopGate, h.sd.stopEntered = make(chan struct{}), make(chan struct{}, 2)
+	go func() {
+		<-h.sd.stopEntered
+		h.m.mu.Lock()
+		delete(h.m.insts, "bbbbbb")
+		h.m.mu.Unlock()
+		close(h.sd.stopGate)
+	}()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("stopStartTimedOut panicked on a runner that is gone: %v", r)
+		}
+	}()
+	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) {
+		t.Fatalf("stopped %v, want only ghr-runner-aaaaaa", h.sd.stopped)
+	}
+}

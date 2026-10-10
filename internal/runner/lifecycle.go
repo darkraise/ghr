@@ -229,10 +229,12 @@ func (m *Manager) refreshUnits(ctx context.Context) {
 
 // beginFinish moves an instance to cleaning and runs finish in the background.
 // A failed finish leaves it cleaning (holding its repo slot) for refreshUnits to retry.
+// It starts nothing once Close has been called: the instance dir stays, and
+// adoption cleans the runner up at the next start.
 func (m *Manager) beginFinish(id string) {
 	m.mu.Lock()
 	i, ok := m.insts[id]
-	if !ok || i.finishing {
+	if !ok || i.finishing || m.closed {
 		m.mu.Unlock()
 		return
 	}
@@ -242,8 +244,10 @@ func (m *Manager) beginFinish(id string) {
 	}
 	i.finishing = true
 	repo := i.Repo
-	m.mu.Unlock()
+	// Counted under the lock that guards closed: a caller that outlives the
+	// run loop must not add to the group while Wait runs.
 	m.wg.Add(1)
+	m.mu.Unlock()
 	go func() {
 		defer m.wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), finishTimeout)
@@ -604,8 +608,17 @@ func (m *Manager) deregisterIdle(ctx context.Context, i instance, now time.Time)
 func (m *Manager) stopStartTimedOut(ctx context.Context, cfg *config.Config, now time.Time) {
 	for _, id := range sched.StartTimedOut(cfg, m.schedInstances(cfg), now) {
 		m.mu.Lock()
-		repo := m.insts[id].Repo
+		i, ok := m.insts[id]
+		repo := ""
+		if ok {
+			repo = i.Repo
+		}
 		m.mu.Unlock()
+		// A stop a person asked for can finish and remove a runner while this
+		// loop is stopping another one.
+		if !ok {
+			continue
+		}
 		if err := m.SD.Stop(ctx, UnitPrefix+id); err != nil {
 			m.Events.Add("warn", repo, "stop %s: %v", id, err)
 			continue
