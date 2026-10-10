@@ -251,12 +251,12 @@ main[data-content]::before {
 @theme inline {
   --radius-sm: 4px;
   --radius-md: 6px;
-  --radius-lg: 10px;
-  --radius-xl: 10px;
+  --radius-lg: 6px;
+  --radius-xl: 6px;
 }
 
 :root[data-radius] {
-  --radius: 10px;
+  --radius: 6px;
   --radius-button: 6px;
 }
 
