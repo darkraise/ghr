@@ -119,6 +119,12 @@ describe("log palette", () => {
 })
 
 describe("ghr chrome styles", () => {
+  it("paints the log panel dark and marks error and warning lines on their left edge", () => {
+    expect(css).toMatch(/\.ghr-log-panel \{\s*background: hsl\(var\(--log-bg\)\);\s*color: hsl\(var\(--log-fg\)\);/)
+    expect(css).toMatch(/\.ghr-log-error \{[^}]*box-shadow: inset 2px 0 0 hsl\(var\(--destructive\)\);/)
+    expect(css).toMatch(/\.ghr-log-warning \{[^}]*box-shadow: inset 2px 0 0 hsl\(var\(--warning\)\);/)
+  })
+
   it("keeps the light-mode log panel readable with the dark palette", () => {
     const light = tokens("light")
     const panel = { ...light, ...block(':root[data-mode="light"] .ghr-log-panel') }

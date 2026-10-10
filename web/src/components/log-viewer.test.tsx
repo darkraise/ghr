@@ -26,6 +26,15 @@ function bigLog(count: number, special: Record<number, string> = {}): JobLog {
 const bigSteps: Step[] = [{ number: 1, name: "Build", status: "completed", conclusion: "failure" }]
 
 describe("LogViewer", () => {
+  it("holds the heading, the search box, the toolbar and the steps in one dark panel", () => {
+    renderViewer({ heading: <span>lint 1m12s</span>, toolbar: <button type="button">Raw log</button> })
+    const panel = screen.getByRole("list", { name: "Steps" }).closest(".ghr-log-panel") as HTMLElement
+    expect(panel).not.toBeNull()
+    expect(within(panel).getByText("lint 1m12s")).toBeInTheDocument()
+    expect(within(panel).getByLabelText("Search logs")).toBeInTheDocument()
+    expect(within(panel).getByRole("button", { name: "Raw log" })).toBeInTheDocument()
+  })
+
   it("lists every step with its status and duration, the failed one open", () => {
     renderViewer()
     expect(screen.getAllByRole("button", { expanded: false }).length).toBeGreaterThan(0)

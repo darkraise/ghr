@@ -53,12 +53,14 @@ export function LogViewer({
   step,
   line,
   toolbar,
+  heading,
 }: {
   log: JobLog
   steps: Step[]
   step?: number
   line?: number
   toolbar?: ReactNode
+  heading?: ReactNode
 }) {
   const target = step !== undefined && line !== undefined ? { step, line } : undefined
   const linesOf = (n: number): LogLine[] => log.steps.find((s) => s.number === n)?.lines ?? []
@@ -125,7 +127,7 @@ export function LogViewer({
       target: target?.step === s.number && target.line === l.n,
     })
     return (
-      <div className="ghr-log overflow-x-auto rounded-md py-2 font-mono text-xs leading-5">
+      <div className="ghr-log overflow-x-auto py-2 font-mono text-xs leading-5">
         {start > 0 && (
           <button
             type="button"
@@ -166,8 +168,9 @@ export function LogViewer({
   }
 
   return (
-    <div ref={ref} className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3">
+    <div ref={ref} className="ghr-log-panel overflow-hidden rounded-md border border-border">
+      <div className="flex flex-wrap items-center gap-3 border-b border-border px-3 py-2">
+        {heading && <div className="mr-auto flex min-w-0 items-center gap-2 text-sm font-semibold">{heading}</div>}
         <Input
           type="search"
           aria-label="Search logs"
@@ -195,14 +198,14 @@ export function LogViewer({
                 type="button"
                 aria-expanded={open}
                 onClick={() => toggle(setOpenSteps, s.number)}
-                className="flex w-full items-center gap-2 py-1.5 text-left text-sm hover:bg-muted"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted"
               >
                 <ChevronRight aria-hidden="true" size={15} className={`shrink-0 text-muted-foreground ${open ? "rotate-90" : ""}`} />
                 {info && <RunStatusIcon status={info.status} conclusion={info.conclusion} />}
                 <span className="min-w-0 flex-1 break-words">{s.name}</span>
                 {ms !== undefined && <span className="font-mono text-xs text-muted-foreground">{dur(ms)}</span>}
               </button>
-              {open && <div className="pb-2">{renderLines(s)}</div>}
+              {open && <div>{renderLines(s)}</div>}
             </li>
           )
         })}

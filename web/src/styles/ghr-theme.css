@@ -304,6 +304,11 @@ textarea {
   color: hsl(var(--log-fg));
 }
 
+.ghr-log-panel {
+  background: hsl(var(--log-bg));
+  color: hsl(var(--log-fg));
+}
+
 .ghr-log-muted {
   color: hsl(var(--log-muted));
 }
@@ -315,11 +320,13 @@ textarea {
 .ghr-log-error {
   background: hsl(var(--log-error-bg));
   color: hsl(var(--log-error-fg));
+  box-shadow: inset 2px 0 0 hsl(var(--destructive));
 }
 
 .ghr-log-warning {
   background: hsl(var(--log-warning-bg));
   color: hsl(var(--log-warning-fg));
+  box-shadow: inset 2px 0 0 hsl(var(--warning));
 }
 
 .ghr-log-target {
