@@ -69,7 +69,7 @@ ghr's web UI looks and reads like a part of GitHub: the boxes, status pills, run
 
 ### 1.4 Status
 
-- A new shared `StatusPill({ state, label? })` replaces `StateText` on every page: a Lucide icon, a word, the state's colour as text, and the same colour at low opacity as the fill. `StateText` is deleted once nothing uses it.
+- A new shared `StatusPill({ state, label? })` replaces `StateText` on every page: a Lucide icon in the state's colour, a word in the text colour, and the state's colour at low opacity as the fill. The word is not coloured: light-mode Running on its own tint measures about 4.3:1, under the 4.5:1 floor. `StateText` is deleted once nothing uses it.
 - One vocabulary and one mapping, in one module:
 
 | State | Word | Colour | Icon |
@@ -84,7 +84,7 @@ ghr's web UI looks and reads like a part of GitHub: the boxes, status pills, run
 
 - Where a row has no room for a pill (run rows, job lists, step rows), the status shows as the icon alone in its colour, with the word as its accessible name. `ResultIcon` and `RunStatusIcon` keep their props and draw from the same mapping.
 - A spinner still marks a step or run that is in progress, and stops under reduced motion, as today.
-- Every text and icon colour in the table of §1.1 meets 4.5:1 on `surface` and on `ground` in its mode; the pill's text meets 4.5:1 on its own tinted fill (§7).
+- Every text and status colour in the table of §1.1 meets 4.5:1 on `surface` and on `ground` in its mode; a pill's icon meets 3:1 on its own tinted fill (§7).
 
 ## 2. Shell
 
@@ -230,10 +230,10 @@ Restyled only: the tokens, the box, the pill and the fonts. Steps, fields, wordi
 - Every reworked page's tests are updated to the new structure; assertions about behaviour that does not change stay. New shared pieces (`StatusPill`, `RunRow`, `SideLayout`, the top bar, the update banner) get tests sized like their neighbours in `web/src/components/page/`.
 - The router test covers the new settings and repository section routes, the two redirects, and the unknown-section case.
 - The existing axe checks stay on every page.
-- A new contrast test reads the palette from one module and checks, in both modes: text, muted, accent and each status colour on `surface` and on `ground` at 4.5:1; each pill's text on its tinted fill at 4.5:1; borders and status icons at 3:1.
+- A new contrast test reads the palette from one module and checks, in both modes: text, muted, accent and each status colour on `surface` and on `ground` at 4.5:1; each pill's icon on its tinted fill at 3:1.
 - The theme-init test covers a missing saved mode resolving to the system's mode.
 
-**Whole app.** `npm run build`, `npm run lint`, `npm run typecheck` and `npm test` in `web/`, then `go test ./...`, because the Go side embeds the built UI.
+**Whole app.** `npm run build`, `npm run lint`, `npm run typecheck` and `npm test` in `web/`, then the Go tests for `./internal/...`, `./cmd/...` and `./web/` (never `./...`, which walks `web/node_modules`), because the Go side embeds the built UI.
 
 **Manual, before release.** On the runner LXC, with the owner's yes for each deploy:
 - every page in light and in dark, at 1440px and at 400px wide, with no sideways page scroll;
