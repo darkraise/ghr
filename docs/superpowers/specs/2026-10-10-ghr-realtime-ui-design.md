@@ -25,7 +25,7 @@ The daemon computes all fingerprints in one pass per check (§2.3). Each fingerp
 | Topic | Fingerprint | Early wake |
 |---|---|---|
 | `status` | `Status` with `Now`, `RateRemaining`, `RateLimit`, `DiskUsedBytes` and `DiskTotalBytes` zeroed | - |
-| `gauges` | `Status.RateRemaining`, `RateLimit`, `DiskUsedBytes`, `DiskTotalBytes`, and `TokenStatus.RateRemaining`, `RateLimit`, `RateReset`, `CheckedAt` | - |
+| `gauges` | `Status.RateRemaining`, `RateLimit`, `DiskUsedBytes`, `DiskTotalBytes`, and `TokenStatus.RateRemaining`, `RateLimit`, `RateReset` | - |
 | `events` | counter: `events.Ring.Last()`, the last sequence number | `Ring.Add` |
 | `config` | `Backend.Config()` | - |
 | `token` | `TokenStatus` with `RateRemaining`, `RateLimit`, `RateReset` and `CheckedAt` set to nil | - |
@@ -33,6 +33,7 @@ The daemon computes all fingerprints in one pass per check (§2.3). Each fingerp
 | `history` | counter: `history.Store.Writes()` | `Append`, `Prune` |
 | `metrics` | `Backend.Metrics()` | - |
 
+- `TokenStatus.CheckedAt` is in no fingerprint. Every GitHub response moves it, about 15 times per poll cycle on an idle daemon, and each `gauges` notice refetches `keys.status`; the 60 s safety poll (§3.3) keeps the token's check time fresh instead. Amended 2026-10-10 after the manual checks found an idle daemon refetching status about once a second.
 - Topic names are lowercase ASCII and are the wire values.
 - A topic whose fingerprint cannot be computed in a check (an error, or a panic recovered in the daemon's source function) is left out of that check's map; the hub skips it and logs once per topic until it is computed again. It never stops the watcher.
 - New methods: `events.Ring.Last() int64`; `history.Store.Writes() int64`, bumped only when `Append` writes a line or `Prune` replaces the file, not on a duplicate append or a prune with no file.
@@ -154,6 +155,7 @@ Added to `api.NewServer` through a new `Backend.Subscribe() (*changes.Sub, error
 - `internal/events` and `internal/history`: `Last`, `Writes` (not bumped by a duplicate append or a prune with no file) and `SetOnChange`, under `-race`.
 - `internal/daemon`:
   - an idle daemon whose rate counter and disk bytes change publishes only `gauges` across several checks;
+  - a token check that moves only `CheckedAt` publishes nothing;
   - `status` ignores `Now`;
   - the fingerprint function calls `M.Status()` once per check;
   - an activity build that began before `BeforePublish` is not reused after it.
