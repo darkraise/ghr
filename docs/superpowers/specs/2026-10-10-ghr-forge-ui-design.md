@@ -88,14 +88,13 @@ ghr's web UI looks and reads like a part of GitHub: the boxes, status pills, run
 
 ## 2. Shell
 
-- The sidebar layout is replaced by a top bar and a tab row, built on the kit's `TopNavLayout`.
+- The sidebar layout is replaced by a top bar and a tab row in ghr's own markup. The kit's `TopNavLayout` is not used: it always renders a search box and a user menu, renders no badges, and hides its tabs below 768px.
 - **Top bar, left to right:** the ghr mark; the host name in mono; a spacer; the capacity segments with their text ("3 of 4 busy" in queue mode, "3 busy" in all mode, from `capacity()`); the colour-mode control; Log out.
 - **Tabs:** Dashboard, Runners (badge: live runners), Actions, History, a divider, Repositories (badge: configured count), Settings. The current tab has the 2px active-tab line and weight 600. A tab stays current on its nested pages: Runners on `/runners/$id`, Actions on run and job pages, Repositories on `/repositories/$name/…`, Settings on `/settings/…`.
 - **Content:** a centred column, at most 1216px wide, with 24px side padding.
 - **Banners,** in this order above the page content: Reconnecting, Degraded, First-run setup, then the runner update. `UpdateCard` leaves the navigation footer and renders as a banner with the same states, wording and actions.
 - **Narrow screens:** the tab row scrolls sideways inside itself and the page never does. Below 640px the host name hides and the capacity text hides, leaving the segments with the text as their accessible name.
-- **Kit check, the plan's first task.** It confirms that `TopNavLayout` gives a divider between tab groups, slots for the capacity and the mode control, badge counts, prefix matching for nested routes, and a scrolling tab row. For anything it lacks, ghr builds its own top bar and tab row from the kit's smaller components; the design above does not change.
-- **Removed with the sidebar:** the `Operate` and `Configure` group labels, the sidebar capacity panel, the widened rail and the CSS that hides the collapse toggle.
+- **Removed with the sidebar:** the `Operate` and `Configure` group labels, the sidebar capacity panel, the header's user menu (Log out is a button in the top bar), the widened rail and the CSS that hides the collapse toggle.
 
 ### 2.1 Colour mode
 
@@ -157,13 +156,14 @@ Rows sit in one box, divided by 1px lines, and highlight on hover. Group heading
 
 ## 5. Run and job pages
 
-- **Frame.** The breadcrumbs stay. The title row is a `StatusPill`, the run title, then "{workflow} #{run number}" in muted text. The attempt picker and "Open on GitHub" stay as header actions.
+- **Frame.** The breadcrumbs, the run title and its description sentence stay. The run's state shows as a `StatusPill` first in the header's actions, ahead of the attempt picker and "Open on GitHub". The kit's page header takes its title and description as plain text, so the pill cannot sit inside the title.
 - **Left list.** Summary, the jobs, and Run details stay. The current entry has the `sunk` fill and the accent left marker. Each job entry is a status icon, the name and the duration in mono.
 - **Summary** becomes one box holding a row of label-over-value pairs: Triggered via (event, actor, short SHA, pull requests), Status, Total duration, Artifacts. The pairs wrap below 800px.
-- **Graph.** The box body is a `ground` canvas. Each job is a `surface` card with a 1px border: status icon, name, and the duration right-aligned in mono; the selected or hovered card takes the accent border. Connectors are 1px `muted` lines. Layout, the timeline fallback and its reason line come from `internal/wfgraph` and the existing component unchanged.
+- **Graph.** The box body is a `ground` canvas. Each job is a `surface` card with a 1px border: status icon, name, and the duration right-aligned in mono; a hovered or focused card takes the accent border. Connectors are 1px `muted` lines. Layout, the timeline fallback and its reason line come from `internal/wfgraph` and the existing component unchanged.
 - **Annotations and Artifacts** are boxes with header bands. Their rows, counts, status lines and download flow are unchanged.
 - **Job page.** The heading box keeps the job facts. Steps and log become one dark panel:
-  - its header holds the job name, the duration, the "Search logs" box and "Raw log";
+  - its header holds the job's status icon, name and duration, the "Search logs" box and "Raw log";
+  - a running or queued job's step list sits in the same dark panel, with the note "Logs appear when the job finishes.";
   - each step is a row inside the dark panel (chevron, status icon, name, duration in mono) that expands to its lines;
   - an `error` line keeps its tint and gains a 2px `failed` marker on its left edge; `warning` gets the same in `waiting`.
 - Unchanged: which step opens first, `step` and `line` links, groups, ANSI handling, the 5,000-line cut, search, the running-job note and every error state of run-details §1.6.
@@ -208,7 +208,7 @@ A new `SideLayout` in `web/src/components/page/` gives the GitHub-settings frame
 
 ### 6.4 Repository page
 
-The header stays above the frame: breadcrumb, name, state as a `StatusPill` with the state sentence, and the actions Pause or Resume, View history and the More actions menu.
+The header stays above the frame: breadcrumb, name, the state sentence, and the actions, which open with the state as a `StatusPill` ahead of Pause or Resume, View history and the More actions menu.
 
 | Left list | Content | Route |
 |---|---|---|
