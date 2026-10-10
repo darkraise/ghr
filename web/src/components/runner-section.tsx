@@ -7,7 +7,7 @@ import { api } from "@/api/client"
 import { keys, useStatus } from "@/api/hooks"
 import type { RunnerUpdate } from "@/api/types"
 import { Field, FieldGroup } from "@/components/page/field"
-import { StateText } from "@/components/page/state-text"
+import { StatusPill } from "@/components/page/status-pill"
 import { DAY_MS } from "@/lib/duration"
 import { ago, monthDay, plural } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
@@ -33,7 +33,7 @@ function VersionLine({ u, now }: { u: RunnerUpdate; now: number }) {
     return (
       <>
         {versions}
-        <StateText state="running" label="Updating" />
+        <StatusPill state="running" label="Updating" />
       </>
     )
   }
@@ -41,7 +41,7 @@ function VersionLine({ u, now }: { u: RunnerUpdate; now: number }) {
     return (
       <>
         {versions}
-        <StateText state="queued" />
+        <StatusPill state="queued" />
       </>
     )
   }
@@ -50,7 +50,7 @@ function VersionLine({ u, now }: { u: RunnerUpdate; now: number }) {
     return (
       <>
         {versions}
-        <StateText state={urgent ? "failed" : "waiting"} label="Update required" />
+        <StatusPill state={urgent ? "failed" : "waiting"} label="Update required" />
         <span className="text-sm text-muted-foreground">{deadlineText(u.deadline, now)}</span>
       </>
     )
@@ -60,7 +60,7 @@ function VersionLine({ u, now }: { u: RunnerUpdate; now: number }) {
     return (
       <>
         {installed}
-        <StateText state="up to date" />
+        <StatusPill state="up to date" />
         <span className="text-sm text-muted-foreground">{`checked ${ago(now - Date.parse(u.checked_at))}`}</span>
       </>
     )

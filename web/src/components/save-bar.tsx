@@ -18,7 +18,7 @@ export function SaveBar({
 }) {
   if (count === 0) return null
   return (
-    <div className="sticky bottom-0 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-border bg-card p-3">
+    <div className="sticky bottom-0 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card p-3">
       <span className="text-sm text-warning">{unsavedText(count)}</span>
       <div className="flex gap-2">
         <Button variant="outline" disabled={saving || disabled} onClick={onDiscard}>

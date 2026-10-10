@@ -76,7 +76,7 @@ export function InstalledSection({ storage, status, offline }: { storage: Storag
                   {groupByTool(tools).map((g) => (
                     <TableBody key={g.tool}>
                       <TableRow>
-                        <th scope="rowgroup" colSpan={5} className="pt-4 pb-1 text-left text-sm font-medium">
+                        <th scope="rowgroup" colSpan={5} className="pt-4 pb-1 text-left text-sm font-semibold">
                           {g.tool}
                         </th>
                       </TableRow>
@@ -107,7 +107,7 @@ export function InstalledSection({ storage, status, offline }: { storage: Storag
             )}
             {others.length > 0 && (
               <div className="flex flex-col gap-1">
-                <h3 className="text-sm font-medium">Installed by jobs</h3>
+                <h3 className="text-sm font-semibold">Installed by jobs</h3>
                 <p className="text-sm text-muted-foreground">A job's own setup step installed these. ghr does not manage them.</p>
                 <ul className="flex flex-col gap-1 text-sm">
                   {others.map((f) => (

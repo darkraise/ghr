@@ -22,7 +22,7 @@ export function DiskBreakdown({ status, storage, highWater }: { status: Status; 
   return (
     <div className="flex flex-col gap-3">
       <p className="flex flex-wrap items-baseline gap-x-2">
-        <span className="font-mono text-2xl font-medium">{status.disk_pct}%</span>
+        <span className="font-mono text-2xl font-semibold">{status.disk_pct}%</span>
         <span className="text-sm text-muted-foreground">{`${humanBytes(used)} of ${humanBytes(total)} used, prunes at ${highWater}%`}</span>
       </p>
       <div className="relative">

@@ -18,7 +18,7 @@ import { keys, useStatus, useToken } from "@/api/hooks"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { ErrorLine } from "@/components/page/error-line"
 import { Field, FieldGroup } from "@/components/page/field"
-import { StateText } from "@/components/page/state-text"
+import { StatusPill } from "@/components/page/status-pill"
 import { ago } from "@/lib/format"
 import { expiryText, rateText, tokenWord } from "@/lib/token"
 import { useNow } from "@/lib/use-now"
@@ -44,7 +44,7 @@ export function TokenSection() {
       <Field label="Status">
         {t ? (
           <>
-            <StateText state={tokenWord(t, now)} />
+            <StatusPill state={tokenWord(t, now)} />
             <span className="text-sm">{expiryText(t, now)}</span>
           </>
         ) : (

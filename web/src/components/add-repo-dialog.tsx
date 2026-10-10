@@ -79,7 +79,7 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
       </DialogHeader>
       <DialogBody className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium">Repository</span>
+          <span className="text-sm font-semibold">Repository</span>
           {picked ? <strong>{picked}</strong> : <span className="text-sm text-muted-foreground">Pick one below</span>}
         </div>
         <RepoPicker picked={picked} onPick={setPicked} />
@@ -96,7 +96,7 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
           />
         </div>
         <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium">Labels</span>
+          <span className="text-sm font-semibold">Labels</span>
           <TagField label="Labels" value={labels} onChange={setLabels} />
         </div>
         <div className="flex items-center gap-2">

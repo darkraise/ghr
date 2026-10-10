@@ -341,7 +341,7 @@ export function SetupPage() {
           })}
         </ol>
         <section aria-labelledby="setup-step">
-          <h2 id="setup-step" className="mb-4 text-lg font-medium">
+          <h2 id="setup-step" className="mb-4 text-lg font-semibold">
             {STEPS[current]}
           </h2>
           {body}

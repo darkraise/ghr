@@ -144,7 +144,7 @@ export function JobGraph({
             const hidden = members.length - GROUP_SHOWN
             return (
               <div key={node.key} className="absolute flex flex-col rounded-md border border-border bg-card hover:border-primary focus-within:border-primary px-3 py-1" style={style}>
-                <p className="flex h-8 items-center gap-2 text-sm font-medium">
+                <p className="flex h-8 items-center gap-2 text-sm font-semibold">
                   <span className="min-w-0 flex-1 truncate">{node.name}</span>
                   <span className="font-mono text-xs text-muted-foreground">{members.length}</span>
                 </p>

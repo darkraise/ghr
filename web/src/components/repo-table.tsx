@@ -96,7 +96,7 @@ export function RepoTable({
               <TableCell>
                 <a
                   href={`/repositories/${encodeURIComponent(r.name)}`}
-                  className="font-medium hover:underline"
+                  className="font-semibold hover:underline"
                   onClick={(e) => {
                     e.preventDefault()
                     e.stopPropagation()

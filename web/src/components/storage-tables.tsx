@@ -12,7 +12,7 @@ import type { PackageCache, Status, Storage } from "@/api/types"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { ErrorLine } from "@/components/page/error-line"
 import { Section } from "@/components/page/section"
-import { StateText } from "@/components/page/state-text"
+import { StatusPill } from "@/components/page/status-pill"
 import { RefusedHint } from "@/components/refused-hint"
 import { SizeBar } from "@/components/size-bar"
 import { ago, hhmm, humanBytes } from "@/lib/format"
@@ -157,7 +157,7 @@ export function OperationsSection({ storage, className = "" }: { storage: Storag
                   <TableCell className="font-mono">{hhmm(new Date(o.finished_at ?? o.started_at))}</TableCell>
                   <TableCell>{o.kind}</TableCell>
                   <TableCell>{o.target}</TableCell>
-                  <TableCell>{o.outcome && <StateText state={o.outcome} label={o.outcome === "ok" ? "OK" : undefined} />}</TableCell>
+                  <TableCell>{o.outcome && <StatusPill state={o.outcome} label={o.outcome === "ok" ? "OK" : undefined} />}</TableCell>
                   <TableCell className="whitespace-normal text-muted-foreground">{o.message}</TableCell>
                 </TableRow>
               ))}

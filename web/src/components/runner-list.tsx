@@ -71,7 +71,7 @@ export function RunnerList({
   return (
     <div className="flex flex-col gap-4">
       {ids.length > 0 && (
-        <ul aria-label="Runners" className="flex flex-col rounded-[10px] border border-border bg-card" onKeyDown={onKeyDown}>
+        <ul aria-label="Runners" className="flex flex-col rounded-md border border-border bg-card" onKeyDown={onKeyDown}>
           {status.instances.map((i) => (
             <li key={i.id} className="border-b border-border last:border-b-0">
               <Link
@@ -91,7 +91,7 @@ export function RunnerList({
               >
                 <span aria-hidden="true" className={`size-2.5 rounded-[2px] ${LIGHT[shown(i)] ?? "bg-muted-foreground"}`} />
                 <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                  <span className="font-mono font-medium">{i.id}</span>
+                  <span className="font-mono font-semibold">{i.id}</span>
                   <span className="sr-only">{sentence(shown(i))}</span>
                   <span className="text-muted-foreground">{i.repo}</span>
                 </span>
@@ -114,7 +114,7 @@ export function RunnerList({
       )}
       {waiting.length > 0 && (
         <section aria-labelledby="runners-waiting" className="flex flex-col gap-1">
-          <h2 id="runners-waiting" className="text-sm font-medium text-warning">
+          <h2 id="runners-waiting" className="text-sm font-semibold text-warning">
             Waiting
           </h2>
           <ul className="flex flex-col text-sm">

@@ -8,7 +8,7 @@ import { api } from "@/api/client"
 import { keys, useLabelCheck, useStatus } from "@/api/hooks"
 import { ErrorLine } from "@/components/page/error-line"
 import { FieldGroup } from "@/components/page/field"
-import { StateText } from "@/components/page/state-text"
+import { StatusPill } from "@/components/page/status-pill"
 import { ago, plural } from "@/lib/format"
 import { classify, OS_ARCH } from "@/lib/labels"
 import { useNow } from "@/lib/use-now"
@@ -62,7 +62,7 @@ export function LabelCheckGroup({
     return (
       <div key={i} className="flex flex-col gap-1.5 py-3 text-sm">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <StateText state={kind} />
+          <StatusPill state={kind} />
           {g.labels.length > 0 ? <span className="font-mono">{g.labels.join(", ")}</span> : <span>No labels (runner group)</span>}
           <span>{g.more > 0 ? `${g.jobs.join(", ")} +${g.more} more` : g.jobs.join(", ")}</span>
           <span className="text-muted-foreground">{`${plural(g.count, "job")}, last seen ${ago(now - Date.parse(g.last_seen))}`}</span>

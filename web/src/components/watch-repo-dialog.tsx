@@ -54,7 +54,7 @@ function WatchRepoForm({ onClose }: { onClose: () => void }) {
       <DialogBody className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">Its workflow runs show on the Actions page. ghr runs no runners for it.</p>
         <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium">Repository</span>
+          <span className="text-sm font-semibold">Repository</span>
           {picked ? <strong>{picked}</strong> : <span className="text-sm text-muted-foreground">Pick one below</span>}
         </div>
         <RepoPicker picked={picked} onPick={setPicked} disableWatched />

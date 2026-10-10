@@ -14,7 +14,7 @@ import { useContainers, useLogTail, useStatus, useSteps } from "@/api/hooks"
 import type { Container, InstanceStatus, Step } from "@/api/types"
 import { LogView } from "@/components/log-view"
 import { ErrorLine } from "@/components/page/error-line"
-import { StateText } from "@/components/page/state-text"
+import { StatusPill } from "@/components/page/status-pill"
 import { StepList } from "@/components/step-list"
 import { StopRunnerDialog } from "@/components/stop-runner-dialog"
 import { copyWithToast } from "@/lib/clipboard"
@@ -54,7 +54,7 @@ function Containers({ containers }: { containers: UseQueryResult<Container[]> })
         {containers.data.map((c) => (
           <TableRow key={c.id}>
             <TableCell>
-              <StateText state={c.state} />
+              <StatusPill state={c.state} />
             </TableCell>
             <TableCell className="font-mono">{c.name}</TableCell>
             <TableCell className="font-mono">{c.image}</TableCell>
@@ -124,7 +124,7 @@ export function RunnerPanel({ id, tab, backLink }: { id: string; tab: DetailTab;
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-col gap-3 rounded-[10px] border border-border bg-card p-4">
+      <div className="flex flex-col gap-3 rounded-md border border-border bg-card p-4">
         {backLink && (
           <Link to="/runners" aria-label="Back to Runners" className="inline-flex items-center gap-1 self-start text-sm text-primary hover:underline">
             <ChevronLeft size={15} aria-hidden="true" />
@@ -133,7 +133,7 @@ export function RunnerPanel({ id, tab, backLink }: { id: string; tab: DetailTab;
         )}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h2 className="font-mono text-lg font-semibold">{id}</h2>
-          {finished ? <StateText state="finished" /> : inst && <StateText state={inst.stopping ? "stopping" : inst.state} />}
+          {finished ? <StatusPill state="finished" /> : inst && <StatusPill state={inst.stopping ? "stopping" : inst.state} />}
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {runUrl && (
               <Button variant="outline" asChild>

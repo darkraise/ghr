@@ -9,7 +9,7 @@ import type { Registration } from "@/api/types"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { ErrorLine } from "@/components/page/error-line"
 import { FieldGroup } from "@/components/page/field"
-import { StateText } from "@/components/page/state-text"
+import { StatusPill } from "@/components/page/status-pill"
 import { errorText } from "@/query"
 
 export function RegistrationsGroup({
@@ -50,7 +50,7 @@ export function RegistrationsGroup({
       ) : (
         (regs.data ?? []).map((r) => (
           <div key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3 text-sm">
-            <StateText state={r.busy ? "busy" : r.status} />
+            <StatusPill state={r.busy ? "busy" : r.status} />
             {r.ghr && <span className="text-muted-foreground">ghr</span>}
             <span>{r.name}</span>
             <span className="font-mono text-xs text-muted-foreground">{r.labels.join(" ")}</span>

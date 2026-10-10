@@ -38,7 +38,7 @@ export function Field({
           {label}
         </Label>
       ) : (
-        <span className="text-sm font-medium sm:pt-2">{label}</span>
+        <span className="text-sm font-semibold sm:pt-2">{label}</span>
       )}
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
