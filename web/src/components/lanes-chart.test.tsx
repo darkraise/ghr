@@ -60,7 +60,8 @@ describe("LanesChart", () => {
     for (const state of ["running", "warm"]) {
       const box = container.querySelector(`rect[data-state="${state}"]`)
       expect(box).toHaveClass("fill-none", "stroke-muted-foreground")
-      expect(box).not.toHaveClass("fill-running", "stroke-running")
+      expect(box).not.toHaveClass("fill-running")
+      expect(box).not.toHaveClass("stroke-running")
       expect(box).toHaveAttribute("stroke-dasharray", "3 2")
     }
     expect(container.querySelector(".ghr-pulse")).toBeNull()
