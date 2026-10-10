@@ -137,6 +137,7 @@ type instance struct {
 	retryFinish  time.Time // when a failed finish may run again
 	cleanupFails int       // consecutive failed Docker cleanups
 	deregistered bool      // stopIdleRunner deleted its registration
+	stopping     bool      // Kill asked systemd to stop the unit
 }
 
 type Manager struct {
@@ -470,6 +471,7 @@ func (m *Manager) Status() model.Status {
 	for _, i := range m.insts {
 		st.Instances = append(st.Instances, model.InstanceStatus{
 			ID: i.ID, Repo: i.Repo, RunnerName: i.RunnerName, State: string(i.State), Since: i.StateSince, Job: i.Job,
+			Stopping: i.stopping && i.State != sched.Cleaning,
 		})
 	}
 	sort.Slice(st.Instances, func(a, b int) bool {
@@ -486,15 +488,26 @@ type ErrUnknownRunner string
 
 func (e ErrUnknownRunner) Error() string { return "unknown runner " + string(e) }
 
-// Kill stops a runner's unit; its exit is handled by the next tick.
+// Kill stops a runner's unit and marks the runner stopping until a tick
+// handles its exit. The stop does not end with ctx: a caller that gives up
+// would kill systemctl while the unit may still be stopping, and the runner
+// would read as running again.
 func (m *Manager) Kill(ctx context.Context, id string) error {
 	m.mu.Lock()
 	i, ok := m.insts[id]
+	if ok {
+		i.stopping = true
+	}
 	m.mu.Unlock()
 	if !ok {
 		return ErrUnknownRunner(id)
 	}
-	if err := m.SD.Stop(ctx, UnitPrefix+id); err != nil {
+	if err := m.SD.Stop(context.WithoutCancel(ctx), UnitPrefix+id); err != nil {
+		m.mu.Lock()
+		if cur, ok := m.insts[id]; ok {
+			cur.stopping = false
+		}
+		m.mu.Unlock()
 		return err
 	}
 	m.Events.Add("warn", i.Repo, "runner %s stopped by user", id)

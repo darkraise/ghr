@@ -588,6 +588,80 @@ func TestKill(t *testing.T) {
 	}
 }
 
+// stoppingOf is the Stopping flag Status reports for id.
+func stoppingOf(h *harness, id string) bool {
+	for _, i := range h.m.Status().Instances {
+		if i.ID == id {
+			return i.Stopping
+		}
+	}
+	return false
+}
+
+func TestKillMarksTheRunnerStoppingWhileItsUnitStops(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.sd.stopGate, h.sd.stopEntered = make(chan struct{}), make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- h.m.Kill(ctx, "aaaaaa") }()
+	<-h.sd.stopEntered
+	if !stoppingOf(h, "aaaaaa") || h.state("aaaaaa") != "starting" {
+		t.Fatalf("while the unit stops: stopping %v state %s", stoppingOf(h, "aaaaaa"), h.state("aaaaaa"))
+	}
+	// The caller gives up: the stop goes on and the flag stays.
+	cancel()
+	select {
+	case err := <-done:
+		t.Fatalf("Kill returned %v when its caller's context ended", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if !stoppingOf(h, "aaaaaa") {
+		t.Fatal("flag cleared when the caller's context ended")
+	}
+	close(h.sd.stopGate)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !stoppingOf(h, "aaaaaa") || !strings.Contains(h.eventText(), "runner aaaaaa stopped by user") {
+		t.Fatalf("after the stop: stopping %v events %s", stoppingOf(h, "aaaaaa"), h.eventText())
+	}
+}
+
+func TestKillClearsStoppingWhenTheStopFails(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.sd.stopErr["ghr-runner-aaaaaa"] = errors.New("bus error")
+	if err := h.m.Kill(context.Background(), "aaaaaa"); err == nil || err.Error() != "bus error" {
+		t.Fatalf("kill err %v", err)
+	}
+	if stoppingOf(h, "aaaaaa") || strings.Contains(h.eventText(), "stopped by user") {
+		t.Fatalf("stopping %v events %s", stoppingOf(h, "aaaaaa"), h.eventText())
+	}
+}
+
+// The flag stays on the instance after a stop; Status hides it once the tick
+// has seen the unit exit.
+func TestACleaningRunnerNeverReportsStopping(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud")
+	h.writeJob(t, "aaaaaa", 55)
+	h.gh.setJobs(55, completedJob(h, 55, "ghr-darkcloud-aaaaaa", "success"))
+	h.docker.setErr("RemoveVolumesByLabel", errors.New("volume in use"))
+	if err := h.m.Kill(context.Background(), "aaaaaa"); err != nil {
+		t.Fatal(err)
+	}
+	if !stoppingOf(h, "aaaaaa") {
+		t.Fatal("flag cleared by a successful stop")
+	}
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if h.state("aaaaaa") != "cleaning" || stoppingOf(h, "aaaaaa") {
+		t.Fatalf("state %s stopping %v", h.state("aaaaaa"), stoppingOf(h, "aaaaaa"))
+	}
+}
+
 func TestPendingListsJobsAwaitingTheirConclusion(t *testing.T) {
 	h := newHarness(t)
 	e := model.HistoryEntry{ID: "aaaaaa", Repo: "darkmem", RunID: 7, JobName: "build", Conclusion: "unknown",

@@ -92,6 +92,8 @@ type InstanceStatus struct {
 	State      string    `json:"state"`
 	Since      time.Time `json:"since"`
 	Job        *JobInfo  `json:"job,omitempty"`
+	// Stopping is true from a person's stop request until the unit has exited.
+	Stopping bool `json:"stopping,omitempty"`
 }
 
 type JobInfo struct {

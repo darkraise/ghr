@@ -167,6 +167,10 @@ type fakeSD struct {
 	active    map[string]bool
 	stopErr   map[string]error // by unit
 	activeErr map[string]error // by unit
+	// stopGate, when set, holds every Stop until it is closed or the call's
+	// context ends; stopEntered receives once per held call.
+	stopGate    chan struct{}
+	stopEntered chan struct{}
 }
 
 func newFakeSD() *fakeSD {
@@ -181,7 +185,18 @@ func (f *fakeSD) Start(_ context.Context, u system.UnitSpec) error {
 	return nil
 }
 
-func (f *fakeSD) Stop(_ context.Context, unit string) error {
+func (f *fakeSD) Stop(ctx context.Context, unit string) error {
+	f.mu.Lock()
+	gate, entered := f.stopGate, f.stopEntered
+	f.mu.Unlock()
+	if gate != nil {
+		entered <- struct{}{}
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.stopErr[unit]; err != nil {
