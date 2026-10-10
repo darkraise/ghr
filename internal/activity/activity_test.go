@@ -2,6 +2,7 @@ package activity
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -122,6 +123,39 @@ func TestLiveInstances(t *testing.T) {
 	}
 	if sg := runs["done"].Segments; len(sg) != 1 || sg[0].State != "succeeded" || sg[0].To == nil || !sg[0].To.Equal(at(13, 20)) {
 		t.Fatalf("finished run %+v", sg)
+	}
+}
+
+func TestStoppingInstancesKeepTheirSegments(t *testing.T) {
+	build := func(stopping bool) map[string]model.ActivityRun {
+		a := Build(Input{Window: "1h", Now: now,
+			History: []model.HistoryEntry{job("done", at(13, 10), at(13, 20), "success")},
+			Instances: []model.InstanceStatus{
+				{ID: "s", Repo: "ghr", State: "starting", Since: at(14, 4), Stopping: stopping},
+				{ID: "w", Repo: "darkmem", State: "idle", Since: at(14, 0), Stopping: stopping},
+				{ID: "r", Repo: "darkmem", State: "busy", Since: at(13, 59), Stopping: stopping,
+					Job: &model.JobInfo{RunNumber: "42", Workflow: "ci", Name: "test", StartedAt: at(14, 1)}},
+				{ID: "done", Repo: "darkmem", State: "busy", Since: at(13, 10), Stopping: stopping},
+			}})
+		runs := map[string]model.ActivityRun{}
+		for _, l := range a.Lanes {
+			for _, r := range l.Runs {
+				runs[r.InstanceID] = r
+			}
+		}
+		return runs
+	}
+	plain, stopping := build(false), build(true)
+	for _, id := range []string{"s", "w", "r"} {
+		if plain[id].Stopping || !stopping[id].Stopping {
+			t.Fatalf("%s: stopping %v without the flag, %v with it", id, plain[id].Stopping, stopping[id].Stopping)
+		}
+		if !reflect.DeepEqual(plain[id].Segments, stopping[id].Segments) {
+			t.Fatalf("%s: segments %+v became %+v", id, plain[id].Segments, stopping[id].Segments)
+		}
+	}
+	if stopping["done"].Stopping {
+		t.Fatal("a run built from a finished job carries the flag")
 	}
 }
 

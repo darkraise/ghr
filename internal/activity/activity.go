@@ -163,7 +163,7 @@ func runs(in Input, loc *time.Location) []model.ActivityRun {
 		if seen[i.ID] {
 			continue
 		}
-		r := model.ActivityRun{InstanceID: i.ID, Repo: i.Repo}
+		r := model.ActivityRun{InstanceID: i.ID, Repo: i.Repo, Stopping: i.Stopping}
 		switch i.State {
 		case "starting":
 			r.Segments = []model.ActivitySegment{{State: "starting", From: i.Since.In(loc)}}

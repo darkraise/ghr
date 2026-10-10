@@ -476,6 +476,9 @@ type ActivityRun struct {
 	RunNumber  string            `json:"run_number,omitempty"`
 	Segments   []ActivitySegment `json:"segments"`
 	HTMLURL    string            `json:"html_url,omitempty"`
+	// Stopping is the live instance's flag; a run built from a finished job
+	// never carries it.
+	Stopping bool `json:"stopping,omitempty"`
 }
 
 // ActivitySegment is a stretch of one state; To is null while it lasts.
