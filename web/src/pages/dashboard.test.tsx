@@ -135,4 +135,13 @@ describe("Dashboard page", () => {
     await screen.findByRole("region", { name: "Disk" })
     expect(region("Disk").queryByText("/var/lib/docker")).toBeNull()
   })
+
+  it("opens a repository's settings section from Edit", async () => {
+    mockApi(authedRoutes())
+    const { user, router } = renderApp("/")
+    const name = "darkmem"
+    await user.click(await screen.findByRole("button", { name: `More actions for ${name}` }))
+    await user.click(await screen.findByRole("menuitem", { name: "Edit" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/repositories/${name}/settings`))
+  })
 })

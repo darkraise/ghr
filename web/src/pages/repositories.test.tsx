@@ -1,26 +1,28 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
+import { keys } from "@/api/hooks"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
-const row = (name: string) => within(screen.getByRole("link", { name }).closest("tr") as HTMLElement)
+const row = (name: string) => within(screen.getByRole("link", { name }).closest("li") as HTMLElement)
 
 describe("Repositories page", () => {
   it("sums up the repositories in the header", async () => {
     mockApi(authedRoutes())
     renderApp("/repositories")
-    expect(await screen.findByText("2 configured, 1 running, 1 paused")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Add repository" })).toBeEnabled()
+    const configured = within(await screen.findByRole("region", { name: "Configured repositories" }))
+    expect(configured.getByText("2 configured, 1 running, 1 paused")).toBeInTheDocument()
+    expect(configured.getByRole("button", { name: "Add repository" })).toBeEnabled()
   })
 
   it("lists every repository with the week's success rate and labels", async () => {
     mockApi(authedRoutes())
     renderApp("/repositories")
     const table = within(await screen.findByRole("region", { name: "Configured repositories" }))
-    expect(table.getByRole("columnheader", { name: "7 days" })).toBeInTheDocument()
     await waitFor(() => expect(row("darkmem").getByText("50%")).toBeInTheDocument())
     expect(row("darkmem").getByText("gpu")).toBeInTheDocument()
+    expect(table.getByText("2 configured, 1 running, 1 paused")).toBeInTheDocument()
     expect(row("old-repo").getByText("Removing. Running jobs finish first.")).toBeInTheDocument()
   })
 
@@ -51,8 +53,22 @@ describe("Repositories page", () => {
     mockApi(authedRoutes({ "GET /api/status": { ...fixtures.status, repos: [] } }))
     renderApp("/repositories")
     expect(await screen.findByText("No repositories yet")).toBeInTheDocument()
-    expect(screen.getAllByRole("button", { name: "Add repository" })).toHaveLength(2)
-    expect(screen.queryByRole("region", { name: "Configured repositories" })).toBeNull()
+    const box = screen.getByRole("region", { name: "Configured repositories" })
+    expect(within(box).getByText("No repositories yet")).toBeInTheDocument()
+    expect(within(box).getByRole("button", { name: "Add repository" })).toBeEnabled()
+    expect(screen.getAllByRole("button", { name: "Add repository" })).toHaveLength(1)
+  })
+
+  it("keeps the same Add button when the first repository appears", async () => {
+    let repos = [] as typeof fixtures.status.repos
+    mockApi(authedRoutes({ "GET /api/status": () => json({ ...fixtures.status, repos }) }))
+    const { queryClient } = renderApp("/repositories")
+    await screen.findByText("No repositories yet")
+    const add = screen.getByRole("button", { name: "Add repository" })
+    repos = fixtures.status.repos
+    await queryClient.invalidateQueries({ queryKey: keys.status })
+    await screen.findByRole("link", { name: "darkmem" })
+    expect(screen.getByRole("button", { name: "Add repository" })).toBe(add)
   })
 
   it("pauses a repository from its row menu", async () => {
@@ -93,7 +109,8 @@ describe("Repositories page", () => {
   it("shows warm in all mode", async () => {
     mockApi(authedRoutes({ "GET /api/config": { ...fixtures.config, mode: "all" } }))
     renderApp("/repositories")
-    expect(await screen.findByRole("columnheader", { name: "Warm" })).toBeInTheDocument()
+    await screen.findByRole("region", { name: "Configured repositories" })
+    expect(await row("darkmem").findByText("Warm 1")).toBeInTheDocument()
   })
 
   it("lists the watched repositories", async () => {

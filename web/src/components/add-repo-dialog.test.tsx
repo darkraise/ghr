@@ -146,7 +146,7 @@ describe("Add repository dialog", () => {
     mockApi(routes({ "GET /api/status": { ...fixtures.status, repos: [] } }))
     renderApp("/repositories")
     await screen.findByText("No repositories yet")
-    expect(screen.getAllByRole("button", { name: "Add repository" })).toHaveLength(2)
+    expect(screen.getAllByRole("button", { name: "Add repository" })).toHaveLength(1)
   })
 
   it("shows a busy Add while the request runs", async () => {
