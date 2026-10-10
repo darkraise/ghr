@@ -58,6 +58,21 @@ func TestIdleCountersChangeOnlyGauges(t *testing.T) {
 	}
 }
 
+// Every GitHub response moves the token's check time, several times a second
+// while the daemon polls; on its own that must not publish anything.
+func TestATokenCheckAloneChangesNoTopic(t *testing.T) {
+	b, _, gh := newBackend(t)
+	now := time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)
+	limit, rem := 5000, 4990
+	reset := now.Add(time.Hour)
+	gh.meta = github.TokenMeta{CheckedAt: now, OK: true, RateLimit: &limit, RateRemaining: &rem, RateReset: &reset}
+	prev := b.fingerprints()
+	gh.meta.CheckedAt = now.Add(400 * time.Millisecond)
+	if got := changed(prev, b.fingerprints()); len(got) != 0 {
+		t.Fatalf("a new check time changed %v", got)
+	}
+}
+
 func TestStatusFingerprintIgnoresNow(t *testing.T) {
 	b, m, _ := newBackend(t)
 	prev := b.fingerprints()

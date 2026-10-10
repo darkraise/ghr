@@ -75,7 +75,10 @@ func (b *Backend) fingerprints() map[string]uint64 {
 	})
 	hash("gauges", func() any {
 		st, ts := status(), token()
-		return []any{st.RateRemaining, st.DiskUsedBytes, st.DiskTotalBytes, ts.RateRemaining, ts.RateLimit, ts.RateReset, ts.CheckedAt}
+		// CheckedAt is left out: every GitHub response moves it, several times
+		// a second while the daemon polls, and the browser's safety poll
+		// refreshes it.
+		return []any{st.RateRemaining, st.DiskUsedBytes, st.DiskTotalBytes, ts.RateRemaining, ts.RateLimit, ts.RateReset}
 	})
 	count("events", b.Events.Last)
 	hash("config", b.Config)
