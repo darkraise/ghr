@@ -13,10 +13,11 @@ import (
 const Capacity = 1000
 
 type Ring struct {
-	Now   func() time.Time
-	mu    sync.Mutex
-	seq   int64
-	items []model.Event
+	Now      func() time.Time
+	mu       sync.Mutex
+	seq      int64
+	items    []model.Event
+	onChange func()
 }
 
 func New() *Ring { return &Ring{Now: time.Now} }
@@ -30,8 +31,27 @@ func (r *Ring) Add(level, repo, format string, args ...any) {
 	if len(r.items) > Capacity {
 		r.items = r.items[len(r.items)-Capacity:]
 	}
+	fn := r.onChange
 	r.mu.Unlock()
 	log.Printf("%s %s %s", level, repo, msg)
+	if fn != nil {
+		fn()
+	}
+}
+
+// SetOnChange installs fn, which Add calls after it releases the ring's lock;
+// nil removes it.
+func (r *Ring) SetOnChange(fn func()) {
+	r.mu.Lock()
+	r.onChange = fn
+	r.mu.Unlock()
+}
+
+// Last returns the newest event's sequence number, 0 before any event.
+func (r *Ring) Last() int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.seq
 }
 
 // After returns events with Seq > seq, oldest first.
