@@ -105,6 +105,7 @@ ghr serves a browser UI with every page and action ghr offers. The example confi
 4. On the LAN the UI is plain HTTP: the password and the session cookie cross the network unencrypted. Put nginx-proxy-manager in front for TLS, and bind `listen` to a LAN-only address; change it from `0.0.0.0` if the LXC has more than one network.
 5. Behind the proxy every browser shares the proxy's address, so five wrong passwords in 15 minutes lock everyone out for 15 minutes. Put an nginx-proxy-manager access list in front of the host.
 6. Sessions live in memory: every restart, including each `setup.sh` upgrade, logs you out.
+7. The UI receives updates over one long-lived request, `/api/changes`. ghr marks it `X-Accel-Buffering: no`, which nginx honours, and sends a ping every 15 s, inside nginx's default 60 s read timeout, so nginx-proxy-manager needs no extra settings. Another proxy must pass the response through unbuffered and allow 15 s of silence. If the stream cannot stay open, the UI still works and falls back to polling.
 
 ```yaml
 web:
