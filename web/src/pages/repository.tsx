@@ -128,7 +128,7 @@ function HeaderActions({ name, repo, offline }: { name: string; repo: RepoStatus
 }
 
 export function RepositoryPage() {
-  const { name } = useParams({ from: "/app/repositories/$name" })
+  const { name = "" } = useParams({ strict: false })
   // Keyed by name: each repository starts with its own empty draft.
   return <RepositoryForm key={name} name={name} />
 }

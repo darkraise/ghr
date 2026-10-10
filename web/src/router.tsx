@@ -159,6 +159,14 @@ const jobRoute = createRoute({
 const toolchainsRoute = createRoute({ getParentRoute: () => appRoute, path: "/toolchains", component: ToolchainsPage })
 const storageRoute = createRoute({ getParentRoute: () => appRoute, path: "/storage", component: StoragePage })
 const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings", component: SettingsPage })
+// The section pages read $section themselves, so the route table does not
+// change when a page gains or loses a section.
+const settingsSectionRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings/$section", component: SettingsPage })
+const repositorySectionRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/repositories/$name/$section",
+  component: RepositoryPage,
+})
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
@@ -167,6 +175,7 @@ const routeTree = rootRoute.addChildren([
     dashboardRoute,
     repositoriesRoute,
     repositoryRoute,
+    repositorySectionRoute,
     runnersRoute,
     runnerRoute,
     actionsRoute,
@@ -176,6 +185,7 @@ const routeTree = rootRoute.addChildren([
     toolchainsRoute,
     storageRoute,
     settingsRoute,
+    settingsSectionRoute,
   ]),
 ])
 

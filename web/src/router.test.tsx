@@ -84,6 +84,21 @@ describe("routes", () => {
     expect(await screen.findByRole("heading", { name: "History" })).toBeInTheDocument()
   })
 
+  it("serves a settings section under /settings", async () => {
+    mockApi(authedRoutes())
+    const { router } = renderApp("/settings/token")
+    expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/settings/token")
+    expect(router.state.matches.at(-1)?.routeId).toBe("/app/settings/$section")
+  })
+
+  it("serves a repository section under its repository", async () => {
+    mockApi(authedRoutes())
+    const { router } = renderApp("/repositories/darkmem/settings")
+    expect(await screen.findByRole("heading", { level: 1, name: "darkmem" })).toBeInTheDocument()
+    expect(router.state.matches.at(-1)?.routeId).toBe("/app/repositories/$name/$section")
+  })
+
   it("reads the runner detail tab from the search", async () => {
     mockApi(authed)
     const router = renderAt("/runners/aaaaaa?tab=log")
