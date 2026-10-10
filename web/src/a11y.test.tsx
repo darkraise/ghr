@@ -177,7 +177,19 @@ describe("Settings accessibility", () => {
       setViewport(1280)
       mockApi(authedRoutes({ "GET /api/token": fixtures.token }))
       renderApp("/settings")
-      await screen.findByRole("navigation", { name: "Sections" })
+      await screen.findByRole("navigation", { name: "Settings" })
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+
+  it(
+    "has no axe violations on the token section at 1280px",
+    async () => {
+      setViewport(1280)
+      mockApi(authedRoutes({ "GET /api/token": fixtures.token }))
+      renderApp("/settings/token")
+      await screen.findByRole("navigation", { name: "Settings" })
       await screen.findByText("4,980 of 5,000, resets 14:45")
       expect(await violations()).toEqual([])
     },

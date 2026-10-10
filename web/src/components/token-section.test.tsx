@@ -21,7 +21,7 @@ function token(over: Partial<TokenStatus> = {}): TokenStatus {
 describe("GitHub token section", () => {
   it("shows the token's state, expiry and rate limit", async () => {
     mockApi(authedRoutes({ "GET /api/token": token() }))
-    renderApp("/settings")
+    renderApp("/settings/token")
     expect(await screen.findByText("Expires Dec 2, in 60 days")).toBeInTheDocument()
     const section = within(screen.getByRole("region", { name: "GitHub token" }))
     expect(section.getByText("Valid")).toHaveClass("text-foreground")
@@ -31,13 +31,13 @@ describe("GitHub token section", () => {
 
   it("warns when the token expires within 14 days", async () => {
     mockApi(authedRoutes({ "GET /api/token": token({ expires_at: new Date(DAEMON_NOW + 10 * DAY).toISOString() }) }))
-    renderApp("/settings")
+    renderApp("/settings/token")
     expect(await screen.findByText("Expires soon")).toBeInTheDocument()
   })
 
   it("shows a rejected token's reason", async () => {
     mockApi(authedRoutes({ "GET /api/token": { state: "rejected", reason: "Bad credentials" } }))
-    renderApp("/settings")
+    renderApp("/settings/token")
     expect(await screen.findByText("Bad credentials")).toBeInTheDocument()
     expect(screen.getByText("Rejected")).toBeInTheDocument()
     expect(screen.getByText("Expiry unknown")).toBeInTheDocument()
@@ -46,7 +46,7 @@ describe("GitHub token section", () => {
   it("offers a retry when the token cannot be read", async () => {
     let down = true
     mockApi(authedRoutes({ "GET /api/token": () => (down ? json({ error: "daemon busy" }, 500) : token()) }))
-    const { user } = renderApp("/settings")
+    const { user } = renderApp("/settings/token")
     expect(await screen.findByText("daemon busy")).toBeInTheDocument()
     down = false
     await user.click(screen.getByRole("button", { name: "Try again" }))
@@ -55,7 +55,7 @@ describe("GitHub token section", () => {
 
   it("replaces the token only after confirmation, sending it raw", async () => {
     const { calls } = mockApi(authedRoutes({ "GET /api/token": token(), "PUT /api/token": () => noContent() }))
-    const { user } = renderApp("/settings")
+    const { user } = renderApp("/settings/token")
     await user.click(await screen.findByRole("button", { name: "Replace token" }))
     const dialog = await screen.findByRole("dialog")
     await user.click(within(dialog).getByRole("button", { name: "Replace" }))
@@ -84,7 +84,7 @@ describe("GitHub token section", () => {
         "PUT /api/token": () => json({ error: "new token rejected: Bad credentials" }, 400),
       }),
     )
-    const { user } = renderApp("/settings")
+    const { user } = renderApp("/settings/token")
     await user.click(await screen.findByRole("button", { name: "Replace token" }))
     const dialog = await screen.findByRole("dialog")
     await user.type(within(dialog).getByLabelText("Token"), "github_pat_bad")
@@ -96,7 +96,7 @@ describe("GitHub token section", () => {
   it("does not show an error from a replace that ended after the dialog closed", async () => {
     let answer: (r: Response) => void = () => undefined
     mockApi(authedRoutes({ "GET /api/token": token(), "PUT /api/token": () => new Promise<Response>((resolve) => (answer = resolve)) }))
-    const { user } = renderApp("/settings")
+    const { user } = renderApp("/settings/token")
     await user.click(await screen.findByRole("button", { name: "Replace token" }))
     const dialog = await screen.findByRole("dialog")
     await user.type(within(dialog).getByLabelText("Token"), "github_pat_bad")
@@ -113,7 +113,7 @@ describe("GitHub token section", () => {
 
   it("leaves the rate limit blank until it is known, and says when nothing is read yet", async () => {
     mockApi(authedRoutes({ "GET /api/token": () => new Promise(() => {}) }))
-    renderApp("/settings")
+    renderApp("/settings/token")
     const section = within(await screen.findByRole("region", { name: "GitHub token" }))
     expect(section.getByText("Not read yet")).toBeInTheDocument()
     expect(section.queryByText("–")).toBeNull()

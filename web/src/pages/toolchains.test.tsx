@@ -12,6 +12,13 @@ const sdk = (version: string): Toolchain => ({ tool: "dotnet", version, arch: "x
 const installed = () => within(screen.getByRole("region", { name: "Installed" }))
 
 describe("Toolchains page", () => {
+  it("is served inside Settings", async () => {
+    mockApi(routes())
+    renderApp("/settings/toolchains")
+    expect(await screen.findByRole("heading", { level: 1, name: "Toolchains" })).toBeInTheDocument()
+    expect(screen.getByRole("navigation", { name: "Settings" })).toBeInTheDocument()
+  })
+
   it("offers Install and the popular set in the header", async () => {
     mockApi(routes())
     renderApp("/toolchains")

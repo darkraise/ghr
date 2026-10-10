@@ -10,6 +10,13 @@ const routes = (over: Record<string, unknown> = {}) => authedRoutes({ "GET /api/
 const region = (name: string) => within(screen.getByRole("region", { name }))
 
 describe("Storage page", () => {
+  it("is served inside Settings", async () => {
+    mockApi(routes())
+    renderApp("/settings/storage")
+    expect(await screen.findByRole("heading", { level: 1, name: "Storage" })).toBeInTheDocument()
+    expect(screen.getByRole("navigation", { name: "Settings" })).toBeInTheDocument()
+  })
+
   it("sums up Docker's disk use in the header", async () => {
     mockApi(routes())
     renderApp("/storage")

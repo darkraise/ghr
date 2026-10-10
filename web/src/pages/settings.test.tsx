@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest"
 import type { Config } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
-import { setViewport } from "@/test/media"
 import { renderApp } from "@/test/render"
 
 function routes(over: Record<string, unknown> = {}) {
@@ -284,27 +283,12 @@ describe("Settings page layout", () => {
     expect(await screen.findByText("Serving darkraise in queue mode")).toBeInTheDocument()
   })
 
-  it("indexes every section at 1280px", async () => {
-    setViewport(1280)
-    mockApi(routes())
-    renderApp("/settings")
-    const nav = within(await screen.findByRole("navigation", { name: "Sections" }))
-    expect(nav.getAllByRole("button").map((b) => b.textContent)).toEqual([
-      "General",
-      "Timing",
-      "Disk and retention",
-      "Runner defaults",
-      "GitHub token",
-      "Runner and config",
-      "Account",
-    ])
-  })
-
   it("counts only config fields in the save bar", async () => {
     mockApi(routes())
-    const { user } = renderApp("/settings")
+    const { user } = renderApp("/settings/account")
     await user.type(await screen.findByLabelText("Current password"), "old password 1")
     expect(screen.queryByText(/unsaved change/)).toBeNull()
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull()
   })
 })
 
@@ -318,7 +302,7 @@ describe("Account section", () => {
 
   it("changes the password", async () => {
     const { calls } = mockApi(routes({ "POST /auth/password": () => noContent() }))
-    const { user } = renderApp("/settings")
+    const { user } = renderApp("/settings/account")
     await fill(user, "old password 1", "new password 12", "new password 12")
     await waitFor(() => expect(calls.some((c) => c.path === "/auth/password")).toBe(true))
     expect(calls.find((c) => c.path === "/auth/password")?.body).toEqual({ current: "old password 1", new: "new password 12" })
@@ -328,7 +312,7 @@ describe("Account section", () => {
 
   it("checks the new password before sending", async () => {
     const { calls } = mockApi(routes())
-    const { user } = renderApp("/settings")
+    const { user } = renderApp("/settings/account")
     await fill(user, "old password 1", "short", "short")
     expect(await screen.findByText("Password must be 12 to 1024 bytes")).toBeInTheDocument()
     await user.clear(screen.getByLabelText("New password"))
@@ -340,10 +324,10 @@ describe("Account section", () => {
 
   it("says when the current password is wrong", async () => {
     mockApi(routes({ "POST /auth/password": () => json({ error: "wrong password" }, 401) }))
-    const { user, router } = renderApp("/settings")
+    const { user, router } = renderApp("/settings/account")
     await fill(user, "bad password 1", "new password 12", "new password 12")
     expect(await screen.findByRole("alert")).toHaveTextContent("The current password is wrong")
-    expect(router.state.location.pathname).toBe("/settings")
+    expect(router.state.location.pathname).toBe("/settings/account")
   })
 
   it("leaves Log out to the shell, which leaves without asking about unsaved edits", async () => {
@@ -358,13 +342,71 @@ describe("Account section", () => {
       }),
     )
     const { user, router } = renderApp("/settings")
-    const account = within(await screen.findByRole("region", { name: "Account" }))
-    expect(account.queryByRole("button", { name: "Log out" })).toBeNull()
     const poll = await screen.findByLabelText("Poll interval")
     await user.clear(poll)
     await user.type(poll, "15s")
     await user.click(screen.getByRole("button", { name: "Log out" }))
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
     expect(screen.queryByText("Unsaved changes")).toBeNull()
+  })
+})
+
+describe("Settings sections", () => {
+  it("opens on General with the section list beside it", async () => {
+    mockApi(routes())
+    renderApp("/settings")
+    const nav = await screen.findByRole("navigation", { name: "Settings" })
+    expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual([
+      "General",
+      "GitHub token",
+      "Runner software",
+      "Account",
+      "Toolchains",
+      "Storage",
+    ])
+    expect(within(nav).getByText("Host")).toBeInTheDocument()
+    expect(within(nav).getByRole("link", { name: "General" })).toHaveAttribute("aria-current", "page")
+    expect(await screen.findByRole("heading", { level: 1, name: "General" })).toBeInTheDocument()
+    expect(await screen.findByLabelText("Poll interval")).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "GitHub token" })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["token", "GitHub token"],
+    ["runner", "Runner software"],
+    ["account", "Account"],
+    ["toolchains", "Toolchains"],
+    ["storage", "Storage"],
+  ])("shows the %s section at its own address", async (section, title) => {
+    mockApi(routes({ "GET /api/storage": fixtures.storage }))
+    renderApp(`/settings/${section}`)
+    const nav = await screen.findByRole("navigation", { name: "Settings" })
+    expect(within(nav).getByRole("link", { name: title })).toHaveAttribute("aria-current", "page")
+    expect(within(nav).getByRole("link", { name: "General" })).not.toHaveAttribute("aria-current")
+    expect(await screen.findByRole("heading", { level: 1, name: title })).toBeInTheDocument()
+    expect(screen.queryByLabelText("Poll interval")).not.toBeInTheDocument()
+  })
+
+  it("says so when the section does not exist", async () => {
+    mockApi(routes())
+    renderApp("/settings/nope")
+    expect(await screen.findByText("Settings has no such section.")).toBeInTheDocument()
+  })
+
+  it("guards an unsaved change when another section is opened from the list", async () => {
+    mockApi(routes())
+    const { user } = renderApp("/settings")
+    const poll = await screen.findByLabelText("Poll interval")
+    await user.clear(poll)
+    await user.type(poll, "15s")
+    await user.click(within(screen.getByRole("navigation", { name: "Settings" })).getByRole("link", { name: "GitHub token" }))
+    expect(await screen.findByText("Unsaved changes")).toBeInTheDocument()
+  })
+
+  it("keeps Log out out of the Account section", async () => {
+    mockApi(routes())
+    renderApp("/settings/account")
+    const account = within(await screen.findByRole("region", { name: "Account" }))
+    expect(account.queryByRole("button", { name: "Log out" })).toBeNull()
   })
 })

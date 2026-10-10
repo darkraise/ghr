@@ -46,7 +46,7 @@ describe("routes", () => {
     ["/repositories", "Repositories"],
     ["/toolchains", "Toolchains"],
     ["/storage", "Storage"],
-    ["/settings", "Settings"],
+    ["/settings", "General"],
     ["/runners/aaaaaa", "aaaaaa"],
   ])("serves %s", async (path, title) => {
     mockApi(authed)
@@ -87,9 +87,18 @@ describe("routes", () => {
   it("serves a settings section under /settings", async () => {
     mockApi(authedRoutes())
     const { router } = renderApp("/settings/token")
-    expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { level: 1, name: "GitHub token" })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe("/settings/token")
     expect(router.state.matches.at(-1)?.routeId).toBe("/app/settings/$section")
+  })
+
+  it.each([
+    ["/settings/nope", "Settings has no such section."],
+    ["/repositories/darkmem/nope", "This repository has no such section."],
+  ])("says %s is no section", async (path, line) => {
+    mockApi(authedRoutes())
+    renderApp(path)
+    expect(await screen.findByText(line)).toBeInTheDocument()
   })
 
   it("serves a repository section under its repository", async () => {
