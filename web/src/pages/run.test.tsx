@@ -124,6 +124,15 @@ describe("Run page", () => {
     renderApp("/actions/darkmem/runs/102")
     expect(await screen.findByText("token lacks actions=read on darkraise/darkmem: grant it in the PAT settings")).toBeInTheDocument()
   })
+
+  it("lays the summary out as four pairs from 800px", async () => {
+    mockApi(runRoutes())
+    renderApp("/actions/darkmem/runs/102")
+    const status = await screen.findByText("Total duration")
+    const list = status.closest("dl") as HTMLElement
+    expect(list).toHaveClass("grid-cols-2", "min-[800px]:grid-cols-4")
+    expect(list).not.toHaveClass("sm:grid-cols-4")
+  })
 })
 
 describe("Job page", () => {

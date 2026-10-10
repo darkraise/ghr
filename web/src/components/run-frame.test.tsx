@@ -122,4 +122,25 @@ describe("RunFrame", () => {
     expect(rail).toHaveClass("min-[800px]:sticky")
     expect(rail.parentElement).toHaveClass("min-[800px]:grid-cols-[15rem_minmax(0,1fr)]")
   })
+
+  it.each([
+    [{ status: "completed", conclusion: "failure" }, "Failed"],
+    [{ status: "completed", conclusion: "success" }, "Succeeded"],
+    [{ status: "in_progress", conclusion: "" }, "Running"],
+    [{ status: "queued", conclusion: "" }, "Waiting"],
+  ])("shows the run's state as a pill before the header actions (%o)", (over, word) => {
+    renderFrame({}, { ...fixtures.runDetail, ...over })
+    const github = screen.getByRole("link", { name: "Open on GitHub" })
+    const actions = github.closest("div") as HTMLElement
+    const pill = within(actions).getByText(word)
+    expect(pill.parentElement).toHaveClass("rounded-full")
+    expect(actions.firstElementChild).toContainElement(pill)
+  })
+
+  it("marks the current entry of the job list with the side-link style", () => {
+    renderFrame()
+    const summary = screen.getByRole("link", { name: "Summary" })
+    expect(summary.className).toContain("aria-[current=page]:shadow-[inset_2px_0_0_hsl(var(--primary))]")
+    expect(screen.getByText("Jobs")).toHaveClass("border-t")
+  })
 })

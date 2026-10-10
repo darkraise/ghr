@@ -163,7 +163,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 function SummaryFacts({ run, owner, now }: { run: RunDetail; owner: string; now: number }) {
   const links = githubLinks(owner, run)
   return (
-    <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+    <dl className="grid grid-cols-2 gap-4 min-[800px]:grid-cols-4">
       <Fact label={run.event ? `Triggered via ${run.event}` : "Triggered"}>
         {run.actor && <span>{run.actor}</span>}
         <a href={links.commit} target="_blank" rel="noreferrer" className="font-mono text-primary hover:underline">

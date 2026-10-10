@@ -68,4 +68,28 @@ describe("JobGraph", () => {
     expect(section.getAllByRole("link")).toHaveLength(7)
     expect(section.getByRole("button", { name: "Show fewer" })).toHaveAttribute("aria-expanded", "true")
   })
+
+  it("takes the accent border on hover and keyboard focus", () => {
+    const { container } = show()
+    const single = container.querySelector('a[href="#job-1001"]') as HTMLElement
+    expect(single).toHaveClass("hover:border-primary")
+    expect(single).toHaveClass("focus-visible:border-primary")
+    expect(single).not.toHaveClass("focus-within:border-primary")
+
+    const base = run.jobs[2] as RunJob
+    const shards = [0, 1].map((i) => ({ ...base, id: 2000 + i, name: `Shard ${i + 1}` }))
+    const g: RunGraph = { nodes: [{ key: "shard", name: "Shard", column: 0, needs: [], job_ids: shards.map((x) => x.id), group: true }] }
+    const grouped = render(<JobGraph graph={g} jobs={shards} path={run.path} event={run.event} now={NOW} jobLink={jobLink} />)
+    const wrapper = grouped.container.querySelector('a[href="#job-2000"]')?.closest("div.rounded-md") as HTMLElement
+    expect(wrapper).toHaveClass("hover:border-primary")
+    expect(wrapper).toHaveClass("focus-within:border-primary")
+  })
+
+  it("draws the jobs on a ground canvas with thin muted connectors", () => {
+    const { container } = show()
+    expect(screen.getByRole("group", { name: "Job graph" })).toHaveClass("bg-background", "rounded-md", "p-3")
+    const svg = container.querySelector("svg[aria-hidden='true']") as SVGElement
+    expect(svg).toHaveClass("text-muted-foreground")
+    expect(svg.querySelector("path")).toHaveAttribute("stroke-width", "1")
+  })
 })
