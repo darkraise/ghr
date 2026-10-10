@@ -198,7 +198,7 @@ export function LogViewer({
                 type="button"
                 aria-expanded={open}
                 onClick={() => toggle(setOpenSteps, s.number)}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted"
+                className="focus-ring-tight flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted"
               >
                 <ChevronRight aria-hidden="true" size={15} className={`shrink-0 text-muted-foreground ${open ? "rotate-90" : ""}`} />
                 {info && <RunStatusIcon status={info.status} conclusion={info.conclusion} />}

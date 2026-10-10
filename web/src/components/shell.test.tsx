@@ -23,7 +23,7 @@ describe("shell", () => {
     renderApp("/")
     const nav = await screen.findByRole("navigation", { name: "Pages" })
     await waitFor(() => expect(within(nav).getByRole("link", { name: /^Repositories/ })).toBeInTheDocument())
-    expect(within(nav).getAllByRole("link").map((a) => a.textContent?.replace(/\d+$/, ""))).toEqual([
+    expect(within(nav).getAllByRole("link").map((a) => a.textContent?.replace(/(, )?\d+$/, ""))).toEqual([
       "Dashboard",
       "Runners",
       "Actions",
@@ -49,6 +49,8 @@ describe("shell", () => {
     const nav = await screen.findByRole("navigation", { name: "Pages" })
     await waitFor(() => expect(within(within(nav).getByRole("link", { name: /^Runners/ })).getByText("2")).toBeInTheDocument())
     await waitFor(() => expect(within(within(nav).getByRole("link", { name: /^Repositories/ })).getByText("2")).toBeInTheDocument())
+    expect(within(nav).getByRole("link", { name: /^Runners,\s*2$/ })).toBeInTheDocument()
+    expect(within(nav).getByRole("link", { name: /^Repositories,\s*2$/ })).toBeInTheDocument()
   })
 
   it("shows reconnecting while status polls fail, until one succeeds", async () => {

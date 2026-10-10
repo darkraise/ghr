@@ -40,7 +40,7 @@ function tabs(status: Status | undefined, config: Config | undefined): Tab[] {
 }
 
 const TAB =
-  "flex shrink-0 items-center gap-2 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm whitespace-nowrap hover:bg-muted aria-[current=page]:border-[hsl(var(--tab-line))] aria-[current=page]:font-semibold"
+  "flex shrink-0 items-center gap-2 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm whitespace-nowrap hover:bg-muted aria-[current=page]:border-[hsl(var(--tab-line))] focus-ring-tight aria-[current=page]:font-semibold"
 const FRAME = "mx-auto w-full max-w-[1264px] px-6"
 
 export function Shell() {
@@ -112,7 +112,12 @@ export function Shell() {
               <Link to={tab.to} activeOptions={{ exact: tab.to === "/" }} className={TAB}>
                 <tab.icon size={15} aria-hidden="true" />
                 {tab.label}
-                {tab.badge && <span className="rounded-full bg-muted px-1.5 font-mono text-xs">{tab.badge}</span>}
+                {tab.badge && (
+                  <>
+                    <span className="sr-only">, </span>
+                    <span className="rounded-full bg-muted px-1.5 font-mono text-xs">{tab.badge}</span>
+                  </>
+                )}
               </Link>
             </span>
           ))}
