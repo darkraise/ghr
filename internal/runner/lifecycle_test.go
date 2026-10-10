@@ -549,6 +549,51 @@ func TestStopIdleKeepsRunnerGitHubWillNotDeregister(t *testing.T) {
 	}
 }
 
+// A tick stops its idle runners from a snapshot, and a stop a person asked for
+// can start a runner's cleanup after that snapshot was taken.
+func TestStopIdleRunnerLeavesARunnerInCleanupAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		failCleanup bool
+		state       string
+	}{
+		{"the runner is gone", false, "gone"},
+		{"the runner is cleaning", true, "cleaning"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.m.spawn(context.Background(), h.cfg, "darkcloud")
+			if tc.failCleanup {
+				h.writeJob(t, "aaaaaa", 55)
+				h.gh.setJobs(55, completedJob(h, 55, "ghr-darkcloud-aaaaaa", "success"))
+				h.docker.setErr("RemoveVolumesByLabel", errors.New("volume in use"))
+			}
+			stale := h.m.snapshot()[0]
+			if err := h.m.Kill(context.Background(), "aaaaaa"); err != nil {
+				t.Fatal(err)
+			}
+			h.m.Wait()
+			if h.state("aaaaaa") != tc.state {
+				t.Fatalf("state %s after the kill, want %s", h.state("aaaaaa"), tc.state)
+			}
+			calls := h.gh.callsText()
+			res := h.m.stopIdleRunner(context.Background(), stale, h.now)
+			if res != idleStopped {
+				t.Fatalf("result %d, want %d (idleStopped)", res, idleStopped)
+			}
+			if got := strings.TrimPrefix(h.gh.callsText(), calls); strings.Contains(got, "GetRunner") || strings.Contains(got, "DeleteRunner") {
+				t.Fatalf("GitHub calls after the kill's own:%s", strings.ReplaceAll(got, ",", " "))
+			}
+			if len(h.sd.stopped) != 1 {
+				t.Fatalf("unit stops %v, want only the kill's", h.sd.stopped)
+			}
+			if ev := h.eventText(); strings.Contains(ev, "stopped idle runner") || strings.Contains(ev, "token lacks access") {
+				t.Fatalf("events %s", ev)
+			}
+		})
+	}
+}
+
 // A failed or cancelled systemd query is not an exit: the busy runner's dir stays.
 func TestUnitQueryErrorIsNotAnExit(t *testing.T) {
 	h := newHarness(t)
@@ -809,6 +854,8 @@ func TestTwoKillsStartOneCleanup(t *testing.T) {
 	h := newHarness(t)
 	h.m.spawn(context.Background(), h.cfg, "darkmem")
 	entered, release := make(chan struct{}, 2), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
 	h.gh.hook = func(method string) {
 		if method == "DeleteRunner" {
 			entered <- struct{}{}
@@ -833,7 +880,7 @@ func TestTwoKillsStartOneCleanup(t *testing.T) {
 	}
 	<-entered
 	time.Sleep(50 * time.Millisecond)
-	close(release)
+	unblock()
 	h.m.Wait()
 	if n := len(h.gh.deleted); n != 1 || strings.Contains(h.eventText(), "cleanup of aaaaaa failed") || h.state("aaaaaa") != "gone" {
 		t.Fatalf("%d cleanups completed, state %s, events %s; want one cleanup, none failed, and gone", n, h.state("aaaaaa"), h.eventText())

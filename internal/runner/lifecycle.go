@@ -563,7 +563,15 @@ const (
 // is never killed by the stop.
 func (m *Manager) stopIdleRunner(ctx context.Context, i instance, now time.Time) idleStop {
 	m.mu.Lock()
-	gone := m.insts[i.ID] != nil && m.insts[i.ID].deregistered
+	cur := m.insts[i.ID]
+	// A stop a person asked for can move the runner to cleanup, or remove it,
+	// after the caller's snapshot, and that cleanup deletes the registration
+	// itself. The unit is down either way, so this counts as stopped.
+	if cur == nil || cur.State == sched.Cleaning {
+		m.mu.Unlock()
+		return idleStopped
+	}
+	gone := cur.deregistered
 	m.mu.Unlock()
 	// A runner deregistered by an earlier stop can take no job and its check
 	// now answers 404, so only the unit stop is repeated.
