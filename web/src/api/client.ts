@@ -45,6 +45,10 @@ export function setUnauthorizedHandler(fn: () => void): void {
   onUnauthorized = fn
 }
 
+export function notifyUnauthorized(): void {
+  onUnauthorized()
+}
+
 export async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { "X-GHR": "1" }
   let payload: string | undefined
