@@ -1,7 +1,7 @@
 # ghr: show a runner as stopping
 
 **Date:** 2026-10-10
-**Status:** design approved in chat on 2026-10-10 (approach and full design); revised after the spec review the same day, revision pending approval.
+**Status:** design approved in chat on 2026-10-10 (approach and full design); revised after the spec review and approved the same day.
 **Register:** docs/superpowers/registers/2026-10-10-ghr-ui-polish-realtime.md (item 25)
 **Code:** `internal/model`, `internal/runner`, `internal/daemon`, `internal/activity`, `cmd/ghr`, `web/src`
 
