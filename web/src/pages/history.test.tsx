@@ -201,6 +201,18 @@ describe("History page", () => {
     expect(within(await screen.findByRole("alert")).getByText("history file unreadable")).toBeInTheDocument()
   })
 
+  it("pads a failed refresh that leaves the earlier rows behind", async () => {
+    let fail = false
+    mockApi(authedRoutes({ "GET /api/history": () => (fail ? json({ error: "history file unreadable" }, 500) : fixtures.history) }))
+    const { queryClient } = renderApp("/history")
+    await screen.findByRole("table")
+    fail = true
+    await queryClient.invalidateQueries({ queryKey: ["history"] })
+    const alert = await screen.findByRole("alert")
+    expect(within(alert).getByText("history file unreadable")).toBeInTheDocument()
+    expect(alert.closest(".p-4")).not.toBeNull()
+  })
+
   it("shows loading until the chart's span is known", async () => {
     mockApi(authedRoutes({ "GET /api/activity": () => new Promise(() => {}) }))
     renderApp("/history")
