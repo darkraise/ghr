@@ -103,6 +103,7 @@ export function DashboardPage() {
                 now={now}
                 offline={offline}
                 onOpen={(name) => void navigate({ to: "/repositories/$name", params: { name } })}
+                onEdit={(name) => void navigate({ to: "/repositories/$name/$section", params: { name, section: "settings" } })}
               />
             </div>
           )}

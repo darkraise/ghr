@@ -12,10 +12,9 @@ import { keys, useActivity, useConfig, useStatus } from "@/api/hooks"
 import { AddRepoDialog } from "@/components/add-repo-dialog"
 import { ErrorLine } from "@/components/page/error-line"
 import { Section } from "@/components/page/section"
-import { RepoTable } from "@/components/repo-table"
+import { RepoList } from "@/components/repo-list"
 import { WatchRepoDialog } from "@/components/watch-repo-dialog"
 import { reposSummary } from "@/lib/repos"
-import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
 function WatchedSection({
@@ -81,7 +80,6 @@ export function RepositoriesPage() {
   const status = useStatus()
   const config = useConfig()
   const activity = useActivity("24h")
-  const now = useNow()
   const navigate = useNavigate()
   const hash = useLocation({ select: (l) => l.hash })
   const [adding, setAdding] = useState(false)
@@ -112,25 +110,30 @@ export function RepositoriesPage() {
   )
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader title="Repositories" description={reposSummary(st) || undefined} actions={add} />
+      <PageHeader title="Repositories" actions={st.repos.length === 0 ? add : undefined} />
       {st.repos.length === 0 ? (
         <div className="flex flex-col items-start gap-2">
           <p className="text-sm text-muted-foreground">No repositories yet</p>
           {add}
         </div>
       ) : (
-        <Section title="Configured repositories">
-          <div className="overflow-x-auto">
-            <RepoTable
-              repos={st.repos}
-              activity={activity.data?.repos}
-              now={now}
-              offline={offline}
-              onOpen={(name) => void navigate({ to: "/repositories/$name", params: { name } })}
-              columns="full"
-              config={config.data}
-            />
-          </div>
+        <Section
+          title="Configured repositories"
+          aside={
+            <>
+              <span className="text-sm text-muted-foreground">{reposSummary(st)}</span>
+              <span className="ml-auto">{add}</span>
+            </>
+          }
+          flush
+        >
+          <RepoList
+            repos={st.repos}
+            config={config.data}
+            activity={activity.data?.repos}
+            offline={offline}
+            onEdit={(name) => void navigate({ to: "/repositories/$name/$section", params: { name, section: "settings" } })}
+          />
         </Section>
       )}
       {(config.data || config.isError) && (
