@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { keys } from "@/api/hooks"
+import { liveConfig } from "@/api/live"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
@@ -156,5 +157,27 @@ describe("shell", () => {
     mockApi(authedRoutes())
     renderApp("/")
     await waitFor(() => expect(document.documentElement.style.getPropertyValue("--ghr-host")).toBe('"localhost"'))
+  })
+
+  it("opens the change stream once the app is mounted", async () => {
+    liveConfig.enabled = true
+    try {
+      const { calls } = mockApi(
+        authedRoutes({
+          "GET /api/changes": () =>
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(c) {
+                  c.enqueue(new TextEncoder().encode("event: hello\ndata: {}\n\n"))
+                },
+              }),
+            ),
+        }),
+      )
+      renderApp("/")
+      await waitFor(() => expect(calls.some((c) => c.path === "/api/changes")).toBe(true))
+    } finally {
+      liveConfig.enabled = false
+    }
   })
 })

@@ -7,6 +7,7 @@ import { Boxes, GitBranch, HardDrive, HistoryIcon, LayoutDashboard, LogOut, Sett
 import { useEffect, useRef } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useEvents, useMetrics, useStatus } from "@/api/hooks"
+import { useChangeStream } from "@/api/use-change-stream"
 import type { Config, Status } from "@/api/types"
 import { CapacityBar } from "@/components/capacity-bar"
 import { ModeControl } from "@/components/mode-control"
@@ -53,6 +54,7 @@ export function Shell() {
   // on every page, and the Dashboard opens with them warm.
   useMetrics()
   useEvents(epoch)
+  useChangeStream()
 
   useEffect(() => {
     useBrandStore.getState().setAppName("ghr")

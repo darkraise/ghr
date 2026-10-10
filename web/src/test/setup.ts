@@ -1,6 +1,11 @@
 import "@testing-library/jest-dom/vitest"
 import { cleanup, configure } from "@testing-library/react"
 import { afterEach, vi } from "vitest"
+import { liveConfig } from "@/api/live"
+
+// The change stream would add a fetch to every rendered app, and many tests
+// count fetch calls; the stream's own tests turn it back on.
+liveConfig.enabled = false
 
 // darkraise-ui's ThemeProvider calls window.matchMedia without a guard, and
 // jsdom implements neither matchMedia, scrollTo nor scrollIntoView.
