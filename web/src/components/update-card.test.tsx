@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it } from "vitest"
 import type { RunnerUpdate } from "@/api/types"
@@ -19,6 +19,14 @@ function draw(update: RunnerUpdate, offline = false) {
 const inDays = (days: number) => new Date(Date.now() + days * DAY_MS + 3_600_000).toISOString()
 
 describe("UpdateCard", () => {
+  it("lays out as one horizontal banner", () => {
+    draw({ installed: "2.337.0", latest: "2.338.0", deadline: inDays(10) })
+    const banner = screen.getByRole("region", { name: "Runner update" })
+    expect(banner).toHaveClass("flex-wrap", "items-center", "rounded-md")
+    expect(banner).not.toHaveClass("flex-col")
+    expect(within(banner).getByRole("button")).toBeInTheDocument()
+  })
+
   it("stays hidden when there is nothing to do", () => {
     const { container } = draw({ installed: "2.338.0", latest: "2.338.0" })
     expect(container).toBeEmptyDOMElement()
