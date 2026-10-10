@@ -16,7 +16,8 @@ import { ConfirmDialog } from "@/components/confirm-dialog"
 import { LabelCheckGroup } from "@/components/label-check-group"
 import { ErrorLine } from "@/components/page/error-line"
 import { Field, FieldGroup } from "@/components/page/field"
-import { SectionNav } from "@/components/page/section-nav"
+import { SideLayout } from "@/components/page/side-layout"
+import { StatusPill } from "@/components/page/status-pill"
 import { RegistrationsGroup } from "@/components/registrations-group"
 import { RepoActivity } from "@/components/repo-activity"
 import { RejectedAlert, SaveBar } from "@/components/save-bar"
@@ -24,6 +25,8 @@ import { TagField } from "@/components/tag-field"
 import { UnsavedGuard } from "@/components/unsaved-guard"
 import { changedKeys, sameValue, settle, type Values } from "@/lib/draft"
 import { repoDescription } from "@/lib/repos"
+import { SIDE_LINK } from "@/lib/side-link"
+import { repoStateWord } from "@/lib/status"
 import { useNow } from "@/lib/use-now"
 import { useRepoActions } from "@/lib/use-repo-actions"
 import { errorText } from "@/query"
@@ -31,10 +34,9 @@ import { errorText } from "@/query"
 const SYSTEM_LABELS = ["self-hosted", "linux", "x64"]
 
 const SECTIONS = [
-  { id: "capacity", title: "Capacity" },
-  { id: "labels", title: "Labels" },
-  { id: "cleanup", title: "Cleanup" },
-  { id: "workflow-labels", title: "Workflow labels" },
+  { id: "", title: "Overview" },
+  { id: "settings", title: "Capacity and labels" },
+  { id: "labels", title: "Workflow labels" },
   { id: "registrations", title: "GitHub registrations" },
 ] as const
 
@@ -112,6 +114,11 @@ function LiveActions({ repo, offline }: { repo: RepoStatus; offline: boolean }) 
 function HeaderActions({ name, repo, offline }: { name: string; repo: RepoStatus | undefined; offline: boolean }) {
   return (
     <div className="flex flex-wrap gap-2">
+      {repo && (
+        <span className="flex items-center">
+          <StatusPill state={repoStateWord(repo).toLowerCase()} />
+        </span>
+      )}
       {repo ? (
         <LiveActions repo={repo} offline={offline} />
       ) : (
@@ -128,12 +135,13 @@ function HeaderActions({ name, repo, offline }: { name: string; repo: RepoStatus
 }
 
 export function RepositoryPage() {
-  const { name = "" } = useParams({ strict: false })
-  // Keyed by name: each repository starts with its own empty draft.
-  return <RepositoryForm key={name} name={name} />
+  const { name = "", section = "" } = useParams({ strict: false })
+  // Keyed by name: each repository starts with its own empty draft, and
+  // moving between its sections keeps the draft.
+  return <RepositoryForm key={name} name={name} section={section} />
 }
 
-function RepositoryForm({ name }: { name: string }) {
+function RepositoryForm({ name, section }: { name: string; section: string }) {
   const status = useStatus()
   const config = useConfig()
   const now = useNow()
@@ -252,81 +260,100 @@ function RepositoryForm({ name }: { name: string }) {
       />
       {repoStatus?.removing && <p className="text-sm text-muted-foreground">Being removed. Running jobs finish first, and settings are read-only.</p>}
       {rejection && <RejectedAlert message={rejection} />}
-      <RepoActivity name={name} repo={repoStatus} now={now} />
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_12rem]">
-        <div className="flex min-w-0 flex-col gap-6">
-          <FieldGroup id="capacity" title="Capacity">
-            <Field
-              label="Max"
-              htmlFor="repo-max"
-              help="Leave empty for the default: 1 in queue mode, no limit in all mode. Once set, it stays explicit."
-              error={maxError}
-              changed={is("max")}
-            >
-              <Input
-                id="repo-max"
-                type="number"
-                min={0}
-                max={99}
-                className="w-24"
-                disabled={locked}
-                value={typeof values.max === "number" ? String(values.max) : ""}
-                onChange={(e) => setNumber("max", e.target.value)}
-              />
-            </Field>
-            <Field label="Warm" htmlFor="repo-warm" help="Runners kept ready in all mode. Leave empty for the default of 1." error={warmError} changed={is("warm")}>
-              <Input
-                id="repo-warm"
-                type="number"
-                min={0}
-                max={99}
-                className="w-24"
-                disabled={locked}
-                value={typeof values.warm === "number" ? String(values.warm) : ""}
-                onChange={(e) => setNumber("warm", e.target.value)}
-              />
-            </Field>
-          </FieldGroup>
-          <FieldGroup id="labels" title="Labels">
-            <Field label="Repo labels" help="Added to this repository's runners." changed={is("labels")}>
-              <TagField
-                label="Repo labels"
-                value={values.labels as string[]}
-                disabled={locked}
-                onChange={(next) => setDraft((d) => ({ ...d, labels: next }))}
-              />
-            </Field>
-            <Field label="Runners get" help="Runners already running keep their labels.">
-              <ul aria-label="Runner labels" className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
-                {SYSTEM_LABELS.map((l) => (
-                  <li key={`system-${l}`} className="font-mono">
-                    {l}
-                  </li>
-                ))}
-                {custom.map((c) => (
-                  <li key={`custom-${c.label}`}>
-                    <span className="font-mono">{c.label}</span>
-                    {c.global && <span className="ml-1 text-muted-foreground">global</span>}
-                  </li>
-                ))}
-              </ul>
-            </Field>
-          </FieldGroup>
-          <FieldGroup id="cleanup" title="Cleanup">
-            <Field label="Prefixes" help="Container name prefixes removed after each job." changed={is("cleanup_name_prefixes")}>
-              <TagField
-                label="Prefixes"
-                value={values.cleanup_name_prefixes as string[]}
-                disabled={locked}
-                onChange={(next) => setDraft((d) => ({ ...d, cleanup_name_prefixes: next }))}
-              />
-            </Field>
-          </FieldGroup>
+      <SideLayout
+        label="Repository"
+        nav={SECTIONS.map((s) =>
+          s.id === "" ? (
+            <Link key="overview" to="/repositories/$name" params={{ name }} activeOptions={{ exact: true }} className={SIDE_LINK}>
+              {s.title}
+            </Link>
+          ) : (
+            <Link key={s.id} to="/repositories/$name/$section" params={{ name, section: s.id }} className={SIDE_LINK}>
+              {s.title}
+            </Link>
+          ),
+        )}
+      >
+        {section === "" && <RepoActivity name={name} repo={repoStatus} now={now} />}
+        {section === "settings" && (
+          <div className="flex min-w-0 flex-col gap-6">
+            <FieldGroup id="capacity" title="Capacity">
+              <Field
+                label="Max"
+                htmlFor="repo-max"
+                help="Leave empty for the default: 1 in queue mode, no limit in all mode. Once set, it stays explicit."
+                error={maxError}
+                changed={is("max")}
+              >
+                <Input
+                  id="repo-max"
+                  type="number"
+                  min={0}
+                  max={99}
+                  className="w-24"
+                  disabled={locked}
+                  value={typeof values.max === "number" ? String(values.max) : ""}
+                  onChange={(e) => setNumber("max", e.target.value)}
+                />
+              </Field>
+              <Field label="Warm" htmlFor="repo-warm" help="Runners kept ready in all mode. Leave empty for the default of 1." error={warmError} changed={is("warm")}>
+                <Input
+                  id="repo-warm"
+                  type="number"
+                  min={0}
+                  max={99}
+                  className="w-24"
+                  disabled={locked}
+                  value={typeof values.warm === "number" ? String(values.warm) : ""}
+                  onChange={(e) => setNumber("warm", e.target.value)}
+                />
+              </Field>
+            </FieldGroup>
+            <FieldGroup id="labels" title="Labels">
+              <Field label="Repo labels" help="Added to this repository's runners." changed={is("labels")}>
+                <TagField
+                  label="Repo labels"
+                  value={values.labels as string[]}
+                  disabled={locked}
+                  onChange={(next) => setDraft((d) => ({ ...d, labels: next }))}
+                />
+              </Field>
+              <Field label="Runners get" help="Runners already running keep their labels.">
+                <ul aria-label="Runner labels" className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+                  {SYSTEM_LABELS.map((l) => (
+                    <li key={`system-${l}`} className="font-mono">
+                      {l}
+                    </li>
+                  ))}
+                  {custom.map((c) => (
+                    <li key={`custom-${c.label}`}>
+                      <span className="font-mono">{c.label}</span>
+                      {c.global && <span className="ml-1 text-muted-foreground">global</span>}
+                    </li>
+                  ))}
+                </ul>
+              </Field>
+            </FieldGroup>
+            <FieldGroup id="cleanup" title="Cleanup">
+              <Field label="Prefixes" help="Container name prefixes removed after each job." changed={is("cleanup_name_prefixes")}>
+                <TagField
+                  label="Prefixes"
+                  value={values.cleanup_name_prefixes as string[]}
+                  disabled={locked}
+                  onChange={(next) => setDraft((d) => ({ ...d, cleanup_name_prefixes: next }))}
+                />
+              </Field>
+            </FieldGroup>
+          </div>
+        )}
+        {section === "labels" && (
           <LabelCheckGroup name={name} effective={effective} degraded={degraded} degradedReason={status.data?.degraded_reason} disabled={locked} onAddLabel={addLabel} />
+        )}
+        {section === "registrations" && (
           <RegistrationsGroup name={name} degraded={degraded} degradedReason={status.data?.degraded_reason} disabled={locked} />
-        </div>
-        <SectionNav items={SECTIONS} />
-      </div>
+        )}
+        {!SECTIONS.some((s) => s.id === section) && <p className="text-sm text-muted-foreground">This repository has no such section.</p>}
+      </SideLayout>
       <SaveBar count={changed.length} saving={saving} disabled={status.isError} onSave={() => void save()} onDiscard={discard} />
       <UnsavedGuard count={changed.length} page="Repositories" saving={saving} onSave={save} onDiscard={discard} />
     </div>

@@ -26,7 +26,7 @@ function applyingRoutes() {
 describe("repository page", () => {
   it("shows the repo's state, settings and the labels its runners get", async () => {
     mockApi(routes())
-    renderApp("/repositories/darkmem")
+    renderApp("/repositories/darkmem/settings")
     expect(await screen.findByLabelText("Max")).toHaveValue(2)
     expect(screen.getByLabelText("Warm")).toHaveValue(1)
     expect(screen.getByText("Running 1 of 2 runners, 3 jobs waiting")).toBeInTheDocument()
@@ -40,13 +40,12 @@ describe("repository page", () => {
       "gpu",
     ])
     expect(screen.getByText("Leave empty for the default: 1 in queue mode, no limit in all mode. Once set, it stays explicit.")).toBeInTheDocument()
-    expect(screen.getByRole("region", { name: "Last 24 hours" })).toBeInTheDocument()
     expect(screen.getByRole("region", { name: "Capacity" })).toBeInTheDocument()
   })
 
   it("saves only the changed field", async () => {
     const { calls } = mockApi(applyingRoutes())
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     await user.type(max, "3")
@@ -60,12 +59,12 @@ describe("repository page", () => {
 
   it("starts a fresh draft on another repository", async () => {
     mockApi(routes())
-    const { user, router } = renderApp("/repositories/darkmem")
+    const { user, router } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     await user.type(max, "2")
     expect(screen.queryByText(/unsaved change/)).toBeNull()
-    await router.navigate({ to: "/repositories/$name", params: { name: "darkcloud" } })
+    await router.navigate({ to: "/repositories/$name/$section", params: { name: "darkcloud", section: "settings" } })
     expect(await screen.findByRole("heading", { name: "darkcloud" })).toBeInTheDocument()
     expect(screen.getByLabelText("Max")).toHaveValue(null)
     expect(screen.queryByText(/unsaved change/)).toBeNull()
@@ -73,7 +72,7 @@ describe("repository page", () => {
 
   it("says when the daemon did not apply a field", async () => {
     mockApi(routes({ "PATCH /api/config": () => noContent() }))
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/settings")
     await user.type(await screen.findByRole("textbox", { name: "Prefixes" }), "test_{Enter}")
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     expect(
@@ -92,7 +91,7 @@ describe("repository page", () => {
         },
       }),
     )
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/settings")
     await user.type(await screen.findByRole("textbox", { name: "Prefixes" }), "test_{Enter}")
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     expect((await screen.findAllByText("Saved, but re-reading the config failed: ghr is restarting")).length).toBeGreaterThan(0)
@@ -107,7 +106,7 @@ describe("repository page", () => {
           json({ error: "darkmem: needs at least one label in labels or repo labels; a; b; c" }, 400),
       }),
     )
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/settings")
     await user.click(await screen.findByRole("button", { name: "Remove gpu" }))
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     expect(await screen.findByText("Save rejected")).toBeInTheDocument()
@@ -119,7 +118,7 @@ describe("repository page", () => {
 
   it("blocks a save while warm exceeds max", async () => {
     const { calls } = mockApi(routes())
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/settings")
     const warm = await screen.findByLabelText("Warm")
     await user.clear(warm)
     await user.type(warm, "3")
@@ -131,7 +130,7 @@ describe("repository page", () => {
 
   it("keeps an emptied box empty and refuses to save it", async () => {
     const { calls } = mockApi(routes())
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     expect(max).toHaveValue(null)
@@ -143,14 +142,14 @@ describe("repository page", () => {
 
   it("disables the form while the daemon is unreachable", async () => {
     mockApi(routes({ "GET /api/status": () => json({ error: "connection refused" }, 502) }))
-    renderApp("/repositories/darkmem")
+    renderApp("/repositories/darkmem/settings")
     await waitFor(() => expect(screen.getByLabelText("Max")).toBeDisabled())
     expect(screen.getByRole("textbox", { name: "Prefixes" })).toBeDisabled()
   })
 
   it("discards the edits", async () => {
     mockApi(routes())
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     await user.type(max, "5")
@@ -161,7 +160,7 @@ describe("repository page", () => {
 
   it("asks before leaving with unsaved edits", async () => {
     mockApi(routes())
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     await user.type(max, "5")
@@ -172,7 +171,7 @@ describe("repository page", () => {
   it("locks the form while the repo is being removed", async () => {
     const repos = fixtures.status.repos.map((r) => (r.name === "darkmem" ? { ...r, removing: true } : r))
     mockApi(routes({ "GET /api/status": { ...fixtures.status, repos } }))
-    renderApp("/repositories/darkmem")
+    renderApp("/repositories/darkmem/settings")
     expect(await screen.findByLabelText("Max")).toBeDisabled()
     expect(screen.getByRole("textbox", { name: "Repo labels" })).toBeDisabled()
     expect(screen.getByText("Being removed. Running jobs finish first, and settings are read-only.")).toBeInTheDocument()
@@ -229,15 +228,80 @@ describe("repository page", () => {
     expect(await screen.findByRole("menuitem", { name: "Remove" })).toHaveAttribute("aria-disabled", "true")
   })
 
-  it("marks a changed field and indexes the sections at 1280px", async () => {
+  it("marks a changed field at 1280px", async () => {
     setViewport(1280)
     mockApi(routes())
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     await user.type(max, "3")
     expect(screen.getByText("Changed")).toHaveClass("text-warning")
-    const nav = within(screen.getByRole("navigation", { name: "Sections" }))
-    expect(nav.getAllByRole("button").map((b) => b.textContent)).toEqual(["Capacity", "Labels", "Cleanup", "Workflow labels", "GitHub registrations"])
+  })
+
+  it("opens on the overview and keeps the form on its own section", async () => {
+    mockApi(routes())
+    renderApp("/repositories/darkmem")
+    const nav = await screen.findByRole("navigation", { name: "Repository" })
+    expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual([
+      "Overview",
+      "Capacity and labels",
+      "Workflow labels",
+      "GitHub registrations",
+    ])
+    expect(within(nav).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page")
+    expect(await screen.findByRole("group", { name: "Jobs per bucket for the last 24 hours" })).toBeInTheDocument()
+    expect(screen.queryByLabelText("Max")).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["settings", "Capacity and labels"],
+    ["labels", "Workflow labels"],
+    ["registrations", "GitHub registrations"],
+  ])("shows the %s section at its own address", async (section, link) => {
+    mockApi(routes())
+    renderApp(`/repositories/darkmem/${section}`)
+    const nav = await screen.findByRole("navigation", { name: "Repository" })
+    expect(within(nav).getByRole("link", { name: link })).toHaveAttribute("aria-current", "page")
+    expect(within(nav).getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current")
+    expect(screen.queryByRole("group", { name: "Jobs per bucket for the last 24 hours" })).not.toBeInTheDocument()
+  })
+
+  it("shows the capacity form on the settings section only", async () => {
+    mockApi(routes())
+    renderApp("/repositories/darkmem/settings")
+    expect(await screen.findByLabelText("Max")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Capacity" })).toBeInTheDocument()
+  })
+
+  it("says so when the section does not exist", async () => {
+    mockApi(routes())
+    renderApp("/repositories/darkmem/nope")
+    expect(await screen.findByText("This repository has no such section.")).toBeInTheDocument()
+  })
+
+  it("guards an unsaved change when another section is opened from the list", async () => {
+    mockApi(routes())
+    const { user } = renderApp("/repositories/darkmem/settings")
+    const max = await screen.findByLabelText("Max")
+    await user.clear(max)
+    await user.type(max, "3")
+    await user.click(within(screen.getByRole("navigation", { name: "Repository" })).getByRole("link", { name: "Overview" }))
+    expect(await screen.findByText("Unsaved changes")).toBeInTheDocument()
+  })
+
+  it.each([
+    ["Running", {}, "bg-running/15", "text-running"],
+    ["Paused", { paused: true }, "bg-muted-foreground/15", "text-muted-foreground"],
+    ["Error", { error: "runner image missing" }, "bg-destructive/15", "text-destructive"],
+  ])("shows the repository's state as a pill before the header actions (%s)", async (word, over, fill, text) => {
+    const repos = fixtures.status.repos.map((r) => (r.name === "darkmem" ? { ...r, ...over } : r))
+    mockApi(routes({ "GET /api/status": { ...fixtures.status, repos } }))
+    renderApp("/repositories/darkmem")
+    // The header first renders without the pill until status loads, so find the word, not a node captured early.
+    const label = await waitFor(() => within(screen.getByRole("link", { name: "View history" }).closest("div") as HTMLElement).getByText(word))
+    const actions = label.closest("div") as HTMLElement
+    expect(actions.firstElementChild).toContainElement(label)
+    expect(label.parentElement).toHaveClass("rounded-full", fill)
+    expect(label.parentElement?.querySelector("svg")).toHaveClass(text)
   })
 })

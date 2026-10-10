@@ -19,7 +19,7 @@ function routes(over: Record<string, unknown> = {}) {
 describe("GitHub registrations group", () => {
   it("lists registrations and offers Delete only for an offline foreign one", async () => {
     mockApi(routes())
-    renderApp("/repositories/darkmem")
+    renderApp("/repositories/darkmem/registrations")
     expect(await screen.findByText("ghr-aaaaaa")).toBeInTheDocument()
     expect(screen.getByText("old-runner")).toBeInTheDocument()
     expect(screen.getByText("self-hosted linux")).toBeInTheDocument()
@@ -34,7 +34,7 @@ describe("GitHub registrations group", () => {
 
   it("deletes a registration only after confirmation", async () => {
     const { calls } = mockApi(routes({ "DELETE /api/repos/darkmem/registrations/9": () => noContent() }))
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/registrations")
     await user.click(await screen.findByRole("button", { name: "Delete old-runner" }))
     const ask = within(await screen.findByRole("alertdialog"))
     expect(ask.getByText("Delete runner registration old-runner?")).toBeInTheDocument()
@@ -53,7 +53,7 @@ describe("GitHub registrations group", () => {
 
   it("says when nothing is registered, and refreshes", async () => {
     const { calls } = mockApi(routes({ "GET /api/repos/darkmem/registrations": [] }))
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/registrations")
     expect(
       await screen.findByText("No runners registered. ghr starts single-use runners on demand, and keeps warm ones in all mode."),
     ).toBeInTheDocument()
@@ -65,8 +65,8 @@ describe("GitHub registrations group", () => {
     const { calls } = mockApi(
       routes({ "GET /api/status": { ...fixtures.status, degraded: true, degraded_reason: "bad credentials" } }),
     )
-    renderApp("/repositories/darkmem")
-    expect((await screen.findAllByText("GitHub is rejecting the token: bad credentials")).length).toBe(2)
+    renderApp("/repositories/darkmem/registrations")
+    expect(await screen.findByText("GitHub is rejecting the token: bad credentials")).toBeInTheDocument()
     expect(calls.some((c) => c.path.endsWith("/registrations"))).toBe(false)
   })
 })

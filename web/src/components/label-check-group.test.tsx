@@ -24,7 +24,7 @@ function routes(over: Record<string, unknown> = {}) {
 describe("Workflow labels group", () => {
   it("shows the label groups and whether ghr takes them", async () => {
     mockApi(routes())
-    renderApp("/repositories/darkmem")
+    renderApp("/repositories/darkmem/labels")
     expect(await screen.findByText("homelab, self-hosted")).toBeInTheDocument()
     expect(screen.getByText("Matched")).toHaveClass("text-foreground")
     expect(screen.getByText("ci / build, ci / test")).toBeInTheDocument()
@@ -35,7 +35,7 @@ describe("Workflow labels group", () => {
 
   it("offers the missing labels and adds one as an unsaved edit", async () => {
     const { calls } = mockApi(routes({ "GET /api/repos/darkmem/label-check": unmatched }))
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/labels")
     expect(await screen.findByText("Missing arm64, big")).toBeInTheDocument()
     expect(screen.getByText("Unmatched")).toHaveClass("text-foreground")
     expect(screen.getByText(/, partial$/)).toBeInTheDocument()
@@ -46,7 +46,6 @@ describe("Workflow labels group", () => {
       screen.getByText("Adding a label changes which jobs ghr accepts. It does not install anything on the runner."),
     ).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Add label big" }))
-    expect(screen.getByRole("button", { name: "Remove big" })).toBeInTheDocument()
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
     expect(calls.some((c) => c.method !== "GET")).toBe(false)
   })
@@ -63,7 +62,7 @@ describe("Workflow labels group", () => {
           started ? { state: "checking", partial: false, groups: [] } : { state: "not_checked", partial: false, groups: [] },
       }),
     )
-    const { user } = renderApp("/repositories/darkmem")
+    const { user } = renderApp("/repositories/darkmem/labels")
     expect(await screen.findByText("Not checked yet")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Check now" }))
     expect(await screen.findByText("Checking")).toBeInTheDocument()
@@ -75,14 +74,14 @@ describe("Workflow labels group", () => {
     const { calls } = mockApi(
       routes({ "GET /api/status": { ...fixtures.status, degraded: true, degraded_reason: "bad credentials" } }),
     )
-    renderApp("/repositories/darkmem")
+    renderApp("/repositories/darkmem/labels")
     expect((await screen.findAllByText("GitHub is rejecting the token: bad credentials")).length).toBeGreaterThan(0)
     expect(calls.some((c) => c.path.endsWith("/label-check"))).toBe(false)
   })
 
   it("shows a failed read as an error line", async () => {
     mockApi(routes({ "GET /api/repos/darkmem/label-check": () => json({ error: "GitHub: 502" }, 502) }))
-    renderApp("/repositories/darkmem")
+    renderApp("/repositories/darkmem/labels")
     const region = within(await screen.findByRole("region", { name: "Workflow labels" }))
     expect(await region.findByRole("alert")).toHaveTextContent("GitHub: 502")
   })
