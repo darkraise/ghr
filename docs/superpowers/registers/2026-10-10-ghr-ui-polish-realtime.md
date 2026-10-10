@@ -1,7 +1,7 @@
 # ghr UI polish and realtime updates
 
 **Source:** owner request in chat, 2026-10-10
-**Covers:** docs/superpowers/specs/2026-10-10-ghr-realtime-ui-design.md
+**Covers:** docs/superpowers/specs/2026-10-10-ghr-realtime-ui-design.md, docs/superpowers/specs/2026-10-10-ghr-runner-stopping-state-design.md
 
 | # | Item | Assigned | Acceptance | State | Note |
 |---|---|---|---|---|---|
@@ -29,5 +29,5 @@
 | 22 | Realtime: password change and reset session ends are not tested for the stream | - | - | deferred | Task 8 minor; they end sessions through the same Valid check as logout |
 | 23 | Realtime: history.Store.Append double-closes its file (defer plus explicit Close) | - | - | deferred | Task 2 discovered; pre-existing and harmless |
 | 24 | Realtime: an idle daemon refetches /api/status about once a second in bursts | commit 721df16, spec 7714ed3 | A token check that moves only CheckedAt publishes no topic; an idle Dashboard makes no status refetch bursts | done | found by the row 3 checks; rechecked on the LXC with build 7714ed3: 1 change notice and 6 API requests in 60 s idle; the token's check time now refreshes on the 60 s safety poll |
-| 25 | Realtime: a stopped runner stays running in the UI until the manager's next tick | - | - | open | found by the row 3 checks; busy runner b6f7e2 took 16.2 s from ghr kill to the UI: 8.4 s for systemd to stop the unit, then 7.8 s until the next tick; Manager.Kill leaves the exit to the next tick, KillRunner does not wake the loop, and there is no stopping state; the stream itself delivered the job result 63 ms after the daemon logged it |
+| 25 | Realtime: a stopped runner stays running in the UI until the manager's next tick | docs/superpowers/specs/2026-10-10-ghr-runner-stopping-state-design.md | A runner stopped with ghr kill or the Stop button reads stopping in the UI in under a second and is cleaned up as soon as its unit is down | doing | found by the row 3 checks; busy runner b6f7e2 took 16.2 s from ghr kill to the UI: 8.4 s for systemd to stop the unit, then 7.8 s until the next tick; Manager.Kill leaves the exit to the next tick, KillRunner does not wake the loop, and there is no stopping state; the stream itself delivered the job result 63 ms after the daemon logged it |
 | 26 | Realtime: the gauges fingerprint omits Status.RateLimit, which spec section 1 lists | - | - | deferred | noticed while fixing row 24; the status topic zeroes it too, so a changed limit alone publishes nothing; the limit rarely changes |
