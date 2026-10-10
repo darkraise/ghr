@@ -2,6 +2,7 @@ package webui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,6 +21,13 @@ const (
 	authBodyLimit = 4 << 10
 	csp           = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'"
 )
+
+// sessionRecheck is how often an /api request still running checks that its
+// session exists, so a logout ends an open change stream; tests shorten it.
+var sessionRecheck = 5 * time.Second
+
+// afterFunc is time.AfterFunc; tests replace it to see the timers.
+var afterFunc = time.AfterFunc
 
 type handler struct {
 	auth  *Auth
@@ -125,13 +134,45 @@ func (h *handler) session(r *http.Request) (string, bool) {
 	return c.Value, true
 }
 
+// requireSession serves next only for a logged-in session, and cancels the
+// request's context once that session ends: logout, a password change or
+// reset, or expiry.
 func (h *handler) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := h.session(r); !ok {
+		id, ok := h.session(r)
+		if !ok {
 			writeError(w, http.StatusUnauthorized, "not logged in")
 			return
 		}
-		next.ServeHTTP(w, r)
+		every, after := sessionRecheck, afterFunc
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		var mu sync.Mutex
+		done := false
+		var timer *time.Timer
+		var check func()
+		check = func() {
+			mu.Lock()
+			defer mu.Unlock()
+			if done {
+				return
+			}
+			if !h.auth.Valid(id) {
+				cancel()
+				return
+			}
+			timer = after(every, check)
+		}
+		mu.Lock()
+		timer = after(every, check)
+		mu.Unlock()
+		defer func() {
+			mu.Lock()
+			done = true
+			timer.Stop()
+			mu.Unlock()
+		}()
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

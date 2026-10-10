@@ -354,3 +354,89 @@ func TestSetupFromAnyAddress(t *testing.T) {
 		}
 	}
 }
+
+// waitAPI holds every request open until its context ends.
+type waitAPI struct {
+	started chan struct{}
+	ended   chan struct{}
+}
+
+func (a *waitAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	close(a.started)
+	<-r.Context().Done()
+	close(a.ended)
+}
+
+func setSessionRecheck(t *testing.T, d time.Duration) {
+	t.Helper()
+	old := sessionRecheck
+	sessionRecheck = d
+	t.Cleanup(func() { sessionRecheck = old })
+}
+
+func TestLongRequestEndsWithItsSession(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		end  func(a *Auth, c *clock, id string)
+	}{
+		{"logout", func(a *Auth, _ *clock, id string) { a.Logout(id) }},
+		{"expiry", func(_ *Auth, c *clock, _ string) { c.add(sessionTTL) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setSessionRecheck(t, 20*time.Millisecond)
+			a, c := newTestAuth(t)
+			id, err := a.Setup(pw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			api := &waitAPI{started: make(chan struct{}), ended: make(chan struct{})}
+			h := Handler(a, api, testFS(), []string{"ghr.lan"})
+			returned := make(chan struct{})
+			go func() {
+				do(h, http.MethodGet, "/api/changes", "", withCookie(id))
+				close(returned)
+			}()
+			select {
+			case <-api.started:
+			case <-time.After(2 * time.Second):
+				t.Fatal("the request never reached the API")
+			}
+			select {
+			case <-api.ended:
+				t.Fatal("a live session's request was cancelled")
+			case <-time.After(100 * time.Millisecond):
+			}
+			tc.end(a, c, id)
+			select {
+			case <-api.ended:
+			case <-time.After(2 * time.Second):
+				t.Fatal("the request outlived its session")
+			}
+			<-returned
+		})
+	}
+}
+
+func TestRequestStopsItsSessionTimer(t *testing.T) {
+	var timers []*time.Timer
+	afterFunc = func(d time.Duration, f func()) *time.Timer {
+		tm := time.AfterFunc(d, f)
+		timers = append(timers, tm)
+		return tm
+	}
+	t.Cleanup(func() { afterFunc = time.AfterFunc })
+	h, a, _ := newTestHandler(t)
+	id, err := a.Setup(pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := do(h, http.MethodGet, "/api/status", "", withCookie(id)); rec.Code != http.StatusOK {
+		t.Fatalf("status: %d", rec.Code)
+	}
+	if len(timers) != 1 {
+		t.Fatalf("%d timers for one request, want 1", len(timers))
+	}
+	if timers[0].Stop() {
+		t.Fatal("the request returned with its re-check timer still armed")
+	}
+}
