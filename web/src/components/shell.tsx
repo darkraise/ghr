@@ -97,12 +97,12 @@ export function Shell() {
               <UpdateCard update={st.runner_update} offline={offline} />
             </div>
           )}
-          <div className="ghr-rail-foot flex items-center gap-2 text-sm text-[hsl(var(--sidebar-foreground))]">
-            <span className="ghr-rail-wide flex-1 truncate">Owner</span>
+          <div className="flex items-center gap-2 text-sm text-[hsl(var(--sidebar-foreground))]">
+            <span className="flex-1 truncate">Owner</span>
             <ModeControl />
             <Button size="sm" variant="ghost" aria-label="Log out" onClick={() => void logout()}>
               <LogOut size={15} aria-hidden="true" />
-              <span className="ghr-rail-wide">Log out</span>
+              <span>Log out</span>
             </Button>
           </div>
         </div>

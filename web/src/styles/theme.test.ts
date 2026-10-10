@@ -165,10 +165,8 @@ describe("ghr chrome styles", () => {
     expect(css).toMatch(/\.lucide \{\s*stroke-width: 1\.75;/)
   })
 
-  it("keeps the rail footer usable when the rail is collapsed", () => {
-    expect(css).toMatch(/\.ghr-rail-narrow \{\s*display: none;/)
-    expect(css).toMatch(/\[data-collapsed="true"\] \.ghr-rail-narrow \{\s*display: block;/)
-    expect(css).toMatch(/\[data-collapsed="true"\] \.ghr-rail-foot,\s*\.dr-sidebar-layout-aside\[data-collapsed="true"\] \.ghr-mode \{\s*flex-direction: column;/)
+  it("hides the rail's collapse toggle", () => {
+    expect(css).toMatch(/\.dr-sidebar-layout-toggle \{\s*display: none;/)
   })
 
   it("appends the host to the brand label", () => {

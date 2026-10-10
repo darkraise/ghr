@@ -18,7 +18,6 @@ export function ModeControl() {
       variant="outline"
       value={mode}
       aria-label="Colour mode"
-      className="ghr-mode"
       onValueChange={(value) => {
         const next = MODES.find((m) => m.value === value)
         if (next) setMode(next.value)

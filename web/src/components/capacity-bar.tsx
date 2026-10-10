@@ -37,7 +37,7 @@ export function CapacityBar({ status }: { status: Status }) {
   const c = capacity(status)
   return (
     <div className="flex flex-col gap-2 rounded-[6px] bg-[hsl(var(--sidebar-hover-bg))] p-2.5">
-      <div className="ghr-rail-wide flex items-baseline justify-between gap-2 text-sm">
+      <div className="flex items-baseline justify-between gap-2 text-sm">
         <span className="text-[hsl(var(--sidebar-foreground-muted))]">Runners</span>
         <span className="font-mono text-[hsl(var(--sidebar-foreground))]">{c.text}</span>
       </div>

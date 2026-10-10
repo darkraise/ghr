@@ -297,21 +297,10 @@ body {
   font-weight: 400;
 }
 
-.dr-sidebar-layout-aside[data-collapsed="true"] .ghr-rail-wide {
+/* The rail always stays expanded. The kit has no prop for that, but its
+   collapsed state starts false and only this button flips it. */
+.dr-sidebar-layout-toggle {
   display: none;
-}
-
-.ghr-rail-narrow {
-  display: none;
-}
-
-.dr-sidebar-layout-aside[data-collapsed="true"] .ghr-rail-narrow {
-  display: block;
-}
-
-.dr-sidebar-layout-aside[data-collapsed="true"] .ghr-rail-foot,
-.dr-sidebar-layout-aside[data-collapsed="true"] .ghr-mode {
-  flex-direction: column;
 }
 
 .dr-layout-header {
