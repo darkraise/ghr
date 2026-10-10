@@ -1,8 +1,10 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { HistoryEntry } from "@/api/types"
+import { resultWord } from "@/lib/history"
 import { json, mockApi } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
+import { setViewport } from "@/test/media"
 import { renderApp } from "@/test/render"
 
 const secureContext = Object.getOwnPropertyDescriptor(window, "isSecureContext")
@@ -29,10 +31,39 @@ describe("History page", () => {
     expect(table.getByText("#7")).toBeInTheDocument()
     expect(table.getAllByText("deploy")).toHaveLength(2)
     expect(table.getByText("#41")).toBeInTheDocument()
-    expect(table.getByText("Succeeded")).toBeInTheDocument()
-    expect(table.getByText("Failed")).toBeInTheDocument()
+    expect(table.getByRole("img", { name: "Succeeded" })).toBeInTheDocument()
+    expect(table.getByRole("img", { name: "Failed" })).toBeInTheDocument()
     expect(screen.getByText("2 jobs, 1 failed, median 3m15s")).toBeInTheDocument()
     expect(screen.getAllByRole("link", { name: /^Open run/ })).toHaveLength(1)
+  })
+
+  it("links a finished job to its run page and lists its facts", async () => {
+    setViewport(1024)
+    mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
+    renderApp("/history")
+    const entry = fixtures.history.find((h) => h.run_id > 0)
+    if (!entry) throw new Error("fixture has no entry with a run")
+    const link = (await screen.findAllByRole("link", { name: entry.job_name }))[0]
+    if (!link) throw new Error("no link")
+    expect(link).toHaveAttribute("href", `/actions/${entry.repo}/runs/${entry.run_id}`)
+    const row = link.closest("tr") as HTMLElement
+    expect(within(row).getByText(entry.workflow)).toBeInTheDocument()
+    expect(within(row).getByText(entry.repo)).toBeInTheDocument()
+    expect(within(row).getByText(`#${entry.run_number}`)).toBeInTheDocument()
+    expect(within(row).getByRole("img", { name: resultWord(entry.conclusion) })).toBeInTheDocument()
+  })
+
+  it("puts the summary in the list's header band and the duration bar under the duration", async () => {
+    setViewport(1024)
+    mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
+    renderApp("/history")
+    await screen.findAllByRole("link", { name: "deploy" })
+    const box = screen.getByRole("region", { name: "Finished jobs" })
+    const heading = within(box).getByRole("heading", { level: 2, name: "Finished jobs" })
+    expect(heading.parentElement).toHaveTextContent(/\d+ jobs?/)
+    expect(within(box).queryByRole("columnheader")).not.toBeInTheDocument()
+    const bar = box.querySelector("[data-duration-bar]")
+    expect(bar?.parentElement).toHaveClass("flex-col")
   })
 
   it("reads the table from where the chart starts", async () => {
