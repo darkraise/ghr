@@ -90,6 +90,14 @@ describe("RunnerList", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/runners/bbbbbb"))
   })
 
+  it("marks the selected runner with the sunk fill and an accent edge", async () => {
+    draw()
+    const current = await link("aaaaaa")
+    expect(current).toHaveClass("bg-muted", "shadow-[inset_2px_0_0_hsl(var(--primary))]")
+    const other = fixtures.status.instances.find((i) => i.id !== "aaaaaa")
+    if (other) expect(await link(other.id)).not.toHaveClass("shadow-[inset_2px_0_0_hsl(var(--primary))]")
+  })
+
   it("lists repositories waiting at their cap", async () => {
     const repos = [{ name: "darkrouter", paused: false, max: 2, active: 2, queued: 2 }]
     draw({ ...fixtures.status, repos })

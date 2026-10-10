@@ -10,9 +10,9 @@ import { useMediaQuery, WIDE } from "@/lib/use-media-query"
 // The light shows capacity like the shell's bar: busy pulses, warm is an
 // outline, starting is faint.
 const LIGHT: Record<string, string> = {
-  busy: "ghr-pulse bg-primary",
-  starting: "bg-primary/45",
-  idle: "border border-primary",
+  busy: "ghr-pulse bg-running",
+  starting: "bg-running/45",
+  idle: "border border-running",
 }
 
 const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
@@ -86,7 +86,7 @@ export function RunnerList({
                   else links.current.delete(i.id)
                 }}
                 className={`grid grid-cols-[0.625rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 px-3 py-2 text-sm hover:bg-muted/50 ${
-                  i.id === selected ? "bg-muted" : ""
+                  i.id === selected ? "bg-muted shadow-[inset_2px_0_0_hsl(var(--primary))]" : ""
                 }`}
               >
                 <span aria-hidden="true" className={`size-2.5 rounded-[2px] ${LIGHT[shown(i)] ?? "bg-muted-foreground"}`} />
