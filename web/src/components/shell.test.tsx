@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { keys } from "@/api/hooks"
 import { liveConfig } from "@/api/live"
 import { json, mockApi, noContent } from "@/test/api"
-import { authedRoutes, fixtures } from "@/test/fixtures"
+import { authedRoutes, fixtures, runRoutes } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
 function logoutRoutes(answer: () => Response) {
@@ -18,21 +18,37 @@ function logoutRoutes(answer: () => Response) {
 }
 
 describe("shell", () => {
-  it("lists the pages in two groups", async () => {
+  it("lists the pages as tabs, without Toolchains or Storage", async () => {
     mockApi(authedRoutes())
     renderApp("/")
-    for (const label of ["Dashboard", "Runners", "History", "Repositories", "Toolchains", "Storage", "Settings"]) {
-      expect((await screen.findAllByRole("link", { name: new RegExp(`^${label}`) })).length).toBeGreaterThan(0)
-    }
-    expect(screen.getByText("Operate")).toBeInTheDocument()
-    expect(screen.getByText("Configure")).toBeInTheDocument()
+    const nav = await screen.findByRole("navigation", { name: "Pages" })
+    await waitFor(() => expect(within(nav).getByRole("link", { name: /^Repositories/ })).toBeInTheDocument())
+    expect(within(nav).getAllByRole("link").map((a) => a.textContent?.replace(/\d+$/, ""))).toEqual([
+      "Dashboard",
+      "Runners",
+      "Actions",
+      "History",
+      "Repositories",
+      "Settings",
+    ])
+    expect(within(nav).getByRole("link", { name: /^Dashboard/ })).toHaveAttribute("aria-current", "page")
+    expect(within(nav).getByRole("link", { name: /^Settings/ })).toHaveAttribute("href", "/settings")
   })
 
-  it("counts live runners and configured repositories in the nav", async () => {
+  it("keeps a tab current on its nested pages", async () => {
+    mockApi(runRoutes())
+    renderApp("/actions/darkmem/runs/102")
+    const nav = await screen.findByRole("navigation", { name: "Pages" })
+    expect(within(nav).getByRole("link", { name: /^Actions/ })).toHaveAttribute("aria-current", "page")
+    expect(within(nav).getByRole("link", { name: /^Dashboard/ })).not.toHaveAttribute("aria-current")
+  })
+
+  it("counts live runners and configured repositories in the tabs", async () => {
     mockApi(authedRoutes())
     renderApp("/")
-    await waitFor(() => expect(within(screen.getByRole("link", { name: /^Runners/ })).getByText("2")).toBeInTheDocument())
-    await waitFor(() => expect(within(screen.getByRole("link", { name: /^Repositories/ })).getByText("2")).toBeInTheDocument())
+    const nav = await screen.findByRole("navigation", { name: "Pages" })
+    await waitFor(() => expect(within(within(nav).getByRole("link", { name: /^Runners/ })).getByText("2")).toBeInTheDocument())
+    await waitFor(() => expect(within(within(nav).getByRole("link", { name: /^Repositories/ })).getByText("2")).toBeInTheDocument())
   })
 
   it("shows reconnecting while status polls fail, until one succeeds", async () => {
@@ -78,7 +94,7 @@ describe("shell", () => {
     })
   })
 
-  it("logs out from the rail", async () => {
+  it("logs out from the top bar", async () => {
     const { calls } = mockApi(logoutRoutes(noContent))
     const { user, router } = renderApp("/")
     await user.click(await screen.findByRole("button", { name: "Log out" }))
@@ -94,14 +110,13 @@ describe("shell", () => {
     expect(calls.some((c) => c.method === "POST" && c.path === "/auth/logout")).toBe(true)
   })
 
-  it("logs out from the header's user menu past unsaved edits", async () => {
+  it("logs out past unsaved edits", async () => {
     mockApi(logoutRoutes(noContent))
     const { user, router } = renderApp("/settings")
     const poll = await screen.findByLabelText("Poll interval")
     await user.clear(poll)
     await user.type(poll, "15s")
-    await user.click(screen.getByRole("button", { name: "O" }))
-    await user.click(await screen.findByRole("menuitem", { name: "Log out" }))
+    await user.click(screen.getByRole("button", { name: "Log out" }))
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
     expect(screen.queryByText("Unsaved changes")).toBeNull()
   })
@@ -130,15 +145,16 @@ describe("shell", () => {
     expect(screen.getByText("Queued since 13:55. Runners update between jobs.")).toBeInTheDocument()
   })
 
-  it("puts the capacity readout and the user menu in the header bar", async () => {
+  it("puts the brand, the host, the capacity and the mode control in the top bar", async () => {
     mockApi(authedRoutes())
-    const { container } = renderApp("/")
-    await waitFor(() => {
-      const header = container.querySelector<HTMLElement>(".dr-layout-header")
-      if (!header) throw new Error("no header bar")
-      expect(within(header).getByText("1 of 2 busy")).toBeInTheDocument()
-      expect(within(header).getByRole("button", { name: "O" })).toBeInTheDocument()
-    })
+    renderApp("/")
+    const bar = await screen.findByRole("banner")
+    await waitFor(() => expect(within(bar).getByText("1 of 2 busy")).toBeInTheDocument())
+    expect(within(bar).getByRole("img", { name: "1 of 2 busy, 1 warm" })).toBeInTheDocument()
+    expect(within(bar).getByText("localhost")).toBeInTheDocument()
+    expect(within(bar).getByRole("radiogroup", { name: "Colour mode" })).toBeInTheDocument()
+    expect(within(bar).getByRole("button", { name: "Log out" })).toBeInTheDocument()
+    expect(within(bar).queryByRole("searchbox")).not.toBeInTheDocument()
   })
 
   it("offers dark, light and system in place of the theme switcher", async () => {
@@ -153,10 +169,21 @@ describe("shell", () => {
     expect(await screen.findByText("GitHub rejected the token. No new runners start until this clears.")).toBeInTheDocument()
   })
 
-  it("names the host for the brand label", async () => {
+  it("shows the runner update as a banner above the page", async () => {
     mockApi(authedRoutes())
     renderApp("/")
-    await waitFor(() => expect(document.documentElement.style.getPropertyValue("--ghr-host")).toBe('"localhost"'))
+    const banner = await screen.findByRole("region", { name: "Runner update" })
+    expect(screen.getByRole("main")).toContainElement(banner)
+    expect(screen.getByRole("banner")).not.toContainElement(banner)
+  })
+
+  it("keeps the main-content target and a skip link to it", async () => {
+    mockApi(authedRoutes())
+    renderApp("/")
+    const main = await screen.findByRole("main")
+    expect(main).toHaveAttribute("id", "main-content")
+    expect(main).toHaveAttribute("tabindex", "-1")
+    expect(screen.getByRole("link", { name: "Skip to content" })).toHaveAttribute("href", "#main-content")
   })
 
   it("opens the change stream once the app is mounted", async () => {

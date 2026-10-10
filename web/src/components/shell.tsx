@@ -2,14 +2,14 @@ import { useQueryClient } from "@tanstack/react-query"
 import { Link, Outlet, useNavigate } from "@tanstack/react-router"
 import { Alert, AlertDescription, AlertTitle } from "darkraise-ui/components/alert"
 import { Button } from "darkraise-ui/components/button"
-import { SidebarLayout, useBrandStore, type NavGroup } from "darkraise-ui/layout"
-import { Boxes, GitBranch, HardDrive, HistoryIcon, LayoutDashboard, LogOut, Settings, Workflow, Wrench } from "lucide-react"
+import { Boxes, GitBranch, HistoryIcon, LayoutDashboard, LogOut, Settings, Workflow, type LucideIcon } from "lucide-react"
 import { useEffect, useRef } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useEvents, useMetrics, useStatus } from "@/api/hooks"
 import { useChangeStream } from "@/api/use-change-stream"
 import type { Config, Status } from "@/api/types"
-import { CapacityBar } from "@/components/capacity-bar"
+import { Brand } from "@/components/brand"
+import { CapacitySegments } from "@/components/capacity-bar"
 import { ModeControl } from "@/components/mode-control"
 import { UpdateCard } from "@/components/update-card"
 import { capacity } from "@/lib/capacity"
@@ -20,28 +20,28 @@ function count(n: number | undefined): string | undefined {
   return n ? String(n) : undefined
 }
 
-function navGroups(status: Status | undefined, config: Config | undefined): NavGroup[] {
+interface Tab {
+  label: string
+  to: "/" | "/runners" | "/actions" | "/history" | "/repositories" | "/settings"
+  icon: LucideIcon
+  badge?: string
+  divided?: boolean
+}
+
+function tabs(status: Status | undefined, config: Config | undefined): Tab[] {
   return [
-    {
-      label: "Operate",
-      items: [
-        { label: "Dashboard", href: "/", icon: LayoutDashboard },
-        { label: "Runners", href: "/runners", icon: Boxes, badge: count(status && running(status)) },
-        { label: "Actions", href: "/actions", icon: Workflow },
-        { label: "History", href: "/history", icon: HistoryIcon },
-      ],
-    },
-    {
-      label: "Configure",
-      items: [
-        { label: "Repositories", href: "/repositories", icon: GitBranch, badge: count(config?.repos?.length) },
-        { label: "Toolchains", href: "/toolchains", icon: Wrench },
-        { label: "Storage", href: "/storage", icon: HardDrive },
-        { label: "Settings", href: "/settings", icon: Settings },
-      ],
-    },
+    { label: "Dashboard", to: "/", icon: LayoutDashboard },
+    { label: "Runners", to: "/runners", icon: Boxes, badge: count(status && running(status)) },
+    { label: "Actions", to: "/actions", icon: Workflow },
+    { label: "History", to: "/history", icon: HistoryIcon },
+    { label: "Repositories", to: "/repositories", icon: GitBranch, badge: count(config?.repos?.length), divided: true },
+    { label: "Settings", to: "/settings", icon: Settings },
   ]
 }
+
+const TAB =
+  "flex shrink-0 items-center gap-2 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm whitespace-nowrap hover:bg-muted aria-[current=page]:border-[hsl(var(--tab-line))] aria-[current=page]:font-semibold"
+const FRAME = "mx-auto w-full max-w-[1264px] px-6"
 
 export function Shell() {
   const status = useStatus()
@@ -55,13 +55,6 @@ export function Shell() {
   useMetrics()
   useEvents(epoch)
   useChangeStream()
-
-  useEffect(() => {
-    useBrandStore.getState().setAppName("ghr")
-    // The kit's brand label holds only the app name; ghr-theme.css appends
-    // the host from this property.
-    document.documentElement.style.setProperty("--ghr-host", JSON.stringify(window.location.hostname))
-  }, [])
 
   useEffect(() => {
     if (epoch === undefined) return
@@ -85,33 +78,47 @@ export function Shell() {
   const offline = status.isError
   const unreachable = status.isError && !(status.error instanceof ApiError && status.error.status === 401)
   return (
-    <SidebarLayout
-      nav={navGroups(st, config.data)}
-      showThemeSwitcher={false}
-      activeBar="ring"
-      notificationSlot={null}
-      headerSlot={st && <span className="font-mono text-sm">{capacity(st).text}</span>}
-      navHeader={st && <CapacityBar status={st} />}
-      navFooter={
-        <div className="flex flex-col gap-3">
+    <div className="flex min-h-dvh flex-col bg-background text-foreground">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-card focus:px-3 focus:py-2 focus:text-sm"
+      >
+        Skip to content
+      </a>
+      <header className="border-b border-border bg-[hsl(var(--top-bar))]">
+        <div className={`${FRAME} flex h-14 items-center gap-3`}>
+          <Link to="/" aria-label="ghr" className="flex items-center rounded-md">
+            <Brand />
+          </Link>
+          <span className="hidden font-mono text-xs text-muted-foreground sm:inline">{window.location.hostname}</span>
+          <span className="flex-1" />
           {st && (
-            <div className="empty:hidden">
-              <UpdateCard update={st.runner_update} offline={offline} />
-            </div>
+            <span className="flex items-center gap-2">
+              <span className="w-20">
+                <CapacitySegments status={st} />
+              </span>
+              <span className="hidden font-mono text-sm sm:inline">{capacity(st).text}</span>
+            </span>
           )}
-          <div className="flex items-center gap-2 text-sm text-[hsl(var(--sidebar-foreground))]">
-            <span className="flex-1 truncate">Owner</span>
-            <ModeControl />
-            <Button size="sm" variant="ghost" aria-label="Log out" onClick={() => void logout()}>
-              <LogOut size={15} aria-hidden="true" />
-              <span>Log out</span>
-            </Button>
-          </div>
+          <ModeControl />
+          <Button size="sm" variant="ghost" aria-label="Log out" onClick={() => void logout()}>
+            <LogOut size={15} aria-hidden="true" />
+            <span className="hidden sm:inline">Log out</span>
+          </Button>
         </div>
-      }
-      user={{ name: "Owner", email: "ghr" }}
-      onLogout={() => void logout()}
-    >
+        <nav aria-label="Pages" className={`${FRAME} flex gap-1 overflow-x-auto`}>
+          {tabs(st, config.data).map((tab) => (
+            <span key={tab.to} className={`flex shrink-0 ${tab.divided ? "ml-2 border-l border-border pl-2" : ""}`}>
+              <Link to={tab.to} activeOptions={{ exact: tab.to === "/" }} className={TAB}>
+                <tab.icon size={15} aria-hidden="true" />
+                {tab.label}
+                {tab.badge && <span className="rounded-full bg-muted px-1.5 font-mono text-xs">{tab.badge}</span>}
+              </Link>
+            </span>
+          ))}
+        </nav>
+      </header>
+      <main id="main-content" tabIndex={-1} className={`${FRAME} flex flex-1 flex-col py-6 outline-none`}>
       {unreachable && (
         <Alert variant="destructive" className="mb-4">
           <AlertTitle>Reconnecting</AlertTitle>
@@ -134,7 +141,13 @@ export function Shell() {
           </AlertDescription>
         </Alert>
       )}
-      <Outlet />
-    </SidebarLayout>
+        {st && (
+          <div className="mb-4 empty:hidden">
+            <UpdateCard update={st.runner_update} offline={offline} />
+          </div>
+        )}
+        <Outlet />
+      </main>
+    </div>
   )
 }
