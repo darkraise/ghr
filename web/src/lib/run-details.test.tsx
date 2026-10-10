@@ -112,8 +112,8 @@ describe("RunStatusIcon", () => {
     ["completed", "failure", "Failed"],
     ["completed", "cancelled", "Cancelled"],
     ["completed", "skipped", "Skipped"],
-    ["queued", "", "Queued"],
-    ["waiting", "", "Queued"],
+    ["queued", "", "Waiting"],
+    ["waiting", "", "Waiting"],
   ])("shows %s/%s as %s", (status, conclusion, name) => {
     render(<RunStatusIcon status={status} conclusion={conclusion} />)
     expect(screen.getByRole("img", { name })).toBeInTheDocument()
@@ -122,6 +122,6 @@ describe("RunStatusIcon", () => {
   it("shows a running job as a spinner", () => {
     render(<RunStatusIcon status="in_progress" conclusion="" />)
     expect(screen.getByText("Running")).toHaveClass("sr-only")
-    expect(screen.queryByRole("img", { name: "Queued" })).toBeNull()
+    expect(screen.queryByRole("img", { name: "Waiting" })).toBeNull()
   })
 })

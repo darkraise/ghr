@@ -24,7 +24,7 @@ describe("GitHub token section", () => {
     renderApp("/settings")
     expect(await screen.findByText("Expires Dec 2, in 60 days")).toBeInTheDocument()
     const section = within(screen.getByRole("region", { name: "GitHub token" }))
-    expect(section.getByText("Valid")).toHaveClass("text-success")
+    expect(section.getByText("Valid")).toHaveClass("text-foreground")
     expect(section.getByText("1m ago")).toBeInTheDocument()
     expect(section.getByText("4,980 of 5,000, resets 14:45")).toHaveClass("font-mono")
   })

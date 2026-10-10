@@ -37,7 +37,7 @@ describe("RunnerPanel", () => {
     draw()
     expect(await screen.findByRole("heading", { name: "aaaaaa", level: 2 })).toBeInTheDocument()
     expect(await screen.findByText("Run tests")).toBeInTheDocument()
-    expect(screen.getByText("Busy")).toHaveClass("text-primary")
+    expect(screen.getAllByText("Running")[0]).toHaveClass("text-foreground")
     expect(screen.getByText("darkmem")).toBeInTheDocument()
     expect(screen.getByText("Running for")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Open run" })).toHaveAttribute("href", "https://github.com/darkraise/darkmem/actions/runs/102/job/2")
@@ -98,7 +98,7 @@ describe("RunnerPanel", () => {
     draw("/runners/aaaaaa?tab=containers")
     expect(await screen.findByText("ghr-aaaaaa-db-1")).toBeInTheDocument()
     expect(screen.getByText("ghr-aaaaaa")).toHaveClass("text-muted-foreground")
-    expect(screen.getByText("Running")).toBeInTheDocument()
+    expect(screen.getAllByText("Running").length).toBeGreaterThan(0)
   })
 
   it("puts the chosen tab in the URL", async () => {
@@ -111,7 +111,7 @@ describe("RunnerPanel", () => {
   it("stops the runner only after confirmation", async () => {
     const { calls } = mockApi(routes({ "DELETE /api/runners/aaaaaa": () => noContent() }))
     const { user } = draw()
-    await screen.findByText("Busy")
+    await screen.findByText("Running")
     await user.click(screen.getByRole("button", { name: "Stop runner" }))
     expect(await screen.findByText("Runner aaaaaa is running a job. Stop it?")).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Cancel" }))
@@ -131,8 +131,8 @@ describe("RunnerPanel", () => {
       }),
     )
     draw()
-    expect(await screen.findByText("Stopping")).toHaveClass("text-muted-foreground")
-    expect(screen.queryByText("Busy")).toBeNull()
+    expect(await screen.findByText("Stopping")).toHaveClass("text-foreground")
+    expect(screen.queryByText("Running")).toBeNull()
     expect(screen.getByRole("button", { name: "Stop runner" })).toBeDisabled()
   })
 
@@ -177,11 +177,11 @@ describe("RunnerPanel", () => {
     let down = false
     mockApi(routes({ "GET /api/status": () => (down ? json({ error: "connection refused" }, 502) : fixtures.status) }))
     draw()
-    await screen.findByText("Busy")
+    await screen.findByText("Running")
     expect(screen.getByRole("button", { name: "Stop runner" })).toBeEnabled()
     down = true
     await waitFor(() => expect(screen.getByRole("button", { name: "Stop runner" })).toBeDisabled())
-    expect(screen.getByText("Busy")).toBeInTheDocument()
+    expect(screen.getAllByText("Running").length).toBeGreaterThan(0)
   })
 
   it("says when no step is reported yet", async () => {

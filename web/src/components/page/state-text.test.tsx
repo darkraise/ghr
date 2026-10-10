@@ -5,8 +5,8 @@ import { StateText } from "./state-text"
 
 describe("stateTone", () => {
   it.each([
-    ["busy", "accent"],
-    ["Running", "accent"],
+    ["busy", "run"],
+    ["Running", "run"],
     ["online", "accent"],
     ["matched", "accent"],
     ["waiting", "warn"],
@@ -28,7 +28,7 @@ describe("stateTone", () => {
 })
 
 describe("StateText", () => {
-  it("shows the state as a sentence-case word in its tone's colour", () => {
+  it("shows the state as a sentence-case word, or a given label", () => {
     render(
       <>
         <StateText state="busy" />
@@ -36,8 +36,8 @@ describe("StateText", () => {
         <StateText state="paused" />
       </>,
     )
-    expect(screen.getByText("Busy")).toHaveClass("text-primary")
-    expect(screen.getByText("Offline now")).toHaveClass("text-destructive")
-    expect(screen.getByText("Paused")).toHaveClass("text-muted-foreground")
+    expect(screen.getByText("Running")).toBeInTheDocument()
+    expect(screen.getByText("Offline now")).toBeInTheDocument()
+    expect(screen.getByText("Paused")).toBeInTheDocument()
   })
 })

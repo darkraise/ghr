@@ -1,24 +1,12 @@
-import { Ban, Check, CircleHelp, CircleSlash, X, type LucideIcon } from "lucide-react"
+import { stateIcon, TONE_TEXT } from "@/lib/state-icon"
+import { stateTone, stateWord } from "@/lib/status"
 
-interface Result {
-  label: string
-  Icon: LucideIcon
-  className: string
-}
-
-const FAILED: Result = { label: "Failed", Icon: X, className: "text-destructive" }
-
-const RESULTS: Record<string, Result | undefined> = {
-  success: { label: "Succeeded", Icon: Check, className: "text-success" },
-  failure: FAILED,
-  cancelled: { label: "Cancelled", Icon: Ban, className: "text-muted-foreground" },
-  skipped: { label: "Skipped", Icon: CircleSlash, className: "text-muted-foreground" },
-  // ghr's own conclusion for a job whose result it never learned.
-  unknown: { label: "Unknown", Icon: CircleHelp, className: "text-muted-foreground" },
-}
+const KNOWN = new Set(["success", "failure", "cancelled", "skipped", "unknown"])
 
 // Any other conclusion shows as failed, as the Dashboard has always shown it.
+// "unknown" is ghr's own conclusion for a job whose result it never learned.
 export function ResultIcon({ conclusion }: { conclusion: string }) {
-  const { label, Icon, className } = RESULTS[conclusion] ?? FAILED
-  return <Icon role="img" aria-label={label} size={15} className={`shrink-0 ${className}`} />
+  const state = KNOWN.has(conclusion) ? conclusion : "failure"
+  const Icon = stateIcon(state)
+  return <Icon role="img" aria-label={stateWord(state)} size={15} className={`shrink-0 ${TONE_TEXT[stateTone(state)]}`} />
 }
