@@ -16,6 +16,7 @@ import (
 
 	"github.com/darkraise/ghr/internal/activity"
 	"github.com/darkraise/ghr/internal/api"
+	"github.com/darkraise/ghr/internal/changes"
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/events"
 	"github.com/darkraise/ghr/internal/github"
@@ -102,7 +103,10 @@ type Backend struct {
 	WebSetupRequired func() bool
 	// SetupPending reports an unfinished first-run setup; nil reports false.
 	SetupPending func() bool
-	checks       labelChecks
+	// Changes is the hub GET /changes subscribes to; nil until the daemon has started.
+	Changes *changes.Hub
+	flags   setupFlagCache
+	checks  labelChecks
 
 	stepsMu    sync.Mutex
 	steps      map[string]stepsEntry
