@@ -297,6 +297,12 @@ body {
   font-weight: 400;
 }
 
+/* Wide enough for the footer's owner label, log out and the mode control
+   at the large font step. */
+:root {
+  --sidebar-width-expanded: 18rem;
+}
+
 /* The rail always stays expanded. The kit has no prop for that, but its
    collapsed state starts false and only this button flips it. */
 .dr-sidebar-layout-toggle {

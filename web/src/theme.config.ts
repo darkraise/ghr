@@ -19,7 +19,7 @@ export const themeConfig: ThemeConfig = {
     controlDepth: "flush",
     shellStyle: "classic",
     sidebarActiveBar: "ring",
-    fontSize: "medium",
+    fontSize: "large",
     accentIntensity: "balanced",
     outerGlow: "none",
     innerGlow: "none",

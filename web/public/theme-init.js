@@ -26,7 +26,7 @@
     preset: "default",
     "background-style": "solid",
     density: "compact",
-    "font-size": "medium",
+    "font-size": "large",
     radius: "subtle",
     elevation: "low",
     "button-elevation": "flat",

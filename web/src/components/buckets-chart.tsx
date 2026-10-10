@@ -107,7 +107,7 @@ export function BucketsChart({
       viewBox={`0 0 ${width} ${height}`}
       role="group"
       aria-label={`${jobs ? "Jobs" : "Activity"} per bucket for ${windowWords(activity.window)}`}
-      className="block text-xs"
+      className="block text-[0.75rem]"
     >
       {tracks.map(([name, peak], k) => (
         <g key={name}>

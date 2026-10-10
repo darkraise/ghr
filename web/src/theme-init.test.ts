@@ -58,6 +58,6 @@ describe("theme-init.js", () => {
     run()
     expect(root.getAttribute("data-density")).toBe("compact")
     expect(root.getAttribute("data-radius")).toBe("subtle")
-    expect(root.getAttribute("data-font-size")).toBe("medium")
+    expect(root.getAttribute("data-font-size")).toBe("large")
   })
 })

@@ -168,7 +168,7 @@ export function LanesChart({
       viewBox={`0 0 ${width} ${height}`}
       role="group"
       aria-label={`Runner lanes for ${windowWords(activity.window)}`}
-      className="block text-xs"
+      className="block text-[0.75rem]"
     >
       {Array.from({ length: laneCount }, (_, i) => (
         <g key={i}>

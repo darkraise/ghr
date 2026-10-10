@@ -169,6 +169,10 @@ describe("ghr chrome styles", () => {
     expect(css).toMatch(/\.dr-sidebar-layout-toggle \{\s*display: none;/)
   })
 
+  it("widens the rail for the large font step", () => {
+    expect(css).toMatch(/:root \{\s*--sidebar-width-expanded: 18rem;/)
+  })
+
   it("appends the host to the brand label", () => {
     expect(css).toMatch(/\.dr-brand-logo-label::after \{\s*content: var\(--ghr-host, ""\);/)
   })
@@ -181,7 +185,7 @@ describe("theme config", () => {
     expect(themeConfig.defaults).toMatchObject({
       preset: "default",
       density: "compact",
-      fontSize: "medium",
+      fontSize: "large",
       elevation: "low",
       buttonElevation: "flat",
       radius: "subtle",
