@@ -45,7 +45,7 @@ type fakeManager struct {
 	now         time.Time    // Status().Now
 	diskUsed    int64        // Status().DiskUsedBytes
 	rate        int          // Status().RateRemaining
-	statusCalls atomic.Int64 // Status calls; activity builds read it from several goroutines
+	statusCalls atomic.Int64 // Status calls; the change hub reads it from its own goroutine
 }
 
 func (f *fakeManager) PausedUntil() time.Time { return f.paused }
