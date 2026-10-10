@@ -26,7 +26,7 @@ describe("Actions page", () => {
     expect(link).toHaveAttribute("href", "/actions/darkmem/runs/102")
     expect(link).not.toHaveAttribute("target")
     expect(progress.getByText("Running")).toBeInTheDocument()
-    expect(progress.getByRole("img", { name: "Queued" })).toBeInTheDocument()
+    expect(progress.getByRole("img", { name: "Waiting" })).toBeInTheDocument()
     expect(progress.getByText(/^4m0\ds$/)).toBeInTheDocument()
   })
 

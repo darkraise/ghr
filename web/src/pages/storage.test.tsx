@@ -190,7 +190,7 @@ describe("Recent operations", () => {
     expect(row.getByText("13:06")).toHaveClass("font-mono")
     expect(row.getByText("clear")).toBeInTheDocument()
     expect(row.getByText("nuget")).toBeInTheDocument()
-    expect(row.getByText("OK")).toHaveClass("text-success")
+    expect(row.getByText("OK")).toHaveClass("text-foreground")
     expect(row.getByText("cleared NuGet (3.6 GB freed)")).toHaveClass("text-muted-foreground")
   })
 
