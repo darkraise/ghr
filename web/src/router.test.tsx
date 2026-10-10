@@ -51,7 +51,8 @@ describe("routes", () => {
   ])("serves %s", async (path, title) => {
     mockApi(authed)
     renderAt(path)
-    expect(await screen.findByRole("heading", { name: title })).toBeInTheDocument()
+    const query = path === "/settings" ? { level: 1, name: title } : { name: title }
+    expect(await screen.findByRole("heading", query)).toBeInTheDocument()
   })
 
   it("offers a retry when the daemon cannot be asked who is logged in", async () => {

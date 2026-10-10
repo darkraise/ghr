@@ -178,6 +178,7 @@ describe("Settings accessibility", () => {
       mockApi(authedRoutes({ "GET /api/token": fixtures.token }))
       renderApp("/settings")
       await screen.findByRole("navigation", { name: "Settings" })
+      await screen.findByLabelText("Poll interval")
       expect(await violations()).toEqual([])
     },
     30_000,
