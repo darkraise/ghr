@@ -114,11 +114,11 @@ export function JobGraph({
         ) : undefined
       }
     >
-      <div role="group" aria-label="Job graph" tabIndex={0} className="overflow-x-auto pb-2">
+      <div role="group" aria-label="Job graph" tabIndex={0} className="overflow-x-auto rounded-md bg-background p-3">
         <div className="relative" style={{ width, height }}>
-          <svg aria-hidden="true" width={width} height={height} className="absolute inset-0 text-border">
+          <svg aria-hidden="true" width={width} height={height} className="absolute inset-0 text-muted-foreground">
             {edges(placed).map((d) => (
-              <path key={d} d={d} fill="none" stroke="currentColor" strokeWidth={1.5} />
+              <path key={d} d={d} fill="none" stroke="currentColor" strokeWidth={1} />
             ))}
           </svg>
           {placed.map(({ node, x, y, h }) => {
@@ -129,7 +129,7 @@ export function JobGraph({
               return (
                 <div key={node.key} className="absolute" style={style}>
                   {jobLink(single.id, <JobLine job={single} now={now} />, {
-                    className: "flex h-full items-center gap-2 rounded-[6px] border border-border bg-card px-3 text-sm hover:bg-muted",
+                    className: "flex h-full items-center gap-2 rounded-md border border-border bg-card hover:border-primary focus-within:border-primary px-3 text-sm",
                     label: label(single, node),
                   })}
                 </div>
@@ -143,7 +143,7 @@ export function JobGraph({
             const shown = isOpen ? members : members.slice(0, GROUP_SHOWN)
             const hidden = members.length - GROUP_SHOWN
             return (
-              <div key={node.key} className="absolute flex flex-col rounded-[6px] border border-border bg-card px-3 py-1" style={style}>
+              <div key={node.key} className="absolute flex flex-col rounded-md border border-border bg-card hover:border-primary focus-within:border-primary px-3 py-1" style={style}>
                 <p className="flex h-8 items-center gap-2 text-sm font-medium">
                   <span className="min-w-0 flex-1 truncate">{node.name}</span>
                   <span className="font-mono text-xs text-muted-foreground">{members.length}</span>

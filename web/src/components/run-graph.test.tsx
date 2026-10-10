@@ -68,4 +68,12 @@ describe("JobGraph", () => {
     expect(section.getAllByRole("link")).toHaveLength(7)
     expect(section.getByRole("button", { name: "Show fewer" })).toHaveAttribute("aria-expanded", "true")
   })
+
+  it("draws the jobs on a ground canvas with thin muted connectors", () => {
+    const { container } = show()
+    expect(screen.getByRole("group", { name: "Job graph" })).toHaveClass("bg-background", "rounded-md", "p-3")
+    const svg = container.querySelector("svg[aria-hidden='true']") as SVGElement
+    expect(svg).toHaveClass("text-muted-foreground")
+    expect(svg.querySelector("path")).toHaveAttribute("stroke-width", "1")
+  })
 })

@@ -3,9 +3,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "d
 import { PageHeader } from "darkraise-ui/layout"
 import type { ReactNode } from "react"
 import type { RunDetail, RunJob } from "@/api/types"
+import { SideGroup } from "@/components/page/side-layout"
+import { StatusPill } from "@/components/page/status-pill"
 import { RunStatusIcon } from "@/components/run-status-icon"
 import { dur } from "@/lib/format"
-import { attemptLabel, githubLinks, jobMs, runDescription } from "@/lib/run-details"
+import { attemptLabel, githubLinks, isRunActive, jobMs, runDescription } from "@/lib/run-details"
+import { SIDE_LINK } from "@/lib/side-link"
 
 export interface JobLinkOptions {
   step?: number
@@ -20,10 +23,15 @@ export interface JobLinkOptions {
 export type JobLinkFn = (jobId: number, children: ReactNode, opts?: JobLinkOptions) => ReactNode
 export type SummaryLinkFn = (children: ReactNode, opts: { className?: string; current?: boolean }) => ReactNode
 
-// The router marks the current link with aria-current, so the style follows it.
-const RAIL_LINK =
-  "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted aria-[current=page]:bg-muted aria-[current=page]:font-medium"
-const RAIL_LABEL = "mt-3 px-2 pb-1 text-xs font-medium text-muted-foreground"
+const RAIL_LINK = SIDE_LINK
+
+function RunPill({ run }: { run: RunDetail }) {
+  if (!isRunActive(run.status)) {
+    const done = run.conclusion === "success" || run.conclusion === "cancelled" || run.conclusion === "skipped"
+    return <StatusPill state={done ? run.conclusion : "failure"} />
+  }
+  return <StatusPill state={run.status === "in_progress" ? "running" : "queued"} />
+}
 
 export function RunFrame({
   run,
@@ -58,6 +66,9 @@ export function RunFrame({
   const workflowFile = githubLinks(owner, run).workflowFile
   const actions = (
     <div className="flex flex-wrap items-center gap-2">
+      <span className="flex items-center">
+        <RunPill run={run} />
+      </span>
       {run.attempts > 1 && (
         <Select value={String(run.attempt)} onValueChange={(v) => onAttempt(Number(v))}>
           <SelectTrigger aria-label="Attempt" className="w-48">
@@ -86,7 +97,7 @@ export function RunFrame({
       <div className="grid gap-4 min-[800px]:grid-cols-[15rem_minmax(0,1fr)] min-[800px]:items-start">
         <nav aria-label="Run" className="flex flex-col min-[800px]:sticky min-[800px]:top-4">
           {summaryLink("Summary", { className: RAIL_LINK, current: current === "summary" })}
-          <p className={RAIL_LABEL}>Jobs</p>
+          <SideGroup>Jobs</SideGroup>
           <ul className="flex flex-col">
             {run.jobs.map((j) => {
               const ms = jobMs(j, now)
@@ -107,7 +118,7 @@ export function RunFrame({
           </ul>
           {workflowFile && (
             <>
-              <p className={RAIL_LABEL}>Run details</p>
+              <SideGroup>Run details</SideGroup>
               <a href={workflowFile} target="_blank" rel="noreferrer" className={RAIL_LINK}>
                 Workflow file
                 <span className="sr-only">, opens in a new tab</span>
