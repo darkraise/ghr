@@ -98,7 +98,8 @@ describe("RunnerPanel", () => {
     draw("/runners/aaaaaa?tab=containers")
     expect(await screen.findByText("ghr-aaaaaa-db-1")).toBeInTheDocument()
     expect(screen.getByText("ghr-aaaaaa")).toHaveClass("text-muted-foreground")
-    expect(screen.getAllByText("Running").length).toBeGreaterThan(0)
+    const row = within(screen.getByText("ghr-aaaaaa-db-1").closest("tr") as HTMLElement)
+    expect(row.getByText("Running")).toBeInTheDocument()
   })
 
   it("puts the chosen tab in the URL", async () => {

@@ -38,7 +38,7 @@ describe("Runner and config section", () => {
     )
     const { user } = renderApp("/settings")
     const s = await section()
-    expect(await s.findByText("Update required")).toHaveClass("text-foreground")
+    expect((await s.findByText("Update required")).closest("span.rounded-full")?.querySelector("svg")).toHaveClass("text-warning")
     expect(s.getByText("Required by Oct 23, in 20 days")).toBeInTheDocument()
     await user.click(s.getByRole("button", { name: "Queue update" }))
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/runner-update")).toBe(true))
@@ -49,7 +49,7 @@ describe("Runner and config section", () => {
     mockApi(withUpdate({ installed: "2.337.0", latest: "2.338.0", deadline: new Date(DAEMON_NOW - 2 * DAY).toISOString() }))
     renderApp("/settings")
     const s = await section()
-    expect(await s.findByText("Update required")).toHaveClass("text-foreground")
+    expect((await s.findByText("Update required")).closest("span.rounded-full")?.querySelector("svg")).toHaveClass("text-destructive")
     expect(s.getByText("Required by Oct 1, overdue")).toBeInTheDocument()
   })
 
