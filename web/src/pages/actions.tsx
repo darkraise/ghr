@@ -3,13 +3,13 @@ import { Alert, AlertDescription, AlertTitle } from "darkraise-ui/components/ale
 import { Button } from "darkraise-ui/components/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "darkraise-ui/components/select"
 import { Spinner } from "darkraise-ui/components/spinner"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "darkraise-ui/components/table"
 import { ToggleGroup, ToggleGroupItem } from "darkraise-ui/components/toggle-group"
 import { PageHeader } from "darkraise-ui/layout"
 import { useEffect } from "react"
 import { useActions, useConfig } from "@/api/hooks"
 import type { ActionsRun } from "@/api/types"
 import { ErrorLine } from "@/components/page/error-line"
+import { RunGroup, RunRow, RunValue } from "@/components/page/run-row"
 import { Section } from "@/components/page/section"
 import { RunStatusIcon } from "@/components/run-status-icon"
 import {
@@ -24,75 +24,44 @@ import {
 } from "@/lib/actions"
 import { dur } from "@/lib/format"
 import { groupByDayOf } from "@/lib/history"
+import { runCols } from "@/lib/run-cols"
 import { useMediaQuery } from "@/lib/use-media-query"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
 const ALL = "__all__"
 
-function RunRow({ run, now, wide }: { run: ActionsRun; now: number; wide: boolean }) {
-  const took = dur(runMs(run, now))
-  const start = startText(run.started_at, now)
+const BRANCH = "rounded-full bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary"
+const GHR = "rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-foreground"
+
+function ActionRow({ run, now, wide }: { run: ActionsRun; now: number; wide: boolean }) {
+  const by = [run.event, run.actor && `by ${run.actor}`].filter(Boolean).join(" ")
   return (
-    <TableRow>
-      <TableCell className="w-8 align-top">
-        <RunStatusIcon status={run.status} conclusion={run.conclusion} />
-      </TableCell>
-      <TableCell className="align-top">
-        <Link
-          to="/actions/$repo/runs/$id"
-          params={{ repo: run.repo, id: String(run.id) }}
-          className="font-medium hover:underline"
-        >
+    <RunRow
+      wide={wide}
+      icon={<RunStatusIcon status={run.status} conclusion={run.conclusion} />}
+      title={
+        <Link to="/actions/$repo/runs/$id" params={{ repo: run.repo, id: String(run.id) }} className="hover:text-primary hover:underline">
           {run.title}
           <span className="sr-only">{`, ${run.repo} #${run.run_number}`}</span>
         </Link>
-        <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-          <span>{run.workflow}</span>
-          <span>{run.repo}</span>
-          <span className="font-mono">#{run.run_number}</span>
-          {run.branch && <span className="font-mono">{run.branch}</span>}
-          {run.event && <span>{run.event}</span>}
-          {run.actor && <span>{run.actor}</span>}
-        </span>
-        {!wide && (
-          <span className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-            <span className="font-mono">{took}</span>
-            <span className="font-mono">{start}</span>
-            {run.ghr && <span className="font-mono">ghr</span>}
-          </span>
-        )}
-      </TableCell>
-      {wide && (
+      }
+      facts={
         <>
-          <TableCell className="text-right align-top font-mono">{took}</TableCell>
-          <TableCell className="text-right align-top font-mono">{start}</TableCell>
-          <TableCell className="text-right align-top font-mono text-muted-foreground">{run.ghr ? "ghr" : ""}</TableCell>
+          <span>{`${run.workflow} #${run.run_number}`}</span>
+          <span>{run.repo}</span>
+          {by && <span>{by}</span>}
+          {run.branch && <span className={BRANCH}>{run.branch}</span>}
+          {run.ghr && <span className={GHR}>ghr</span>}
         </>
-      )}
-    </TableRow>
-  )
-}
-
-function RunHead({ wide }: { wide: boolean }) {
-  return (
-    <TableHeader>
-      <TableRow>
-        <TableHead>
-          <span className="sr-only">Status</span>
-        </TableHead>
-        <TableHead>Run</TableHead>
-        {wide && (
-          <>
-            <TableHead className="text-right">Duration</TableHead>
-            <TableHead className="text-right">Started</TableHead>
-            <TableHead>
-              <span className="sr-only">Runner</span>
-            </TableHead>
-          </>
-        )}
-      </TableRow>
-    </TableHeader>
+      }
+      values={
+        <>
+          <RunValue kind="time">{startText(run.started_at, now)}</RunValue>
+          <RunValue kind="duration">{dur(runMs(run, now))}</RunValue>
+        </>
+      }
+    />
   )
 }
 
@@ -113,11 +82,20 @@ export function ActionsPage() {
   // A repository that is neither configured nor watched leaves the URL once
   // the config has loaded, so the address bar matches the page.
   useEffect(() => {
-    if (config.data && search.repo && !repo) void navigate({ to: "/actions", search: status ? { status } : {}, replace: true })
+    if (config.data && search.repo && !repo)
+      void navigate({
+        to: "/actions",
+        search: status ? { status } : {},
+        replace: true,
+      })
   }, [config.data, search.repo, repo, status, navigate])
 
   function update(next: { repo?: string; status?: ActionsStatus | "" }) {
-    const merged: { repo: string; status: ActionsStatus | "" } = { repo: repo ?? "", status: status ?? "", ...next }
+    const merged: { repo: string; status: ActionsStatus | "" } = {
+      repo: repo ?? "",
+      status: status ?? "",
+      ...next,
+    }
     const out: ActionsSearch = {}
     if (merged.repo) out.repo = merged.repo
     if (merged.status) out.status = merged.status
@@ -127,8 +105,49 @@ export function ActionsPage() {
   const data = actions.data
   const { active, recent } = data ? splitRuns(data.runs, repo, status) : { active: [], recent: [] }
   const failed = data?.repos.filter((r) => r.error) ?? []
-  const cols = wide ? 5 : 2
 
+  const filters = (
+    <>
+      <Select value={repo ?? ALL} onValueChange={(v) => update({ repo: v === ALL ? "" : v })}>
+        <SelectTrigger aria-label="Repository" className="w-56">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>All repositories</SelectItem>
+          {configured.map((name) => (
+            <SelectItem key={name} value={name}>
+              {name}
+            </SelectItem>
+          ))}
+          {watched.map((name) => (
+            <SelectItem key={name} value={name}>
+              {`${name} (watched)`}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <ToggleGroup
+        type="single"
+        size="sm"
+        variant="outline"
+        value={status ?? ALL}
+        aria-label="Status"
+        onValueChange={(v) =>
+          update({
+            status: STATUS_FILTERS.find((s) => s.value === v)?.value ?? "",
+          })
+        }
+      >
+        <ToggleGroupItem value={ALL}>All</ToggleGroupItem>
+        {STATUS_FILTERS.map((s) => (
+          <ToggleGroupItem key={s.value} value={s.value}>
+            {s.label}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    </>
+  )
+  let listed = false
   let body
   if (actions.isError && !data) body = <ErrorLine onRetry={() => void actions.refetch()}>{errorText(actions.error)}</ErrorLine>
   else if (!data) body = <Spinner label="Loading" />
@@ -158,48 +177,42 @@ export function ActionsPage() {
       </div>
     )
   } else {
+    listed = true
+    const shown = active.length + recent.length
+    const cols = runCols(wide, false)
     body = (
-      <>
-        {(active.length > 0 || status === "active") && (
-          <Section title="In progress">
-            {active.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nothing is running or queued.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <RunHead wide={wide} />
-                  <TableBody>
-                    {active.map((r) => (
-                      <RunRow key={`${r.repo}#${r.id}`} run={r} now={now} wide={wide} />
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+      <Section
+        title={`${shown} workflow ${shown === 1 ? "run" : "runs"}`}
+        aside={<div className="ml-auto flex flex-wrap items-center gap-3">{filters}</div>}
+        flush
+      >
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            {(active.length > 0 || status === "active") && (
+              <tbody>
+                <RunGroup label="In progress" cols={cols} />
+                {active.length === 0 ? (
+                  <tr>
+                    <td colSpan={cols} className="px-4 py-3 text-sm text-muted-foreground">
+                      Nothing is running or queued.
+                    </td>
+                  </tr>
+                ) : (
+                  active.map((r) => <ActionRow key={`${r.repo}#${r.id}`} run={r} now={now} wide={wide} />)
+                )}
+              </tbody>
             )}
-          </Section>
-        )}
-        {recent.length > 0 && (
-          <Section title="Recent">
-            <div className="overflow-x-auto">
-              <Table>
-                <RunHead wide={wide} />
-                {groupByDayOf(recent, (r) => r.started_at, now).map((g) => (
-                  <TableBody key={g.key}>
-                    <TableRow>
-                      <th scope="rowgroup" colSpan={cols} className="pt-4 pb-1 text-left text-sm font-medium text-muted-foreground">
-                        {g.label}
-                      </th>
-                    </TableRow>
-                    {g.rows.map((r) => (
-                      <RunRow key={`${r.repo}#${r.id}`} run={r} now={now} wide={wide} />
-                    ))}
-                  </TableBody>
+            {groupByDayOf(recent, (r) => r.started_at, now).map((g) => (
+              <tbody key={g.key}>
+                <RunGroup label={g.label} cols={cols} />
+                {g.rows.map((r) => (
+                  <ActionRow key={`${r.repo}#${r.id}`} run={r} now={now} wide={wide} />
                 ))}
-              </Table>
-            </div>
-          </Section>
-        )}
-      </>
+              </tbody>
+            ))}
+          </table>
+        </div>
+      </Section>
     )
   }
 
@@ -215,41 +228,7 @@ export function ActionsPage() {
         description={data ? actionsSummary(data.runs, data.repos.length, repo, new Date(data.fetched_at)) : undefined}
         actions={watchLink}
       />
-      <div className="flex flex-wrap items-center gap-3">
-        <Select value={repo ?? ALL} onValueChange={(v) => update({ repo: v === ALL ? "" : v })}>
-          <SelectTrigger aria-label="Repository" className="w-56">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>All repositories</SelectItem>
-            {configured.map((name) => (
-              <SelectItem key={name} value={name}>
-                {name}
-              </SelectItem>
-            ))}
-            {watched.map((name) => (
-              <SelectItem key={name} value={name}>
-                {`${name} (watched)`}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <ToggleGroup
-          type="single"
-          size="sm"
-          variant="outline"
-          value={status ?? ALL}
-          aria-label="Status"
-          onValueChange={(v) => update({ status: STATUS_FILTERS.find((s) => s.value === v)?.value ?? "" })}
-        >
-          <ToggleGroupItem value={ALL}>All</ToggleGroupItem>
-          {STATUS_FILTERS.map((s) => (
-            <ToggleGroupItem key={s.value} value={s.value}>
-              {s.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </div>
+      {!listed && <div className="flex flex-wrap items-center gap-3">{filters}</div>}
       {failed.length > 0 && (
         <Alert variant="warning">
           <AlertTitle as="h2">Some repositories could not be read</AlertTitle>
