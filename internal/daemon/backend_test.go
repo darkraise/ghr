@@ -30,6 +30,7 @@ type fakeManager struct {
 	insts     []model.InstanceStatus
 	cleared   bool
 	killed    []string
+	killErr   error // returned by Kill
 	pruneErr  error
 	prunes    int
 	degraded  string
@@ -94,7 +95,7 @@ func (f *fakeManager) RunnerRepoAndRun(id string) (string, int64, string, error)
 }
 func (f *fakeManager) Kill(ctx context.Context, id string) error {
 	f.killed = append(f.killed, id)
-	return nil
+	return f.killErr
 }
 func (f *fakeManager) ClearDegraded() { f.cleared = true }
 
@@ -550,6 +551,25 @@ func TestConfigChangesWakeTheLoop(t *testing.T) {
 	b.PatchConfig(model.ConfigPatch{GlobalMax: &zero}) // rejected: no wake
 	if wakes != 2 {
 		t.Fatalf("wakes = %d", wakes)
+	}
+}
+
+func TestKillRunnerWakesTheLoopOnlyAfterAStop(t *testing.T) {
+	b, m, _ := newBackend(t)
+	ctx := context.Background()
+	wakes := 0
+	b.Wake = func() { wakes++ }
+	m.killErr = errors.New("bus error")
+	if err := b.KillRunner(ctx, "aaaaaa"); err == nil || err.Error() != "bus error" || wakes != 0 {
+		t.Fatalf("failed stop: err %v wakes %d", err, wakes)
+	}
+	m.killErr = runner.ErrUnknownRunner("zzzzzz")
+	if err := b.KillRunner(ctx, "zzzzzz"); apiStatus(err) != 404 || wakes != 0 {
+		t.Fatalf("unknown runner: err %v wakes %d", err, wakes)
+	}
+	m.killErr = nil
+	if err := b.KillRunner(ctx, "aaaaaa"); err != nil || wakes != 1 {
+		t.Fatalf("stop: err %v wakes %d", err, wakes)
 	}
 }
 

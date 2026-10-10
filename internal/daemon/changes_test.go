@@ -120,6 +120,21 @@ func TestStateChangesReachTheirTopics(t *testing.T) {
 	}
 }
 
+func TestAStoppingFlagChangesOnlyStatus(t *testing.T) {
+	b, m, _ := newBackend(t)
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa", Repo: "darkmem", State: "busy"}}
+	prev := b.fingerprints()
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa", Repo: "darkmem", State: "busy", Stopping: true}}
+	cur := b.fingerprints()
+	if got := changed(prev, cur); !slices.Equal(got, []string{"status"}) {
+		t.Fatalf("setting the flag changed %v", got)
+	}
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa", Repo: "darkmem", State: "busy"}}
+	if got := changed(cur, b.fingerprints()); !slices.Equal(got, []string{"status"}) {
+		t.Fatalf("clearing the flag changed %v", got)
+	}
+}
+
 type panickyStorage struct{ fakeStorage }
 
 func (p *panickyStorage) Snapshot() model.Storage { panic("snapshot failed") }

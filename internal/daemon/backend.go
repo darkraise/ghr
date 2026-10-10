@@ -88,8 +88,9 @@ type Backend struct {
 	Space StorageService
 	// CheckToken validates a candidate token by reading repo, its runners and its runs with it.
 	CheckToken func(ctx context.Context, token, repo string) error
-	// Wake asks the run loop for an immediate tick after a config change, so a
-	// pause stops idle runners at once; nil in tests.
+	// Wake asks the run loop for an immediate tick after a config change or a
+	// runner stop, so a pause stops idle runners and a stopped runner is
+	// cleaned up at once; nil in tests.
 	Wake func()
 	// Now is the clock for label-check throttling; nil means time.Now.
 	Now func() time.Time
@@ -356,7 +357,13 @@ func (b *Backend) fetchSteps(ctx context.Context, id string) ([]model.Step, erro
 }
 
 func (b *Backend) KillRunner(ctx context.Context, id string) error {
-	return notFoundIfUnknown(b.M.Kill(ctx, id))
+	if err := b.M.Kill(ctx, id); err != nil {
+		return notFoundIfUnknown(err)
+	}
+	if b.Wake != nil {
+		b.Wake()
+	}
+	return nil
 }
 
 // update applies fn through the store (validate, save, swap) and wakes the loop.
