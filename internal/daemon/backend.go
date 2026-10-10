@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/darkraise/ghr/internal/activity"
@@ -107,8 +108,9 @@ type Backend struct {
 	steps      map[string]stepsEntry
 	stepsCalls map[string]*stepsCall
 
-	activityMu sync.Mutex
-	activity   map[string]*activityEntry
+	activityMu  sync.Mutex
+	activity    map[string]*activityEntry
+	activityGen atomic.Int64
 
 	actions actionsCache
 	wfFiles wfCache
@@ -134,6 +136,7 @@ type activityEntry struct {
 	mu  sync.Mutex
 	at  time.Time
 	ok  bool
+	gen int64 // activityGen when the build began
 	val model.Activity
 }
 
@@ -149,8 +152,9 @@ func (b *Backend) Activity(ctx context.Context, window, repo string, loc *time.L
 	e := b.activityEntry(key)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	gen := b.activityGen.Load()
 	now := b.now()
-	if e.ok && now.Sub(e.at) < activityTTL {
+	if e.ok && e.gen == gen && now.Sub(e.at) < activityTTL {
 		return e.val, nil
 	}
 	cfg := b.Store.Config()
@@ -175,9 +179,13 @@ func (b *Backend) Activity(ctx context.Context, window, repo string, loc *time.L
 	if b.Sampler != nil {
 		in.Minutes, in.Hours = b.Sampler.Minutes(), b.Sampler.Hours()
 	}
-	e.val, e.at, e.ok = activity.Build(in), now, true
+	e.val, e.at, e.gen, e.ok = activity.Build(in), now, gen, true
 	return e.val, nil
 }
+
+// staleActivity makes every cached activity view stale, one being built now
+// included; the change hub calls it before telling browsers to refetch.
+func (b *Backend) staleActivity([]string) { b.activityGen.Add(1) }
 
 // activityEntry returns key's cache entry, creating it if needed. Creating
 // one also drops expired entries nobody holds, so a client cycling through
@@ -689,11 +697,14 @@ func (b *Backend) PruneScope(scope string) error {
 
 // Storage is the storage snapshot with the last prune and the disk reading,
 // which the runner manager keeps.
-func (b *Backend) Storage() model.Storage {
-	st := b.Space.Snapshot()
-	st.LastPrune = b.M.LastPrune()
-	st.Docker.DiskPct = b.M.Status().DiskPct
-	return st
+func (b *Backend) Storage() model.Storage { return b.storageFrom(b.M.Status()) }
+
+// storageFrom is Storage with the disk reading taken from st.
+func (b *Backend) storageFrom(st model.Status) model.Storage {
+	s := b.Space.Snapshot()
+	s.LastPrune = b.M.LastPrune()
+	s.Docker.DiskPct = st.DiskPct
+	return s
 }
 
 func (b *Backend) RefreshStorage() error { return storageErr(b.Space.Refresh()) }
@@ -748,8 +759,11 @@ func storageErr(err error) error {
 }
 
 // Token reports what GitHub's responses said about the token; never the token.
-func (b *Backend) Token() model.TokenStatus {
-	meta := b.GH.TokenMeta()
+func (b *Backend) Token() model.TokenStatus { return tokenStatus(b.GH.TokenMeta(), b.M.Status()) }
+
+// tokenStatus is the token's state from GitHub's last answers and the
+// manager's degraded flag in st.
+func tokenStatus(meta github.TokenMeta, st model.Status) model.TokenStatus {
 	ts := model.TokenStatus{State: "unverified", RateRemaining: meta.RateRemaining, RateLimit: meta.RateLimit,
 		RateReset: meta.RateReset, ExpiresAt: meta.ExpiresAt}
 	if !meta.CheckedAt.IsZero() {
@@ -760,7 +774,7 @@ func (b *Backend) Token() model.TokenStatus {
 			ts.State = "rejected"
 		}
 	}
-	if st := b.M.Status(); st.Degraded {
+	if st.Degraded {
 		ts.State, ts.Reason = "rejected", st.DegradedReason
 	}
 	return ts

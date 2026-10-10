@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,6 +41,11 @@ type fakeManager struct {
 	diskPct   int              // Status().DiskPct
 	pending   []model.HistoryEntry
 	onPending func() // runs when Pending is read, before it returns
+
+	now         time.Time    // Status().Now
+	diskUsed    int64        // Status().DiskUsedBytes
+	rate        int          // Status().RateRemaining
+	statusCalls atomic.Int64 // Status calls; activity builds read it from several goroutines
 }
 
 func (f *fakeManager) PausedUntil() time.Time { return f.paused }
@@ -70,7 +76,9 @@ func (f *fakeManager) Pending() []model.HistoryEntry {
 }
 
 func (f *fakeManager) Status() model.Status {
-	return model.Status{Instances: f.insts, Degraded: f.degraded != "", DegradedReason: f.degraded, DiskPct: f.diskPct}
+	f.statusCalls.Add(1)
+	return model.Status{Now: f.now, Instances: f.insts, Degraded: f.degraded != "", DegradedReason: f.degraded,
+		DiskPct: f.diskPct, DiskUsedBytes: f.diskUsed, RateRemaining: f.rate}
 }
 func (f *fakeManager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 	return model.LogChunk{}, runner.ErrUnknownRunner(id)
@@ -1226,5 +1234,66 @@ func TestAvailableReposMarksWatched(t *testing.T) {
 	want := []model.AvailableRepo{{Name: "darkmem", Private: true, Configured: true}, {Name: "public", Watched: true}}
 	if len(rs) != 2 || rs[0] != want[0] || rs[1] != want[1] {
 		t.Fatalf("available %+v", rs)
+	}
+}
+
+// A change while an activity view is being built makes that build stale, so
+// the next call rebuilds it instead of reusing it within the 5 s TTL.
+func TestActivityBuiltBeforeAChangeIsNotReused(t *testing.T) {
+	b, m, _ := newBackend(t)
+	now := time.Date(2026, 10, 3, 14, 5, 0, 0, time.UTC)
+	b.Now = func() time.Time { return now }
+	ctx := context.Background()
+	runs := func(a model.Activity) int {
+		n := 0
+		for _, l := range a.Lanes {
+			n += len(l.Runs)
+		}
+		return n
+	}
+	first := true
+	m.onPending = func() {
+		if first {
+			first = false
+			b.staleActivity([]string{"history"})
+		}
+	}
+	entry := func(id string, run int64) model.HistoryEntry {
+		return model.HistoryEntry{ID: id, Repo: "darkmem", RunID: run, Conclusion: "success",
+			StartedAt: now.Add(-20 * time.Minute), FinishedAt: now.Add(-10 * time.Minute)}
+	}
+	if a, _ := b.Activity(ctx, "1h", "", time.UTC); runs(a) != 0 {
+		t.Fatalf("first build: %d runs", runs(a))
+	}
+	if err := b.Hist.Append(entry("a", 1)); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := b.Activity(ctx, "1h", "", time.UTC); runs(a) != 1 {
+		t.Fatal("a build that began before a change was reused after it")
+	}
+	if err := b.Hist.Append(entry("b", 2)); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := b.Activity(ctx, "1h", "", time.UTC); runs(a) != 1 {
+		t.Fatal("without a change the rebuilt view was not reused within 5 s")
+	}
+}
+
+func TestTokenAndStorageFromOneStatus(t *testing.T) {
+	b, m, _ := newBackend(t)
+	st := model.Status{Degraded: true, DegradedReason: "GitHub rejected the token", DiskPct: 41}
+	if ts := tokenStatus(github.TokenMeta{}, st); ts.State != "rejected" || ts.Reason != "GitHub rejected the token" {
+		t.Fatalf("token %+v", ts)
+	}
+	if s := b.storageFrom(st); s.Docker.DiskPct != 41 {
+		t.Fatalf("storage disk %d", s.Docker.DiskPct)
+	}
+	if n := m.statusCalls.Load(); n != 0 {
+		t.Fatalf("the helpers read the manager's status %d times", n)
+	}
+	b.Storage()
+	b.Token()
+	if n := m.statusCalls.Load(); n != 2 {
+		t.Fatalf("Storage and Token read the status %d times, want 2", n)
 	}
 }
