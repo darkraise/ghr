@@ -3,7 +3,13 @@
 **Date:** 2026-10-12
 **Spec:** docs/superpowers/specs/2026-10-12-ghr-host-fixes-design.md (approved by the owner on 2026-10-12)
 **Register:** docs/superpowers/registers/2026-10-11-ghr-comprehensive-review.md (rows 47 to 74, 186, 199, 203, 205 to 208, 210 to 214; sub-project 3 of 6)
-**Target plan:** docs/superpowers/plans/2026-10-12-ghr-host-fixes.md (not written yet)
+**Target plan:** docs/superpowers/plans/2026-10-12-ghr-host-fixes.md (written, linted and reviewed on 2026-10-12)
+
+**Status:** this note is history. Everything under "What is left" was done on 2026-10-12, in the same session after all: the fragments were assembled into a 36-task plan (four tasks were split in two, and a final whole-tree verification task was added), the spec was amended twice, the register rows were set to planned, and the plan passed two review rounds (round 1 on the Codex review seat, 17 / 18 / 16 / 14 with one critical and fourteen important findings, all fixed in the task code; round 2 on the Opus judge, 17 / 18 / 18 / 14, one important finding fixed). The task numbers in the table below are the first numbering; the plan's own index is the authority. The owner chose no external executor.
+
+The five drafter worktrees and branches were removed after the plan was saved. The branch `plan/host-fixes-merge` keeps the merged result of all five (one commit per task, plus merge commits) as a reference: `gofmt`, `go vet`, the installer tests and `go test -race ./...` pass on it. It was not reviewed task by task and is not the plan's execution.
+
+Open with the owner when the session ended: whether a config whose only labels are system labels should load with a warning (it refuses to start); whether the password prompt should keep raw mode (Task 7) or row 56 be deferred; the per-client connection bound of 64 behind a reverse proxy and per IPv6 /64; the rule that a public listing holds a block for one tick against a private `GetRepo` answer (Task 31); and whether to run `apt-get update` on the dev host after the incident below.
 
 The plan is drafted the way the two earlier plans were: each task is carried out red-then-green in a worktree first, and its text is written from what was done. Five drafters did this, one per group of packages that share no file. Their task texts are the fragments below. What is left is to assemble, score, lint and review the plan.
 

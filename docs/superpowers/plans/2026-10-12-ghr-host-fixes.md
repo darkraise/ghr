@@ -12,6 +12,8 @@
 
 **Execution:** inline — `claude --model sonnet --effort high` — 14 of 36 tasks are heavy (1, 3, 7, 11, 12, 14, 17, 19, 25, 26, 29, 31, 32, 33) and are delegated; the other 22 run in the session
 
+**Plan review:** 2026-10-12 — dr-superpowers:judge-opus — executability 17 / coherence 18 / coverage 18 / assumptions 14 (round 2)
+
 **Parallelism:** sequential — the security tasks must run alone, the fixes are small, and the dev host is the limit: `/tmp` is a nearly full tmpfs and the test suites time out under load
 
 ## Global Constraints
@@ -92,6 +94,7 @@ Names one task adds and a later task uses.
 - `func (s *Store) Reload() (warnings, added []string, tokenChanged bool, err error)` in `internal/daemon/store.go`. Task 25. It has one more return value than before, `added`: the warnings of this load that were neither in the load before nor in the config saved since, worked out under the store's lock. Every caller is in `internal/daemon` and is changed by Task 25: `OpenStore`, `Backend.Reload`, the not-configured loop in `Run`, and ten calls in `store_test.go`. The store has no method that reads the remembered list; the field is `Store.warnings`.
 - `internal/daemon/limitlistener.go`: `limitConns(l net.Listener, total, perClient int) *limitListener`, `clientKey(remote net.Addr) string`, `maxWebConns = 256`, `maxWebConnsPerClient = 64`. Task 26. In `Run`, `webLn` is now a `*limitListener` held as a `net.Listener`; connections the web server sees are `*limitConn`, which embeds `net.Conn`. A task that sets a write deadline through `http.ResponseController` on a web route (spec 1.2) is not affected: `SetWriteDeadline` is promoted from the embedded connection.
 - Test helpers in package `daemon` tests: `textAddr`, `scriptedConn`, `scriptedListener`, `newScriptedListener`, `acceptLoop`, `endLoop`, `closeTwiceAtOnce` (`limitlistener_test.go`). Task 26. Names another drafter's test in `internal/daemon` must not reuse.
+- `fakeManager.cleared` in `internal/daemon/backend_test.go` is an `atomic.Bool`: read it with `m.cleared.Load()`, set it with `m.cleared.Store(...)`. Task 25. A later test in `internal/daemon` that reads the flag must use `Load()`.
 - The error text `could not check the token` and the method `(*Backend).checkTokenSafely`. Task 27.
 - `internal/daemon/joblogs.go`: `logSettle = 2 * time.Minute`, `logSettleTTL = 15 * time.Second`, `completionTime(t *time.Time) time.Time`, the field `logJob.completedAt`, and `logMiss.until` in place of `logMiss.at`. Task 28.
 - `internal/runner/manager.go`: `readJobJSON(path string, v any) error`, `maxJobFile = 1 << 20`. Task 29. Test helpers `mustReturn` and `mkfifo` in `internal/runner/jobfile_unix_test.go`.
@@ -114,6 +117,7 @@ Names one task adds and a later task uses.
 - One score differs from what its drafter proposed. Task 11's coupling is 1, not 2: no later task uses `Env.Allow`, `Env.fetch` or `Origin`.
 - Task 7 puts the password prompt's terminal in raw mode, with the consequences spec section 2.3 lists. The owner was told on 2026-10-12 and may choose per-system terminal code instead; the plan keeps raw mode until they say so. Nobody has typed at a real interactive terminal: a pseudo-terminal test proves the state is restored, and it skips where `/dev/ptmx` is missing.
 - That `systemctl --no-reload reenable` makes no implicit reload is taken from systemd's documentation, not from a run on a host (Task 20's tests check the recorded commands). The live check in spec section 8 settles it.
+- Entries below marked unverified that no task settles are accepted risks, not open work: the 90-second unit stop, the prompt at a real keyboard, `/dev/ptmx` on the CI runner, whether a runs listing's ETag changes with visibility, `--no-reload reenable` on a live systemd, `shellcheck`, and a permission error while `Save` resolves a link. Each is covered by the owner's live check on the runner LXC, which spec section 8 describes and which no task performs because a deploy needs the owner's yes.
 - `ClientKey` is called in one place outside tests, `internal/webui/handler.go:228`, and `Auth.Login` is called outside the package only by `internal/daemon/web_test.go:134`, with an IPv4 key (`rg -n '\.Login\(|ClientKey\(' --glob '*.go'`, 2026-10-12). Both signatures are unchanged.
 - An IPv4-mapped remote address is turned into its IPv4 address before it becomes a key: `remoteAddr` ends with `ip.Unmap().WithZone("")` (`internal/webui/auth.go:338` at `8cf8ea2`).
 - `login` checks the lockout three times, at `internal/webui/auth.go:135`, `:155` and `:164` at `8cf8ea2`, each under `a.mu`, and reads the clock right before each. Task 1's `TestALockLandingMidLoginRefusesIt` relies on exactly these three clock reads.
@@ -6679,7 +6683,7 @@ git commit -m "fix(daemon): answer a failed config save with 500"
 - Modify: `internal/daemon/store.go` (`Store`, `OpenStore`, `Reload`, `Update`, `Configure`)
 - Modify: `internal/daemon/backend.go` (`Backend.Reload`)
 - Modify: `internal/daemon/run.go` (the reload case of the not-configured loop in `Run`)
-- Test: `internal/daemon/store_test.go`, `internal/daemon/backend_test.go`, `internal/daemon/run_test.go`
+- Test: `internal/daemon/store_test.go`, `internal/daemon/backend_test.go` (new tests, and the fake manager's `cleared` flag), `internal/daemon/run_test.go`
 
 **Interfaces:**
 - Consumes: `daemon.SaveError` in `Store.Update` (Task 24), only as lines this task quotes
@@ -6876,6 +6880,52 @@ func TestReloadsAtOnceWriteAWarningOnce(t *testing.T) {
 	}
 }
 ```
+
+`TestReloadsAtOnceWriteAWarningOnce` reloads from two goroutines, and every reload calls `ClearDegraded` on the daemon's fake manager, which sets the fake's `cleared` flag. Two unguarded writes of a `bool` are a data race, so the flag becomes an `atomic.Bool`, in the same file. `sync/atomic` is already imported there. In the `fakeManager` struct, replace
+
+```go
+	cleared   bool
+```
+
+with
+
+```go
+	cleared   atomic.Bool // set by ClearDegraded, which two reloads at once both call
+```
+
+Replace
+
+```go
+func (f *fakeManager) ClearDegraded() { f.cleared = true }
+```
+
+with
+
+```go
+func (f *fakeManager) ClearDegraded() { f.cleared.Store(true) }
+```
+
+In `TestReloadAppliesWakesAndRejects`, replace
+
+```go
+	m.cleared = false
+```
+
+with
+
+```go
+	m.cleared.Store(false)
+```
+
+The flag is read in nine places, in `TestPauseAllStepsKillToken`, `TestReloadAppliesWakesAndRejects` and `TestSetTokenJudgesEveryRepository`. Each read becomes a `Load()`; the four patterns below cover all nine. Replace each of the 4 occurrences of `!m.cleared` with `!m.cleared.Load()`.
+
+Replace each of the 2 occurrences of `, m.cleared)` with `, m.cleared.Load())`.
+
+Replace the one occurrence of `|| m.cleared ||` with `|| m.cleared.Load() ||`.
+
+Replace each of the 2 occurrences of `, m.cleared, woke)` with `, m.cleared.Load(), woke)`.
+
+After these, no `m.cleared` is left in the file that is not followed by `.Load()` or `.Store(`.
 
 In `internal/daemon/run_test.go`, add this test directly above `func TestRunConfiguresOnceWhenReloadAndSetupRace(t *testing.T) {`:
 
@@ -7146,6 +7196,9 @@ Run: `PATH=/usr/local/go/bin:$PATH go vet ./... && PATH=/usr/local/go/bin:$PATH 
 Expected: no output from `go vet`, then PASS (`ok  	github.com/darkraise/ghr/internal/daemon`)
 
 The whole package runs here because `TestReloadWarnsOnWebChange` and `TestReloadAppliesWakesAndRejects` cover the parts of `Reload` this task must not change, and under the race detector because two of the new tests reload from two goroutines.
+
+Then run: `PATH=/usr/local/go/bin:$PATH go test -race -count=30 -run 'TestReloadsAtOnceWriteAWarningOnce' ./internal/daemon/`
+Expected: PASS (`ok  	github.com/darkraise/ghr/internal/daemon`)
 
 - [ ] **Step 6: Commit**
 
@@ -10047,21 +10100,26 @@ Expected: no output.
 Run: `mkdir -p /root/.cache/ghr-plan-tmp && TMPDIR=/root/.cache/ghr-plan-tmp GOTMPDIR=/root/.cache/ghr-plan-tmp PATH=/usr/local/go/bin:$PATH go vet ./...`
 Expected: no output, exit status 0.
 
-- [ ] **Step 3: Run every Go test with the race detector**
+- [ ] **Step 3: Vet the tree for Windows**
+
+Run: `TMPDIR=/root/.cache/ghr-plan-tmp GOTMPDIR=/root/.cache/ghr-plan-tmp GOOS=windows PATH=/usr/local/go/bin:$PATH go vet ./...`
+Expected: no output, exit status 0. The CLI and several packages also build for Windows, and a Unix-only constant in shared code breaks that build without failing any Linux test.
+
+- [ ] **Step 4: Run every Go test with the race detector**
 
 Run: `TMPDIR=/root/.cache/ghr-plan-tmp GOTMPDIR=/root/.cache/ghr-plan-tmp PATH=/usr/local/go/bin:$PATH go test -race -count=1 -timeout 480s ./...`
 Expected: one `ok` line for each of the 22 packages that have tests, no `FAIL` line and no `DATA RACE` text. Give the command at least nine minutes before treating it as hung.
 
-- [ ] **Step 4: Run the installer tests**
+- [ ] **Step 5: Run the installer tests**
 
 Run: `bash deploy/tests/setup_test.sh`
 Expected: the last line is `all assertions passed`.
 
-- [ ] **Step 5: Confirm nothing under `web/` changed**
+- [ ] **Step 6: Confirm nothing under `web/` changed**
 
-Run: `git diff --stat "$(git merge-base HEAD master)" HEAD -- web/`
-Expected: no output.
+Run: `git diff --stat 8cf8ea2 HEAD -- web/`
+Expected: no output. `8cf8ea2` is the commit this plan was written against; nothing under `web/` changed between it and the start of the work.
 
-- [ ] **Step 6: Report**
+- [ ] **Step 7: Report**
 
 Report the result of each step. When a step fails, report the failing package or assertion with its output and stop: this task fixes nothing and commits nothing.

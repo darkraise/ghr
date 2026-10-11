@@ -80,7 +80,7 @@ The web listener accepts without limit, and every open connection holds a file d
 `askPassword` checks its context only after the blocked read returns, so Ctrl-C takes effect at the next Enter.
 
 - The read runs on its own goroutine, and `askPassword` itself makes both terminal mode changes, before and after waiting, so no ordering lets a mode change follow the restore. When the context ends first, it restores the terminal state it saved, ends the prompt's line and returns the context's error. The blocked read is left behind; the process is exiting.
-- The terminal library can hide typing from the caller's side only by raw mode, so the prompt now waits in raw mode. Consequences at the prompt: Ctrl-C ends the read itself and prints `interrupted`; Ctrl-D on an empty line prints `interrupted` where it printed `EOF`; Ctrl-Z and Ctrl-\ do nothing; a `ghr` killed there leaves the terminal raw, where it left it without echo. Keeping today's mode would need per-system terminal code for Linux, the BSDs and Windows. The owner was told on 2026-10-12 and may choose that instead.
+- The terminal library can hide typing from the caller's side only by raw mode, so the prompt now waits in raw mode. Consequences at the prompt: Ctrl-C ends the read itself and prints `interrupted`; Ctrl-D on an empty line prints `interrupted` where it printed `EOF`; Ctrl-Z and Ctrl-\ do nothing; a `ghr` killed there leaves the terminal raw, where it left it without echo; and each prompt reads through its own line reader, so a password pasted as two lines at the first prompt is not carried over to the `Repeat:` prompt. Keeping today's mode would need per-system terminal code for Linux, the BSDs and Windows. The owner was told on 2026-10-12 and may choose that instead.
 
 ## 3. Config
 
