@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -431,16 +432,14 @@ func (m *Manager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 	if !idRe.MatchString(id) {
 		return model.LogChunk{}, ErrUnknownRunner(id)
 	}
-	dir := filepath.Join(m.instanceDir(id), "_diag")
-	if _, err := os.Stat(dir); err != nil {
-		dir = filepath.Join(m.Paths.Logs, id)
-		if _, err := os.Stat(dir); err != nil {
-			return model.LogChunk{}, ErrUnknownRunner(id)
-		}
+	root, err := m.openLogs(id)
+	if err != nil {
+		return model.LogChunk{}, ErrUnknownRunner(id)
 	}
+	defer root.Close()
 	var files []string
 	for _, pat := range []string{"Runner_*.log", "Worker_*.log"} {
-		matches, _ := filepath.Glob(filepath.Join(dir, pat))
+		matches, _ := fs.Glob(root.FS(), pat)
 		sort.Strings(matches)
 		files = append(files, matches...)
 	}
@@ -457,10 +456,10 @@ func (m *Manager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 	}
 	var data []byte
 	for _, f := range files {
-		name := filepath.Base(f)
+		name := f
 		off := offsets[name]
 		if budget := maxLogChunk - len(data); budget > 0 {
-			if b, err := readFrom(f, off, budget); err == nil && len(b) > 0 {
+			if b, err := readFrom(root, name, off, budget); err == nil && len(b) > 0 {
 				if name != last {
 					if last != "" {
 						data = append(data, '\n')
@@ -480,12 +479,46 @@ func (m *Manager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 	return model.LogChunk{Data: string(data), Next: next.Encode()}, nil
 }
 
-func readFrom(path string, off int64, limit int) ([]byte, error) {
-	f, err := os.Open(path)
+// openLogs opens the directory that holds a runner's diagnostic logs: the
+// live instance's _diag, or its archive. The job wrote these files and
+// RunnerLog reads them as root, so the log directory itself is opened as an
+// os.Root and every read goes through it: the root keeps the directory it
+// opened even if its name is swapped afterwards, and refuses any path that
+// leaves it through a symlink. A _diag that is a symlink is refused.
+func (m *Manager) openLogs(id string) (*os.Root, error) {
+	if inst, err := os.OpenRoot(m.instanceDir(id)); err == nil {
+		defer inst.Close()
+		if fi, err := inst.Lstat("_diag"); err == nil {
+			if !fi.IsDir() {
+				return nil, fs.ErrInvalid
+			}
+			return inst.OpenRoot("_diag")
+		}
+	}
+	dir := filepath.Join(m.Paths.Logs, id)
+	if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() {
+		return nil, fs.ErrNotExist
+	}
+	return os.OpenRoot(dir)
+}
+
+// readFrom reads up to limit bytes of a log from off. Only a regular file is
+// read: a symlink is skipped, and a FIFO or a device would block the reader
+// or feed it for ever. The check is repeated on the open file, because the
+// job can swap the name between the two; whatever it swaps in, the root
+// lets the open reach only a file inside the log directory.
+func readFrom(root *os.Root, name string, off int64, limit int) ([]byte, error) {
+	if fi, err := root.Lstat(name); err != nil || !fi.Mode().IsRegular() {
+		return nil, fs.ErrInvalid
+	}
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return nil, fs.ErrInvalid
+	}
 	if _, err := f.Seek(off, io.SeekStart); err != nil {
 		return nil, err
 	}
