@@ -97,6 +97,9 @@ type Paths struct {
 	Instances string
 	Logs      string
 	Pending   string // history records waiting for the job's final conclusion
+	// Private holds what root must trust about an instance, mode 0700. The
+	// instance directory itself belongs to the runner user.
+	Private   string
 	ToolCache string
 	Hooks     string
 	Home      string

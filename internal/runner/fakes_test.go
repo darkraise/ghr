@@ -586,7 +586,7 @@ func newHarness(t *testing.T) *harness {
 		Config: func() *config.Config { return h.cfg },
 		GH:     h.gh, SD: h.sd, Docker: h.docker, Disk: h.docker, Host: h.host,
 		Paths: Paths{Dist: dist, Instances: filepath.Join(root, "instances"), Logs: filepath.Join(root, "logs"),
-			Pending: filepath.Join(root, "pending"), ToolCache: filepath.Join(root, "toolcache"),
+			Pending: filepath.Join(root, "pending"), Private: filepath.Join(root, "private"), ToolCache: filepath.Join(root, "toolcache"),
 			Hooks: "/opt/ghr/hooks", Home: "/home/ghrunner", UpdateState: filepath.Join(root, "runner-update.json")},
 		Events:  ev,
 		History: &history.Store{Path: filepath.Join(root, "history.jsonl")},
