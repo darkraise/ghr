@@ -260,6 +260,14 @@ main[data-content]::before {
   --radius-button: 6px;
 }
 
+/* The kit pins the page to the viewport for its own app shell, which scrolls
+   inside itself. ghr's shell has no inner scroller, so the document scrolls. */
+html,
+body {
+  height: auto;
+  overflow: visible;
+}
+
 body {
   font-variant-numeric: tabular-nums;
 }

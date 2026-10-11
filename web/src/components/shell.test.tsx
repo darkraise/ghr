@@ -53,6 +53,13 @@ describe("shell", () => {
     expect(within(nav).getByRole("link", { name: /^Repositories,\s*2$/ })).toBeInTheDocument()
   })
 
+  it("clips the tabs' hidden separators inside the tab row", async () => {
+    mockApi(authedRoutes())
+    renderApp("/")
+    const nav = await screen.findByRole("navigation", { name: "Pages" })
+    expect(nav).toHaveClass("relative", "overflow-x-auto")
+  })
+
   it("shows reconnecting while status polls fail, until one succeeds", async () => {
     let fail = true
     mockApi(authedRoutes({ "GET /api/status": () => (fail ? json({ error: "connection refused" }, 502) : fixtures.status) }))

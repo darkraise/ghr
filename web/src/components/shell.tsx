@@ -106,7 +106,9 @@ export function Shell() {
             <span className="hidden sm:inline">Log out</span>
           </Button>
         </div>
-        <nav aria-label="Pages" className={`${FRAME} flex gap-1 overflow-x-auto`}>
+        {/* relative: the tabs' sr-only separators are absolutely positioned, and
+            only a positioned scroller clips them. */}
+        <nav aria-label="Pages" className={`${FRAME} relative flex gap-1 overflow-x-auto`}>
           {tabs(st, config.data).map((tab) => (
             <span key={tab.to} className={`flex shrink-0 ${tab.divided ? "ml-2 border-l border-border pl-2" : ""}`}>
               <Link to={tab.to} activeOptions={{ exact: tab.to === "/" }} className={TAB}>

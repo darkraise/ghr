@@ -167,6 +167,10 @@ describe("ghr chrome styles", () => {
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.ghr-pulse \{\s*animation: none;\s*\}\s*\.dr-spinner-circle \{\s*animation: none;/)
   })
 
+  it("lets the document scroll", () => {
+    expect(css).toMatch(/html,\s*body \{\s*height: auto;\s*overflow: visible;\s*\}/)
+  })
+
   it("draws every Lucide icon at one stroke width", () => {
     expect(css).toMatch(/\.lucide \{\s*stroke-width: 1\.75;/)
   })
