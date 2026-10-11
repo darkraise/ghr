@@ -60,13 +60,32 @@ func (n *needsList) UnmarshalYAML(v *yaml.Node) error {
 	return nil
 }
 
+// strategy tells whether a job's strategy has a matrix. A strategy written as
+// one expression counts as having one: what it expands to is not in the file.
+type strategy struct {
+	matrix bool
+}
+
+func (s *strategy) UnmarshalYAML(v *yaml.Node) error {
+	if v.Kind == yaml.ScalarNode {
+		s.matrix = true
+		return nil
+	}
+	var m struct {
+		Matrix any `yaml:"matrix"`
+	}
+	if err := v.Decode(&m); err != nil {
+		return err
+	}
+	s.matrix = m.Matrix != nil
+	return nil
+}
+
 type rawJob struct {
 	Name     string    `yaml:"name"`
 	Needs    needsList `yaml:"needs"`
-	Strategy struct {
-		Matrix any `yaml:"matrix"`
-	} `yaml:"strategy"`
-	Uses string `yaml:"uses"`
+	Strategy strategy  `yaml:"strategy"`
+	Uses     string    `yaml:"uses"`
 }
 
 // Parse reads the jobs of a workflow file in file order. Each job body is
@@ -104,7 +123,7 @@ func Parse(data []byte) (*Workflow, error) {
 			return nil, fmt.Errorf("%w: a job key or name is longer than %d bytes", ErrInvalid, maxLabel)
 		}
 		w.Jobs = append(w.Jobs, Job{Key: jobs.Content[i].Value, Name: raw.Name, Needs: raw.Needs,
-			Matrix: raw.Strategy.Matrix != nil, Uses: raw.Uses != ""})
+			Matrix: raw.Strategy.matrix, Uses: raw.Uses != ""})
 	}
 	if err := validate(w); err != nil {
 		return nil, err
@@ -162,7 +181,18 @@ var exprRe = regexp.MustCompile(`\$\{\{.*?\}\}`)
 type pattern struct {
 	label  string
 	prefix string
-	re     *regexp.Regexp
+	// literal is how many bytes of the label are literal text, not expressions.
+	literal int
+	re      *regexp.Regexp
+}
+
+// better reports whether p is the closer match than q for a name both match:
+// the longer literal prefix wins, then the more literal text in total.
+func (p pattern) better(q pattern) bool {
+	if len(p.prefix) != len(q.prefix) {
+		return len(p.prefix) > len(q.prefix)
+	}
+	return p.literal > q.literal
 }
 
 // newPattern matches the names GitHub gives a workflow job's runs: each
@@ -175,8 +205,10 @@ func newPattern(j Job) pattern {
 	}
 	lits := exprRe.Split(label, -1)
 	quoted := make([]string, len(lits))
+	literal := 0
 	for i, l := range lits {
 		quoted[i] = regexp.QuoteMeta(l)
+		literal += len(l)
 	}
 	expr := strings.Join(quoted, ".*?")
 	if j.Matrix && len(lits) == 1 {
@@ -185,13 +217,15 @@ func newPattern(j Job) pattern {
 	if j.Uses {
 		expr += `(?: / .*)?`
 	}
-	return pattern{label: label, prefix: lits[0], re: regexp.MustCompile(`(?s)^` + expr + `$`)}
+	return pattern{label: label, prefix: lits[0], literal: literal, re: regexp.MustCompile(`(?s)^` + expr + `$`)}
 }
 
 // Build lays the run's jobs out per workflow job. A job goes to the workflow
 // job whose name is its exact text, otherwise to the matching pattern with
-// the longest literal prefix, ties to the earlier job. Workflow jobs with no
-// run are dropped and their needs pass through to what they need.
+// the longest literal prefix; among equal prefixes the pattern with the most
+// literal text in total wins, and a remaining tie goes to the earlier job.
+// Workflow jobs with no run are dropped and their needs pass through to what
+// they need.
 func Build(w *Workflow, jobs []APIJob) ([]model.GraphNode, error) {
 	if err := validate(w); err != nil {
 		return nil, err
@@ -211,7 +245,7 @@ func Build(w *Workflow, jobs []APIJob) ([]model.GraphNode, error) {
 		}
 		if best < 0 {
 			for i, p := range pats {
-				if p.re.MatchString(a.Name) && (best < 0 || len(p.prefix) > len(pats[best].prefix)) {
+				if p.re.MatchString(a.Name) && (best < 0 || p.better(pats[best])) {
 					best = i
 				}
 			}

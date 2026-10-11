@@ -39,6 +39,8 @@ jobs:
   release:
     needs: [docs, frontend-tests]
     uses: ./.github/workflows/release.yml
+  deploy:
+    strategy: ${{ fromJSON(needs.pick-runner.outputs.strategy) }}
 `
 
 func TestParse(t *testing.T) {
@@ -54,6 +56,8 @@ func TestParse(t *testing.T) {
 		{Key: "lint", Name: "Lint", Needs: []string{"pick-runner"}},
 		{Key: "docs", Needs: []string{"backend"}},
 		{Key: "release", Needs: []string{"docs", "frontend-tests"}, Uses: true},
+		// A strategy written as one expression counts as a matrix.
+		{Key: "deploy", Matrix: true},
 	}
 	if !reflect.DeepEqual(w.Jobs, want) {
 		t.Fatalf("jobs\n%+v\nwant\n%+v", w.Jobs, want)
@@ -149,6 +153,7 @@ func TestBuildMatching(t *testing.T) {
 		{"reusable workflow caller", []Job{{Key: "rel", Uses: true}}, "rel / publish", "rel"},
 		{"key when there is no name", []Job{{Key: "lint"}}, "lint", "lint"},
 		{"longest literal prefix wins", []Job{{Key: "any", Name: "Test ${{ matrix.os }}"}, {Key: "linux", Name: "Test linux ${{ matrix.v }}"}}, "Test linux 1.26", "linux"},
+		{"more literal text wins among equal prefixes", []Job{{Key: "any", Name: "Test ${{ matrix.os }}"}, {Key: "arm", Name: "Test ${{ matrix.os }} on arm"}}, "Test linux on arm", "arm"},
 		{"ties go to the earlier job", []Job{{Key: "a", Name: "Test ${{ matrix.x }}"}, {Key: "b", Name: "Test ${{ matrix.y }}"}}, "Test 1", "a"},
 		{"exact text wins over a longer prefix", []Job{{Key: "a", Name: "Deploy ${{ matrix.env }}"}, {Key: "b", Name: "Deploy $${{ matrix.n }}"}}, "Deploy ${{ matrix.env }}", "a"},
 		{"no workflow job matches", []Job{{Key: "a", Name: "Build"}}, "Deploy", ""},
