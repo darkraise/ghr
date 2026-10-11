@@ -221,7 +221,7 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 			return
 		}
 		msg := spawnText(err)
-		d := m.spawnFailed(s.Repo, msg, now)
+		d := m.spawnFailed(s.Repo, msg, m.Now())
 		m.Events.Add("error", s.Repo, "spawn failed: %s; next attempt in %s", msg, d)
 	}
 }

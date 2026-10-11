@@ -293,7 +293,9 @@ func (m *Manager) refreshUnits(ctx context.Context) {
 
 // neverOnline reports whether a runner this process spawned is gone without
 // ever having come online: not one a person stopped, not one already in
-// cleanup, and not one that ran a whole job between two ticks.
+// cleanup, and not one that ran a whole job between two ticks. A runner that
+// ran a whole job between two ticks did come online, so its repository's
+// failed starts are forgotten.
 func (m *Manager) neverOnline(id string) (repo string, yes bool) {
 	m.mu.Lock()
 	i, ok := m.insts[id]
@@ -303,7 +305,13 @@ func (m *Manager) neverOnline(id string) (repo string, yes bool) {
 	}
 	repo = i.Repo
 	m.mu.Unlock()
-	return repo, !exists(filepath.Join(m.instanceDir(id), JobFile))
+	if exists(filepath.Join(m.instanceDir(id), JobFile)) {
+		m.mu.Lock()
+		m.clearSpawnBackoffLocked(repo)
+		m.mu.Unlock()
+		return "", false
+	}
+	return repo, true
 }
 
 // beginFinish moves an instance to cleaning and runs finish in the background.

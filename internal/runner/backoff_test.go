@@ -138,3 +138,21 @@ func TestAStoppedOrAdoptedRunnerIsNotASpawnFailure(t *testing.T) {
 		}
 	})
 }
+
+// A runner that ran a whole job between two ticks did come online, even
+// though no tick saw it idle.
+func TestRunnerThatRanAJobBetweenTicksClearsTheSpawnBackoff(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.m.spawnFailed("darkmem", "boom", h.now)
+	if err := h.m.spawn(ctx, h.cfg, "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	h.writeJob(t, "aaaaaa", 55)
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(ctx)
+	h.m.Wait()
+	if spawnFailures(h) != 0 || h.m.Status().Repos[1].Error != "" {
+		t.Fatalf("failures %d error %q", spawnFailures(h), h.m.Status().Repos[1].Error)
+	}
+}
