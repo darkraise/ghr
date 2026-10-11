@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -100,14 +101,18 @@ func TestGetContent(t *testing.T) {
 		{name: "too large for the API", path: "big.yml",
 			body:    `{"content":"","encoding":"none"}`,
 			wantURI: "GET /repos/darkraise/darkmem/contents/big.yml?ref=a1f9c3e",
-			wantErr: `github: big.yml has encoding "none", not base64`},
+			wantErr: `github: file content cannot be decoded: big.yml has encoding "none", not base64`},
+		{name: "base64 that does not decode", path: "bad.yml",
+			body:    `{"content":"am9i!","encoding":"base64"}`,
+			wantURI: "GET /repos/darkraise/darkmem/contents/bad.yml?ref=a1f9c3e",
+			wantErr: "github: file content cannot be decoded: bad.yml: illegal base64 data at input byte 4"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, f := newClient(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, tc.body) })
 			got, err := c.GetContent(context.Background(), "darkmem", tc.path, "a1f9c3e")
 			if tc.wantErr != "" {
-				if err == nil || err.Error() != tc.wantErr {
-					t.Fatalf("err %v", err)
+				if err == nil || err.Error() != tc.wantErr || !errors.Is(err, ErrBadContent) || got != nil {
+					t.Fatalf("got %q err %v", got, err)
 				}
 			} else if err != nil || string(got) != tc.want {
 				t.Fatalf("got %q err %v", got, err)

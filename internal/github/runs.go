@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -93,8 +94,13 @@ func (c *Client) ListArtifacts(ctx context.Context, repo string, runID int64) ([
 	return out, nil
 }
 
+// ErrBadContent is a file GitHub answered for but did not deliver in a form
+// that can be decoded. Asking again gives the same answer.
+var ErrBadContent = errors.New("github: file content cannot be decoded")
+
 // GetContent reads one file at ref. GitHub answers base64 with line breaks;
-// a file over 1 MB comes back with encoding "none", which is an error here.
+// a file over 1 MB comes back with encoding "none". That, and base64 that
+// does not decode, is an ErrBadContent.
 func (c *Client) GetContent(ctx context.Context, repo, path, ref string) ([]byte, error) {
 	segs := strings.Split(path, "/")
 	for i, s := range segs {
@@ -109,7 +115,11 @@ func (c *Client) GetContent(ctx context.Context, repo, path, ref string) ([]byte
 		return nil, err
 	}
 	if body.Encoding != "base64" {
-		return nil, fmt.Errorf("github: %s has encoding %q, not base64", path, body.Encoding)
+		return nil, fmt.Errorf("%w: %s has encoding %q, not base64", ErrBadContent, path, body.Encoding)
 	}
-	return base64.StdEncoding.DecodeString(strings.NewReplacer("\n", "", "\r", "").Replace(body.Content))
+	data, err := base64.StdEncoding.DecodeString(strings.NewReplacer("\n", "", "\r", "").Replace(body.Content))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: %v", ErrBadContent, path, err)
+	}
+	return data, nil
 }
