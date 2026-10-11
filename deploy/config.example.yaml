@@ -1,6 +1,6 @@
 owner: ""                   # GitHub user or org; set by setup.sh, ghr setup github, or the web UI
 mode: queue                 # queue | all
-global_max: 2               # queue mode only
+global_max: 2               # queue mode only; at most 99, like a repo's max and warm
 poll_interval: 10s
 start_timeout: 2m
 idle_timeout: 5m

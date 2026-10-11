@@ -31,6 +31,11 @@ const (
 	MinHistoryRetention = 24 * time.Hour
 )
 
+// MaxRunners is the most runners global_max, a repository's max or a
+// repository's warm may ask for. Parse lowers a larger value in config.yaml;
+// Validate refuses one, which is what an API change gets.
+const MaxRunners = 99
+
 // SystemLabels are the read-only labels GitHub gives every Linux x64 runner.
 var SystemLabels = []string{"self-hosted", "linux", "x64"}
 
@@ -174,11 +179,35 @@ func Parse(data []byte) (*Config, []string, error) {
 		return nil, nil, fmt.Errorf("parse config: %w", err)
 	}
 	c.Owner = strings.TrimSpace(c.Owner)
+	clamped := c.clampRunners()
 	warnings, err := c.Validate()
 	if err != nil {
 		return nil, nil, err
 	}
-	return c, warnings, nil
+	return c, append(clamped, warnings...), nil
+}
+
+// clampRunners lowers global_max and every repository's max and warm to
+// MaxRunners, and returns one warning for each value it lowered.
+func (c *Config) clampRunners() []string {
+	var warnings []string
+	clamp := func(what string, v *int) {
+		if *v > MaxRunners {
+			warnings = append(warnings, fmt.Sprintf("%s %d is above %d; using %d", what, *v, MaxRunners, MaxRunners))
+			*v = MaxRunners
+		}
+	}
+	clamp("global_max", &c.GlobalMax)
+	for i := range c.Repos {
+		r := &c.Repos[i]
+		if r.Max != nil {
+			clamp(r.Name+": max", r.Max)
+		}
+		if r.Warm != nil {
+			clamp(r.Name+": warm", r.Warm)
+		}
+	}
+	return warnings
 }
 
 func Load(path string) (*Config, []string, error) {
@@ -299,6 +328,9 @@ func (c *Config) Validate() ([]string, error) {
 	if c.GlobalMax < 1 {
 		errs = append(errs, "global_max must be >= 1")
 	}
+	if c.GlobalMax > MaxRunners {
+		errs = append(errs, fmt.Sprintf("global_max must be <= %d", MaxRunners))
+	}
 	for name, d := range map[string]Duration{
 		"poll_interval": c.PollInterval, "start_timeout": c.StartTimeout,
 		"idle_timeout": c.IdleTimeout, "history_retention": c.HistoryRetention,
@@ -341,6 +373,12 @@ func (c *Config) Validate() ([]string, error) {
 		}
 		if r.Warm != nil && *r.Warm < 0 {
 			errs = append(errs, r.Name+": warm must be >= 0")
+		}
+		if r.Max != nil && *r.Max > MaxRunners {
+			errs = append(errs, fmt.Sprintf("%s: max must be <= %d", r.Name, MaxRunners))
+		}
+		if r.Warm != nil && *r.Warm > MaxRunners {
+			errs = append(errs, fmt.Sprintf("%s: warm must be <= %d", r.Name, MaxRunners))
 		}
 		// warm only applies in all mode, where an omitted max is unlimited, so
 		// only an explicit max > 0 bounds it, whatever the current mode is.

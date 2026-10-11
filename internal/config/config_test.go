@@ -78,11 +78,15 @@ func TestValidateErrors(t *testing.T) {
 	neg := -1
 	two := 2
 	three := 3
+	over := MaxRunners + 1
 	cases := map[string]func(c *Config){
 		"mode must be":                 func(c *Config) { c.Mode = "fast" },
 		"global_max must be >= 1":      func(c *Config) { c.GlobalMax = 0 },
+		"global_max must be <= 99":     func(c *Config) { c.GlobalMax = over },
 		"duplicate repo darkmem":       func(c *Config) { c.Repos = append(c.Repos, Repo{Name: "darkmem"}) },
 		"darkmem: max must be >= 0":    func(c *Config) { c.Repos[1].Max = &neg },
+		"darkmem: max must be <= 99":   func(c *Config) { c.Repos[1].Max = &over },
+		"darkmem: warm must be <= 99":  func(c *Config) { c.Repos[1].Warm = &over },
 		"darkmem: warm must be <= max": func(c *Config) { c.Repos[1].Max = &two; c.Repos[1].Warm = &three },
 		"needs at least one label":     func(c *Config) { c.Labels = nil; c.Repos[1].Labels = nil },
 		"build_cache_keep":             func(c *Config) { c.BuildCacheKeep = "lots" },
@@ -116,6 +120,46 @@ func TestValidateErrors(t *testing.T) {
 		if _, err := c.Validate(); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("want error containing %q, got %v", want, err)
 		}
+	}
+}
+
+// A config.yaml written by hand above the cap is lowered on load, with one
+// warning for each value, and what was loaded saves and loads again.
+func TestParseClampsRunnerCounts(t *testing.T) {
+	c, warnings, err := Parse([]byte(`
+owner: darkraise
+mode: all
+global_max: 500
+labels: [homelab]
+repos:
+  - name: darkcloud
+    max: 120
+    warm: 100
+  - name: darkmem
+    max: 99
+    warm: 0
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "global_max 500 is above 99; using 99|darkcloud: max 120 is above 99; using 99|darkcloud: warm 100 is above 99; using 99"
+	if got := strings.Join(warnings, "|"); got != want {
+		t.Fatalf("warnings\n got %s\nwant %s", got, want)
+	}
+	cloud, mem := c.Repo("darkcloud"), c.Repo("darkmem")
+	if c.GlobalMax != MaxRunners || *cloud.Max != MaxRunners || *cloud.Warm != MaxRunners || *mem.Max != 99 || *mem.Warm != 0 {
+		t.Fatalf("global_max %d, darkcloud %d/%d, darkmem %d/%d", c.GlobalMax, *cloud.Max, *cloud.Warm, *mem.Max, *mem.Warm)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(path, c); err != nil {
+		t.Fatalf("saving a clamped config: %v", err)
+	}
+	back, warnings, err := Load(path)
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("loading what was saved: warnings %v, err %v", warnings, err)
+	}
+	if back.GlobalMax != MaxRunners || *back.Repo("darkcloud").Max != MaxRunners || *back.Repo("darkcloud").Warm != MaxRunners {
+		t.Fatalf("saved file: %+v", back)
 	}
 }
 
