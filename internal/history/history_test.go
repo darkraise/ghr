@@ -1,7 +1,9 @@
 package history
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -188,7 +190,18 @@ func TestWritesCountsOnlyRealWrites(t *testing.T) {
 	if s.Writes() != 1 {
 		t.Fatalf("a duplicate append counted: writes %d", s.Writes())
 	}
+	before, err := os.Stat(s.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Prune(t0.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// A rewrite renames a new file into place, so the same file means no rewrite.
+	if after, err := os.Stat(s.Path); err != nil || !os.SameFile(before, after) || s.Writes() != 1 {
+		t.Fatalf("a prune that drops nothing: writes %d, hook saw %v, err %v", s.Writes(), seen, err)
+	}
+	if err := s.Prune(t0.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if s.Writes() != 2 || !slices.Equal(seen, []int64{1, 2}) {
@@ -224,5 +237,124 @@ func TestHistoryHookUnderConcurrency(t *testing.T) {
 	wg.Wait()
 	if s.Writes() != 4 {
 		t.Fatalf("writes %d, want 4", s.Writes())
+	}
+}
+
+// entryLine is a history line of exactly n bytes, without its newline.
+func entryLine(id string, n int) string {
+	head := `{"id":"` + id + `","repo":"`
+	return head + strings.Repeat("x", n-len(head)-2) + `"}`
+}
+
+func TestReadAllSkipsWhatItCannotDecode(t *testing.T) {
+	good := `{"id":"good","repo":"a","run_id":1}`
+	for name, c := range map[string]struct {
+		file    string
+		ids     string
+		skipped int
+	}{
+		"empty file":                    {"", "", 0},
+		"a line of exactly 1 MiB":       {entryLine("edge", maxLine) + "\n" + good + "\n", "edge,good", 0},
+		"a line one byte over":          {good + "\n" + entryLine("big", maxLine+1) + "\n", "good", 1},
+		"an oversized line between two": {good + "\n" + entryLine("big", 2*maxLine) + "\n" + good + "\n", "good,good", 1},
+		"an oversized last line":        {good + "\n" + entryLine("big", 2*maxLine), "good", 1},
+		"a line that is not JSON":       {"garbage\n" + good + "\n", "good", 1},
+		"a last line with no newline":   {good + "\n" + good, "good,good", 0},
+	} {
+		s := &Store{Path: filepath.Join(t.TempDir(), "history.jsonl")}
+		if err := os.WriteFile(s.Path, []byte(c.file), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, skipped, err := s.readAll()
+		var ids []string
+		for _, e := range got {
+			ids = append(ids, e.ID)
+		}
+		if err != nil || strings.Join(ids, ",") != c.ids || skipped != c.skipped {
+			t.Errorf("%s: entries %v, skipped %d, err %v; want %s and %d", name, ids, skipped, err, c.ids, c.skipped)
+		}
+	}
+}
+
+// One line too long to decode must not stop the store: appends and queries
+// keep working, the skip is logged once, and the next prune removes the line.
+func TestOversizedLineIsSkippedAndPruned(t *testing.T) {
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	s := &Store{Path: filepath.Join(t.TempDir(), "history.jsonl")}
+	if err := s.Append(model.HistoryEntry{ID: "old", Repo: "a", RunID: 1, FinishedAt: t0}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(s.Path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(entryLine("big", 2*maxLine) + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Append(model.HistoryEntry{ID: "new", Repo: "a", RunID: 2, FinishedAt: t0.Add(time.Hour)}); err != nil {
+		t.Fatalf("append beside an oversized line: %v", err)
+	}
+	got, err := s.Query("", "", time.Time{}, 0)
+	if err != nil || len(got) != 2 || got[0].ID != "new" || got[1].ID != "old" {
+		t.Fatalf("query beside an oversized line: %+v %v", got, err)
+	}
+	want := "history: " + s.Path + ": skipped 1 line(s) longer than 1 MiB or not valid JSON\n"
+	if n := strings.Count(logs.String(), "skipped"); n != 1 || !strings.HasSuffix(logs.String(), want) {
+		t.Fatalf("%d skip lines, want one ending %q:\n%s", n, want, logs.String())
+	}
+	writes := s.Writes()
+	if err := s.Prune(t0.Add(-time.Hour)); err != nil { // a cutoff before every entry
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(s.Path)
+	if err != nil || len(data) > 1024 || s.Writes() != writes+1 {
+		t.Fatalf("after the prune: %d bytes, writes %d (was %d), err %v", len(data), s.Writes(), writes, err)
+	}
+	if got, err := s.Query("", "", time.Time{}, 0); err != nil || len(got) != 2 {
+		t.Fatalf("the prune lost entries: %+v %v", got, err)
+	}
+	if n := strings.Count(logs.String(), "skipped"); n != 1 {
+		t.Fatalf("%d skip lines after the prune:\n%s", n, logs.String())
+	}
+
+	// The same when the oversized line is all the file holds.
+	if err := os.WriteFile(s.Path, []byte(entryLine("big", 2*maxLine)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Prune(t0.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(s.Path); err != nil || st.Size() != 0 || s.Writes() != writes+2 {
+		t.Fatalf("a file of one oversized line: size %d, writes %d (was %d), err %v", st.Size(), s.Writes(), writes, err)
+	}
+}
+
+func TestSkippedLineIsLoggedAgainAfterTheFileWasMissing(t *testing.T) {
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	s := &Store{Path: filepath.Join(t.TempDir(), "history.jsonl")}
+	for round := 1; round <= 2; round++ {
+		if err := os.WriteFile(s.Path, []byte("not json\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Query("", "", time.Time{}, 0); err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(logs.String(), "skipped"); n != round {
+			t.Fatalf("round %d: %d skip lines, want %d:\n%s", round, n, round, logs.String())
+		}
+		if err := os.Remove(s.Path); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Query("", "", time.Time{}, 0); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

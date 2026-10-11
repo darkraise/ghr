@@ -3,7 +3,10 @@ package history
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,11 +17,16 @@ import (
 	"github.com/darkraise/ghr/internal/model"
 )
 
+// maxLine is the longest line readAll decodes. An entry ghr writes is a few
+// hundred bytes.
+const maxLine = 1 << 20
+
 type Store struct {
 	Path     string
 	mu       sync.Mutex
 	writes   int64
 	onChange func()
+	skipped  int // lines the last read skipped; readAll logs a change
 }
 
 // SetOnChange installs fn, which Append and Prune call after a counted write,
@@ -61,7 +69,7 @@ func (s *Store) Append(e model.HistoryEntry) error {
 }
 
 func (s *Store) append(e model.HistoryEntry) (bool, error) {
-	all, err := s.readAll()
+	all, _, err := s.readAll()
 	if err != nil {
 		return false, err
 	}
@@ -100,25 +108,63 @@ func (s *Store) append(e model.HistoryEntry) (bool, error) {
 	return true, f.Close()
 }
 
-func (s *Store) readAll() ([]model.HistoryEntry, error) {
+// readAll returns the stored entries and how many lines it skipped: a line
+// longer than maxLine, or one that is not valid JSON. It logs that number
+// when it differs from the previous read's and is not zero. s.mu is held.
+func (s *Store) readAll() ([]model.HistoryEntry, int, error) {
 	f, err := os.Open(s.Path)
 	if os.IsNotExist(err) {
-		return nil, nil
+		s.skipped = 0
+		return nil, 0, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer f.Close()
 	var out []model.HistoryEntry
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
+	skipped := 0
+	r := bufio.NewReaderSize(f, 64*1024)
+	var line []byte
+	for {
+		// A line arrives in buffer-sized pieces; once it is too long the rest
+		// of it is read and thrown away.
+		line = line[:0]
+		long := false
+		var rerr error
+		for {
+			var chunk []byte
+			chunk, rerr = r.ReadSlice('\n')
+			if !long {
+				line = append(line, chunk...)
+				long = len(bytes.TrimSuffix(line, []byte{'\n'})) > maxLine
+			}
+			if rerr != bufio.ErrBufferFull {
+				break
+			}
+		}
+		if rerr != nil && rerr != io.EOF {
+			return nil, 0, rerr
+		}
+		if rerr == io.EOF && len(line) == 0 {
+			break
+		}
 		var e model.HistoryEntry
-		if json.Unmarshal(sc.Bytes(), &e) == nil {
+		if !long && json.Unmarshal(bytes.TrimSuffix(line, []byte{'\n'}), &e) == nil {
 			out = append(out, e)
+		} else {
+			skipped++
+		}
+		if rerr == io.EOF {
+			break
 		}
 	}
-	return out, sc.Err()
+	if skipped != s.skipped {
+		s.skipped = skipped
+		if skipped > 0 {
+			log.Printf("history: %s: skipped %d line(s) longer than 1 MiB or not valid JSON", s.Path, skipped)
+		}
+	}
+	return out, skipped, nil
 }
 
 // Query returns entries by FinishedAt, newest first, filtered by repo (in any
@@ -128,7 +174,7 @@ func (s *Store) readAll() ([]model.HistoryEntry, error) {
 // order, which is not finish order.
 func (s *Store) Query(repo, conclusion string, since time.Time, limit int) ([]model.HistoryEntry, error) {
 	s.mu.Lock()
-	all, err := s.readAll()
+	all, _, err := s.readAll()
 	s.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -154,7 +200,8 @@ func matchConclusion(got, want string) bool {
 	return want == "" || got == want
 }
 
-// Prune drops entries that finished before cutoff, rewriting the file atomically.
+// Prune drops entries that finished before cutoff and lines the read skipped.
+// It replaces the file atomically, and only when there is something to drop.
 func (s *Store) Prune(cutoff time.Time) error {
 	s.mu.Lock()
 	wrote, err := s.prune(cutoff)
@@ -167,9 +214,18 @@ func (s *Store) Prune(cutoff time.Time) error {
 }
 
 func (s *Store) prune(cutoff time.Time) (bool, error) {
-	all, err := s.readAll()
-	if err != nil || all == nil {
+	all, skipped, err := s.readAll()
+	if err != nil {
 		return false, err
+	}
+	keep := make([]model.HistoryEntry, 0, len(all))
+	for _, e := range all {
+		if !e.FinishedAt.Before(cutoff) {
+			keep = append(keep, e)
+		}
+	}
+	if len(keep) == len(all) && skipped == 0 {
+		return false, nil
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(s.Path), ".history-*.jsonl")
 	if err != nil {
@@ -177,10 +233,7 @@ func (s *Store) prune(cutoff time.Time) (bool, error) {
 	}
 	defer os.Remove(tmp.Name())
 	w := bufio.NewWriter(tmp)
-	for _, e := range all {
-		if e.FinishedAt.Before(cutoff) {
-			continue
-		}
+	for _, e := range keep {
 		line, _ := json.Marshal(e)
 		w.Write(append(line, '\n'))
 	}
