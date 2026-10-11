@@ -46,6 +46,7 @@ type detailCall struct {
 
 type detailCache struct {
 	mu      sync.Mutex
+	gen     uint64 // the token generation entries was filled under
 	entries map[detailKey]detailEntry
 	calls   map[detailKey]*detailCall
 	// histFailing holds whether the last fetch failed to read history, so a
@@ -169,6 +170,10 @@ func (b *Backend) RunDetail(ctx context.Context, repo string, id int64, attempt 
 	c := &b.details
 	key := detailKey{repo: strings.ToLower(name), id: id, attempt: attempt}
 	c.mu.Lock()
+	gen := b.tokenGen()
+	if gen != c.gen {
+		c.entries, c.gen = nil, gen
+	}
 	if e, ok := c.entries[key]; ok && b.now().Sub(e.at) < detailTTL(e.val) {
 		c.mu.Unlock()
 		return e.val, nil
@@ -194,7 +199,7 @@ func (b *Backend) RunDetail(ctx context.Context, repo string, id int64, attempt 
 
 	c.mu.Lock()
 	delete(c.calls, key)
-	if call.err == nil {
+	if call.err == nil && b.tokenGen() == gen {
 		now := b.now()
 		for k, e := range c.entries {
 			if now.Sub(e.at) >= detailTTL(e.val) {

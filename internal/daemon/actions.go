@@ -137,10 +137,11 @@ var actionsDeadline = 20 * time.Second
 
 // good keeps each repository's runs from its last successful call, keyed by
 // lower-case name, so a paused, rate-limited or rejected repository keeps
-// showing them; a config change starts it over.
+// showing them; a config change or a new token starts it over.
 type actionsCache struct {
 	mu     sync.Mutex
 	cfg    *config.Config
+	gen    uint64 // the token generation val and good were fetched under
 	at     time.Time
 	ok     bool
 	val    model.Actions
@@ -158,12 +159,16 @@ func (b *Backend) Actions(ctx context.Context) (model.Actions, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cfg := b.Store.Config()
-	if c.ok && c.cfg == cfg && b.now().Sub(c.at) < actionsTTL {
+	gen := b.tokenGen()
+	if c.ok && c.cfg == cfg && c.gen == gen && b.now().Sub(c.at) < actionsTTL {
 		return c.val, nil
 	}
-	if c.cfg != cfg {
+	if c.cfg != cfg || c.gen != gen {
 		c.good, c.goodAt = map[string][]model.ActionsRun{}, time.Time{}
 	}
+	// The build is kept under the generation it began under, so one the
+	// token changed during is never served: the next call starts over.
+	c.gen = gen
 
 	covered := coveredRepos(cfg)
 	runs := make([][]github.Run, len(covered))

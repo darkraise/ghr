@@ -116,6 +116,7 @@ type Backend struct {
 
 	stepsMu    sync.Mutex
 	steps      map[string]stepsEntry
+	stepsGen   uint64 // the token generation steps was filled under
 	stepsCalls map[string]*stepsCall
 
 	activityMu  sync.Mutex
@@ -230,6 +231,16 @@ func (b *Backend) now() time.Time {
 	return time.Now()
 }
 
+// tokenGen is the GitHub client's token generation, which rises each time
+// the token changes. A cache of data fetched with the token remembers the
+// generation it was filled under and is emptied once it differs. A fetch
+// reads the generation before it starts: the new token is stored before the
+// generation rises, so a fetch may use a newer token than its generation
+// (its result is then dropped) but never an older one. A cache reads it
+// while holding its own lock; the client takes no lock of the daemon's, so
+// the cache's lock always comes first.
+func (b *Backend) tokenGen() uint64 { return b.GH.TokenMeta().Generation }
+
 // errNotRemoving aborts a FinalizeRemovals update for a repo resumed meanwhile.
 var errNotRemoving = errors.New("repo is no longer being removed")
 
@@ -289,6 +300,9 @@ type stepsCall struct {
 	err   error
 }
 
+// RunnerSteps returns the steps of the job a runner is running. Callers for
+// one runner share a fetch, and its answer is kept stepsTTL unless the token
+// changed while it ran.
 func (b *Backend) RunnerSteps(ctx context.Context, id string) ([]model.Step, error) {
 	live := map[string]bool{}
 	for _, in := range b.M.Status().Instances {
@@ -296,6 +310,10 @@ func (b *Backend) RunnerSteps(ctx context.Context, id string) ([]model.Step, err
 	}
 	now := b.now()
 	b.stepsMu.Lock()
+	gen := b.tokenGen()
+	if gen != b.stepsGen {
+		b.steps, b.stepsGen = nil, gen
+	}
 	for k, e := range b.steps {
 		if !live[k] || now.Sub(e.at) >= stepsTTL {
 			delete(b.steps, k)
@@ -329,7 +347,7 @@ func (b *Backend) RunnerSteps(ctx context.Context, id string) ([]model.Step, err
 
 	b.stepsMu.Lock()
 	delete(b.stepsCalls, id)
-	if c.err == nil && live[id] {
+	if c.err == nil && live[id] && b.tokenGen() == gen {
 		if b.steps == nil {
 			b.steps = map[string]stepsEntry{}
 		}
