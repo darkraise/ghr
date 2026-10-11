@@ -107,8 +107,22 @@ func TestParseEdges(t *testing.T) {
 		{Number: 1, Name: "Set up job", StartedAt: at("10:00:00"), CompletedAt: at("10:00:01")},
 		{Number: 2, Name: "Post coverage comment", StartedAt: at("10:00:01"), CompletedAt: at("10:00:02")},
 		{Number: 3, Name: "Build", StartedAt: at("10:00:02"), CompletedAt: at("10:00:03")},
-		{Number: 4, Name: "Post Run actions/checkout@v4", StartedAt: at("10:00:03"), CompletedAt: at("10:00:03")},
+		{Number: 4, Name: "Post Build", StartedAt: at("10:00:03"), CompletedAt: at("10:00:03")},
 		{Number: 5, Name: "Complete job", StartedAt: at("10:00:03"), CompletedAt: at("10:00:03")},
+	}
+	trailingPost := []model.Step{
+		{Number: 1, Name: "Set up job", StartedAt: at("10:00:00"), CompletedAt: at("10:00:01")},
+		{Number: 2, Name: "Run actions/checkout@v4", StartedAt: at("10:00:01"), CompletedAt: at("10:00:02")},
+		{Number: 3, Name: "Build", StartedAt: at("10:00:02"), CompletedAt: at("10:00:02")},
+		{Number: 4, Name: "Post coverage comment", StartedAt: at("10:00:02"), CompletedAt: at("10:00:02")},
+		{Number: 5, Name: "Post Run actions/checkout@v4", StartedAt: at("10:00:02"), CompletedAt: at("10:00:03")},
+		{Number: 6, Name: "Complete job", StartedAt: at("10:00:03"), CompletedAt: at("10:00:03")},
+	}
+	orphanText := []model.Step{
+		{Number: 1, Name: "Set up job", StartedAt: at("10:00:00"), CompletedAt: at("10:00:01")},
+		{Number: 2, Name: "Build", StartedAt: at("10:00:01"), CompletedAt: at("10:00:10")},
+		{Number: 3, Name: "Test", StartedAt: at("10:00:10"), CompletedAt: at("10:00:20")},
+		{Number: 4, Name: "Complete job", StartedAt: at("10:00:20"), CompletedAt: at("10:00:21")},
 	}
 	containers := []model.Step{
 		{Number: 1, Name: "Set up job", StartedAt: at("10:00:00"), CompletedAt: at("10:00:01")},
@@ -144,6 +158,25 @@ func TestParseEdges(t *testing.T) {
 				{{N: 1, Kind: "group", Text: "Run gh pr comment"}},
 				{{N: 1, Kind: "group", Text: "Run make"}},
 				{{N: 1, Text: "Post job cleanup."}},
+				{{N: 1, Text: "Cleaning up orphan processes"}}}},
+		{"the last step a person named Post is not a runner post step",
+			"2026-10-03T10:00:00.1Z a\n2026-10-03T10:00:01.2Z ##[group]Run actions/checkout@v4\n" +
+				"2026-10-03T10:00:02.1Z ##[group]Run make\n2026-10-03T10:00:02.3Z ##[group]Run gh pr comment\n" +
+				"2026-10-03T10:00:02.6Z Post job cleanup.\n2026-10-03T10:00:03.1Z Cleaning up orphan processes\n", trailingPost,
+			[][]model.LogLine{
+				{{N: 1, Text: "a"}},
+				{{N: 1, Kind: "group", Text: "Run actions/checkout@v4"}},
+				{{N: 1, Kind: "group", Text: "Run make"}},
+				{{N: 1, Kind: "group", Text: "Run gh pr comment"}},
+				{{N: 1, Text: "Post job cleanup."}},
+				{{N: 1, Text: "Cleaning up orphan processes"}}}},
+		{"the cleanup text printed by a script is not the Complete job marker",
+			"2026-10-03T10:00:00.1Z a\n2026-10-03T10:00:05Z Cleaning up orphan processes\n" +
+				"2026-10-03T10:00:15Z still testing\n2026-10-03T10:00:20.2Z Cleaning up orphan processes\n", orphanText,
+			[][]model.LogLine{
+				{{N: 1, Text: "a"}},
+				{{N: 1, Text: "Cleaning up orphan processes"}},
+				{{N: 1, Text: "still testing"}},
 				{{N: 1, Text: "Cleaning up orphan processes"}}}},
 		{"a Run header never moves to a container step",
 			"2026-10-03T10:00:00.1Z a\n2026-10-03T10:00:01.5Z ##[group]Run early\n" +
@@ -271,6 +304,7 @@ var hookSteps = []model.Step{
 	{Number: 1, Name: "Set up job", Conclusion: "success", StartedAt: at("16:41:19"), CompletedAt: at("16:41:22")},
 	{Number: 2, Name: "Set up runner", Conclusion: "success", StartedAt: at("16:41:22"), CompletedAt: at("16:41:22")},
 	{Number: 3, Name: "Run actions/checkout@v4", Conclusion: "success", StartedAt: at("16:41:22"), CompletedAt: at("16:41:26")},
+	{Number: 4, Name: "Run actions/setup-node@v4", Conclusion: "success", StartedAt: at("16:41:26"), CompletedAt: at("16:41:27")},
 	{Number: 8, Name: "Build", Conclusion: "success", StartedAt: at("16:42:36"), CompletedAt: at("16:42:40")},
 	{Number: 14, Name: "Post Run actions/setup-node@v4", Conclusion: "success", StartedAt: at("16:42:40"), CompletedAt: at("16:42:40")},
 	{Number: 15, Name: "Post Run actions/checkout@v4", Conclusion: "success", StartedAt: at("16:42:40"), CompletedAt: at("16:42:40")},
@@ -326,6 +360,7 @@ func TestParseGivesPostStepsTheirLines(t *testing.T) {
 			{"Current runner version: '2.337.0'", "A job started hook has been configured by the self-hosted runner administrator"},
 			{"Run '/opt/ghr/hooks/job-started.sh'", ""},
 			{"Run actions/checkout@v4"},
+			{},
 			{"Run npx vite build", "built in 3.4s"},
 			{"Post job cleanup.", "Cache hit occurred on the primary key node-cache"},
 			{"Post job cleanup.", "git version 2.55.0", "A job completed hook has been configured by the self-hosted runner administrator"},

@@ -67,18 +67,34 @@ const (
 
 // runnerPosts marks the runner's post steps. They are found by position:
 // walking back from the last step past "Complete job", "Complete runner" and
-// "Stop containers", the unbroken run of steps whose name starts with "Post ".
-// A step a person named that way earlier in the job is not one.
+// "Stop containers", the unbroken run of steps named "Post " and the name of an
+// earlier step, as the runner names them. A step a person named "Post ..."
+// is not one, unless an earlier step happens to carry the rest of its name.
 func runnerPosts(steps []model.Step) []bool {
 	post := make([]bool, len(steps))
 	i := len(steps) - 1
 	for i >= 0 && (steps[i].Name == completeJob || steps[i].Name == completeRunner || steps[i].Name == stopContainers) {
 		i--
 	}
-	for ; i >= 0 && strings.HasPrefix(steps[i].Name, "Post "); i-- {
+	for ; i >= 0 && postOfEarlier(steps, i); i-- {
 		post[i] = true
 	}
 	return post
+}
+
+// postOfEarlier reports whether steps[i] is named "Post " and the name of a
+// step before it.
+func postOfEarlier(steps []model.Step, i int) bool {
+	main, ok := strings.CutPrefix(steps[i].Name, "Post ")
+	if !ok {
+		return false
+	}
+	for _, s := range steps[:i] {
+		if s.Name == main {
+			return true
+		}
+	}
+	return false
 }
 
 // regular reports whether a step prints a "##[group]Run " header of its own;
@@ -104,7 +120,7 @@ func regular(s model.Step, post bool) bool {
 //     whose window holds the line's time, unless the current step is such a
 //     step with no lines yet;
 //   - a "Cleaning up orphan processes" line moves to "Complete job" when that
-//     is the last step with times;
+//     is the last step with times and the line's time is in its window;
 //   - any other line more than a second past the current step's end moves to
 //     the next step that has not ended.
 //
@@ -188,7 +204,7 @@ func Parse(raw []byte, steps []model.Step) []model.LogStep {
 				if !post[cur] || hasLines {
 					p = next(func(k int) bool { return post[timed[k]] && contains(k, at) })
 				}
-			case body == completeHeader && complete >= 0:
+			case body == completeHeader && complete >= 0 && contains(complete, at):
 				p = complete
 			default:
 				if e, bounded := end(p); bounded && at.After(e) {
