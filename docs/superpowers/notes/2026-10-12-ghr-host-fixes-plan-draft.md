@@ -65,3 +65,14 @@ Every flag arrived as a title with no detail. Read the four pieces of code yours
 ## Chain status
 
 - Chain 2 (config): finished. Commits `fc9fe6f`, `9d7276c`, `3ae8a44` on `8cf8ea2`; whole-tree `go vet` and `go test` green; only `internal/config/config.go` and its test touched.
+- Chain 4 (installer, CI, docs): finished. Rebased onto local `master` (`76066ff`). Commits `fe7ab38`, `597d33e`, `c916664`, `9f041ae`, `2d1575f`, `991dbc9`, `3831560`, `63bf7e4`: Task 17 has three commits because its design changed twice (the fragment describes the final export design of `991dbc9`), and Task 21 is two commits (CI, README). `bash deploy/tests/setup_test.sh` and the whole Go tree green; the drafter replayed every task's edits onto a copy of master's files and got the worktree's bytes. `shellcheck` is not installed on this host.
+  - Its notes raise three points to settle at assembly: the comment on `stop_ghr` was changed because it named `gc_dist`'s old position as the reason for dropping a queued runner update (whether the drop is still needed is not checked); `web-password-pending` stays when the password is set in the browser, so a later run at a terminal asks again; the "exactly one `pub` record" rule was dropped as unnecessary once only the export is installed.
+
+## Incident: a drafter's test run wrote to this host
+
+While running tests red-first, the installer drafter's old code ran against real paths on the dev host, before the task text made those paths variables:
+
+- It created `/etc/systemd/system/ghr.service`. It removed the file; the unit was never loaded or enabled. Checked on 2026-10-12: the file is absent and no `ghr*` unit file is listed.
+- It overwrote `/etc/apt/keyrings/docker.asc`, which this host's Docker apt source uses. It restored the file from a download it had fingerprint-checked. Checked on 2026-10-12: the file holds one key with the primary fingerprint `9DC858229FC7DD38854AE2D88D81803C0EBFCD88`, 3817 bytes. The original bytes are not known. The owner may want to run `apt-get update` once to see the Docker repository verify.
+
+For the plan: Tasks 17 and 18 must make the keyring directory and the unit path variables in their FIRST step, before any test runs, and the Global Constraints must say that a test run may never write under `/etc`. Read both task texts for this at assembly.
