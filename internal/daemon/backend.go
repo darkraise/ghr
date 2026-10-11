@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"maps"
 	"net/http"
 	"regexp"
@@ -339,11 +340,7 @@ func (b *Backend) RunnerSteps(ctx context.Context, id string) ([]model.Step, err
 	b.stepsCalls[id] = c
 	b.stepsMu.Unlock()
 
-	// Joined callers share this fetch, so one caller closing its tab must
-	// not cancel it for the others.
-	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	c.steps, c.err = b.fetchSteps(fctx, id)
-	cancel()
+	c.steps, c.err = b.fetchStepsSafely(ctx, id)
 
 	b.stepsMu.Lock()
 	delete(b.stepsCalls, id)
@@ -358,6 +355,26 @@ func (b *Backend) RunnerSteps(ctx context.Context, id string) ([]model.Step, err
 	return c.steps, c.err
 }
 
+// fetchStepsSafely runs the fetch detached from ctx, because joined callers
+// share it and one of them closing its tab must not cancel it for the
+// others. A panic becomes an error: the call must still leave b.stepsCalls
+// and close done, or every later request for the runner would wait on it for
+// good.
+func (b *Backend) fetchStepsSafely(ctx context.Context, id string) (steps []model.Step, err error) {
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("runner %s steps: panic: %v", id, r)
+			steps, err = nil, errors.New("could not read the runner's steps")
+		}
+	}()
+	return b.fetchSteps(fctx, id)
+}
+
+// fetchSteps answers an unknown runner and a runner without a job before it
+// asks whether GitHub may be called, so both still answer while the token is
+// rejected or calls are paused.
 func (b *Backend) fetchSteps(ctx context.Context, id string) ([]model.Step, error) {
 	repo, runID, runnerName, err := b.M.RunnerRepoAndRun(id)
 	if err != nil {
@@ -365,6 +382,9 @@ func (b *Backend) fetchSteps(ctx context.Context, id string) ([]model.Step, erro
 	}
 	if runID == 0 {
 		return nil, nil
+	}
+	if err := b.githubErr(); err != nil {
+		return nil, err
 	}
 	jobs, err := b.GH.ListJobs(ctx, repo, runID)
 	if err != nil {

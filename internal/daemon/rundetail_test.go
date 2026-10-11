@@ -294,7 +294,7 @@ func TestRunDetailCallersShareOneFetch(t *testing.T) {
 // GitHub call is contained.
 type panickyGH struct {
 	GitHub
-	run, jobLog, content, openLog bool
+	run, jobs, jobLog, content, openLog bool
 }
 
 func (p *panickyGH) GetContent(ctx context.Context, repo, path, ref string) ([]byte, error) {
@@ -309,6 +309,13 @@ func (p *panickyGH) GetRun(ctx context.Context, repo string, id int64) (*github.
 		panic("boom")
 	}
 	return p.GitHub.GetRun(ctx, repo, id)
+}
+
+func (p *panickyGH) ListJobs(ctx context.Context, repo string, runID int64) ([]github.Job, error) {
+	if p.jobs {
+		panic("boom")
+	}
+	return p.GitHub.ListJobs(ctx, repo, runID)
 }
 
 func (p *panickyGH) JobLog(ctx context.Context, repo string, jobID int64, limit int64) ([]byte, error) {

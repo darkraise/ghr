@@ -89,10 +89,13 @@ func (f *fakeManager) RunnerContainers(ctx context.Context, id string) ([]model.
 	return nil, runner.ErrUnknownRunner(id)
 }
 func (f *fakeManager) RunnerRepoAndRun(id string) (string, int64, string, error) {
-	if id != "aaaaaa" {
-		return "", 0, "", runner.ErrUnknownRunner(id)
+	switch id {
+	case "aaaaaa":
+		return "darkcloud", 55, "ghr-darkcloud-aaaaaa", nil
+	case "bbbbbb": // a runner that has no job
+		return "darkcloud", 0, "ghr-darkcloud-bbbbbb", nil
 	}
-	return "darkcloud", 55, "ghr-darkcloud-aaaaaa", nil
+	return "", 0, "", runner.ErrUnknownRunner(id)
 }
 func (f *fakeManager) Kill(ctx context.Context, id string) error {
 	f.killed = append(f.killed, id)
@@ -1662,5 +1665,66 @@ func TestSetTokenWithoutRunnerReposUsesTheOwnerCheck(t *testing.T) {
 	}
 	if err := b.SetToken(context.Background(), "tok2"); err != nil || b.Store.Token() != "tok2" || woke != 1 {
 		t.Fatalf("err %v token %q woke %d", err, b.Store.Token(), woke)
+	}
+}
+
+// While the token is rejected or API calls are paused, RunnerSteps still
+// answers whatever needs no GitHub call and refuses only the fetch.
+func TestRunnerStepsRefuseOnlyTheGitHubCall(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		block  func(m *fakeManager, now time.Time)
+		status int
+	}{
+		{"token rejected", func(m *fakeManager, _ time.Time) { m.degraded = "401 Bad credentials" }, 503},
+		{"calls paused", func(m *fakeManager, now time.Time) { m.paused = now.Add(10 * time.Minute) }, 429},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, m, gh := newBackend(t)
+			m.insts = []model.InstanceStatus{{ID: "aaaaaa"}, {ID: "bbbbbb"}}
+			now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+			b.Now = func() time.Time { return now }
+			ctx := context.Background()
+			if _, err := b.RunnerSteps(ctx, "aaaaaa"); err != nil {
+				t.Fatal(err)
+			}
+			tc.block(m, now)
+			if s, err := b.RunnerSteps(ctx, "aaaaaa"); err != nil || len(s) != 1 {
+				t.Fatalf("cached answer: steps %+v err %v", s, err)
+			}
+			if _, err := b.RunnerSteps(ctx, "zzzzzz"); apiStatus(err) != 404 {
+				t.Fatalf("unknown runner: %v", err)
+			}
+			if s, err := b.RunnerSteps(ctx, "bbbbbb"); err != nil || len(s) != 0 {
+				t.Fatalf("runner without a job: steps %+v err %v", s, err)
+			}
+			now = now.Add(stepsTTL)
+			if _, err := b.RunnerSteps(ctx, "aaaaaa"); apiStatus(err) != tc.status || jobCallCount(gh) != 1 {
+				t.Fatalf("the fetch: err %v, %d GitHub calls, want status %d and 1 call", err, jobCallCount(gh), tc.status)
+			}
+		})
+	}
+}
+
+// A panic inside the fetch is an error for its callers, and the shared call
+// is cleared so the next request fetches again.
+func TestRunnerStepsPanicLeavesNoCallBehind(t *testing.T) {
+	b, m, gh := newBackend(t)
+	m.insts = []model.InstanceStatus{{ID: "aaaaaa"}}
+	p := &panickyGH{GitHub: gh, jobs: true}
+	b.GH = p
+	ctx := context.Background()
+	if _, err := b.RunnerSteps(ctx, "aaaaaa"); err == nil || err.Error() != "could not read the runner's steps" {
+		t.Fatalf("panic answered %v", err)
+	}
+	b.stepsMu.Lock()
+	left := len(b.stepsCalls)
+	b.stepsMu.Unlock()
+	if left != 0 {
+		t.Fatalf("%d calls left in flight", left)
+	}
+	p.jobs = false
+	if s, err := b.RunnerSteps(ctx, "aaaaaa"); err != nil || len(s) != 1 {
+		t.Fatalf("the next request: steps %+v err %v", s, err)
 	}
 }
