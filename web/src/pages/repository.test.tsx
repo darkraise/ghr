@@ -250,7 +250,8 @@ describe("repository page", () => {
       "GitHub registrations",
     ])
     expect(within(nav).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page")
-    expect(await screen.findByRole("group", { name: "Jobs per bucket for the last 24 hours" })).toBeInTheDocument()
+    const chart = await screen.findByRole("group", { name: "Jobs per bucket for the last 24 hours" })
+    expect(screen.getByRole("region", { name: "Last 24 hours" })).toContainElement(chart)
     expect(screen.queryByLabelText("Max")).not.toBeInTheDocument()
   })
 
