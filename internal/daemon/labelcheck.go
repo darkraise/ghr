@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -140,7 +141,7 @@ func (b *Backend) StartLabelCheck(repo string) error {
 // scanLabels runs one scan and publishes it into e, unless e was dropped or
 // replaced meanwhile (token change, repo removed or re-added, shutdown).
 func (b *Backend) scanLabels(ctx context.Context, name, key string, e *labelEntry) {
-	groups, err := gatherLabels(ctx, b.GH, name)
+	groups, err := gatherLabelsSafely(ctx, b.GH, name)
 	at := b.now()
 	res := &model.LabelCheck{State: "done", CheckedAt: &at, Groups: groups}
 	if err != nil {
@@ -160,6 +161,19 @@ func (b *Backend) scanLabels(ctx context.Context, name, key string, e *labelEntr
 		return
 	}
 	e.running, e.result = false, res
+}
+
+// gatherLabelsSafely turns a panic in the scan into its error. The scan runs
+// on a detached goroutine, where a panic would end the daemon, and it must
+// still publish its result, or the repo would show "checking" for good.
+func gatherLabelsSafely(ctx context.Context, gh GitHub, repo string) (groups []model.LabelGroup, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("label check %s: panic: %v", repo, r)
+			groups, err = []model.LabelGroup{}, errors.New("could not finish the check")
+		}
+	}()
+	return gatherLabels(ctx, gh, repo)
 }
 
 // LabelCheck returns the repo's last scan without starting one.

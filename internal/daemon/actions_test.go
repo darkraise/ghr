@@ -461,3 +461,18 @@ func TestActionsRunsAtMostFourCallsAtOnce(t *testing.T) {
 		t.Fatalf("peak %d calls %d repos %d", peak, calls, len(a.Repos))
 	}
 }
+
+// A panic while one repository's runs are read is that repository's error;
+// the build still finishes and lists the others.
+func TestActionsPanicIsOneRepositorysError(t *testing.T) {
+	b, _, gh := newBackend(t)
+	gh.recentBy = map[string][]github.Run{"darkmem": {testRun(2, "completed", "success", time.Now().Add(-time.Hour))}}
+	b.GH = &panickyRuns{GitHub: gh, repo: "darkcloud"}
+	a, err := b.Actions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runIDs(a) != "[2]" || a.Repos[0].Repo != "darkcloud" || a.Repos[0].Error != "could not read the runs" || a.Repos[1].Error != "" {
+		t.Fatalf("runs %s repos %+v", runIDs(a), a.Repos)
+	}
+}

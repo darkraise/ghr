@@ -185,6 +185,14 @@ func (b *Backend) Actions(ctx context.Context) (model.Actions, error) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				// A panic on this detached goroutine would end the daemon,
+				// so it becomes this repository's error.
+				defer func() {
+					if p := recover(); p != nil {
+						log.Printf("actions: %s: panic: %v", r.repo, p)
+						runs[i], errs[i] = nil, errors.New("could not read the runs")
+					}
+				}()
 				select {
 				case sem <- struct{}{}:
 				case <-fctx.Done():

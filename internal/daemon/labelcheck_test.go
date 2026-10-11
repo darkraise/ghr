@@ -305,3 +305,32 @@ func TestLabelCheckForgottenOnRemoveAndAdd(t *testing.T) {
 		t.Fatalf("%+v", lc)
 	}
 }
+
+// panickyRuns panics when the recent runs of repo are listed.
+type panickyRuns struct {
+	GitHub
+	repo string
+}
+
+func (p *panickyRuns) ListRecentRuns(ctx context.Context, repo string, n int) ([]github.Run, error) {
+	if repo == p.repo {
+		panic("boom")
+	}
+	return p.GitHub.ListRecentRuns(ctx, repo, n)
+}
+
+// A panic inside a scan ends it as a partial result with an error, so the
+// daemon keeps running and the repository does not show "checking" for good.
+func TestLabelCheckPanicEndsTheScan(t *testing.T) {
+	b, _, gh := newBackend(t)
+	labelGH(gh)
+	b.GH = &panickyRuns{GitHub: gh, repo: "darkcloud"}
+	if err := b.StartLabelCheck("darkcloud"); err != nil {
+		t.Fatal(err)
+	}
+	lc := waitLabelCheck(t, b, "darkcloud")
+	if lc.State != "done" || !lc.Partial || lc.Error != "could not finish the check" || lc.CheckedAt == nil ||
+		lc.Groups == nil || len(lc.Groups) != 0 {
+		t.Fatalf("%+v", lc)
+	}
+}
