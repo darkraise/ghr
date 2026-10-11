@@ -154,28 +154,43 @@ type Client struct {
 	HTTP    *http.Client
 	// Blob fetches the signed download URLs GitHub redirects to. It sends no
 	// token, and the caller's context bounds the whole download.
-	Blob  *http.Client
-	Now   func() time.Time
-	Sleep func(time.Duration)
+	Blob *http.Client
+	Now  func() time.Time
+	// Sleep waits d. When ctx ends first it returns at once with ctx's error.
+	Sleep func(ctx context.Context, d time.Duration) error
 
 	mu sync.Mutex
 	// cache holds the last body per GET URL for ETag revalidation, sized by
 	// its body bytes.
-	cache      *lru.Cache[string, cached]
-	remaining  int
-	retryAt    time.Time
-	gen        uint64 // bumped when the token changes; older responses are not recorded
-	meta       TokenMeta
-	mutMu      sync.Mutex
-	lastMutate time.Time
+	cache     *lru.Cache[string, cached]
+	remaining int
+	retryAt   time.Time
+	gen       uint64 // bumped when the token changes; older responses are not recorded
+	meta      TokenMeta
+	// mutSlot holds one value while a state-changing call has its turn. It
+	// is a channel so that waiting for the turn can end with the context.
+	mutSlot    chan struct{}
+	lastMutate time.Time // guarded by mutSlot
 }
 
 func New(owner string, token func() string) *Client {
 	return &Client{
 		BaseURL: "https://api.github.com", Owner: owner, Token: token,
-		HTTP: &http.Client{Timeout: 30 * time.Second}, Blob: newBlobClient(), Now: time.Now, Sleep: time.Sleep,
+		HTTP: &http.Client{Timeout: 30 * time.Second}, Blob: newBlobClient(), Now: time.Now, Sleep: sleep,
 		cache:     lru.New[string, cached](maxCacheEntries, maxCacheBytes),
 		remaining: -1,
+		mutSlot:   make(chan struct{}, 1),
+	}
+}
+
+func sleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -421,14 +436,22 @@ func (c *Client) classify(resp *http.Response, data []byte) *APIError {
 }
 
 // mutate serialises state-changing calls and spaces them at least 1s apart.
+// A call whose context ends while it waits for its turn or for the spacing
+// returns the context's error and sends nothing.
 func (c *Client) mutate(ctx context.Context, method, u string, body any) ([]byte, error) {
-	c.mutMu.Lock()
-	defer c.mutMu.Unlock()
+	select {
+	case c.mutSlot <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-c.mutSlot }()
 	if until := c.SuspendedUntil(); !until.IsZero() {
 		return nil, &APIError{Status: http.StatusTooManyRequests, Kind: ErrRateLimit, Message: "rate limited until " + until.Format(time.RFC3339), RetryAt: until}
 	}
 	if wait := c.lastMutate.Add(time.Second).Sub(c.Now()); wait > 0 {
-		c.Sleep(wait)
+		if err := c.Sleep(ctx, wait); err != nil {
+			return nil, err
+		}
 	}
 	data, _, err := c.do(ctx, method, u, body)
 	c.lastMutate = c.Now()

@@ -154,7 +154,7 @@ func TestGenerateJITConfigBodyAndSpacing(t *testing.T) {
 	now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
 	var slept []time.Duration
 	c.Now = func() time.Time { return now }
-	c.Sleep = func(d time.Duration) { slept = append(slept, d); now = now.Add(d) }
+	c.Sleep = func(_ context.Context, d time.Duration) error { slept = append(slept, d); now = now.Add(d); return nil }
 	for i := 0; i < 2; i++ {
 		j, err := c.GenerateJITConfig(context.Background(), "r", "ghr-r-abc123", []string{"homelab"})
 		if err != nil {
@@ -174,7 +174,7 @@ func TestGenerateJITConfigBodyAndSpacing(t *testing.T) {
 
 func TestDeleteRunner404IsSuccess(t *testing.T) {
 	c, f := newClient(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(404) })
-	c.Sleep = func(time.Duration) {}
+	c.Sleep = func(context.Context, time.Duration) error { return nil }
 	if err := c.DeleteRunner(context.Background(), "r", 9); err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestRateLimitSuspendsEveryRequest(t *testing.T) {
 		w.WriteHeader(204)
 	})
 	c.Now = func() time.Time { return now }
-	c.Sleep = func(d time.Duration) { now = now.Add(d) }
+	c.Sleep = func(_ context.Context, d time.Duration) error { now = now.Add(d); return nil }
 	if _, err := c.GetRepo(context.Background(), "r"); !IsKind(err, ErrRateLimit) {
 		t.Fatalf("first call: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestSuspendedMutationFailsWithoutWaiting(t *testing.T) {
 	})
 	var slept []time.Duration
 	c.Now = func() time.Time { return now }
-	c.Sleep = func(d time.Duration) { slept = append(slept, d); now = now.Add(d) }
+	c.Sleep = func(_ context.Context, d time.Duration) error { slept = append(slept, d); now = now.Add(d); return nil }
 	for i := 0; i < 4; i++ {
 		if err := c.DeleteRunner(context.Background(), "r", 1); !IsKind(err, ErrRateLimit) {
 			t.Fatalf("call %d: %v", i, err)
@@ -298,7 +298,7 @@ func TestMutationFailuresClassified(t *testing.T) {
 			w.WriteHeader(tc.status)
 			fmt.Fprint(w, `{"message":"no"}`)
 		})
-		c.Sleep = func(time.Duration) {}
+		c.Sleep = func(context.Context, time.Duration) error { return nil }
 		if _, err := c.GenerateJITConfig(context.Background(), "r", "ghr-r-abc123", []string{"homelab"}); !IsKind(err, tc.kind) {
 			t.Errorf("JIT %d: err = %v", tc.status, err)
 		}
@@ -334,7 +334,7 @@ func TestConcurrentMutationsAreSerialAndSpaced(t *testing.T) {
 		w.WriteHeader(204)
 	})
 	c.Now = clock
-	c.Sleep = func(d time.Duration) { mu.Lock(); now = now.Add(d); mu.Unlock() }
+	c.Sleep = func(_ context.Context, d time.Duration) error { mu.Lock(); now = now.Add(d); mu.Unlock(); return nil }
 	var wg sync.WaitGroup
 	errs := make(chan error, 4)
 	for i := 0; i < 2; i++ {
@@ -361,6 +361,83 @@ func TestConcurrentMutationsAreSerialAndSpaced(t *testing.T) {
 			t.Fatalf("calls %d and %d only %v apart", i-1, i, gap)
 		}
 	}
+}
+
+// A state-changing call whose context ends gives up its place in the queue
+// and its spacing wait, and sends nothing.
+func TestMutationStopsWaitingWhenItsContextEnds(t *testing.T) {
+	t.Run("while queued", func(t *testing.T) {
+		arrived, release := make(chan struct{}), make(chan struct{})
+		c, f := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+			close(arrived)
+			<-release
+			w.WriteHeader(204)
+		})
+		first := make(chan error, 1)
+		go func() { first <- c.DeleteRunner(context.Background(), "r", 1) }()
+		<-arrived
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		second := make(chan error, 1)
+		go func() { second <- c.DeleteRunner(ctx, "r", 2) }()
+		select {
+		case err := <-second:
+			if err != context.Canceled {
+				t.Errorf("queued call: %#v", err)
+			}
+		case <-time.After(5 * time.Second): // elapses only when the call is still queued
+			t.Error("the call is still queued after its context ended")
+		}
+		close(release)
+		if err := <-first; err != nil {
+			t.Fatal(err)
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if len(f.requests) != 1 {
+			t.Fatalf("requests %v", f.requests)
+		}
+	})
+	t.Run("while spacing", func(t *testing.T) {
+		c, f := newClient(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
+		now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+		c.Now = func() time.Time { return now }
+		ctx, cancel := context.WithCancel(context.Background())
+		var waits []time.Duration
+		c.Sleep = func(ctx context.Context, d time.Duration) error {
+			waits = append(waits, d)
+			cancel()
+			return ctx.Err()
+		}
+		if err := c.DeleteRunner(ctx, "r", 1); err != nil {
+			t.Fatal(err)
+		}
+		// The context's own error, not the failure of a request sent under it.
+		if err := c.DeleteRunner(ctx, "r", 2); err != context.Canceled {
+			t.Fatalf("spacing call: %#v", err)
+		}
+		if len(waits) != 1 || waits[0] != time.Second || len(f.requests) != 1 {
+			t.Fatalf("waits %v, requests %v", waits, f.requests)
+		}
+		// The cancelled call gave its turn back: the next one is sent.
+		if err := c.DeleteRunner(context.Background(), "r", 3); err != nil {
+			t.Fatal(err)
+		}
+		if len(f.requests) != 2 || f.requests[1] != "DELETE /repos/darkraise/r/actions/runners/3" {
+			t.Fatalf("requests %v", f.requests)
+		}
+	})
+	t.Run("the default wait", func(t *testing.T) {
+		c := New("darkraise", func() string { return "tok" })
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := c.Sleep(ctx, time.Hour); !errors.Is(err, context.Canceled) {
+			t.Fatalf("wait under an ended context: %v", err)
+		}
+		if err := c.Sleep(context.Background(), 0); err != nil {
+			t.Fatalf("wait of no time: %v", err)
+		}
+	})
 }
 
 func TestTokenMetaRecorded(t *testing.T) {
