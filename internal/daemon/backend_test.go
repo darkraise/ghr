@@ -43,6 +43,7 @@ type fakeManager struct {
 	diskPct   int              // Status().DiskPct
 	pending   []model.HistoryEntry
 	onPending func() // runs when Pending is read, before it returns
+	onStatus  func() // runs when Status is read, before it returns
 
 	now         time.Time    // Status().Now
 	diskUsed    int64        // Status().DiskUsedBytes
@@ -79,6 +80,9 @@ func (f *fakeManager) Pending() []model.HistoryEntry {
 
 func (f *fakeManager) Status() model.Status {
 	f.statusCalls.Add(1)
+	if f.onStatus != nil {
+		f.onStatus()
+	}
 	return model.Status{Now: f.now, Instances: f.insts, Degraded: f.degraded != "", DegradedReason: f.degraded,
 		DiskPct: f.diskPct, DiskUsedBytes: f.diskUsed, RateRemaining: f.rate}
 }
@@ -1131,23 +1135,48 @@ func TestActivityBuildsFromHistoryAndInstances(t *testing.T) {
 	}
 }
 
-// A job finalized while the view is built has left pending for history.
+// A job moves from the instances to the pending records to history. One that
+// moves on while the view is built is read from where it moved to, because
+// the three are read in that order.
 func TestActivityKeepsAJobFinalizedMidBuild(t *testing.T) {
-	b, m, _ := newBackend(t)
 	now := time.Date(2026, 10, 3, 14, 5, 0, 0, time.UTC)
-	b.Now = func() time.Time { return now }
-	m.onPending = func() {
-		if err := b.Hist.Append(model.HistoryEntry{ID: "p", Repo: "darkmem", RunID: 1, Conclusion: "success",
-			StartedAt: now.Add(-20 * time.Minute), FinishedAt: now.Add(-10 * time.Minute)}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	a, err := b.Activity(context.Background(), "1h", "", time.UTC)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(a.Lanes) == 0 || len(a.Lanes[0].Runs) != 1 || a.Lanes[0].Runs[0].InstanceID != "p" {
-		t.Fatalf("lanes %+v", a.Lanes)
+	for _, tc := range []struct {
+		name string
+		arm  func(m *fakeManager, finalize func())
+	}{
+		{"an instance finishes as the instances are read", func(m *fakeManager, finalize func()) {
+			m.insts = []model.InstanceStatus{{ID: "p", Repo: "darkmem", State: "busy", Since: now.Add(-20 * time.Minute)}}
+			m.onStatus = func() {
+				m.insts = nil
+				finalize()
+			}
+		}},
+		{"a pending record is finalized as the pending records are read", func(m *fakeManager, finalize func()) {
+			m.onPending = finalize
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, m, _ := newBackend(t)
+			b.Now = func() time.Time { return now }
+			done := false
+			tc.arm(m, func() {
+				if done {
+					return
+				}
+				done = true
+				if err := b.Hist.Append(model.HistoryEntry{ID: "p", Repo: "darkmem", RunID: 1, Conclusion: "success",
+					StartedAt: now.Add(-20 * time.Minute), FinishedAt: now.Add(-10 * time.Minute)}); err != nil {
+					t.Fatal(err)
+				}
+			})
+			a, err := b.Activity(context.Background(), "1h", "", time.UTC)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(a.Lanes) == 0 || len(a.Lanes[0].Runs) != 1 || a.Lanes[0].Runs[0].InstanceID != "p" {
+				t.Fatalf("lanes %+v", a.Lanes)
+			}
+		})
 	}
 }
 

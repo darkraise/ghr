@@ -170,8 +170,11 @@ func (b *Backend) Activity(ctx context.Context, window, repo string, loc *time.L
 		return e.val, nil
 	}
 	cfg := b.Store.Config()
-	// Pending before history: finalize appends to history before it removes
-	// the pending record, so a job in between is in at least one of them.
+	// Instances, then pending records, then history: a job moves through
+	// them in that order, and it is recorded in the next place before it
+	// leaves the one before, so a job that moves during the build is read in
+	// at least one of them.
+	insts := b.M.Status().Instances
 	pend := b.M.Pending()
 	hist, err := b.Hist.Query("", "", time.Time{}, 0)
 	if err != nil {
@@ -179,7 +182,7 @@ func (b *Backend) Activity(ctx context.Context, window, repo string, loc *time.L
 	}
 	in := activity.Input{
 		Window: window, Loc: loc, Now: now, Retention: cfg.HistoryRetention.D(), Repo: repo,
-		History: hist, Pending: pend, Instances: b.M.Status().Instances,
+		History: hist, Pending: pend, Instances: insts,
 	}
 	if cfg.Mode == config.ModeQueue {
 		c := cfg.GlobalMax
