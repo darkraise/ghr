@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,14 +44,27 @@ func (m *Manager) Adopt(ctx context.Context) error {
 	now := m.Now()
 	adopted, exited := 0, 0
 	var toFinish []string
+	// Recording comes first, for every instance: when it fails, the runners
+	// keep running and the daemon does not start until the directory can be
+	// written.
+	for _, e := range entries {
+		if e.IsDir() && idRe.MatchString(e.Name()) {
+			if _, err := m.readMeta(e.Name()); errors.Is(err, errRecordMeta) {
+				return err
+			}
+		}
+	}
 	for _, e := range entries {
 		id := e.Name()
 		if !e.IsDir() || !idRe.MatchString(id) {
 			continue
 		}
 		dir := m.instanceDir(id)
-		var meta Meta
-		if err := readJSON(filepath.Join(dir, MetaFile), &meta); err != nil || meta.ID != id {
+		meta, err := m.readMeta(id)
+		if errors.Is(err, errRecordMeta) {
+			return err
+		}
+		if err != nil {
 			if active[id] {
 				if err := m.SD.Stop(ctx, UnitPrefix+id); err != nil {
 					m.Events.Add("warn", "", "instance %s has no readable %s and its unit did not stop (%v); reconciliation retries", id, MetaFile, err)
@@ -61,13 +75,14 @@ func (m *Manager) Adopt(ctx context.Context) error {
 			if err := os.RemoveAll(dir); err != nil {
 				m.Events.Add("warn", "", "instance %s had no readable %s; its dir could not be removed (%v); reconciliation retries", id, MetaFile, err)
 			} else {
+				m.removePrivate(id)
 				m.Events.Add("warn", "", "instance %s had no readable %s; stopped and removed", id, MetaFile)
 			}
 			delete(active, id)
 			continue
 		}
 		// start_timeout counts from the spawn, so restarts cannot extend it.
-		inst := &instance{Meta: meta, State: sched.Starting, StateSince: meta.SpawnedAt}
+		inst := &instance{Meta: meta, State: sched.Starting, StateSince: meta.SpawnedAt, adopted: true}
 		if inst.StateSince.IsZero() {
 			inst.StateSince = now
 		}
@@ -98,14 +113,16 @@ func (m *Manager) Adopt(ctx context.Context) error {
 	for _, id := range toFinish {
 		m.beginFinish(id)
 	}
+	m.sweepPrivate()
 	m.Events.Add("info", "", "adopted %d running runners; cleaning up %d that exited while ghr was down", adopted, exited)
 	return nil
 }
 
 // Reconcile works from the real unit inventory: it stops running units no
 // instance tracks, deletes ghr-<repo>-<id> registrations that match neither a
-// tracked instance (same repo and runner ID) nor a running unit, and removes
-// instance dirs whose unit has confirmed exited.
+// tracked instance (same repo and runner ID) nor a running unit once they
+// have been offline at two reconciles in a row, and removes instance dirs
+// whose unit has confirmed exited.
 func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 	running, err := m.activeUnits(ctx)
 	if err != nil {
@@ -127,6 +144,10 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 		delete(running, id)
 		m.Events.Add("warn", "", "reconcile: stopped untracked unit %s%s", UnitPrefix, id)
 	}
+	m.mu.Lock()
+	before := m.orphans
+	m.mu.Unlock()
+	seen := map[int64]bool{}
 	for _, r := range cfg.Repos {
 		runners, err := m.GH.ListRunners(ctx, r.Name)
 		if err != nil {
@@ -139,12 +160,23 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 			if !strings.HasPrefix(rn.Name, prefix) || !idRe.MatchString(id) {
 				continue
 			}
-			if i, ok := known[id]; ok {
-				if strings.EqualFold(i.Repo, r.Name) && i.RunnerID == rn.ID {
-					continue
-				}
-			} else if running[id] {
+			i, tracked := known[id]
+			if tracked && strings.EqualFold(i.Repo, r.Name) && i.RunnerID == rn.ID {
+				continue
+			}
+			// Another ghr host serving this repository names its runners the
+			// same way. Its live runners are online and a starting one is
+			// offline only briefly, so a registration is deleted only when
+			// GitHub called it offline at two reconciles in a row.
+			if rn.Status != "offline" {
+				continue
+			}
+			seen[rn.ID] = true
+			if !tracked && running[id] {
 				continue // an untracked unit that failed to stop may still use it
+			}
+			if !before[rn.ID] {
+				continue
 			}
 			err := m.GH.DeleteRunner(ctx, r.Name, rn.ID)
 			switch {
@@ -157,6 +189,9 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 			}
 		}
 	}
+	m.mu.Lock()
+	m.orphans = seen
+	m.mu.Unlock()
 	entries, err := os.ReadDir(m.Paths.Instances)
 	if err != nil && !os.IsNotExist(err) {
 		m.Events.Add("warn", "", "reconcile: read instance dirs: %v", err)
@@ -172,4 +207,5 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 			}
 		}
 	}
+	m.sweepPrivate()
 }

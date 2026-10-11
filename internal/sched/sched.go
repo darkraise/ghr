@@ -31,6 +31,10 @@ type Instance struct {
 	// Stale marks a runner registered with labels that differ from its repo's
 	// current labels: it may be unable to take the jobs demand now counts.
 	Stale bool
+	// Unusable marks a runner that can take no job: its registration is gone,
+	// or it has been offline too long. It still occupies its slot until its
+	// unit is down.
+	Unusable bool
 }
 
 type QueuedJob struct {
@@ -61,7 +65,7 @@ func MatchLabels(jobLabels, effective []string) bool {
 }
 
 func covers(i Instance, now time.Time) bool {
-	if i.Stale {
+	if i.Stale || i.Unusable {
 		return false
 	}
 	switch i.State {
@@ -115,11 +119,11 @@ func totalActive(insts []Instance) int {
 	return n
 }
 
-// countStates counts the repo's non-stale instances in the given states.
+// countStates counts the repo's instances in the given states that can take a job.
 func countStates(insts []Instance, repo string, states ...State) int {
 	n := 0
 	for _, i := range insts {
-		if !strings.EqualFold(i.Repo, repo) || i.Stale {
+		if !strings.EqualFold(i.Repo, repo) || i.Stale || i.Unusable {
 			continue
 		}
 		for _, s := range states {
@@ -196,7 +200,7 @@ func planAll(cfg *config.Config, insts []Instance, demand Demand, now time.Time)
 
 // IdleToStop returns the IDs of idle instances to stop: past idle_timeout in queue mode,
 // past idle_timeout and beyond the warm count in all mode (newest first), and every
-// stale idle instance or idle instance of a paused (or unconfigured) repo.
+// stale or unusable idle instance or idle instance of a paused (or unconfigured) repo.
 func IdleToStop(cfg *config.Config, insts []Instance, now time.Time) []string {
 	byRepo := map[string][]Instance{}
 	var out []string
@@ -204,7 +208,7 @@ func IdleToStop(cfg *config.Config, insts []Instance, now time.Time) []string {
 		if i.State != Idle {
 			continue
 		}
-		if i.Stale {
+		if i.Stale || i.Unusable {
 			out = append(out, i.ID)
 			continue
 		}

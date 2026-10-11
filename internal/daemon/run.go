@@ -92,6 +92,7 @@ func DefaultOptions() Options {
 			Instances:   "/var/lib/ghr/instances",
 			Logs:        "/var/lib/ghr/logs",
 			Pending:     "/var/lib/ghr/pending",
+			Private:     "/var/lib/ghr/private",
 			ToolCache:   "/var/lib/ghr/toolcache",
 			Hooks:       "/opt/ghr/hooks",
 			Home:        "/home/" + runner.RunnerUser,

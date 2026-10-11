@@ -58,6 +58,7 @@ type updateState struct {
 	lastFinished time.Time
 	gen          int       // bumped when an install switches dist/current
 	stopRetryAt  time.Time // no start before this, after an idle runner did not stop
+	waitReason   string    // why a queued update last waited; "" when nothing held it
 }
 
 // releaseFacts is what a release listing says about an installed version.
@@ -129,9 +130,20 @@ func (m *Manager) storeUpdateFile(f updateFile) error {
 		}
 	}
 	m.mu.Lock()
+	if !sameTime(f.QueuedAt, m.upd.file.QueuedAt) {
+		// A queue that was cancelled or made anew waits for its own reasons.
+		m.upd.waitReason = ""
+	}
 	m.upd.file = f
 	m.mu.Unlock()
 	return nil
+}
+
+func sameTime(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
 }
 
 func (m *Manager) releaseCheckDue(now time.Time) bool {
@@ -172,7 +184,9 @@ func (m *Manager) checkRelease(ctx context.Context) ([]github.Release, error) {
 	}
 	m.mu.Unlock()
 	if err != nil {
-		if github.IsKind(err, github.ErrAuth) || github.IsKind(err, github.ErrRateLimit) {
+		// A 403 here refuses the release listing only; it is already recorded
+		// as the check's error and belongs to no repository.
+		if tokenRejected(err) || github.IsKind(err, github.ErrRateLimit) {
 			m.apiErr("", err, now)
 		}
 		return nil, err
@@ -296,8 +310,18 @@ const (
 // job, or could not be checked or stopped, means ghr is not free after all.
 // Spawning waits until the update ends. A shutdown during the stops leaves the
 // update queued and not started.
-func (m *Manager) startUpdateIfFree(tickCtx context.Context, cfg *config.Config, now time.Time, demandOK bool) {
-	if !demandOK || m.Config() != cfg || !m.apiAllowed(now) || m.isDegraded() {
+func (m *Manager) startUpdateIfFree(tickCtx context.Context, cfg *config.Config, now time.Time, demandOK bool, unanswered string) {
+	reason := ""
+	switch {
+	case m.isDegraded():
+		reason = "GitHub rejected the token"
+	case !m.apiAllowed(now):
+		reason = "GitHub API calls are paused"
+	case !demandOK:
+		reason = unanswered + " did not answer its poll"
+	}
+	m.noteUpdateWait(reason)
+	if reason != "" || m.Config() != cfg {
 		return
 	}
 	m.fileMu.Lock()
@@ -360,4 +384,20 @@ func (m *Manager) startUpdateIfFree(tickCtx context.Context, cfg *config.Config,
 		defer finish()
 		m.runUpdate(ctx)
 	}()
+}
+
+// noteUpdateWait writes one event when the reason a queued update is held
+// back changes. Runners working or jobs queued are the ordinary wait and are
+// not reasons here.
+func (m *Manager) noteUpdateWait(reason string) {
+	m.mu.Lock()
+	if m.upd.file.QueuedAt == nil || m.upd.running {
+		reason = ""
+	}
+	changed := reason != m.upd.waitReason
+	m.upd.waitReason = reason
+	m.mu.Unlock()
+	if changed && reason != "" {
+		m.Events.Add("warn", "", "runner update waiting: %s", reason)
+	}
 }

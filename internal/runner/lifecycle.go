@@ -84,7 +84,11 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 	}
 	dir := m.instanceDir(id)
 	fail := func(err error) error {
-		os.RemoveAll(dir)
+		if rerr := removeAll(dir); rerr == nil {
+			m.removePrivate(id)
+		} else {
+			m.Events.Add("warn", r.Name, "spawn %s: remove dir: %v; reconciliation retries", id, rerr)
+		}
 		if derr := m.GH.DeleteRunner(ctx, r.Name, jit.Runner.ID); derr != nil {
 			m.Events.Add("warn", r.Name, "spawn %s: delete registration: %v", id, derr)
 		}
@@ -99,6 +103,11 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 	}
 	meta := Meta{ID: id, Repo: r.Name, RunnerID: jit.Runner.ID, RunnerName: name, Labels: labels,
 		DistVersion: filepath.Base(dist), SpawnedAt: m.Now()}
+	if err := m.writePrivateMeta(meta); err != nil {
+		return fail(err)
+	}
+	// A copy for a person reading the directory; nothing trusts it while the
+	// private record exists.
 	if err := writeJSON(filepath.Join(dir, MetaFile), meta); err != nil {
 		return fail(err)
 	}
@@ -165,8 +174,7 @@ func (m *Manager) readJobFiles() {
 		inst, ok := m.insts[i.ID]
 		if ok && inst.State != sched.Cleaning {
 			if inst.State == sched.Starting || inst.State == sched.Idle {
-				inst.State = sched.Busy
-				inst.StateSince = m.Now()
+				m.enterLocked(inst, sched.Busy, m.Now())
 			}
 			if inst.Job == nil {
 				inst.Job = jobInfo(rec, m.Now())
@@ -186,7 +194,8 @@ func (m *Manager) readJobFiles() {
 
 // refreshRunners moves starting and idle instances to idle or busy from the
 // runners API, so an idle runner GitHub reports busy is busy even before its
-// hook record or the jobs API shows the job.
+// hook record or the jobs API shows the job, and notes how long an idle
+// runner has been offline.
 func (m *Manager) refreshRunners(ctx context.Context) {
 	now := m.Now()
 	for _, i := range m.snapshot() {
@@ -195,17 +204,73 @@ func (m *Manager) refreshRunners(ctx context.Context) {
 		}
 		r, err := m.GH.GetRunner(ctx, i.Repo, i.RunnerID)
 		if err != nil {
-			if github.IsKind(err, github.ErrAuth) || github.IsKind(err, github.ErrRateLimit) {
+			if tokenRejected(err) || github.IsKind(err, github.ErrRateLimit) {
 				m.apiErr(i.Repo, err, now)
 				return
 			}
+			if github.IsKind(err, github.ErrAuth) {
+				m.repoRefused(i.Repo, err, now)
+				continue
+			}
+			if github.IsKind(err, github.ErrNotFound) {
+				if m.registrationGone(ctx, i.Repo, i.RunnerID, now) {
+					m.markAnswered(i.ID)
+					m.markLost(i.ID)
+				} else if !m.apiAllowed(now) {
+					return // the list was refused for the whole token, or rate-limited
+				}
+			}
 			continue // start_timeout handles runners that never appear
 		}
+		m.markAnswered(i.ID)
 		if r.Busy {
-			m.setState(i.ID, sched.Busy)
-		} else if r.Status == "online" && i.State == sched.Starting {
-			m.setState(i.ID, sched.Idle)
+			m.move(i.ID, sched.Busy, sched.Starting, sched.Idle)
+		} else if r.Status == "online" {
+			m.move(i.ID, sched.Idle, sched.Starting)
 		}
+		m.noteOnline(i.ID, r.Busy || r.Status == "online", now)
+	}
+}
+
+// registrationGone reports whether repo's runner list answers and does not
+// hold runner id. A 404 for one runner cannot say that by itself: GitHub also
+// answers 404 when the token cannot see the repository. A list that cannot be
+// read goes through apiErr and concludes nothing. The list is read once per
+// repository per tick.
+func (m *Manager) registrationGone(ctx context.Context, repo string, id int64, now time.Time) bool {
+	key := strings.ToLower(repo)
+	m.mu.Lock()
+	l, read := m.lists[key]
+	m.mu.Unlock()
+	if !read {
+		runners, err := m.GH.ListRunners(ctx, repo)
+		if err != nil {
+			if tokenRejected(err) || github.IsKind(err, github.ErrRateLimit) {
+				m.apiErr(repo, err, now)
+			} else {
+				m.repoRefused(repo, err, now)
+			}
+		} else {
+			l = runnerList{ids: map[int64]bool{}, ok: true}
+			for _, r := range runners {
+				l.ids[r.ID] = true
+			}
+		}
+		m.mu.Lock()
+		m.lists[key] = l
+		m.mu.Unlock()
+	}
+	return l.ok && !l.ids[id]
+}
+
+// markLost records that an idle instance's registration is confirmed missing.
+// A starting one is left to the start timeout: a registration made seconds
+// ago is not declared gone on one reading.
+func (m *Manager) markLost(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if i, ok := m.insts[id]; ok && i.State == sched.Idle {
+		i.deregistered, i.lost = true, true
 	}
 }
 
@@ -222,11 +287,40 @@ func (m *Manager) refreshUnits(ctx context.Context) {
 		}
 		active, err := m.SD.Active(ctx, UnitPrefix+i.ID)
 		if err == nil && !active {
+			// Recorded here, not in the cleanup that runs in the background:
+			// this tick plans its spawns before that cleanup ends.
+			if repo, yes := m.neverOnline(i.ID); yes {
+				d := m.spawnFailed(repo, "runner exited before coming online", now)
+				m.Events.Add("warn", repo, "runner %s exited before coming online; next spawn in %s", i.ID, d)
+			}
 			// The snapshot can be out of date by now: a stop may have started
 			// the cleanup, and one that failed waits for its retry time.
 			m.startFinish(i.ID, true)
 		}
 	}
+}
+
+// neverOnline reports whether a runner this process spawned is gone without
+// ever having come online: not one a person stopped, not one already in
+// cleanup, and not one that ran a whole job between two ticks. A runner that
+// ran a whole job between two ticks did come online, so its repository's
+// failed starts are forgotten.
+func (m *Manager) neverOnline(id string) (repo string, yes bool) {
+	m.mu.Lock()
+	i, ok := m.insts[id]
+	if !ok || i.State == sched.Cleaning || i.cameOnline || i.adopted || i.stopping {
+		m.mu.Unlock()
+		return "", false
+	}
+	repo = i.Repo
+	m.mu.Unlock()
+	if exists(filepath.Join(m.instanceDir(id), JobFile)) {
+		m.mu.Lock()
+		m.clearSpawnBackoffLocked(repo)
+		m.mu.Unlock()
+		return "", false
+	}
+	return repo, true
 }
 
 // beginFinish moves an instance to cleaning and runs finish in the background.
@@ -371,7 +465,22 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	}
 
 	removed, err := m.cleanupDocker(ctx, cfg, id, i.Repo)
-	fails := 0
+	if !hadJob {
+		m.mu.Lock()
+		ip.cleaned += removed
+		removed = ip.cleaned
+		m.mu.Unlock()
+	}
+	if hadJob && removed > 0 {
+		// Summed in the pending record, which the start of finish reads back:
+		// a retry, even one after a restart, adds to what earlier attempts
+		// removed. A failed write here loses this attempt's count only.
+		p.Cleanup += removed
+		if werr := writeJSONAtomic(pendingPath, p); werr != nil && err == nil {
+			return fmt.Errorf("write pending history: %w", werr)
+		}
+	}
+	fails, announce := 0, false
 	m.mu.Lock()
 	if ip, ok := m.insts[id]; ok {
 		if errors.Is(err, errListProjects) {
@@ -383,6 +492,9 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 			ip.cleanupFails = 0
 		}
 		fails = ip.cleanupFails
+		if err != nil && fails >= maxCleanupFailures && !ip.gaveUp {
+			ip.gaveUp, announce = true, true
+		}
 	}
 	m.mu.Unlock()
 	if err != nil {
@@ -392,11 +504,13 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 		if fails < maxCleanupFailures {
 			return fmt.Errorf("docker cleanup: %w", err)
 		}
-		m.Events.Add("error", i.Repo, "cleanup of %s failed %d times in a row; releasing its slot, remove the leftovers by hand: %v",
-			id, fails, err)
+		// A later step that fails brings finish back here on every retry.
+		if announce {
+			m.Events.Add("error", i.Repo, "cleanup of %s failed %d times in a row; releasing its slot, remove the leftovers by hand: %v",
+				id, fails, err)
+		}
 	}
 	if hadJob {
-		p.Cleanup = removed
 		if err := writeJSONAtomic(pendingPath, p); err != nil {
 			return fmt.Errorf("write pending history: %w", err)
 		}
@@ -404,6 +518,7 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("remove %s: %w", dir, err)
 	}
+	m.removePrivate(id)
 	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil && !github.IsKind(err, github.ErrUnprocessable) {
 		m.Events.Add("warn", i.Repo, "delete registration %s: %v (reconciliation retries)", i.RunnerName, err)
 	}
@@ -548,6 +663,17 @@ func (m *Manager) stopIdle(ctx context.Context, cfg *config.Config, now time.Tim
 	}
 }
 
+// stopDeregistered retries the unit stop of idle runners whose registration
+// is already gone. It needs no GitHub call, so it runs on the ticks in which
+// API calls are not allowed and stopIdle does not run.
+func (m *Manager) stopDeregistered(ctx context.Context, now time.Time) {
+	for _, i := range m.snapshot() {
+		if i.State == sched.Idle && i.deregistered {
+			m.stopIdleRunner(ctx, i, now)
+		}
+	}
+}
+
 // idleStop is what stopIdleRunner did with an idle runner.
 type idleStop int
 
@@ -573,8 +699,8 @@ func (m *Manager) stopIdleRunner(ctx context.Context, i instance, now time.Time)
 	}
 	gone := cur.deregistered
 	m.mu.Unlock()
-	// A runner deregistered by an earlier stop can take no job and its check
-	// now answers 404, so only the unit stop is repeated.
+	// A runner whose registration is already gone can take no job and its
+	// check answers 404, so only the unit stop is repeated.
 	if !gone {
 		if res, ok := m.deregisterIdle(ctx, i, now); !ok {
 			return res
@@ -585,7 +711,20 @@ func (m *Manager) stopIdleRunner(ctx context.Context, i instance, now time.Time)
 		m.Events.Add("warn", i.Repo, "stop idle %s: %v", i.ID, err)
 		return idleKept
 	}
-	m.Events.Add("info", i.Repo, "stopped idle runner %s", i.ID)
+	m.mu.Lock()
+	lost, offline := false, time.Time{}
+	if p := m.insts[i.ID]; p != nil {
+		lost, offline = p.lost, p.offlineSince
+	}
+	m.mu.Unlock()
+	switch {
+	case lost:
+		m.Events.Add("warn", i.Repo, "runner %s registration is gone; stopped", i.ID)
+	case !offline.IsZero() && now.Sub(offline) >= m.Config().StartTimeout.D():
+		m.Events.Add("warn", i.Repo, "runner %s offline for %s; replaced", i.ID, now.Sub(offline).Round(time.Second))
+	default:
+		m.Events.Add("info", i.Repo, "stopped idle runner %s", i.ID)
+	}
 	return idleStopped
 }
 
@@ -596,16 +735,21 @@ func (m *Manager) deregisterIdle(ctx context.Context, i instance, now time.Time)
 	if err != nil {
 		if !github.IsKind(err, github.ErrNotFound) {
 			m.apiErr(i.Repo, err, now)
+			return idleKept, false
 		}
-		return idleKept, false
+		if !m.registrationGone(ctx, i.Repo, i.RunnerID, now) {
+			return idleKept, false
+		}
+		m.markLost(i.ID)
+		return idleStopped, true
 	}
 	if r.Busy {
-		m.setState(i.ID, sched.Busy)
+		m.move(i.ID, sched.Busy, sched.Starting, sched.Idle)
 		return idleBusy, false
 	}
 	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil {
 		if github.IsKind(err, github.ErrUnprocessable) {
-			m.setState(i.ID, sched.Busy)
+			m.move(i.ID, sched.Busy, sched.Starting, sched.Idle)
 			return idleBusy, false
 		}
 		m.apiErr(i.Repo, err, now)
@@ -624,14 +768,16 @@ func (m *Manager) stopStartTimedOut(ctx context.Context, cfg *config.Config, now
 	for _, id := range sched.StartTimedOut(cfg, m.schedInstances(cfg), now) {
 		m.mu.Lock()
 		i, ok := m.insts[id]
-		repo := ""
+		repo, answered := "", false
 		if ok {
-			repo = i.Repo
+			repo, answered = i.Repo, i.answered
 		}
 		m.mu.Unlock()
 		// A stop a person asked for can finish and remove a runner while this
-		// loop is stopping another one.
-		if !ok {
+		// loop is stopping another one. A runner the runners API did not answer
+		// for in this tick is left alone: an API pause or a failed call says
+		// nothing about whether it came online.
+		if !ok || !answered {
 			continue
 		}
 		if err := m.SD.Stop(ctx, UnitPrefix+id); err != nil {

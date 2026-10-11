@@ -344,7 +344,10 @@ func (f *fakeDocker) RemoveVolumesByLabel(_ context.Context, label string) error
 }
 
 // DataRootUsage returns successive f.usage values; a negative value is a failed read.
-func (f *fakeDocker) DataRootUsage(context.Context) (int, error) {
+func (f *fakeDocker) DataRootUsage(ctx context.Context) (int, error) {
+	if err := f.wait(ctx, "DataRootUsage"); err != nil {
+		return 0, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.usage) == 0 {
@@ -583,7 +586,7 @@ func newHarness(t *testing.T) *harness {
 		Config: func() *config.Config { return h.cfg },
 		GH:     h.gh, SD: h.sd, Docker: h.docker, Disk: h.docker, Host: h.host,
 		Paths: Paths{Dist: dist, Instances: filepath.Join(root, "instances"), Logs: filepath.Join(root, "logs"),
-			Pending: filepath.Join(root, "pending"), ToolCache: filepath.Join(root, "toolcache"),
+			Pending: filepath.Join(root, "pending"), Private: filepath.Join(root, "private"), ToolCache: filepath.Join(root, "toolcache"),
 			Hooks: "/opt/ghr/hooks", Home: "/home/ghrunner", UpdateState: filepath.Join(root, "runner-update.json")},
 		Events:  ev,
 		History: &history.Store{Path: filepath.Join(root, "history.jsonl")},
@@ -633,6 +636,14 @@ func (h *harness) eventText() string {
 		b.WriteString(e.Level + " " + e.Repo + " " + e.Msg + "\n")
 	}
 	return b.String()
+}
+
+// checkDisk measures the disk and, above the high-water mark, prunes in the
+// calling goroutine: what a tick does across its background prune.
+func (h *harness) checkDisk(ctx context.Context) {
+	if pct, over := h.m.measureDisk(ctx, h.cfg); over {
+		h.m.pruneDisk(ctx, h.cfg, pct)
+	}
 }
 
 func (h *harness) history(t *testing.T) []string {

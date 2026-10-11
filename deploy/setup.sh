@@ -105,6 +105,13 @@ stop_ghr() {
   trap 'systemctl start ghr.service 2>/dev/null || true' EXIT
 }
 
+# A version an older setup.sh extracted kept the tarball's owner ids (1001),
+# which may be a real user here, so whatever that user could write is not
+# vouched for by its run.sh.
+tree_is_root_owned() {
+  [ -z "$(find "$1" ! -uid 0 -print -quit)" ]
+}
+
 install_runner() {
   local version="$RUNNER_VERSION"
   if [ "$version" = latest ]; then
@@ -114,16 +121,22 @@ install_runner() {
   local dir="$DIST_DIR/$version" staging="$DIST_DIR/$version.tmp"
   # A dist dir is published only after installdependencies.sh succeeded, so an
   # executable run.sh means the version is complete.
+  if [ -d "$dir" ] && ! tree_is_root_owned "$dir"; then
+    log "actions-runner $version has files not owned by root; fetching it again"
+    rm -rf "$dir"
+  fi
   if [ ! -x "$dir/run.sh" ]; then
     log "installing actions-runner $version"
     rm -rf "$staging"
     mkdir -p "$staging"
     fetch_runner "$version" "$staging/runner.tar.gz"
-    tar -xzf "$staging/runner.tar.gz" -C "$staging"
+    tar --no-same-owner -xzf "$staging/runner.tar.gz" -C "$staging"
     rm -f "$staging/runner.tar.gz"
     "$staging/bin/installdependencies.sh" >/dev/null || die "actions-runner $version: bin/installdependencies.sh failed"
     mv -T "$staging" "$dir"
   fi
+  chown -R root:root "$dir"
+  chmod -R go-w "$dir"
   ln -sfn "$dir" "$DIST_DIR/current.tmp"
   mv -Tf "$DIST_DIR/current.tmp" "$DIST_DIR/current"
 }

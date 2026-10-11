@@ -33,8 +33,9 @@ const (
 )
 
 const (
-	authRecheck = 60 * time.Second
-	maxBackoff  = 2 * time.Minute
+	authRecheck     = 60 * time.Second
+	maxBackoff      = 2 * time.Minute
+	maxSpawnBackoff = 10 * time.Minute
 )
 
 var idRe = regexp.MustCompile(`^[0-9a-f]{6}$`)
@@ -96,6 +97,9 @@ type Paths struct {
 	Instances string
 	Logs      string
 	Pending   string // history records waiting for the job's final conclusion
+	// Private holds what root must trust about an instance, mode 0700. The
+	// instance directory itself belongs to the runner user.
+	Private   string
 	ToolCache string
 	Hooks     string
 	Home      string
@@ -103,7 +107,8 @@ type Paths struct {
 	UpdateState string
 }
 
-// Meta is written to <instance>/ghr.json at spawn and read back on re-adoption.
+// Meta is recorded in Paths.Private at spawn and read back on re-adoption;
+// <instance>/ghr.json holds a copy.
 type Meta struct {
 	ID          string    `json:"id"`
 	Repo        string    `json:"repo"`
@@ -136,8 +141,22 @@ type instance struct {
 	finishing    bool      // a finish goroutine is running
 	retryFinish  time.Time // when a failed finish may run again
 	cleanupFails int       // consecutive failed Docker cleanups
-	deregistered bool      // stopIdleRunner deleted its registration
+	gaveUp       bool      // the cleanup give-up has been reported
+	deregistered bool      // its registration was deleted by ghr or confirmed missing
+	lost         bool      // the registration was confirmed missing, not deleted by ghr
+	offlineSince time.Time // when an idle runner was first seen offline; zero while online
+	adopted      bool      // rebuilt by Adopt, not spawned by this process
 	stopping     bool      // Kill asked systemd to stop the unit
+	cameOnline   bool      // it has been idle or busy at least once
+	cleaned      int       // containers removed by earlier finish attempts of a runner that ran no job
+	answered     bool      // the runners API answered for it in the current tick
+}
+
+// runnerList is one repository's registered runner IDs as read in this tick;
+// ok is false when the read failed.
+type runnerList struct {
+	ids map[int64]bool
+	ok  bool
 }
 
 type Manager struct {
@@ -167,6 +186,10 @@ type Manager struct {
 	repoErr        map[string]string
 	fails          map[string]int
 	retryAt        map[string]time.Time
+	lists          map[string]runnerList // by lower-cased repo; reset every tick
+	spawnFails     map[string]int        // failed starts in a row, by lower-cased repo
+	spawnRetryAt   map[string]time.Time  // no spawn for the repo before this
+	spawnErr       map[string]string     // the last failed start's message
 	degraded       bool
 	degradedReason string
 	authCheckAt    time.Time
@@ -181,6 +204,7 @@ type Manager struct {
 	maintCtx       context.Context         // cancelled by Close
 	maintCancel    context.CancelFunc
 	lastJob        map[string]model.HistoryEntry
+	orphans        map[int64]bool // untracked registrations seen offline at the last reconcile; guarded by mu
 	epoch          string
 	wg             sync.WaitGroup
 	upd            updateState // guarded by mu
@@ -197,6 +221,10 @@ func (m *Manager) Init() error {
 	m.repoErr = map[string]string{}
 	m.fails = map[string]int{}
 	m.retryAt = map[string]time.Time{}
+	m.lists = map[string]runnerList{}
+	m.spawnFails = map[string]int{}
+	m.spawnRetryAt = map[string]time.Time{}
+	m.spawnErr = map[string]string{}
 	m.lastJob = map[string]model.HistoryEntry{}
 	m.lastPrune = m.Now()
 	m.maintCtx, m.maintCancel = context.WithCancel(context.Background())
@@ -362,14 +390,128 @@ func (m *Manager) releasePrune() {
 	m.mu.Unlock()
 }
 
+// startDiskPrune runs pruneDisk in the background and releases the prune
+// reservation when it ends; the caller must hold the reservation. Docker's
+// prune commands can take minutes, and a tick that waited for them would
+// spawn and reap nothing meanwhile. It reports false, starting nothing, once
+// Close has been called.
+func (m *Manager) startDiskPrune(cfg *config.Config, pct int) bool {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return false
+	}
+	ctx := m.maintCtx
+	// Counted under the lock that guards closed, so Wait cannot miss it.
+	m.wg.Add(1)
+	m.mu.Unlock()
+	go func() {
+		defer m.wg.Done()
+		defer m.releasePrune()
+		m.pruneDisk(ctx, cfg, pct)
+	}()
+	return true
+}
+
 func (m *Manager) instanceDir(id string) string { return filepath.Join(m.Paths.Instances, id) }
 
-func (m *Manager) setState(id string, s sched.State) {
+// enterLocked puts i in state s; m.mu must be held. The first time a runner
+// comes online its repository's failed starts are forgotten.
+func (m *Manager) enterLocked(i *instance, s sched.State, now time.Time) {
+	i.State = s
+	i.StateSince = now
+	if s == sched.Idle || s == sched.Busy {
+		if !i.cameOnline {
+			m.clearSpawnBackoffLocked(i.Repo)
+		}
+		i.cameOnline = true
+	}
+}
+
+// move puts the instance in state to when its live state is one of from, and
+// reports whether it did. Callers decide from a snapshot that a network call
+// has made old, so only the live state counts.
+func (m *Manager) move(id string, to sched.State, from ...sched.State) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if i, ok := m.insts[id]; ok && i.State != s && i.State != sched.Cleaning {
-		i.State = s
-		i.StateSince = m.Now()
+	i, ok := m.insts[id]
+	if !ok || !slices.Contains(from, i.State) {
+		return false
+	}
+	m.enterLocked(i, to, m.Now())
+	return true
+}
+
+// backoff is the wait after n failures in a row: 10 s, doubling up to limit.
+func backoff(n int, limit time.Duration) time.Duration {
+	d := 10 * time.Second << (n - 1)
+	if d > limit || d <= 0 {
+		return limit
+	}
+	return d
+}
+
+// spawnFailed records a failed start for repo and returns the wait before the
+// next attempt: 10 s, doubling to maxSpawnBackoff. A successful poll does not
+// reset it, because a poll that works says nothing about a spawn that does not.
+func (m *Manager) spawnFailed(repo, msg string, now time.Time) time.Duration {
+	key := strings.ToLower(repo)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.spawnFails[key]++
+	d := backoff(m.spawnFails[key], maxSpawnBackoff)
+	m.spawnRetryAt[key] = now.Add(d)
+	m.spawnErr[key] = msg
+	return d
+}
+
+// clearSpawnBackoffLocked forgets repo's failed starts; m.mu must be held.
+func (m *Manager) clearSpawnBackoffLocked(repo string) {
+	key := strings.ToLower(repo)
+	delete(m.spawnFails, key)
+	delete(m.spawnRetryAt, key)
+	delete(m.spawnErr, key)
+}
+
+// spawnText words a failed start for the repository's status line.
+func spawnText(err error) string {
+	var ae *github.APIError
+	if errors.As(err, &ae) && ae.Kind == github.ErrAuth {
+		return permissionText(ae)
+	}
+	return err.Error()
+}
+
+// beginTick forgets what the last tick learned from the runners API.
+func (m *Manager) beginTick() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lists = map[string]runnerList{}
+	for _, i := range m.insts {
+		i.answered = false
+	}
+}
+
+func (m *Manager) markAnswered(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if i, ok := m.insts[id]; ok {
+		i.answered = true
+	}
+}
+
+// noteOnline records what the runners API said about a runner's connection:
+// the first time an idle runner is seen offline, or that it is connected.
+func (m *Manager) noteOnline(id string, online bool, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	i, ok := m.insts[id]
+	switch {
+	case !ok:
+	case online:
+		i.offlineSince = time.Time{}
+	case i.State == sched.Idle && i.offlineSince.IsZero():
+		i.offlineSince = now
 	}
 }
 
@@ -382,6 +524,19 @@ func (m *Manager) snapshot() []instance {
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].ID < out[b].ID })
 	return out
+}
+
+// unconfirmedBusy reports whether repo has a busy runner whose job the jobs
+// API has not confirmed yet.
+func (m *Manager) unconfirmedBusy(repo string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, i := range m.insts {
+		if strings.EqualFold(i.Repo, repo) && i.State == sched.Busy && !i.JobConfirmed {
+			return true
+		}
+	}
+	return false
 }
 
 // stale reports whether an instance was registered with labels other than its
@@ -399,10 +554,14 @@ func stale(cfg *config.Config, i instance) bool {
 }
 
 func (m *Manager) schedInstances(cfg *config.Config) []sched.Instance {
+	now, grace := m.Now(), cfg.StartTimeout.D()
 	var out []sched.Instance
 	for _, i := range m.snapshot() {
+		// An idle runner may be reconnecting; start_timeout is how long a
+		// runner gets to connect in the first place.
+		offline := i.State == sched.Idle && !i.offlineSince.IsZero() && now.Sub(i.offlineSince) >= grace
 		out = append(out, sched.Instance{ID: i.ID, Repo: i.Repo, State: i.State, StateSince: i.StateSince,
-			JobConfirmed: i.JobConfirmed, Stale: stale(cfg, i)})
+			JobConfirmed: i.JobConfirmed, Stale: stale(cfg, i), Unusable: i.deregistered || offline})
 	}
 	return out
 }
@@ -451,6 +610,11 @@ func (m *Manager) Status() model.Status {
 	for _, r := range cfg.Repos {
 		rs := model.RepoStatus{Name: r.Name, Paused: r.Paused, Removing: r.Removing, Max: cfg.EffectiveMax(r),
 			Queued: len(m.demand[r.Name]), Error: m.repoErr[r.Name]}
+		// A paused repo gets no spawns, so a failed start from before the
+		// pause is not its state any more.
+		if rs.Error == "" && !r.Paused {
+			rs.Error = m.spawnErr[strings.ToLower(r.Name)]
+		}
 		for _, q := range m.demand[r.Name] {
 			if rs.OldestQueuedAt == nil || q.CreatedAt.Before(*rs.OldestQueuedAt) {
 				at := q.CreatedAt
@@ -557,21 +721,40 @@ func (m *Manager) PausedUntil() time.Time {
 	return m.pauseUntil
 }
 
-// ClearDegraded is called after the token is replaced or reloaded.
+// ClearDegraded is called after the token is replaced or reloaded. A new
+// token may also be what a failing spawn was waiting for.
 func (m *Manager) ClearDegraded() {
 	m.mu.Lock()
 	m.degraded = false
 	m.degradedReason = ""
+	m.spawnFails, m.spawnRetryAt, m.spawnErr = map[string]int{}, map[string]time.Time{}, map[string]string{}
 	m.mu.Unlock()
 }
 
-// apiErr applies the error-handling table: auth → degraded, rate limit → pause,
-// 404 → per-repo access error, anything else → per-repo backoff.
+// tokenRejected reports whether err means GitHub rejected the token itself,
+// which only a 401 says. A 403 refuses one repository or one call.
+func tokenRejected(err error) bool {
+	var ae *github.APIError
+	return errors.As(err, &ae) && ae.Kind == github.ErrAuth && ae.Status == 401
+}
+
+// permissionText words a 403 that is not a rate limit.
+func permissionText(ae *github.APIError) string {
+	msg := "token lacks permission for this repository"
+	if ae.Permissions != "" {
+		msg += " (needs " + ae.Permissions + ")"
+	}
+	return msg + ": " + ae.Error()
+}
+
+// apiErr applies the error-handling table: 401 → degraded, rate limit → pause,
+// 403 → per-repo permission error, 404 → per-repo access error, anything else
+// → per-repo backoff.
 func (m *Manager) apiErr(repo string, err error, now time.Time) {
 	var ae *github.APIError
 	if errors.As(err, &ae) {
-		switch ae.Kind {
-		case github.ErrAuth:
+		switch {
+		case tokenRejected(err):
 			reason := "GitHub rejected the token"
 			if ae.Path != "" {
 				reason += " on " + ae.Method + " " + ae.Path
@@ -590,7 +773,7 @@ func (m *Manager) apiErr(repo string, err error, now time.Time) {
 				m.Events.Add("error", repo, "%s; spawning stopped", reason)
 			}
 			return
-		case github.ErrRateLimit:
+		case ae.Kind == github.ErrRateLimit:
 			m.mu.Lock()
 			was := now.Before(m.pauseUntil)
 			if ae.RetryAt.After(m.pauseUntil) {
@@ -604,17 +787,36 @@ func (m *Manager) apiErr(repo string, err error, now time.Time) {
 		}
 	}
 	msg := err.Error()
-	if github.IsKind(err, github.ErrNotFound) {
+	switch {
+	case github.IsKind(err, github.ErrNotFound):
 		msg = "token lacks access to repo (add it to the PAT's repository access)"
+	case github.IsKind(err, github.ErrAuth):
+		msg = permissionText(ae)
 	}
 	m.mu.Lock()
-	m.fails[repo]++
-	d := 10 * time.Second << (m.fails[repo] - 1)
-	if d > maxBackoff || d <= 0 {
-		d = maxBackoff
+	// A 403 from a call that does not wait for the repo's backoff repeats on
+	// every tick; it is filed once per backoff window.
+	if github.IsKind(err, github.ErrAuth) && now.Before(m.retryAt[repo]) {
+		m.repoErr[repo] = msg
+		m.mu.Unlock()
+		return
 	}
+	m.fails[repo]++
+	d := backoff(m.fails[repo], maxBackoff)
 	m.retryAt[repo] = now.Add(d)
 	m.repoErr[repo] = msg
 	m.mu.Unlock()
 	m.Events.Add("warn", repo, "%s; retrying in %s", msg, d)
+}
+
+// repoRefused files an error from a call that is made on every tick under
+// its repository, once per backoff window: the status shows it, and the
+// event list does not get a line per tick.
+func (m *Manager) repoRefused(repo string, err error, now time.Time) {
+	m.mu.Lock()
+	waiting := now.Before(m.retryAt[repo])
+	m.mu.Unlock()
+	if !waiting {
+		m.apiErr(repo, err, now)
+	}
 }

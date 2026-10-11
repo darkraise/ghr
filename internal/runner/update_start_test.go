@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -41,7 +42,7 @@ func idleRunner(t *testing.T, h *harness) string {
 	}
 	id := "aaaaaa"
 	h.gh.setRunner(h.m.insts[id].RunnerID, "online", false)
-	h.m.setState(id, sched.Idle)
+	h.m.move(id, sched.Idle, sched.Starting)
 	return id
 }
 
@@ -87,7 +88,7 @@ func TestQueuedUpdateWaitsUntilFree(t *testing.T) {
 		}},
 		{"busy runner", func(t *testing.T, h *harness) {
 			id := idleRunner(t, h)
-			h.m.setState(id, sched.Busy)
+			h.m.move(id, sched.Busy, sched.Idle)
 		}},
 		{"queued job", func(t *testing.T, h *harness) {
 			queuedRun(h, "darkmem", 7, github.Job{ID: 70, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
@@ -234,9 +235,8 @@ func TestUpdateWaitsWhenAnIdleRunnerDoesNotStop(t *testing.T) {
 	}
 }
 
-// An idle runner that cannot be stopped (here: its registration is gone, so
-// it cannot be checked) holds the update off for a while instead of every
-// tick stopping the other idle runners again.
+// An idle runner that cannot be checked holds the update off for a while
+// instead of every tick stopping the other idle runners again.
 func TestUpdateBacksOffWhenAnIdleRunnerCannotStop(t *testing.T) {
 	h := newHarness(t)
 	queuedUpdate(t, h, tarballSum())
@@ -244,10 +244,9 @@ func TestUpdateBacksOffWhenAnIdleRunnerCannotStop(t *testing.T) {
 	if err := h.m.spawn(context.Background(), h.cfg, "darkcloud"); err != nil {
 		t.Fatal(err)
 	}
-	h.m.setState("bbbbbb", sched.Idle)
-	h.gh.mu.Lock()
-	delete(h.gh.runners, h.m.insts["bbbbbb"].RunnerID)
-	h.gh.mu.Unlock()
+	h.gh.setRunner(h.m.insts["bbbbbb"].RunnerID, "online", false)
+	h.m.move("bbbbbb", sched.Idle, sched.Starting)
+	h.gh.setErr("GetRunner darkcloud", &github.APIError{Status: 502, Kind: github.ErrServer})
 	postponed := func() int { return strings.Count(h.eventText(), "runner update postponed") }
 	h.m.Tick(context.Background())
 	h.m.Wait()
@@ -260,7 +259,7 @@ func TestUpdateBacksOffWhenAnIdleRunnerCannotStop(t *testing.T) {
 	if postponed() != 1 || strings.Contains(h.eventText(), "runner update started") {
 		t.Fatalf("retried within the backoff:\n%s", h.eventText())
 	}
-	h.gh.setRunner(h.m.insts["bbbbbb"].RunnerID, "online", false)
+	h.gh.setErr("GetRunner darkcloud", nil)
 	h.now = h.now.Add(15 * time.Minute)
 	h.m.Tick(context.Background())
 	h.m.Wait()
@@ -322,5 +321,73 @@ func TestShutdownDuringIdleStopsKeepsTheQueue(t *testing.T) {
 	}
 	if len(*fetched) != 0 || current(t, h) != "2.337.0" {
 		t.Fatalf("an install ran: fetched %v current %s", *fetched, current(t, h))
+	}
+}
+
+// The tick's idle stop and the update start of the same tick both stop the
+// same idle runner. The second stop finds the unit gone and must not postpone
+// the update.
+func TestUpdateStartsInTheTickThatStoppedItsIdleRunner(t *testing.T) {
+	h := newHarness(t)
+	queuedUpdate(t, h, tarballSum())
+	id := idleRunner(t, h)
+	h.now = h.now.Add(6 * time.Minute) // past idle_timeout
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if len(h.sd.stopped) != 2 || h.sd.stopped[0] != UnitPrefix+id || h.sd.stopped[1] != UnitPrefix+id {
+		t.Fatalf("stopped %v, want the idle stop and then the update's own stop", h.sd.stopped)
+	}
+	if strings.Contains(h.eventText(), "runner update postponed") || current(t, h) != "2.338.0" {
+		t.Fatalf("current %s\n%s", current(t, h), h.eventText())
+	}
+}
+
+// A queued update that cannot start for a reason other than runners working
+// says why, once per reason.
+func TestQueuedUpdateSaysWhyItWaits(t *testing.T) {
+	h := newHarness(t)
+	queuedUpdate(t, h, tarballSum())
+	waiting := func() []string {
+		var out []string
+		for _, line := range strings.Split(h.eventText(), "\n") {
+			if strings.Contains(line, "runner update waiting") {
+				out = append(out, line)
+			}
+		}
+		return out
+	}
+	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 502, Kind: github.ErrServer})
+	h.m.Tick(context.Background())
+	h.now = h.now.Add(5 * time.Second) // darkcloud is still in its 10 s backoff
+	h.m.Tick(context.Background())
+	want := []string{"warn  runner update waiting: darkcloud did not answer its poll"}
+	if got := waiting(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events %q", got)
+	}
+	// A queue made anew is a new wait: its reason is said again.
+	if err := h.m.CancelUpdate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.m.QueueUpdate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.m.Tick(context.Background())
+	want = append(want, want[0])
+	if got := waiting(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events after a requeue %q", got)
+	}
+	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Hour)})
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background())
+	want = append(want, "warn  runner update waiting: GitHub API calls are paused")
+	if got := waiting(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events %q", got)
+	}
+	h.gh.setErr("ListRuns darkcloud", nil)
+	h.now = h.now.Add(time.Hour)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if got := waiting(); !reflect.DeepEqual(got, want) || current(t, h) != "2.338.0" {
+		t.Fatalf("current %s events %q", current(t, h), got)
 	}
 }

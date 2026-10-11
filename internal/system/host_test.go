@@ -21,7 +21,7 @@ func TestHostExtractAndRunScriptArgs(t *testing.T) {
 	if err := h.RunScript(context.Background(), "/d/2.338.0.tmp", "bin/installdependencies.sh"); err != nil {
 		t.Fatal(err)
 	}
-	if len(*calls) != 1 || (*calls)[0].String() != "tar -xzf /d/2.338.0.tmp/runner.tar.gz -C /d/2.338.0.tmp" {
+	if len(*calls) != 1 || (*calls)[0].String() != "tar --no-same-owner -xzf /d/2.338.0.tmp/runner.tar.gz -C /d/2.338.0.tmp" {
 		t.Fatalf("Run calls %v", *calls)
 	}
 	want := filepath.Join("/d/2.338.0.tmp", "bin/installdependencies.sh") + " "

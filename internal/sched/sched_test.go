@@ -169,3 +169,33 @@ func TestRepoNamesIgnoreCase(t *testing.T) {
 		t.Fatalf("idle grouping must ignore case, got %v", got)
 	}
 }
+
+// A runner that can take no job (its registration is gone, or it has been
+// offline too long) must not hold a queued job back or count as warm, and it
+// is always stopped.
+func TestUnusableInstanceTakesNoJob(t *testing.T) {
+	c := cfg("all", 4, config.Repo{Name: "a", Warm: ptr(1)})
+	insts := []Instance{{ID: "x", Repo: "a", State: Idle, StateSince: t0, Unusable: true}}
+	if n := Covering(insts, "a", t0); n != 0 {
+		t.Fatalf("covering %d", n)
+	}
+	if got := repos(Plan(c, insts, Demand{}, t0)); !reflect.DeepEqual(got, []string{"a"}) {
+		t.Fatalf("warm replacement not planned: %v", got)
+	}
+	queue := cfg("queue", 4, config.Repo{Name: "a", Max: ptr(2)}) // it still holds one of the two slots
+	if got := repos(Plan(queue, insts, Demand{"a": jobs("a", 1)}, t0)); !reflect.DeepEqual(got, []string{"a"}) {
+		t.Fatalf("queued job still counted as covered: %v", got)
+	}
+	if got := IdleToStop(c, insts, t0); !reflect.DeepEqual(got, []string{"x"}) {
+		t.Fatalf("idle to stop %v", got)
+	}
+	// Until its unit is down it still uses the host, so it keeps its slot.
+	repoFull := cfg("queue", 4, config.Repo{Name: "a", Max: ptr(1)})
+	if got := Plan(repoFull, insts, Demand{"a": jobs("a", 1)}, t0); len(got) != 0 {
+		t.Fatalf("spawned past the repository cap: %v", got)
+	}
+	hostFull := cfg("queue", 1, config.Repo{Name: "a", Max: ptr(2)})
+	if got := Plan(hostFull, insts, Demand{"a": jobs("a", 1)}, t0); len(got) != 0 {
+		t.Fatalf("spawned past global_max: %v", got)
+	}
+}

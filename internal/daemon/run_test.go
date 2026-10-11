@@ -184,7 +184,7 @@ func TestRunServesTicksReloadsAndKeepsRunners(t *testing.T) {
 		Socket: filepath.Join(dir, "ghr.sock"), HistoryPath: filepath.Join(dir, "history.jsonl"),
 		ShutdownWait: 5 * time.Second,
 		Paths: runner.Paths{Dist: dist, Instances: filepath.Join(dir, "instances"), Logs: filepath.Join(dir, "logs"),
-			Pending: filepath.Join(dir, "pending"), ToolCache: filepath.Join(dir, "toolcache"), Hooks: "/opt/ghr/hooks", Home: filepath.Join(dir, "home")},
+			Pending: filepath.Join(dir, "pending"), Private: filepath.Join(dir, "private"), ToolCache: filepath.Join(dir, "toolcache"), Hooks: "/opt/ghr/hooks", Home: filepath.Join(dir, "home")},
 		GitHubURL: fakeGitHub(t).URL, Systemd: sd, Docker: nopDocker{}, Disk: nopDisk{}, Host: dirHost{}, Reload: reload,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -258,7 +258,7 @@ func testOptions(t *testing.T, cfg string) Options {
 		Socket: filepath.Join(dir, "ghr.sock"), HistoryPath: filepath.Join(dir, "history.jsonl"),
 		ShutdownWait: 5 * time.Second,
 		Paths: runner.Paths{Dist: dist, Instances: filepath.Join(dir, "instances"), Logs: filepath.Join(dir, "logs"),
-			Pending: filepath.Join(dir, "pending"), ToolCache: filepath.Join(dir, "toolcache"), Hooks: "/opt/ghr/hooks", Home: filepath.Join(dir, "home")},
+			Pending: filepath.Join(dir, "pending"), Private: filepath.Join(dir, "private"), ToolCache: filepath.Join(dir, "toolcache"), Hooks: "/opt/ghr/hooks", Home: filepath.Join(dir, "home")},
 		GitHubURL: fakeGitHub(t).URL, Systemd: &recSD{}, Docker: nopDocker{}, Disk: nopDisk{}, Host: dirHost{}, Reload: make(chan os.Signal, 1),
 		SetupPendingPath: filepath.Join(dir, "setup-pending"), ToolchainsPendingPath: filepath.Join(dir, "toolchains-pending"),
 	}
@@ -1026,5 +1026,11 @@ func TestRunStreamsChangesPastTheWebWriteTimeout(t *testing.T) {
 	time.Sleep(3 * webWriteTimeout)
 	reload <- os.Interrupt
 	for !strings.Contains(nextFrame(t, frames, `a change naming "events" after the write timeout`), `"events"`) {
+	}
+}
+
+func TestDefaultOptionsHaveARootOnlyRecordDir(t *testing.T) {
+	if got := DefaultOptions().Paths.Private; got != "/var/lib/ghr/private" {
+		t.Fatalf("private dir %q", got)
 	}
 }

@@ -96,6 +96,16 @@ systemctl() {
 }
 timeout() { shift; "$@"; }
 sleep() { SECONDS=$((SECONDS + $1)); }
+# The tests run without root: record the ownership repair instead of doing it,
+# and record how tar is called while still running it.
+chown() { echo "$*" >> "$MARK_DIR/chowns"; }
+tar() {
+  echo "$*" >> "$MARK_DIR/tars"
+  command tar "$@"
+}
+
+# The tests do not run as root: a tree counts as foreign-owned when a job planted a file in it.
+tree_is_root_owned() { [ ! -e "$1/planted-by-a-job" ]; }
 
 new_case() {
   DIST_DIR="$T/$1/dist"
@@ -139,8 +149,22 @@ check "a: leftover temp dir from the failed run was discarded" absent "$DIST_DIR
 check "a: no temp dir left after success" absent "$DIST_DIR/$FIXTURE_VERSION.tmp"
 check "a: tarball not kept in the dist dir" absent "$DIST_DIR/$FIXTURE_VERSION/runner.tar.gz"
 check "a: current points at the new version" [ "$(target_of_current)" = "$FIXTURE_VERSION" ]
+check "a: the runner tarball is extracted without its owner ids" contains "$(cat "$MARK_DIR/tars" 2>/dev/null)" "--no-same-owner -xzf"
+# The third run finds the version installed: it must not extract again, and it
+# must still repair the ownership an older setup.sh left behind.
+: > "$MARK_DIR/tars"
+: > "$MARK_DIR/chowns"
 run install_runner >/dev/null 2>&1
 check "a: third run is a no-op for an installed version" [ "$(count fetches)" -eq 2 ]
+check "a: an installed version is not extracted again" lacks "$(cat "$MARK_DIR/tars")" "-xzf"
+check "a: an installed version is still handed to root" contains "$(cat "$MARK_DIR/chowns")" "-R root:root $DIST_DIR/$FIXTURE_VERSION"
+# A version with files not owned by root is not trusted: it is fetched again.
+touch "$DIST_DIR/$FIXTURE_VERSION/planted-by-a-job"
+run install_runner >/dev/null 2>&1
+check "a: an installed version with foreign-owned files is fetched again" [ "$(count fetches)" -eq 3 ]
+check "a: the foreign-owned files are gone" absent "$DIST_DIR/$FIXTURE_VERSION/planted-by-a-job"
+check "a: the fetched-again version is published" [ -x "$DIST_DIR/$FIXTURE_VERSION/run.sh" ]
+check "a: the fetched-again version is made unwritable for group and others" [ -z "$(find "$DIST_DIR/$FIXTURE_VERSION" -perm /022 ! -type l -print -quit)" ]
 
 # (b) Readiness loop.
 new_case b-ready-after-polls

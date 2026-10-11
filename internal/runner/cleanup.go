@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -29,11 +30,6 @@ func within(path, dir string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// projectsFile remembers the compose projects cleanup has seen: custom projects
-// are found only through their containers, so a retry after those are removed
-// must still reach the project's networks and volumes.
-const projectsFile = "ghr-projects"
-
 // errListProjects marks a cleanup that could not even list Docker containers,
 // usually because the daemon is down; it must not count toward the give-up.
 var errListProjects = errors.New("list compose containers")
@@ -52,7 +48,11 @@ func (m *Manager) projects(ctx context.Context, id string) ([]string, error) {
 			set[c.Project] = true
 		}
 	}
-	if b, err := os.ReadFile(filepath.Join(dir, projectsFile)); err == nil {
+	// Cleanup remembers the projects it has seen: custom projects are found
+	// only through their containers, so a retry after those are removed must
+	// still reach the project's networks and volumes. The list is kept where
+	// the job cannot write, so it cannot edit the names already remembered.
+	if b, err := os.ReadFile(m.privateProjects(id)); err == nil {
 		for _, p := range strings.Fields(string(b)) {
 			set[p] = true
 		}
@@ -73,9 +73,12 @@ func (m *Manager) cleanupDocker(ctx context.Context, cfg *config.Config, id, rep
 	if err != nil {
 		return 0, err
 	}
-	known := filepath.Join(m.instanceDir(id), projectsFile)
 	record := func() error {
-		if err := writeFile(known, []byte(strings.Join(names, "\n")+"\n"), 0o644); err != nil && !errors.Is(err, os.ErrNotExist) {
+		err := os.MkdirAll(m.Paths.Private, 0o700)
+		if err == nil {
+			err = writeFile(m.privateProjects(id), []byte(strings.Join(names, "\n")+"\n"), 0o600)
+		}
+		if err != nil {
 			return fmt.Errorf("record compose projects: %w", err)
 		}
 		return nil
@@ -163,19 +166,28 @@ func (m *Manager) RunnerContainers(ctx context.Context, id string) ([]model.Cont
 	return out, nil
 }
 
-// checkDisk prunes Docker build cache and dangling images above disk_high_water.
-// A failed usage read keeps the last good measurement; every failure is reported.
-func (m *Manager) checkDisk(ctx context.Context, cfg *config.Config) {
+// diskMeasureTimeout bounds the tick's own disk reading (docker info and df),
+// so a Docker daemon that does not answer costs a tick seconds, not the
+// command timeout.
+var diskMeasureTimeout = 15 * time.Second
+
+// measureDisk reads the Docker data root's usage and reports whether it is
+// above disk_high_water. A failed read keeps the last good measurement.
+func (m *Manager) measureDisk(ctx context.Context, cfg *config.Config) (pct int, over bool) {
+	ctx, cancel := context.WithTimeout(ctx, diskMeasureTimeout)
+	defer cancel()
 	u, err := m.dataRoot(ctx)
 	if err != nil {
 		m.Events.Add("warn", "", "disk usage: %v", err)
-		return
+		return 0, false
 	}
 	m.setDisk(u)
-	pct := u.Pct
-	if pct <= cfg.DiskHighWater {
-		return
-	}
+	return u.Pct, u.Pct > cfg.DiskHighWater
+}
+
+// pruneDisk prunes Docker build cache and dangling images after measureDisk
+// found the disk at pct, above disk_high_water. Every failure is reported.
+func (m *Manager) pruneDisk(ctx context.Context, cfg *config.Config, pct int) {
 	started := m.Now()
 	m.mu.Lock()
 	m.lastPruneRec = &model.LastPrune{Trigger: "auto", Scope: "auto", StartedAt: started, Steps: []model.PruneStep{}}
@@ -420,16 +432,14 @@ func (m *Manager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 	if !idRe.MatchString(id) {
 		return model.LogChunk{}, ErrUnknownRunner(id)
 	}
-	dir := filepath.Join(m.instanceDir(id), "_diag")
-	if _, err := os.Stat(dir); err != nil {
-		dir = filepath.Join(m.Paths.Logs, id)
-		if _, err := os.Stat(dir); err != nil {
-			return model.LogChunk{}, ErrUnknownRunner(id)
-		}
+	root, err := m.openLogs(id)
+	if err != nil {
+		return model.LogChunk{}, ErrUnknownRunner(id)
 	}
+	defer root.Close()
 	var files []string
 	for _, pat := range []string{"Runner_*.log", "Worker_*.log"} {
-		matches, _ := filepath.Glob(filepath.Join(dir, pat))
+		matches, _ := fs.Glob(root.FS(), pat)
 		sort.Strings(matches)
 		files = append(files, matches...)
 	}
@@ -446,10 +456,10 @@ func (m *Manager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 	}
 	var data []byte
 	for _, f := range files {
-		name := filepath.Base(f)
+		name := f
 		off := offsets[name]
 		if budget := maxLogChunk - len(data); budget > 0 {
-			if b, err := readFrom(f, off, budget); err == nil && len(b) > 0 {
+			if b, err := readFrom(root, name, off, budget); err == nil && len(b) > 0 {
 				if name != last {
 					if last != "" {
 						data = append(data, '\n')
@@ -469,12 +479,49 @@ func (m *Manager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 	return model.LogChunk{Data: string(data), Next: next.Encode()}, nil
 }
 
-func readFrom(path string, off int64, limit int) ([]byte, error) {
-	f, err := os.Open(path)
+// openLogs opens the directory that holds a runner's diagnostic logs: the
+// live instance's _diag, or its archive. The job wrote these files and
+// RunnerLog reads them as root, so the log directory itself is opened as an
+// os.Root and every read goes through it: the root keeps the directory it
+// opened even if its name is swapped afterwards, and refuses any path that
+// leaves it through a symlink. A _diag that is a symlink is refused.
+func (m *Manager) openLogs(id string) (*os.Root, error) {
+	if inst, err := os.OpenRoot(m.instanceDir(id)); err == nil {
+		defer inst.Close()
+		if fi, err := inst.Lstat("_diag"); err == nil {
+			if !fi.IsDir() {
+				return nil, fs.ErrInvalid
+			}
+			logs, err := inst.OpenRoot("_diag")
+			if err == nil || !errors.Is(err, fs.ErrNotExist) {
+				return logs, err
+			}
+		}
+	}
+	dir := filepath.Join(m.Paths.Logs, id)
+	if fi, err := os.Lstat(dir); err != nil || !fi.IsDir() {
+		return nil, fs.ErrNotExist
+	}
+	return os.OpenRoot(dir)
+}
+
+// readFrom reads up to limit bytes of a log from off. Only a regular file is
+// read: a symlink is skipped, and a FIFO or a device would block the reader
+// or feed it for ever. The check is repeated on the open file, because the
+// job can swap the name between the two; whatever it swaps in, the root
+// lets the open reach only a file inside the log directory.
+func readFrom(root *os.Root, name string, off int64, limit int) ([]byte, error) {
+	if fi, err := root.Lstat(name); err != nil || !fi.Mode().IsRegular() {
+		return nil, fs.ErrInvalid
+	}
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return nil, fs.ErrInvalid
+	}
 	if _, err := f.Seek(off, io.SeekStart); err != nil {
 		return nil, err
 	}

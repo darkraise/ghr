@@ -105,8 +105,14 @@ func (s Systemd) Start(ctx context.Context, u UnitSpec) error {
 	return err
 }
 
+// Stop stops a unit. A unit systemd no longer has is stopped already;
+// systemctl answers that with exit status 5 and "not loaded".
 func (s Systemd) Stop(ctx context.Context, unit string) error {
 	_, err := s.Run(ctx, "systemctl", "stop", unit)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 5 && strings.Contains(err.Error(), "not loaded") {
+		return nil
+	}
 	return err
 }
 
@@ -365,9 +371,11 @@ func (h Host) ChownR(ctx context.Context, path, user string) error {
 	return err
 }
 
-// Extract unpacks a .tar.gz into dir.
+// Extract unpacks a .tar.gz into dir. Run by root, tar restores the archive's
+// owner ids unless told not to; the runner tarball's are 1001, which may be a
+// real user on this host, so the files are made root's.
 func (h Host) Extract(ctx context.Context, tarball, dir string) error {
-	_, err := h.Run(ctx, "tar", "-xzf", tarball, "-C", dir)
+	_, err := h.Run(ctx, "tar", "--no-same-owner", "-xzf", tarball, "-C", dir)
 	return err
 }
 

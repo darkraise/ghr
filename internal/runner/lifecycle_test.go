@@ -178,6 +178,26 @@ func TestExitWithoutJobRecordsNoHistory(t *testing.T) {
 	}
 }
 
+// A runner that ran no job reports every container its cleanup attempts
+// removed, not only the last attempt's.
+func TestExitWithoutJobSumsCleanupAcrossAttempts(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.docker.byLabel["com.docker.compose.project=ghr-aaaaaa"] = []string{"c1"}
+	h.docker.setErr("RemoveVolumesByLabel", errors.New("volume in use"))
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	h.docker.setErr("RemoveVolumesByLabel", nil)
+	h.docker.byLabel["com.docker.compose.project=ghr-aaaaaa"] = []string{"c2"}
+	h.now = h.now.Add(finishRetry)
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if !strings.Contains(h.eventText(), "exited without a job; cleanup: 2 ctrs") {
+		t.Fatalf("state %s events %s", h.state("aaaaaa"), h.eventText())
+	}
+}
+
 // A killed job's conclusion arrives after the runner exits: history waits for it.
 func TestDelayedConclusionIsRetried(t *testing.T) {
 	h := newHarness(t)
@@ -362,7 +382,7 @@ func TestDockerUnreachableKeepsCleaning(t *testing.T) {
 	}
 }
 
-// diskFullUntilCleanup fails the pending-history and ghr-projects writes with
+// diskFullUntilCleanup fails the pending-history and project-list writes with
 // fail until Docker cleanup has removed a volume, like a disk only that frees.
 func diskFullUntilCleanup(t *testing.T, h *harness, fail error) {
 	t.Helper()
@@ -372,7 +392,7 @@ func diskFullUntilCleanup(t *testing.T, h *harness, fail error) {
 		h.docker.mu.Lock()
 		full := len(h.docker.volLabels) == 0
 		h.docker.mu.Unlock()
-		if full && (strings.HasPrefix(name, h.m.Paths.Pending) || filepath.Base(name) == projectsFile) {
+		if full && (strings.HasPrefix(name, h.m.Paths.Pending) || strings.HasSuffix(name, ".projects")) {
 			return &fs.PathError{Op: "write", Path: name, Err: fail}
 		}
 		return orig(name, data, perm)
@@ -465,7 +485,6 @@ func TestStopIdleRechecksBusy(t *testing.T) {
 func TestStopIdleLeavesRunnerOnCheckFailure(t *testing.T) {
 	for _, err := range []error{
 		&github.APIError{Status: 502, Kind: github.ErrServer},
-		&github.APIError{Status: 404, Kind: github.ErrNotFound},
 		errors.New("connection reset"),
 	} {
 		h := newHarness(t)
@@ -614,6 +633,7 @@ func TestUnitQueryErrorIsNotAnExit(t *testing.T) {
 func TestStartTimeoutStopsUnit(t *testing.T) {
 	h := newHarness(t)
 	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.refreshRunners(context.Background()) // the runners API answers: still offline
 	h.now = h.now.Add(3 * time.Minute)
 	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
 	if len(h.sd.stopped) != 1 || !strings.Contains(h.eventText(), "did not come online within 2m0s") {
@@ -1089,6 +1109,7 @@ func TestStartTimeoutSkipsARunnerThatIsGone(t *testing.T) {
 	h := newHarness(t)
 	h.m.spawn(context.Background(), h.cfg, "darkmem")
 	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.refreshRunners(context.Background()) // the runners API answers: still offline
 	h.now = h.now.Add(3 * time.Minute)
 	h.sd.stopGate, h.sd.stopEntered = make(chan struct{}), make(chan struct{}, 2)
 	go func() {
@@ -1106,5 +1127,262 @@ func TestStartTimeoutSkipsARunnerThatIsGone(t *testing.T) {
 	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
 	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) {
 		t.Fatalf("stopped %v, want only ghr-runner-aaaaaa", h.sd.stopped)
+	}
+}
+
+// The runners API is slow. A runner that took a job while its answer was on
+// the way must not be put back to idle by that answer.
+func TestRunnerMadeBusyDuringTheCheckStaysBusy(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.gh.setRunner(101, "online", false)
+	h.gh.hook = func(method string) {
+		if method == "GetRunner" {
+			h.m.mu.Lock()
+			h.m.insts["aaaaaa"].State = sched.Busy
+			h.m.mu.Unlock()
+		}
+	}
+	h.m.refreshRunners(context.Background())
+	if h.state("aaaaaa") != "busy" {
+		t.Fatalf("state %s", h.state("aaaaaa"))
+	}
+}
+
+// A runner that could not be checked may be online. Only an answer from the
+// runners API in this tick lets the start timeout stop it.
+func TestStartTimeoutWaitsForAnAnswerFromTheRunnersAPI(t *testing.T) {
+	for name, block := range map[string]func(h *harness) (unblock func()){
+		"API pause": func(h *harness) func() {
+			h.m.apiErr("darkmem", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(10 * time.Minute)}, h.now)
+			return func() { h.now = h.now.Add(10 * time.Minute) }
+		},
+		"failed call": func(h *harness) func() {
+			h.gh.setErr("GetRunner darkmem", &github.APIError{Status: 502, Kind: github.ErrServer})
+			return func() { h.gh.setErr("GetRunner darkmem", nil) }
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+				t.Fatal(err)
+			}
+			unblock := block(h)
+			h.now = h.now.Add(3 * time.Minute) // past start_timeout
+			h.m.Tick(context.Background())
+			if len(h.sd.stopped) != 0 {
+				t.Fatalf("stopped without an answer: %v\n%s", h.sd.stopped, h.eventText())
+			}
+			unblock()
+			h.m.Tick(context.Background())
+			if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) ||
+				!strings.Contains(h.eventText(), "did not come online within 2m0s") {
+				t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
+			}
+		})
+	}
+}
+
+func idleOnline(t *testing.T, h *harness, repo string) {
+	t.Helper()
+	if err := h.m.spawn(context.Background(), h.cfg, repo); err != nil {
+		t.Fatal(err)
+	}
+	h.gh.setRunner(101, "online", false)
+	h.m.refreshRunners(context.Background())
+	if h.state("aaaaaa") != "idle" {
+		t.Fatalf("state %s", h.state("aaaaaa"))
+	}
+}
+
+// GitHub answers 404 for the runner and its list of the repository's runners
+// does not hold it: the registration is gone, the runner can take no job, and
+// its unit is stopped at once.
+func TestIdleRunnerWhoseRegistrationIsGoneIsStopped(t *testing.T) {
+	h := newHarness(t)
+	idleOnline(t, h, "darkmem")
+	h.gh.mu.Lock()
+	delete(h.gh.runners, 101)
+	h.gh.mu.Unlock()
+	h.m.Tick(context.Background())
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) ||
+		!strings.Contains(h.eventText(), "warn darkmem runner aaaaaa registration is gone; stopped") {
+		t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
+	}
+	if n := sched.Covering(h.m.schedInstances(h.cfg), "darkmem", h.now); n != 0 {
+		t.Fatalf("a runner without a registration still covers %d jobs", n)
+	}
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if h.state("aaaaaa") != "gone" {
+		t.Fatalf("its slot is still held: state %s", h.state("aaaaaa"))
+	}
+}
+
+// A 404 also means "the token cannot see this repository". When the list
+// cannot be read either, nothing is concluded and the runner keeps running.
+func TestIdleRunnerIsKeptWhenTheRunnerListCannotBeRead(t *testing.T) {
+	h := newHarness(t)
+	idleOnline(t, h, "darkmem")
+	h.gh.mu.Lock()
+	delete(h.gh.runners, 101)
+	h.gh.mu.Unlock()
+	h.gh.setErr("ListRunners darkmem", &github.APIError{Status: 404, Kind: github.ErrNotFound})
+	h.now = h.now.Add(6 * time.Minute) // past idle_timeout, so the idle stop asks too
+	h.m.Tick(context.Background())
+	if len(h.sd.stopped) != 0 || h.state("aaaaaa") != "idle" {
+		t.Fatalf("stopped %v state %s", h.sd.stopped, h.state("aaaaaa"))
+	}
+	if e := h.m.Status().Repos[1].Error; !strings.Contains(e, "token lacks access") {
+		t.Fatalf("repository error %q", e)
+	}
+	if n := strings.Count(h.gh.callsText(), "ListRunners darkmem"); n != 1 {
+		t.Fatalf("the runner list was read %d times in one tick", n)
+	}
+}
+
+// The list answers and still holds the runner: the 404 proved nothing.
+func TestIdleRunnerStillListedIsKept(t *testing.T) {
+	h := newHarness(t)
+	idleOnline(t, h, "darkmem")
+	h.gh.mu.Lock()
+	delete(h.gh.runners, 101)
+	h.gh.mu.Unlock()
+	h.gh.listed["darkmem"] = []github.Runner{{ID: 101, Name: "ghr-darkmem-aaaaaa", Status: "online"}}
+	h.now = h.now.Add(6 * time.Minute)
+	h.m.Tick(context.Background())
+	if len(h.sd.stopped) != 0 || h.state("aaaaaa") != "idle" || len(h.gh.deleted) != 0 {
+		t.Fatalf("stopped %v deleted %v state %s", h.sd.stopped, h.gh.deleted, h.state("aaaaaa"))
+	}
+}
+
+// A list refused for the whole token ends the runner checks of this tick.
+func TestRunnerChecksStopWhenTheRunnerListRejectsTheToken(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud") // aaaaaa, runner 101
+	h.m.spawn(context.Background(), h.cfg, "darkmem")   // bbbbbb, runner 102
+	h.gh.mu.Lock()
+	delete(h.gh.runners, 101)
+	h.gh.mu.Unlock()
+	h.gh.setErr("ListRunners darkcloud", &github.APIError{Status: 401, Kind: github.ErrAuth})
+	h.m.refreshRunners(context.Background())
+	if !h.m.Status().Degraded || strings.Contains(h.gh.callsText(), "GetRunner darkmem") {
+		t.Fatalf("degraded %v, calls %s", h.m.Status().Degraded, h.gh.callsText())
+	}
+}
+
+// A runner whose registration is gone needs no GitHub call to be stopped, so
+// an API pause must not keep it running.
+func TestGoneRunnerIsStoppedDuringAnAPIPause(t *testing.T) {
+	h := newHarness(t)
+	idleOnline(t, h, "darkmem")
+	h.gh.mu.Lock()
+	delete(h.gh.runners, 101)
+	h.gh.mu.Unlock()
+	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Hour)})
+	h.sd.stopErr["ghr-runner-aaaaaa"] = errors.New("unit busy")
+	h.m.Tick(context.Background()) // confirmed gone, then the poll is rate-limited; the stop fails
+	if h.m.apiAllowed(h.now) || len(h.sd.stopped) != 0 {
+		t.Fatalf("API allowed %v, stopped %v", h.m.apiAllowed(h.now), h.sd.stopped)
+	}
+	delete(h.sd.stopErr, "ghr-runner-aaaaaa")
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background()) // still paused: the stop is retried without an API call
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) {
+		t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
+	}
+}
+
+// An idle runner whose process hangs shows as offline. Within start_timeout it
+// may be reconnecting; past it, it is replaced.
+func TestIdleRunnerOfflinePastStartTimeoutIsReplaced(t *testing.T) {
+	h := newHarness(t)
+	idleOnline(t, h, "darkmem")
+	h.gh.setRunner(101, "offline", false)
+	h.m.Tick(context.Background()) // first seen offline
+	h.now = h.now.Add(time.Minute)
+	h.m.Tick(context.Background())
+	if len(h.sd.stopped) != 0 || sched.Covering(h.m.schedInstances(h.cfg), "darkmem", h.now) != 1 {
+		t.Fatalf("replaced within the grace: stopped %v", h.sd.stopped)
+	}
+	h.now = h.now.Add(time.Minute)
+	h.m.Tick(context.Background())
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || !reflect.DeepEqual(h.gh.deleted, []int64{101}) ||
+		!strings.Contains(h.eventText(), "warn darkmem runner aaaaaa offline for 2m0s; replaced") {
+		t.Fatalf("stopped %v deleted %v\n%s", h.sd.stopped, h.gh.deleted, h.eventText())
+	}
+}
+
+func TestIdleRunnerBackOnlineRestartsTheOfflineClock(t *testing.T) {
+	h := newHarness(t)
+	idleOnline(t, h, "darkmem")
+	h.gh.setRunner(101, "offline", false)
+	h.m.Tick(context.Background())
+	h.now = h.now.Add(time.Minute)
+	h.gh.setRunner(101, "online", false)
+	h.m.Tick(context.Background())
+	h.now = h.now.Add(time.Minute)
+	h.gh.setRunner(101, "offline", false)
+	h.m.Tick(context.Background()) // offline again: the clock starts here
+	h.now = h.now.Add(time.Minute)
+	h.m.Tick(context.Background())
+	if len(h.sd.stopped) != 0 {
+		t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
+	}
+}
+
+// The history record counts every container the cleanup removed, not only
+// what its last attempt removed, even when the daemon restarted in between.
+func TestCleanupCountSumsAttemptsAcrossARestart(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud")
+	h.writeJob(t, "aaaaaa", 55)
+	h.gh.setJobs(55, completedJob(h, 55, "ghr-darkcloud-aaaaaa", "success"))
+	h.docker.byLabel["com.docker.compose.project=ghr-aaaaaa"] = []string{"c1", "c2"}
+	h.docker.setErr("RemoveNetworksByLabel", errors.New("network busy"))
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	h.docker.byLabel = map[string][]string{} // the containers are gone now
+	h.docker.setErr("RemoveNetworksByLabel", nil)
+	h.restart(t)
+	if err := h.m.Adopt(context.Background()); err != nil { // the unit is gone: cleanup resumes
+		t.Fatal(err)
+	}
+	h.m.Wait()
+	if h.state("aaaaaa") != "gone" || !strings.Contains(h.eventText(), "cleanup: 2 ctrs") {
+		t.Fatalf("state %s\n%s", h.state("aaaaaa"), h.eventText())
+	}
+}
+
+// Once cleanup has given up, a later step that keeps failing retries every
+// 30 s; the give-up itself is said once.
+func TestCleanupGiveUpIsReportedOnce(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud")
+	h.writeJob(t, "aaaaaa", 55)
+	h.docker.setErr("RemoveNetworksByLabel", errors.New("network busy"))
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	for n := 1; n < maxCleanupFailures; n++ {
+		h.m.refreshUnits(context.Background())
+		h.m.Wait()
+		h.now = h.now.Add(finishRetry)
+	}
+	orig := writeFile
+	t.Cleanup(func() { writeFile = orig })
+	writeFile = func(name string, data []byte, perm os.FileMode) error {
+		if strings.HasPrefix(name, h.m.Paths.Pending) {
+			return &fs.PathError{Op: "write", Path: name, Err: syscall.EIO}
+		}
+		return orig(name, data, perm)
+	}
+	for range 3 {
+		h.m.refreshUnits(context.Background())
+		h.m.Wait()
+		h.now = h.now.Add(finishRetry)
+	}
+	if n := strings.Count(h.eventText(), "releasing its slot"); n != 1 || h.state("aaaaaa") != "cleaning" {
+		t.Fatalf("give-up said %d times, state %s\n%s", n, h.state("aaaaaa"), h.eventText())
 	}
 }
