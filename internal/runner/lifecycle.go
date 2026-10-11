@@ -84,8 +84,11 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 	}
 	dir := m.instanceDir(id)
 	fail := func(err error) error {
-		os.RemoveAll(dir)
-		m.removePrivate(id)
+		if rerr := removeAll(dir); rerr == nil {
+			m.removePrivate(id)
+		} else {
+			m.Events.Add("warn", r.Name, "spawn %s: remove dir: %v; reconciliation retries", id, rerr)
+		}
 		if derr := m.GH.DeleteRunner(ctx, r.Name, jit.Runner.ID); derr != nil {
 			m.Events.Add("warn", r.Name, "spawn %s: delete registration: %v", id, derr)
 		}

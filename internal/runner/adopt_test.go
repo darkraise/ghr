@@ -317,3 +317,43 @@ func TestPrivateRecordsGoWithTheirInstance(t *testing.T) {
 		t.Fatalf("left behind: %v", entries)
 	}
 }
+
+// If the instance directory cannot be removed after a failed spawn, it stays
+// runner-writable. Its private record must stay too, or the next start would
+// take the directory's own copy of the metadata on trust.
+func TestFailedSpawnKeepsTheRecordWhileTheDirStays(t *testing.T) {
+	h := newHarness(t)
+	origWrite, origRemove := writeFile, removeAll
+	t.Cleanup(func() { writeFile, removeAll = origWrite, origRemove })
+	copyPath := filepath.Join(h.m.instanceDir("aaaaaa"), MetaFile)
+	writeFile = func(name string, data []byte, perm os.FileMode) error {
+		if name == copyPath {
+			return &fs.PathError{Op: "write", Path: name, Err: syscall.EIO}
+		}
+		return origWrite(name, data, perm)
+	}
+	removeAll = func(path string) error {
+		if strings.HasPrefix(path, h.m.Paths.Instances) {
+			return syscall.EIO
+		}
+		return origRemove(path)
+	}
+	if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err == nil {
+		t.Fatal("spawn succeeded although its metadata copy could not be written")
+	}
+	if _, err := os.Stat(filepath.Join(h.m.Paths.Private, "aaaaaa.json")); err != nil {
+		t.Fatalf("private record removed while the dir stays: %v", err)
+	}
+	writeFile = origWrite
+	forged := Meta{ID: "aaaaaa", Repo: "darkcloud", RunnerID: 999, RunnerName: "ghr-darkcloud-aaaaaa"}
+	if err := writeJSON(copyPath, forged); err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.m.readMeta("aaaaaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Repo != "darkmem" || got.RunnerID != 101 {
+		t.Fatalf("read %+v", got)
+	}
+}
