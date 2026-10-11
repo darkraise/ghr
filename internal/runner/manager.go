@@ -199,6 +199,7 @@ type Manager struct {
 	maintCtx       context.Context         // cancelled by Close
 	maintCancel    context.CancelFunc
 	lastJob        map[string]model.HistoryEntry
+	orphans        map[int64]bool // untracked registrations seen offline at the last reconcile; guarded by mu
 	epoch          string
 	wg             sync.WaitGroup
 	upd            updateState // guarded by mu

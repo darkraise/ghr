@@ -67,7 +67,7 @@ func TestAdoptKeepsDirWhenStopFails(t *testing.T) {
 	os.MkdirAll(h.m.instanceDir("cccccc"), 0o755)
 	h.sd.active["ghr-runner-cccccc"] = true
 	h.sd.stopErr["ghr-runner-cccccc"] = errors.New("job still shutting down")
-	h.gh.listed["darkmem"] = []github.Runner{{ID: 9, Name: "ghr-darkmem-cccccc"}}
+	h.gh.listed["darkmem"] = []github.Runner{{ID: 9, Name: "ghr-darkmem-cccccc", Status: "offline"}}
 	if err := h.m.Adopt(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -111,13 +111,14 @@ func TestReconcileDeletesStaleRegistrationsAndDirs(t *testing.T) {
 	h.sd.active["ghr-runner-aaaaaa"] = true
 	os.MkdirAll(h.m.instanceDir("eeeeee"), 0o755) // orphan dir, no unit
 	h.gh.listed["darkcloud"] = []github.Runner{
-		{ID: 1, Name: "ghr-darkcloud-aaaaaa"},   // ours, live
-		{ID: 5, Name: "ghr-darkcloud-bbbbbb"},   // stale
-		{ID: 6, Name: "homelab-darkcloud"},      // not ghr's
-		{ID: 7, Name: "ghr-darkcloud-x-123456"}, // another repo's naming, not 6 hex
+		{ID: 1, Name: "ghr-darkcloud-aaaaaa"},                    // ours, live
+		{ID: 5, Name: "ghr-darkcloud-bbbbbb", Status: "offline"}, // stale
+		{ID: 6, Name: "homelab-darkcloud"},                       // not ghr's
+		{ID: 7, Name: "ghr-darkcloud-x-123456"},                  // another repo's naming, not 6 hex
 	}
 	// Same ID as darkcloud's live instance, but a different repo: stale.
-	h.gh.listed["darkmem"] = []github.Runner{{ID: 8, Name: "ghr-darkmem-aaaaaa"}}
+	h.gh.listed["darkmem"] = []github.Runner{{ID: 8, Name: "ghr-darkmem-aaaaaa", Status: "offline"}}
+	h.m.Reconcile(context.Background(), h.cfg)
 	h.m.Reconcile(context.Background(), h.cfg)
 	sort.Slice(h.gh.deleted, func(a, b int) bool { return h.gh.deleted[a] < h.gh.deleted[b] })
 	if !reflect.DeepEqual(h.gh.deleted, []int64{5, 8}) {
@@ -135,7 +136,8 @@ func TestReconcileDeletesStaleRegistrationsAndDirs(t *testing.T) {
 func TestReconcileStopsUntrackedUnitBeforeDeletingRegistration(t *testing.T) {
 	h := newHarness(t)
 	h.sd.active["ghr-runner-ffffff"] = true
-	h.gh.listed["darkmem"] = []github.Runner{{ID: 3, Name: "ghr-darkmem-ffffff"}}
+	h.gh.listed["darkmem"] = []github.Runner{{ID: 3, Name: "ghr-darkmem-ffffff", Status: "offline"}}
+	h.m.Reconcile(context.Background(), h.cfg)
 	h.m.Reconcile(context.Background(), h.cfg)
 	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-ffffff"}) || !reflect.DeepEqual(h.gh.deleted, []int64{3}) {
 		t.Fatalf("stopped %v deleted %v", h.sd.stopped, h.gh.deleted)
@@ -191,5 +193,26 @@ func TestAdoptedOnlineRunnerSurvivesAFailedFirstCheck(t *testing.T) {
 	h.m.Tick(context.Background())
 	if len(h.sd.stopped) != 0 || h.state("aaaaaa") != "idle" {
 		t.Fatalf("stopped %v state %s", h.sd.stopped, h.state("aaaaaa"))
+	}
+}
+
+// A second ghr host on the same repository names its runners the same way.
+// Reconcile deletes only a registration it has seen offline twice in a row.
+func TestReconcileLeavesAnotherHostsRunners(t *testing.T) {
+	h := newHarness(t)
+	h.gh.listed["darkmem"] = []github.Runner{
+		{ID: 21, Name: "ghr-darkmem-111111", Status: "online"},  // the other host's idle runner
+		{ID: 22, Name: "ghr-darkmem-222222", Status: "offline"}, // the other host's runner, just starting
+		{ID: 23, Name: "ghr-darkmem-333333", Status: "offline"}, // a leftover
+		{ID: 24, Name: "ghr-darkmem-444444"},                    // no status given: not known to be offline
+	}
+	h.m.Reconcile(context.Background(), h.cfg)
+	if len(h.gh.deleted) != 0 {
+		t.Fatalf("deleted on first sight: %v", h.gh.deleted)
+	}
+	h.gh.listed["darkmem"][1].Status = "online" // it came online meanwhile
+	h.m.Reconcile(context.Background(), h.cfg)
+	if !reflect.DeepEqual(h.gh.deleted, []int64{23}) {
+		t.Fatalf("deleted %v, want only the leftover", h.gh.deleted)
 	}
 }

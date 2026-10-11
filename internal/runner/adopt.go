@@ -104,8 +104,9 @@ func (m *Manager) Adopt(ctx context.Context) error {
 
 // Reconcile works from the real unit inventory: it stops running units no
 // instance tracks, deletes ghr-<repo>-<id> registrations that match neither a
-// tracked instance (same repo and runner ID) nor a running unit, and removes
-// instance dirs whose unit has confirmed exited.
+// tracked instance (same repo and runner ID) nor a running unit once they
+// have been offline at two reconciles in a row, and removes instance dirs
+// whose unit has confirmed exited.
 func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 	running, err := m.activeUnits(ctx)
 	if err != nil {
@@ -127,6 +128,10 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 		delete(running, id)
 		m.Events.Add("warn", "", "reconcile: stopped untracked unit %s%s", UnitPrefix, id)
 	}
+	m.mu.Lock()
+	before := m.orphans
+	m.mu.Unlock()
+	seen := map[int64]bool{}
 	for _, r := range cfg.Repos {
 		runners, err := m.GH.ListRunners(ctx, r.Name)
 		if err != nil {
@@ -139,12 +144,23 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 			if !strings.HasPrefix(rn.Name, prefix) || !idRe.MatchString(id) {
 				continue
 			}
-			if i, ok := known[id]; ok {
-				if strings.EqualFold(i.Repo, r.Name) && i.RunnerID == rn.ID {
-					continue
-				}
-			} else if running[id] {
+			i, tracked := known[id]
+			if tracked && strings.EqualFold(i.Repo, r.Name) && i.RunnerID == rn.ID {
+				continue
+			}
+			// Another ghr host serving this repository names its runners the
+			// same way. Its live runners are online and a starting one is
+			// offline only briefly, so a registration is deleted only when
+			// GitHub called it offline at two reconciles in a row.
+			if rn.Status != "offline" {
+				continue
+			}
+			seen[rn.ID] = true
+			if !tracked && running[id] {
 				continue // an untracked unit that failed to stop may still use it
+			}
+			if !before[rn.ID] {
+				continue
 			}
 			err := m.GH.DeleteRunner(ctx, r.Name, rn.ID)
 			switch {
@@ -157,6 +173,9 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 			}
 		}
 	}
+	m.mu.Lock()
+	m.orphans = seen
+	m.mu.Unlock()
 	entries, err := os.ReadDir(m.Paths.Instances)
 	if err != nil && !os.IsNotExist(err) {
 		m.Events.Add("warn", "", "reconcile: read instance dirs: %v", err)
