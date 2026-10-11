@@ -1,7 +1,7 @@
 # ghr: host fixes
 
 **Date:** 2026-10-12
-**Status:** design presented in chat and approved by the owner on 2026-10-12, with the rulings on public visibility (row 214), download integrity (rows 60 and 67), the login lockout (row 47), the unscheduled rows, the packaging and the execution strategy made the same day.
+**Status:** design presented in chat and approved by the owner on 2026-10-12, with the rulings on public visibility (row 214), download integrity (rows 60 and 67), the login lockout (row 47), the unscheduled rows, the packaging and the execution strategy made the same day. Amended the same day while the plan was drafted (§1.2, §1.4, §1.5, §3.1, §4.1, §4.4, §4.5, §4.6, §5.1 and §6.4): three checks were tightened after a security review of the drafts, and the rest records what the code had to decide. The owner was told of each.
 **Execution strategy:** sequential — the fixes are small and split by package, but the security parts (lockout, root-owned toolchain paths, root reads of job-writable files) must run alone anyway, and the dev host is the limit: `/tmp` is a nearly full tmpfs and both test suites time out under load (register rows 224 and 225).
 **Register:** docs/superpowers/registers/2026-10-11-ghr-comprehensive-review.md (rows 47 to 74, 186, 199, 203, 205 to 208 and 210 to 214). This is sub-project 3 of 6.
 **Code:** `internal/webui`, `internal/api`, `cmd/ghr`, `internal/config`, `internal/toolchain`, `internal/storage`, `internal/system` (the download client), `internal/daemon`, `internal/runner`, `internal/github` (the `Run` type), `internal/metrics`, `deploy/setup.sh` with `deploy/tests/setup_test.sh`, `.github/workflows/ci.yml`, `README.md`. No web file changes.
@@ -30,6 +30,8 @@ Today a failed login is counted under `ClientKey`: the IPv4 address, or the IPv6
 - A login is refused while either key is locked, with the later of the two retry times.
 - A successful login clears the address's failures and leaves the /64's.
 - A host that changes its address inside the /64 for every attempt is held to 50 attempts per window. While the /64 is locked no failure is recorded, so the failure table stays bounded.
+- An IPv4 address written in IPv6 form (`::ffff:a.b.c.d`) is that IPv4 client and has no /64.
+- Known limits: a login already checking its password when a lock lands finishes that check and its result is discarded, as with today's limit; and a client that owns several /64s gets 50 attempts per window in each.
 
 Not closed here: behind a reverse proxy every client reaches ghr from the proxy's address, so they all share one key. ghr reads no `X-Forwarded-For`. This is its own register row and needs an owner ruling on which proxies to trust.
 
@@ -38,7 +40,7 @@ Not closed here: behind a reverse proxy every client reaches ghr from the proxy'
 `Manager.Kill` runs `systemctl stop` on the runner's unit and waits for it. Runner units set no stop timeout, so systemd's default of 90 seconds applies. The CLI's HTTP client gives up after 30 seconds and the web listener cuts a response after 60, and both report a failure while the stop continues. The CLI also prints `ghr daemon unreachable` for any transport error, including Ctrl-C.
 
 - `api.Client` drops its client-wide 30-second timeout for a per-call one: 30 seconds by default, 100 seconds for `Kill`.
-- The CLI tells three failures apart. Ctrl-C prints `interrupted`. A call that ran out of time prints `ghr daemon did not answer within <n>s; the request may still be running`. Anything else keeps `ghr daemon unreachable: <error>`.
+- The CLI tells three failures apart. Ctrl-C prints `interrupted`, for any command that ends because its context was cancelled, so also for `ghr setup github` interrupted while it waits. A call that ran out of time prints `ghr daemon did not answer within <n>s; the request may still be running`. Anything else keeps `ghr daemon unreachable: <error>`.
 - The kill route sets its own write deadline of 100 seconds through `http.ResponseController`, so the web listener's 60-second `WriteTimeout` does not cut it. On the socket server, which has no write timeout, the call changes nothing.
 
 ### 1.3 Save failures (row 49)
@@ -50,7 +52,7 @@ Not closed here: behind a reverse proxy every client reaches ghr from the proxy'
 ### 1.4 Request handling (rows 50 and 51)
 
 - `authBodyLimit` becomes 16 KiB, the limit the socket route uses. Two 1,024-byte passwords in JSON, with every byte escaped, do not fit in 4 KiB.
-- A request to a known `/auth` path with another method answers 405 with an `Allow` header naming the path's method. An unknown `/auth` path still answers 404.
+- A request to a known `/auth` path with another method answers 405 `method not allowed` with an `Allow` header naming the path's method: `POST` for the four POST paths, and `GET, HEAD` for `/auth/state`, because Go's router serves `HEAD` there. An unknown `/auth` path still answers 404.
 - A body over the limit answers 413 `request body too large`. Any other body defect stays 400.
 
 ### 1.5 Connection limit (row 53)
@@ -58,6 +60,8 @@ Not closed here: behind a reverse proxy every client reaches ghr from the proxy'
 The web listener accepts without limit, and every open connection holds a file descriptor of the process that also starts runners.
 
 - The web listener is wrapped so that at most 256 connections are open at once. Further clients wait in the kernel's accept queue. The wrapper lives in `internal/daemon` and adds no dependency. The Unix socket is not limited.
+- One client holds at most 64 of them. A client is an IPv4 address, or an IPv6 /64. A connection from a client already at 64 is closed at once and costs no other client a slot. Without this bound one LAN host could hold every slot.
+- Known limits: behind a reverse proxy every browser reaches ghr from the proxy's address and shares its 64, the caveat register row 226 records for the lockout; every IPv6 host of one /64 shares 64; a host with four IPv4 addresses can still fill all 256; and a client that sends one cheap request every two minutes can probably keep a connection open past the idle timeout (inferred from how keep-alive works, not measured).
 
 ## 2. CLI
 
@@ -85,7 +89,9 @@ The web listener accepts without limit, and every open connection holds a file d
 A label is **valid** when, after trimming, it has 1 to 100 characters, holds no comma and no whitespace, and is not one of the system labels `self-hosted`, `linux` and `x64`. A list is valid when every label is valid and no two are equal ignoring case. The rule covers the global `labels` and every repository's `labels`, each list on its own: a repository label that repeats a global one is allowed, and `CustomLabels` merges them as today.
 
 - `Validate` refuses an invalid list, naming the first offender, for example `labels: "a b" must not contain spaces or commas` or `<repo>: labels: "linux" is added by ghr`. Only an API change reaches this: PATCH and add repository answer 400.
-- `Parse` repairs the lists before it validates, as it does for the runner cap: an invalid or repeated label is dropped and a warning says so, for example `labels: "a b" is not a valid label; ignored`. The file is not rewritten by loading; the next save writes the repaired lists.
+- `Parse` repairs the lists before it validates, as it does for the runner cap: an invalid or repeated label is dropped and a warning says so, `labels: "a b" is not a valid label; ignored` for an invalid one and `labels: "docker" is listed twice; ignored` for a repeat. The file is not rewritten by loading; the next save writes the repaired lists.
+- The other refusals of `Validate` read `must not be empty`, `must be at most 100 characters` and `is listed twice`.
+- Accepted consequence: a file whose only labels are system labels (for example `labels: [linux]` and a repository with no labels of its own) loaded before and no longer does. The repair drops the system label, and the existing rule `needs at least one label in labels or repo labels` then stops the daemon. Such a file was already running runners with no label of their own, which that rule exists to prevent. The owner was asked on 2026-10-12 whether it should load with a warning instead; this stands unless they say so.
 - The 100-character limit is the web form's. GitHub's own limit is not verified (§7).
 
 ### 3.2 Empty file (row 58)
@@ -110,7 +116,10 @@ A reload writes every warning of the load as an event, so `global_max 500 is abo
 
 Checked on 2026-10-12: every `download_url` in the Node and Python manifests, and the link Adoptium returns for a Temurin JDK, is on `https://github.com`.
 
-- Before an archive or script is fetched, its URL must be `https` and on the host its tool expects: `github.com` for Node, Python and Java, the host of `Sources.GoDownload` for Go, the host of `Sources.DotnetScript` for .NET. Anything else fails the install with `refusing to download <url>`. The check is a field of `Env`, so tests keep their local servers.
+- Before an archive or script is fetched, its URL must be `https`, on the host its tool expects and below that tool's own release path: `https://github.com/actions/node-versions/releases/download/` for Node, `https://github.com/actions/python-versions/releases/download/` for Python, `https://github.com/adoptium/temurin<major>-binaries/releases/download/` for Java with the major being installed, and the configured `Sources.GoDownload` and `Sources.DotnetScript` for Go and .NET. A host alone would let a tampered version list name any repository on GitHub. Anything else fails the install with `refusing to download <url>`.
+- The URL is judged by its parsed fields: no user, port, query or fragment, the host equal byte for byte, and a path with no dot segment, doubled or encoded slash, encoded dot or backslash.
+- Every download goes through one function on `Env`, which applies the rule of the installer that called it and then fetches that same string. The check is a field of `Env` whose strict form is the default, so tests keep their local servers.
+- Where a redirect leads is not pinned by host: the first URL is authenticated by TLS, an origin that can redirect anywhere can serve anything itself, and GitHub has changed its asset host before.
 - The download client and the version-list client refuse a redirect to a URL that is not `https`.
 - The `tar` that unpacks an archive as root gains `--no-same-owner`.
 - No checksum is added for Node, Python or `dotnet-install.sh` (Decisions). `dotnet-install.sh` and Python's `setup.sh` already run as the runner user, not as root.
@@ -129,23 +138,26 @@ Checked on 2026-10-12: the manifest lists `1.20.0` and `1.19.0`, and go.dev name
 
 ### 4.4 Java folders (row 64)
 
-- `Remove` deletes the folder named exactly as the version when it exists, and otherwise the folder with the first `+` turned into `-`, as today.
+- `Remove` deletes the folder named exactly as the version when it is a complete install, which is what `Installed` lists, and otherwise the folder with the first `+` turned into `-`, as today.
 
 ### 4.5 The `.tmp` directory (row 65)
 
 `opDir` checks `.tmp` with `Lstat` and then calls `Chmod` and `Mkdir` by path. A job can swap the directory for a link between the two.
 
-- `opDir` opens `.tmp` without following links, checks the opened directory's owner, changes its mode through the handle and creates the operation directory relative to it (`os.Root`). A `.tmp` that is a link or belongs to someone else is still removed and made again first.
+- `opDir` opens `.tmp` as an `os.Root`, refuses it when what it opened is not what `Lstat` of the path names (`os.OpenRoot` follows a link at its own path), checks the opened directory's owner, changes its mode through the handle and creates the operation directory relative to it. A `.tmp` that is a link or belongs to someone else is still removed and made again first.
+- Not closed here: after `opDir` returns, the install uses the operation directory by path again. The random operation ID and the unlistable `.tmp` limit that; closing it means carrying the handle through the install, which is a restructuring.
 
 ### 4.6 Hard links (row 66)
 
-- `measure` counts the allocated size of a file with more than one link once per device and inode, as `du` does. Its file count and newest time are unchanged.
+- `measure` counts the allocated size of a file with more than one link once per device and inode, as `du` does, within each row it reports (one toolchain, folder or cache path), so a row equals `du -s` of that row. Its file count and newest time are unchanged.
 
 ## 5. Installer, CI and docs
 
 ### 5.1 Docker's apt key (row 67)
 
-- `install_docker` installs `gnupg` with `ca-certificates` and `curl`, downloads the key to a temporary file and compares its primary fingerprint with `9DC858229FC7DD38854AE2D88D81803C0EBFCD88` (checked against the published key on 2026-10-12). On a mismatch it stops with `Docker apt key has an unexpected fingerprint` and writes nothing to `/etc/apt/keyrings`.
+- `install_docker` installs `gnupg` with `ca-certificates` and `curl`, downloads the key once into a temporary directory and imports it into a throwaway gpg keyring. That keyring must hold a key whose primary fingerprint is exactly `9DC858229FC7DD38854AE2D88D81803C0EBFCD88` (checked against the published key on 2026-10-12).
+- What is installed to `/etc/apt/keyrings/docker.asc` is gpg's own armored export of that one key, never the downloaded bytes: apt trusts every key in a `Signed-By` file and may read a crafted file differently from gpg.
+- A failed download, import, lookup or export stops with `Docker apt key has an unexpected fingerprint`, writes nothing to `/etc/apt/keyrings` and leaves an existing key file as it was.
 - The ghr tarball check is unchanged (Decisions).
 
 ### 5.2 The service unit (row 68)
@@ -211,7 +223,7 @@ A completed job whose log answers 404 is remembered as "produced no log" for 10 
 ### 6.4 Small fixes (rows 205, 207 and 210)
 
 - `metrics.Load` drops a rollup dated at or after the current UTC hour, the rule `addToHour` applies on a backwards clock step, so an hour lived twice gets one rollup.
-- `forcedPrune` writes `history and logs past retention removed` only when a history entry or a log archive was removed. The step is recorded in the prune's result either way.
+- `forcedPrune` writes `history and logs past retention removed` only when a history entry or a log archive was removed. The step is recorded in the prune's result either way. Whether history lost an entry is read from the store's write counter, so a job's entry appended during the prune also counts as a removal; an exact answer needs the history store to return a count, which is not worth a change there.
 - Each per-repository check in `checkTokenOn` recovers from a panic, which becomes that repository's error `could not check the token`.
 
 ### 6.5 Rows with no behaviour change
