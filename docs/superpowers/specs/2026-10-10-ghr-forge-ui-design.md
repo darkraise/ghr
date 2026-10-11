@@ -122,6 +122,7 @@ ghr's web UI looks and reads like a part of GitHub: the boxes, status pills, run
 - **Dashboard.** Same content and order as today, drawn as the Forge preview:
   - the four stats share one box, split by vertical dividers, in place of four cards;
   - Activity, Repositories, Disk and Events are boxes with header bands;
+  - Repositories spans the full width, with Disk and Events side by side below it and stacked under 1280px (the owner's ruling of 2026-10-11 on register row 15: beside Disk and Events the table did not fit its box);
   - the lanes chart uses the status colours (§1.1), and the repository table shows `StatusPill`s.
 - **Runners and the runner page.** The split view, list, panel, steps, log and stop dialog keep their behaviour. They take the box, the pill, and for the selected list entry the `sunk` fill with a 2px accent marker on its left edge.
 
