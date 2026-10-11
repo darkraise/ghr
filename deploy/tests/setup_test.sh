@@ -104,6 +104,9 @@ tar() {
   command tar "$@"
 }
 
+# The tests do not run as root: a tree counts as foreign-owned when a job planted a file in it.
+tree_is_root_owned() { [ ! -e "$1/planted-by-a-job" ]; }
+
 new_case() {
   DIST_DIR="$T/$1/dist"
   MARK_DIR="$T/$1/mark"
@@ -155,6 +158,13 @@ run install_runner >/dev/null 2>&1
 check "a: third run is a no-op for an installed version" [ "$(count fetches)" -eq 2 ]
 check "a: an installed version is not extracted again" lacks "$(cat "$MARK_DIR/tars")" "-xzf"
 check "a: an installed version is still handed to root" contains "$(cat "$MARK_DIR/chowns")" "-R root:root $DIST_DIR/$FIXTURE_VERSION"
+# A version with files not owned by root is not trusted: it is fetched again.
+touch "$DIST_DIR/$FIXTURE_VERSION/planted-by-a-job"
+run install_runner >/dev/null 2>&1
+check "a: an installed version with foreign-owned files is fetched again" [ "$(count fetches)" -eq 3 ]
+check "a: the foreign-owned files are gone" absent "$DIST_DIR/$FIXTURE_VERSION/planted-by-a-job"
+check "a: the fetched-again version is published" [ -x "$DIST_DIR/$FIXTURE_VERSION/run.sh" ]
+check "a: the fetched-again version is made unwritable for group and others" [ -z "$(find "$DIST_DIR/$FIXTURE_VERSION" -perm /022 ! -type l -print -quit)" ]
 
 # (b) Readiness loop.
 new_case b-ready-after-polls
