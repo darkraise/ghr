@@ -2,7 +2,6 @@ package runner
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -92,7 +91,7 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 		jobs, err := m.repoDemand(ctx, cfg, r, ours, now)
 		if err != nil {
 			allAnswered = false
-			if github.IsKind(err, github.ErrAuth) {
+			if tokenRejected(err) {
 				authFailed = true
 			}
 			m.apiErr(r.Name, err, now)
@@ -214,8 +213,7 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 		if err := m.spawn(ctx, cfg, s.Repo); err != nil {
 			m.Events.Add("error", s.Repo, "spawn failed: %v", err)
 			failed[strings.ToLower(s.Repo)] = true
-			var ae *github.APIError
-			if errors.As(err, &ae) && (ae.Kind == github.ErrAuth || ae.Kind == github.ErrRateLimit) {
+			if tokenRejected(err) || github.IsKind(err, github.ErrRateLimit) {
 				m.apiErr(s.Repo, err, now)
 				return
 			}

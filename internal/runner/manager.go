@@ -629,13 +629,30 @@ func (m *Manager) ClearDegraded() {
 	m.mu.Unlock()
 }
 
-// apiErr applies the error-handling table: auth → degraded, rate limit → pause,
-// 404 → per-repo access error, anything else → per-repo backoff.
+// tokenRejected reports whether err means GitHub rejected the token itself,
+// which only a 401 says. A 403 refuses one repository or one call.
+func tokenRejected(err error) bool {
+	var ae *github.APIError
+	return errors.As(err, &ae) && ae.Kind == github.ErrAuth && ae.Status == 401
+}
+
+// permissionText words a 403 that is not a rate limit.
+func permissionText(ae *github.APIError) string {
+	msg := "token lacks permission for this repository"
+	if ae.Permissions != "" {
+		msg += " (needs " + ae.Permissions + ")"
+	}
+	return msg + ": " + ae.Error()
+}
+
+// apiErr applies the error-handling table: 401 → degraded, rate limit → pause,
+// 403 → per-repo permission error, 404 → per-repo access error, anything else
+// → per-repo backoff.
 func (m *Manager) apiErr(repo string, err error, now time.Time) {
 	var ae *github.APIError
 	if errors.As(err, &ae) {
-		switch ae.Kind {
-		case github.ErrAuth:
+		switch {
+		case tokenRejected(err):
 			reason := "GitHub rejected the token"
 			if ae.Path != "" {
 				reason += " on " + ae.Method + " " + ae.Path
@@ -654,7 +671,7 @@ func (m *Manager) apiErr(repo string, err error, now time.Time) {
 				m.Events.Add("error", repo, "%s; spawning stopped", reason)
 			}
 			return
-		case github.ErrRateLimit:
+		case ae.Kind == github.ErrRateLimit:
 			m.mu.Lock()
 			was := now.Before(m.pauseUntil)
 			if ae.RetryAt.After(m.pauseUntil) {
@@ -668,10 +685,19 @@ func (m *Manager) apiErr(repo string, err error, now time.Time) {
 		}
 	}
 	msg := err.Error()
-	if github.IsKind(err, github.ErrNotFound) {
+	switch {
+	case github.IsKind(err, github.ErrNotFound):
 		msg = "token lacks access to repo (add it to the PAT's repository access)"
+	case github.IsKind(err, github.ErrAuth):
+		msg = permissionText(ae)
 	}
 	m.mu.Lock()
+	// A 403 from a call that does not wait for the repo's backoff repeats on
+	// every tick; it is filed once per backoff window.
+	if github.IsKind(err, github.ErrAuth) && now.Before(m.retryAt[repo]) {
+		m.mu.Unlock()
+		return
+	}
 	m.fails[repo]++
 	d := 10 * time.Second << (m.fails[repo] - 1)
 	if d > maxBackoff || d <= 0 {
@@ -681,4 +707,16 @@ func (m *Manager) apiErr(repo string, err error, now time.Time) {
 	m.repoErr[repo] = msg
 	m.mu.Unlock()
 	m.Events.Add("warn", repo, "%s; retrying in %s", msg, d)
+}
+
+// repoRefused files an error from a call that is made on every tick under
+// its repository, once per backoff window: the status shows it, and the
+// event list does not get a line per tick.
+func (m *Manager) repoRefused(repo string, err error, now time.Time) {
+	m.mu.Lock()
+	waiting := now.Before(m.retryAt[repo])
+	m.mu.Unlock()
+	if !waiting {
+		m.apiErr(repo, err, now)
+	}
 }

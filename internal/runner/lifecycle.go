@@ -195,9 +195,13 @@ func (m *Manager) refreshRunners(ctx context.Context) {
 		}
 		r, err := m.GH.GetRunner(ctx, i.Repo, i.RunnerID)
 		if err != nil {
-			if github.IsKind(err, github.ErrAuth) || github.IsKind(err, github.ErrRateLimit) {
+			if tokenRejected(err) || github.IsKind(err, github.ErrRateLimit) {
 				m.apiErr(i.Repo, err, now)
 				return
+			}
+			if github.IsKind(err, github.ErrAuth) {
+				m.repoRefused(i.Repo, err, now)
+				continue
 			}
 			if github.IsKind(err, github.ErrNotFound) {
 				if m.registrationGone(ctx, i.Repo, i.RunnerID, now) {
@@ -232,7 +236,11 @@ func (m *Manager) registrationGone(ctx context.Context, repo string, id int64, n
 	if !read {
 		runners, err := m.GH.ListRunners(ctx, repo)
 		if err != nil {
-			m.apiErr(repo, err, now)
+			if tokenRejected(err) || github.IsKind(err, github.ErrRateLimit) {
+				m.apiErr(repo, err, now)
+			} else {
+				m.repoRefused(repo, err, now)
+			}
 		} else {
 			l = runnerList{ids: map[int64]bool{}, ok: true}
 			for _, r := range runners {

@@ -172,7 +172,9 @@ func (m *Manager) checkRelease(ctx context.Context) ([]github.Release, error) {
 	}
 	m.mu.Unlock()
 	if err != nil {
-		if github.IsKind(err, github.ErrAuth) || github.IsKind(err, github.ErrRateLimit) {
+		// A 403 here refuses the release listing only; it is already recorded
+		// as the check's error and belongs to no repository.
+		if tokenRejected(err) || github.IsKind(err, github.ErrRateLimit) {
 			m.apiErr("", err, now)
 		}
 		return nil, err

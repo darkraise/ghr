@@ -99,12 +99,12 @@ func TestAuthErrorDegradesAndRecovers(t *testing.T) {
 
 func TestAuthErrorNamesCallAndPermission(t *testing.T) {
 	h := newHarness(t)
-	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 403, Kind: github.ErrAuth,
-		Message: "Resource not accessible by personal access token",
+	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 401, Kind: github.ErrAuth,
+		Message: "Bad credentials",
 		Method:  "GET", Path: "/repos/darkraise/darkcloud/actions/runs", Permissions: "actions=read"})
 	h.m.Tick(context.Background())
 	want := "GitHub rejected the token on GET /repos/darkraise/darkcloud/actions/runs (needs actions=read): " +
-		"github: 403 Resource not accessible by personal access token"
+		"github: 401 Bad credentials"
 	if got := h.m.Status().DegradedReason; got != want {
 		t.Fatalf("reason %q\nwant   %q", got, want)
 	}
@@ -308,5 +308,57 @@ func TestConfirmKeepsKnownStartTime(t *testing.T) {
 	job := h.m.Status().Instances[0].Job
 	if job == nil || !job.StartedAt.Equal(past) || job.RunNumber != "412" {
 		t.Fatalf("job %+v, want StartedAt %v", job, past)
+	}
+}
+
+// One repository refusing a write must not stop the others: only a 401 says
+// the token itself is bad.
+func TestForbiddenSpawnStopsOnlyItsRepository(t *testing.T) {
+	h := newHarness(t)
+	labels := []string{"homelab"}
+	queuedRun(h, "darkcloud", 1, github.Job{ID: 1, Status: "queued", Labels: labels, CreatedAt: h.now.Add(-time.Minute)})
+	queuedRun(h, "darkmem", 2, github.Job{ID: 2, Status: "queued", Labels: labels, CreatedAt: h.now})
+	h.gh.setErr("GenerateJITConfig darkcloud", &github.APIError{Status: 403, Kind: github.ErrAuth,
+		Message: "Resource not accessible by personal access token", Permissions: "administration=write"})
+	h.m.Tick(context.Background())
+	if h.m.Status().Degraded {
+		t.Fatalf("degraded: %s", h.m.Status().DegradedReason)
+	}
+	if len(h.sd.started) != 1 || !strings.Contains(h.gh.jitCalls[0], "darkmem") {
+		t.Fatalf("started %d, jit calls %v", len(h.sd.started), h.gh.jitCalls)
+	}
+}
+
+// A 403 on the per-runner check is filed under its repository once per
+// backoff window, and the other repositories' runners are still checked.
+func TestForbiddenRunnerCheckIsThatRepositorysError(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud") // aaaaaa, runner 101
+	h.m.spawn(context.Background(), h.cfg, "darkmem")   // bbbbbb, runner 102
+	h.gh.setRunner(102, "online", false)
+	h.gh.setErr("GetRunner darkcloud", &github.APIError{Status: 403, Kind: github.ErrAuth,
+		Message: "Resource not accessible by personal access token", Permissions: "administration=read"})
+	h.m.refreshRunners(context.Background())
+	st := h.m.Status()
+	want := "token lacks permission for this repository (needs administration=read): github: 403 Resource not accessible by personal access token"
+	if st.Degraded || st.Repos[0].Error != want || h.state("bbbbbb") != "idle" {
+		t.Fatalf("degraded %v error %q bbbbbb %s", st.Degraded, st.Repos[0].Error, h.state("bbbbbb"))
+	}
+	h.m.refreshRunners(context.Background()) // the same instant: inside the backoff
+	if n := strings.Count(h.eventText(), "token lacks permission"); n != 1 {
+		t.Fatalf("%d events for one refusal:\n%s", n, h.eventText())
+	}
+}
+
+func TestForbiddenPollIsThatRepositorysError(t *testing.T) {
+	h := newHarness(t)
+	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 403, Kind: github.ErrAuth,
+		Message: "Resource not accessible by personal access token", Permissions: "actions=read"})
+	queuedRun(h, "darkmem", 2, github.Job{ID: 3, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
+	h.m.Tick(context.Background())
+	st := h.m.Status()
+	want := "token lacks permission for this repository (needs actions=read): github: 403 Resource not accessible by personal access token"
+	if st.Degraded || st.Repos[0].Error != want || len(h.sd.started) != 1 {
+		t.Fatalf("degraded %v started %d error %q", st.Degraded, len(h.sd.started), st.Repos[0].Error)
 	}
 }
