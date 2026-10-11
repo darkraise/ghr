@@ -26,7 +26,7 @@ func (b *Backend) RunAnnotations(ctx context.Context, repo string, id int64, att
 	calls := map[int64]*logCall{}
 	c := &b.logs
 	c.mu.Lock()
-	c.initLocked()
+	c.initLocked(b.tokenGen())
 	for _, j := range d.Jobs {
 		if j.Status != "completed" || j.Conclusion == "skipped" {
 			continue

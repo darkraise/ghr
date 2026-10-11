@@ -74,6 +74,7 @@ type logResult struct {
 type logCall struct {
 	done    chan struct{}
 	started chan struct{} // closed when the download gets its slot
+	gen     uint64        // the token generation the download began under
 	res     logResult
 }
 
@@ -93,18 +94,24 @@ type logCache struct {
 	parsed *lru.Cache[int64, model.JobLog]
 	notes  *lru.Cache[int64, jobNotes]
 	misses map[int64]logMiss
+	gen    uint64 // the token generation parsed, notes and misses were filled under
 }
 
-// initLocked creates the cache on first use; the caller holds mu.
-func (c *logCache) initLocked() {
-	if c.slots != nil {
-		return
+// initLocked creates the cache on first use and empties what an older token
+// read; the caller holds mu. Downloads in flight are left to finish for the
+// callers waiting on them.
+func (c *logCache) initLocked(gen uint64) {
+	first := c.slots == nil
+	if first {
+		c.slots = make(chan struct{}, logSlots)
+		c.calls = map[int64]*logCall{}
 	}
-	c.slots = make(chan struct{}, logSlots)
-	c.calls = map[int64]*logCall{}
-	c.parsed = lru.New[int64, model.JobLog](1<<30, parsedLogBytes)
-	c.notes = lru.New[int64, jobNotes](annotationEntries, 0)
-	c.misses = map[int64]logMiss{}
+	if first || gen != c.gen {
+		c.gen = gen
+		c.parsed = lru.New[int64, model.JobLog](1<<30, parsedLogBytes)
+		c.notes = lru.New[int64, jobNotes](annotationEntries, 0)
+		c.misses = map[int64]logMiss{}
+	}
 }
 
 // logJob is what a download needs to parse a job's log.
@@ -116,13 +123,14 @@ type logJob struct {
 }
 
 // startLogLocked joins the job's download in flight or starts one; the
-// caller holds mu.
+// caller holds mu and has called initLocked, so c.gen is the generation the
+// download begins under.
 func (b *Backend) startLogLocked(j logJob) *logCall {
 	c := &b.logs
 	if call, ok := c.calls[j.id]; ok {
 		return call
 	}
-	call := &logCall{done: make(chan struct{}), started: make(chan struct{})}
+	call := &logCall{done: make(chan struct{}), started: make(chan struct{}), gen: c.gen}
 	c.calls[j.id] = call
 	// The caller reads logRequestWindow: a read on the detached goroutine
 	// would race with tests that change it while earlier downloads still run.
@@ -131,21 +139,25 @@ func (b *Backend) startLogLocked(j logJob) *logCall {
 }
 
 // downloadLog runs detached from every request, so a caller that stops
-// waiting still leaves the result in the caches.
+// waiting still leaves the result in the caches. A download the token
+// changed during leaves nothing there; the callers waiting on it still get
+// its result.
 func (b *Backend) downloadLog(j logJob, call *logCall, queueWait time.Duration) {
 	c := &b.logs
 	res, size := b.readLog(j, call.started, queueWait)
 
 	c.mu.Lock()
 	delete(c.calls, j.id)
-	switch res.outcome {
-	case logParsed:
-		c.parsed.Add(j.id, res.log, size)
-		c.notes.Add(j.id, res.notes, 0)
-		delete(c.misses, j.id)
-	case logBusy:
-	default:
-		c.misses[j.id] = logMiss{at: b.now(), res: res}
+	if b.tokenGen() == call.gen {
+		switch res.outcome {
+		case logParsed:
+			c.parsed.Add(j.id, res.log, size)
+			c.notes.Add(j.id, res.notes, 0)
+			delete(c.misses, j.id)
+		case logBusy:
+		default:
+			c.misses[j.id] = logMiss{at: b.now(), res: res}
+		}
 	}
 	c.mu.Unlock()
 	call.res = res
@@ -255,7 +267,7 @@ func (b *Backend) JobLog(ctx context.Context, repo string, jobID int64) (model.J
 	}
 	c := &b.logs
 	c.mu.Lock()
-	c.initLocked()
+	c.initLocked(b.tokenGen())
 	if l, ok := c.parsed.Get(jobID); ok {
 		c.mu.Unlock()
 		return l, nil
@@ -326,7 +338,7 @@ func (b *Backend) openRawLog(ctx context.Context, repo string, jobID int64) (rc 
 	}
 	c := &b.logs
 	c.mu.Lock()
-	c.initLocked()
+	c.initLocked(b.tokenGen())
 	slots := c.slots
 	c.mu.Unlock()
 	select {

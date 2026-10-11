@@ -32,6 +32,9 @@ type wfFile struct {
 	data      []byte
 	missingAt time.Time
 	bad       bool
+	// missingGen is the token generation the 404 at missingAt was answered
+	// under: a file one token cannot see may be visible to the next.
+	missingGen uint64
 }
 
 // wfCache keeps workflow files by repository, commit and path. A file at a
@@ -51,13 +54,14 @@ func (b *Backend) workflowFile(ctx context.Context, repo, sha, path string) ([]b
 		c.files = lru.New[string, wfFile](wfFileEntries, 0)
 	}
 	f, ok := c.files.Get(key)
+	gen := b.tokenGen()
 	c.mu.Unlock()
 	switch {
 	case ok && f.bad:
 		return nil, github.ErrBadContent
 	case ok && f.missingAt.IsZero():
 		return f.data, nil
-	case ok && b.now().Sub(f.missingAt) < wfMissingTTL:
+	case ok && f.missingGen == gen && b.now().Sub(f.missingAt) < wfMissingTTL:
 		return nil, &github.APIError{Status: 404, Kind: github.ErrNotFound, Message: "Not Found"}
 	}
 	data, err := b.GH.GetContent(ctx, repo, path, sha)
@@ -65,7 +69,7 @@ func (b *Backend) workflowFile(ctx context.Context, repo, sha, path string) ([]b
 	case err == nil:
 		f = wfFile{data: data}
 	case github.IsKind(err, github.ErrNotFound):
-		f = wfFile{missingAt: b.now()}
+		f = wfFile{missingAt: b.now(), missingGen: gen}
 	case errors.Is(err, github.ErrBadContent):
 		f = wfFile{bad: true}
 	default:

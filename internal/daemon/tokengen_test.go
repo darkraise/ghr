@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 
@@ -41,6 +42,45 @@ func tokenCaches() []tokenCache {
 			func(b *Backend) error { _, err := b.RunnerSteps(ctx, "aaaaaa"); return err },
 			jobCallCount,
 			func(b *Backend) { b.RunnerSteps(ctx, "zzzzzz") }},
+		{"parsed log", "JobLog",
+			func(_ *fakeManager, gh *fakeGH) {
+				logJobOf(gh, 1002, "Backend tests", "x")
+				logJobOf(gh, 1003, "other", "x")
+			},
+			func(b *Backend) error { _, err := b.JobLog(ctx, "darkmem", 1002); return err },
+			func(gh *fakeGH) int { return gh.count("JobLog darkmem 1002") },
+			func(b *Backend) { b.JobLog(ctx, "darkmem", 1003) }},
+		{"log miss", "JobLog",
+			func(_ *fakeManager, gh *fakeGH) {
+				logJobOf(gh, 1002, "Backend tests", "x")
+				logJobOf(gh, 1003, "other", "x")
+				gh.logErr[1002] = &github.APIError{Status: 410, Kind: github.ErrGone}
+			},
+			func(b *Backend) error { _, err := b.JobLog(ctx, "darkmem", 1002); return err },
+			func(gh *fakeGH) int { return gh.count("JobLog darkmem 1002") },
+			func(b *Backend) { b.JobLog(ctx, "darkmem", 1003) }},
+		{"annotations", "JobLog",
+			func(_ *fakeManager, gh *fakeGH) {
+				annotatedRun(gh, logJobOf(gh, 2001, "Build", "##[error]build broke"))
+				logJobOf(gh, 1003, "other", "x")
+			},
+			func(b *Backend) error { _, err := b.RunAnnotations(ctx, "darkmem", 102, 0); return err },
+			func(gh *fakeGH) int { return gh.count("JobLog darkmem 2001") },
+			func(b *Backend) { b.JobLog(ctx, "darkmem", 1003) }},
+		{"failed log read", "JobLog",
+			func(_ *fakeManager, gh *fakeGH) {
+				annotatedRun(gh, logJobOf(gh, 2001, "Build", "x"))
+				logJobOf(gh, 1003, "other", "x")
+				gh.logErr[2001] = errors.New("boom")
+			},
+			func(b *Backend) error { _, err := b.RunAnnotations(ctx, "darkmem", 102, 0); return err },
+			func(gh *fakeGH) int { return gh.count("JobLog darkmem 2001") },
+			func(b *Backend) { b.JobLog(ctx, "darkmem", 1003) }},
+		{"workflow file not found", "GetContent",
+			func(*fakeManager, *fakeGH) {},
+			func(b *Backend) error { _, _, err := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs()); return err },
+			func(gh *fakeGH) int { return gh.count("GetContent") },
+			nil},
 	}
 }
 
@@ -73,6 +113,32 @@ func (g *midFetchGH) GetRun(ctx context.Context, repo string, id int64) (*github
 func (g *midFetchGH) ListJobs(ctx context.Context, repo string, runID int64) ([]github.Job, error) {
 	g.at("ListJobs")
 	return g.GitHub.ListJobs(ctx, repo, runID)
+}
+
+func (g *midFetchGH) JobLog(ctx context.Context, repo string, jobID int64, limit int64) ([]byte, error) {
+	g.at("JobLog")
+	return g.GitHub.JobLog(ctx, repo, jobID, limit)
+}
+
+func (g *midFetchGH) GetContent(ctx context.Context, repo, path, ref string) ([]byte, error) {
+	g.at("GetContent")
+	return g.GitHub.GetContent(ctx, repo, path, ref)
+}
+
+// A workflow file's bytes at a commit are the same for every token, so only
+// the "not found" answer follows the token.
+func TestWorkflowFileBytesOutliveATokenChange(t *testing.T) {
+	b, _, gh := newBackend(t)
+	gh.content = map[string][]byte{contentKey("darkmem", ciPath, "abc"): []byte(ciYAML)}
+	for range 2 {
+		if g, note, err := b.runGraph(context.Background(), "darkmem", "abc", ciPath, ciJobs()); g == nil || note != "" || err != nil {
+			t.Fatalf("graph %+v note %q err %v", g, note, err)
+		}
+		gh.ForgetCache()
+	}
+	if n := gh.count("GetContent"); n != 1 {
+		t.Fatalf("%d GetContent calls, want 1", n)
+	}
 }
 
 // What one token fetched is not served to the next.
