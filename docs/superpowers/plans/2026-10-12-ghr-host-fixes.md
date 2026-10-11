@@ -10,7 +10,7 @@
 
 **Spec:** docs/superpowers/specs/2026-10-12-ghr-host-fixes-design.md
 
-**Execution:** inline — `claude --model sonnet --effort high` — 12 of 35 tasks are heavy (1, 3, 7, 11, 12, 14, 17, 19, 26, 29, 31, 33) and are delegated; the other 23 run in the session
+**Execution:** inline — `claude --model sonnet --effort high` — 14 of 36 tasks are heavy (1, 3, 7, 11, 12, 14, 17, 19, 25, 26, 29, 31, 32, 33) and are delegated; the other 22 run in the session
 
 **Parallelism:** sequential — the security tasks must run alone, the fixes are small, and the dev host is the limit: `/tmp` is a nearly full tmpfs and the test suites time out under load
 
@@ -36,16 +36,19 @@
 
 Names one task adds and a later task uses.
 
-- Task 3: what a `Client` method in `internal/api/client.go` returns when it gets no answer, which Task 4's test pins as it reaches the terminal. The caller's context ended: that context's error itself, unwrapped (`context.Canceled` after a cancel). The call outlived its limit: a plain error, wrapping nothing, with the text `ghr daemon did not answer within <n>s; the request may still be running` (`<n>` is 30, or 100 for `Kill`). Anything else: `ghr daemon unreachable: <error>`, wrapping the cause.
+- Task 3: what a `Client` method in `internal/api/client.go` returns when it gets no answer, which Task 4's test pins as it reaches the terminal. The caller's context ended: that context's error itself, unwrapped (`context.Canceled` after a cancel). The call outlived its limit: a plain error, wrapping nothing, with the text `ghr daemon did not answer within <n>s; the request may still be running` (`<n>` is 30, or 100 for `Kill`). Anything else: `ghr daemon unreachable: <error>`, wrapping the cause. The first two also come back when the cut falls while a response is read, whatever its status; an `*api.Error` is returned only for an error response that arrived in full or ended on its own.
 - Task 3: `internal/api/client.go` gains `callLimit` (30 s), `killLimit` (100 s) and `func (c *Client) callWithin(ctx context.Context, limit time.Duration, method, path string, body io.Reader, out any) error`. A later client method that needs more than 30 seconds calls `callWithin` with its own limit.
 - Task 3: `api.NewUnixClient` returns a client whose `HTTP.Timeout` is 0. Code that calls `client.HTTP.Do` directly has no time limit unless its request carries a context deadline. `socketCall` in `internal/daemon/run_test.go`, the one such caller in the tree, gets a 30-second deadline in the same task.
 - Task 3: the `"testing/synctest"` import in `internal/api/api_test.go`, used by Task 5.
 - Task 4: `run` in `cmd/ghr/main.go` prints `ghr: interrupted` to stderr and exits 1 for any error for which `errors.Is(err, context.Canceled)` holds. Task 7 returns such an error from `askPassword`; `waitConfigured` in `cmd/ghr/setup.go` already does. Any later CLI task that returns a cancelled context's error gets this text.
 - Task 4: `var interruptContext func() (context.Context, context.CancelFunc)` in `cmd/ghr/main.go`, the context `run` hands to `cli`. A later test that drives `run` and needs to cancel it replaces this variable.
 - Task 4: the `"testing/synctest"` import in `cmd/ghr/main_test.go`.
-- Task 5: `const killWriteWindow = 100 * time.Second` in `internal/api/server.go`, and the field `onKill func()` of `fakeBackend` in `internal/api/api_test.go`.
-- Task 7: `var saveTerminal func() (func(), error)` in `cmd/ghr/password.go`, and `stubPasswordInput` in `cmd/ghr/cli_test.go` now replaces it too. A later test that calls `askPassword`, `readToken` or `readNewPassword` on the terminal path without `stubPasswordInput` must replace `saveTerminal` itself.
-- Task 7: the `"testing/synctest"` import in `cmd/ghr/cli_test.go`.
+- Task 5: `const killWriteWindow = 100 * time.Second` in `internal/api/server.go`. The kill route applies it only when the request's context holds an `*http.Server` (under `http.ServerContextKey`) whose `WriteTimeout` is above zero. A later route that needs a longer write deadline on the web listener and none on the socket can use the same test.
+- Task 5: in `internal/api/api_test.go`, the field `onKill func()` of `fakeBackend`, the type `deadlineWriter`, and `servedBy(srv *http.Server, method, path string) *http.Request`, which builds a request as that server would hand it to a handler.
+- Task 7: the rule that only `askPassword` changes the terminal's mode. `readPassword` (`var readPassword func() ([]byte, error)` in `cmd/ghr/password.go`) now only reads a line: its default is `readHidden(os.Stdin)`, and it must never change a terminal mode. No other code calls it.
+- Task 7: `var hideInput func() (func(), error)` in `cmd/ghr/password.go`, which hides the terminal's input and returns the function that puts the terminal back; `func hideTerminal(f *os.File) (func(), error)` and `func readHidden(in io.Reader) ([]byte, error)`, its real parts; `var errInterrupted = errors.New("interrupted")`, returned for Ctrl-C or Ctrl-D typed at a prompt.
+- Task 7: `stubPasswordInput` in `cmd/ghr/cli_test.go` now replaces `hideInput` too. A later test that calls `askPassword`, `readToken` or `readNewPassword` on the terminal path without `stubPasswordInput` must replace `hideInput` itself. `openPTY(t)` in `cmd/ghr/password_linux_test.go` returns both ends of a pseudo-terminal (Linux only).
+- Task 7: the `"slices"`, `"sync"` and `"testing/synctest"` imports in `cmd/ghr/cli_test.go`.
 - Task 1: `maxPrefixFailures = 50` and `func prefixKey(key string) (string, bool)` in `internal/webui/auth.go`; `ClientKey` now returns an IPv6 client's address, not its /64. The test helpers `v6`, `v6Prefix` and `failureCounters` are in `internal/webui/auth_test.go`.
 - Task 2: `authBodyLimit` is `16 << 10`; `/auth` answers 405 `{"error":"method not allowed"}` with `Allow`, and 413 `{"error":"request body too large"}`.
 - Task 8 adds `config.MaxLabelLength = 100` (exported constant, `internal/config/config.go`).
@@ -62,48 +65,55 @@ Names one task adds and a later task uses.
   - `labels: "docker" is listed twice; ignored` (a label equal ignoring case to an earlier one in the same list; the first one stays)
   - the same two with the prefix `<repo>: ` for a repository's `labels`, e.g. `darkcloud: labels: "x,y" is not a valid label; ignored`
 - Task 8 changes `Parse`'s warning list: a load with an invalid label now returns warnings it did not before. The daemon records each warning as an event; a later task that remembers load warnings (spec 3.4) should expect these strings alongside `global_max 500 is above 99; using 99`.
-- Task 9 and Task 10 add no names.
-- Task 11: `Env.Allow func(url, base string) error` in `internal/toolchain/toolchain.go`. `NewEnv` sets it to `httpsUnder`; an `Env` built by hand must set it, or an install panics on the nil func. No caller of `NewEnv` changes.
-- Task 11: `(*Env).fetch(ctx context.Context, base, rawURL, dst string) error` in `internal/toolchain/layout.go`, the only caller of `Env.Fetch`. It returns `Allow`'s error as it is and wraps a `Fetch` error as `download: <err>`.
-- Task 11: `(*Env).installArchive(ctx context.Context, toolDir, base string, rel Release, progress func(string)) error` (new third parameter `base`).
-- Task 11: `httpsUnder(rawURL, base string) error` in `internal/toolchain/env.go`; the constants `nodeReleases` (`node.go`) and `pythonReleases` (`python.go`); `javaReleases(version string) string` (`java.go`).
+- Task 9 adds no names.
+- Task 10 adds unexported names in `internal/config/config.go`: `syncFile` (a package variable, `= (*os.File).Sync`, the one seam; tests replace it and restore it with `t.Cleanup`), `saveTarget(path string) (string, error)` and `maxLinkHops = 8`. No later task calls them. Task 10 also adds the test helpers `saveOwner`, `isSymlink` and `stubSync` to `config_test.go`; a later task that adds a test there may use them.
+- Task 10 changes `Save`'s behaviour: a symbolic link at the path stays and the file at the end of the chain is written (created when missing); a loop, more than 8 links, or a missing directory on the way returns an error and writes nothing; a failing sync returns the error, keeps the old file and removes the temporary file.
+- Task 11: `type Origin struct{ Dir, File string }` in `internal/toolchain/toolchain.go`. Exactly one field is set: `Dir` is a directory rule and must end in `/`; `File` is an exact-file rule. Node, Python, Java and Go pass `Origin{Dir: ...}`; .NET passes `Origin{File: e.Sources.DotnetScript}`.
+- Task 11: `Env.Allow func(url string, from Origin) error` in `internal/toolchain/toolchain.go`. `NewEnv` sets it to `httpsFrom`; an `Env` built by hand must set it, or an install panics on the nil func. No caller of `NewEnv` changes.
+- Task 11: `(*Env).fetch(ctx context.Context, from Origin, rawURL, dst string) error` in `internal/toolchain/layout.go`, the only caller of `Env.Fetch`. It returns `Allow`'s error as it is and wraps a `Fetch` error as `download: <err>`.
+- Task 11: `(*Env).installArchive(ctx context.Context, toolDir string, from Origin, rel Release, progress func(string)) error` (new third parameter `from`).
+- Task 11: `httpsFrom(rawURL string, from Origin) error` in `internal/toolchain/env.go`; the constants `nodeReleases` (`node.go`) and `pythonReleases` (`python.go`); `javaReleases(version string) string` (`java.go`).
 - Task 11: the error text `refusing to download <url>`, returned unwrapped by every installer's `Install`.
 - Task 12: `system.HTTPSRedirect(req *http.Request, via []*http.Request) error` in `internal/system/system.go`, an `http.Client.CheckRedirect`; its refusal reads `refusing a redirect to <scheme>://<host>`. Task 13 uses it. Also the unexported `downloadClient` in `internal/system`.
 - Task 13: the unexported `getClient` in `internal/toolchain/env.go`; `NewEnv`'s `Extract` runs `tar --no-same-owner -xzf <archive> -C <dir>`.
 - Task 17: `openOwned(path string) (*os.Root, error)` in `internal/toolchain/layout.go`.
 - Task 18: `type inode struct{ dev, ino uint64 }` in `internal/storage/measure.go`; `hardLink(fi os.FileInfo) (inode, bool)` in `internal/storage/own_unix.go` and `own_other.go`.
 - Task 13 uses `system.HTTPSRedirect` from Task 12. No other task of this chain uses a name from an earlier one. Beyond that the order matters because Tasks 13 to 17 edit files that Task 11 changes (`env.go`, `python.go`, `golang.go`, `java.go`, `layout.go`, `hardening_test.go`), and their quoted lines are those files as Task 11 leaves them.
-- `KEYRING_DIR` (Task 19): variable in `deploy/setup.sh`, default `/etc/apt/keyrings`; `write_docker_source` writes `Signed-By: $KEYRING_DIR/docker.asc`; the test script's `new_case` sets it to `$T/<case>/keyrings`, and section `(e)` pins it back to `/etc/apt/keyrings`.
+- `KEYRING_DIR` (Task 19): variable in `deploy/setup.sh`, default `/etc/apt/keyrings`; `write_docker_source` writes `Signed-By: $KEYRING_DIR/docker.asc`; the test script sets it to `$T/keyrings` for the whole run and `new_case` to `$T/<case>/keyrings`, `DEFAULT_KEYRING_DIR` keeps the script's value, and `run` refuses to start a function while it is outside `$T`.
 - `DOCKER_KEY_FINGERPRINT` (Task 19): variable in `deploy/setup.sh`, `9DC858229FC7DD38854AE2D88D81803C0EBFCD88`.
 - `export_docker_key <dir>` and `install_docker_key` (Task 19): functions in `deploy/setup.sh`; the die message is `Docker apt key has an unexpected fingerprint`.
-- `SYSTEMD_DIR` (Task 20): variable in `deploy/setup.sh`, default `/etc/systemd/system`; `install_service` writes `$SYSTEMD_DIR/ghr.service`.
-- `$STATE_DIR/web-password-pending` (Task 21): marker file created by `install_config`, removed by `set_web_password`.
+- `SYSTEMD_DIR` (Task 20): variable in `deploy/setup.sh`, default `/etc/systemd/system`; `install_service` writes `$SYSTEMD_DIR/ghr.service` and looks for `$SYSTEMD_DIR/docker.service.wants/ghr.service`. The test script sets it to `$T/systemd` for the whole run and `new_case` to `$T/<case>/systemd`, `DEFAULT_SYSTEMD_DIR` keeps the script's value, and `run` now checks both directories.
+- `install_service` systemctl calls (Task 20), in this order: `--no-reload reenable ghr.service`; then `daemon-reload`, only when the unit file differed or the `docker.service.wants` link was missing; then `restart ghr.service`.
+- `$STATE_DIR/web-password-pending` (Task 21): marker file created by `install_config`, removed by `set_web_password` after a password is set or after a read that succeeded and returned an empty line (not on end of input or a failed read).
 - `FIRST_INSTALL` (removed by Task 21): nothing may read it afterwards.
 - `main` order in `deploy/setup.sh` (Task 22): `install_runner`, `gc_dist`, `install_ghr`, `install_config`, `install_service`, ..., `set_web_password`, `preinstall_toolchains`, `print_next`.
 - `daemon.SaveError` in `internal/daemon/store.go`: `type SaveError struct{ Err error }` with `Error() string` (`"save config: " + Err`) and `Unwrap() error`; `Store.Update` returns it when `config.Save` fails. Task 24. Task 25 quotes the line that builds it.
 - The answer `500 could not save config.yaml` from `Backend.update`, built as `&api.Error{Status: http.StatusInternalServerError, Msg: "could not save config.yaml"}`; the log line `save config: <error>`. Task 24. Any web or CLI task that asserts on a save failure sees this status and text.
-- `func (s *Store) Warnings() []string` in `internal/daemon/store.go`; the field `Store.warnings`. Task 25.
+- `func (s *Store) Reload() (warnings, added []string, tokenChanged bool, err error)` in `internal/daemon/store.go`. Task 25. It has one more return value than before, `added`: the warnings of this load that were neither in the load before nor in the config saved since, worked out under the store's lock. Every caller is in `internal/daemon` and is changed by Task 25: `OpenStore`, `Backend.Reload`, the not-configured loop in `Run`, and ten calls in `store_test.go`. The store has no method that reads the remembered list; the field is `Store.warnings`.
 - `internal/daemon/limitlistener.go`: `limitConns(l net.Listener, total, perClient int) *limitListener`, `clientKey(remote net.Addr) string`, `maxWebConns = 256`, `maxWebConnsPerClient = 64`. Task 26. In `Run`, `webLn` is now a `*limitListener` held as a `net.Listener`; connections the web server sees are `*limitConn`, which embeds `net.Conn`. A task that sets a write deadline through `http.ResponseController` on a web route (spec 1.2) is not affected: `SetWriteDeadline` is promoted from the embedded connection.
 - Test helpers in package `daemon` tests: `textAddr`, `scriptedConn`, `scriptedListener`, `newScriptedListener`, `acceptLoop`, `endLoop`, `closeTwiceAtOnce` (`limitlistener_test.go`). Task 26. Names another drafter's test in `internal/daemon` must not reuse.
 - The error text `could not check the token` and the method `(*Backend).checkTokenSafely`. Task 27.
 - `internal/daemon/joblogs.go`: `logSettle = 2 * time.Minute`, `logSettleTTL = 15 * time.Second`, `completionTime(t *time.Time) time.Time`, the field `logJob.completedAt`, and `logMiss.until` in place of `logMiss.at`. Task 28.
 - `internal/runner/manager.go`: `readJobJSON(path string, v any) error`, `maxJobFile = 1 << 20`. Task 29. Test helpers `mustReturn` and `mkfifo` in `internal/runner/jobfile_unix_test.go`.
 - `internal/github/client.go`: `type RunRepository struct{ Private *bool }`, the field `Run.Repository RunRepository` (JSON `repository`), `func (r Run) RepoPublic() bool`. Task 30. Task 31 calls `RepoPublic` and its test builds a `RunRepository`.
-- `func (m *Manager) sawPublic(repo string, now time.Time)` in `internal/runner/visibility.go`, placed directly above `blockedLocked`. Task 31. Task 32 places its method directly above it. Test helper `listedRun` in `internal/runner/blocked_test.go`.
-- `func (m *Manager) RecordVisibility(repo string, public bool)` on `*runner.Manager`, in `internal/runner/visibility.go`, placed directly above `sawPublic`. Task 32. Task 33 calls it.
+- `func (m *Manager) sawPublic(repo string, now time.Time)` in `internal/runner/visibility.go`, placed directly above `blockedLocked`, and the field `listedAt time.Time` of the `visibility` struct. Task 31. Task 32 adds two fields to the same struct, replaces the end of `readVisibility` as Task 31 left it, and places its method directly above `sawPublic`. Test helper `listedRun` in `internal/runner/blocked_test.go`.
+- `func (m *Manager) RecordVisibility(repo string, public bool)` on `*runner.Manager`, in `internal/runner/visibility.go`, placed directly above `sawPublic`; the fields `rev uint64` and `handed bool` of the `visibility` struct. Task 32. Task 33 calls it. Its contract: hand an answer over only for a repository that is being added, and before the config that holds it can be seen; the manager keeps the answer until the repository has shown up in the config once.
+- `func (s *Store) UpdateThen(fn func(c *config.Config) error, saved func()) ([]string, error)` in `internal/daemon/store.go`: `Update` with a step that runs once `config.yaml` holds the change and before `Store.Config` shows it, with the store's lock held; `Update(fn)` is now `UpdateThen(fn, nil)`. `(*Backend).updateThen(fn, saved)` in `internal/daemon/backend.go` is the same for `update`. Task 33.
 - `RecordVisibility(repo string, public bool)` as the last method of the `Manager` interface in `internal/daemon/backend.go`; `fakeManager` in `internal/daemon/backend_test.go` gains `RecordVisibility`, `vmu`, `visibility` and `onVisibility`. Task 33. Any other type that must satisfy `daemon.Manager` needs the method; at the base commit only `*runner.Manager` and `fakeManager` do.
 - `func (m *Manager) prune(cfg *config.Config, now time.Time) (removed, ok bool)` in `internal/runner/cleanup.go` (one `bool` before). Task 34.
 
 ## Assumptions (evidence)
 
 - Every task's code was carried out red-then-green in a drafter's worktree on local `master` (`8cf8ea2`, or `76066ff`, which differs only in docs), one commit per task except where a task says it makes two, in five chains that share no production file: Tasks 1 to 7, 8 to 10, 11 to 18, 19 to 23, 24 to 35. Each drafter checked its quoted blocks against the commit before each task. Evidence: the drafters' reports of 2026-10-12, recorded in docs/superpowers/notes/2026-10-12-ghr-host-fixes-plan-draft.md.
-- The five chains merge without conflict. Evidence: on 2026-10-12 the five branches were merged into one worktree from `master`; `gofmt -l`, `go vet ./...`, `go test -race -count=1 -timeout 480s ./...` (22 packages) and `bash deploy/tests/setup_test.sh` passed there. The run was made on the final branches, after four tasks had been split in two.
+- The five chains merge without conflict. Evidence: on 2026-10-12 the five branches were merged into one worktree from `master`; `gofmt -l`, `go vet ./...`, `GOOS=windows go vet ./...`, `go test -race -count=1 -timeout 480s ./...` (22 packages) and `bash deploy/tests/setup_test.sh` passed there. The run was made on the final branches, after four tasks had been split in two and the findings of the first plan review had been fixed.
 - `internal/daemon/run_test.go` is edited by Task 3 (the `socketCall` helper only) and by tasks of the last chain elsewhere in the file; the hunks do not overlap. Evidence: the merge above.
 - GitHub's maximum length for a runner label is unverified and cannot be checked without registering a runner. The rule in Task 8 keeps the web form's 100 characters; a label GitHub refuses fails the spawn with GitHub's own error, as today. No task verifies it: spec section 7 records the decision.
 - A config file whose only labels are system labels stops loading after Task 8, by the existing rule `needs at least one label in labels or repo labels`. This is an accepted consequence recorded in spec section 3.1; the owner was asked on 2026-10-12 and may reverse it.
 - The three pinned actions in Task 23 are the commits their tags name, in the `actions` organisation's own repositories. Evidence, 2026-10-12: `gh api repos/actions/checkout/git/ref/tags/v4.4.0` gives `11d5960a326750d5838078e36cf38b85af677262`, `gh api repos/actions/setup-go/git/ref/tags/v5.6.0` gives `40f1582b2485089dde7abd97c1529aa768e1baff`, `gh api repos/actions/setup-node/git/ref/tags/v4.4.0` gives `49933ea5288caeca8642d1e84afbd3f7d6820020`, and `gh api repos/actions/<name>/commits/<sha>` answers each from that repository.
 - With `Requires=` and `After=` alone a unit stays inactive after its required unit is stopped and started; also wanted by that unit, it starts again, and on a restart too. Evidence: two throwaway units on Debian 13 with systemd 257, 2026-10-12 (spec section 7).
-- Two scores differ from what the drafters proposed. Task 11's coupling is 1, not 2: no later task uses `Env.Allow` or `Env.fetch`. Task 33's coupling is 2, not 3: the method it adds to the daemon's manager interface is additive, and the only other implementer, the runner manager, gains it in Task 32.
+- One score differs from what its drafter proposed. Task 11's coupling is 1, not 2: no later task uses `Env.Allow`, `Env.fetch` or `Origin`.
+- Task 7 puts the password prompt's terminal in raw mode, with the consequences spec section 2.3 lists. The owner was told on 2026-10-12 and may choose per-system terminal code instead; the plan keeps raw mode until they say so. Nobody has typed at a real interactive terminal: a pseudo-terminal test proves the state is restored, and it skips where `/dev/ptmx` is missing.
+- That `systemctl --no-reload reenable` makes no implicit reload is taken from systemd's documentation, not from a run on a host (Task 20's tests check the recorded commands). The live check in spec section 8 settles it.
 - `ClientKey` is called in one place outside tests, `internal/webui/handler.go:228`, and `Auth.Login` is called outside the package only by `internal/daemon/web_test.go:134`, with an IPv4 key (`rg -n '\.Login\(|ClientKey\(' --glob '*.go'`, 2026-10-12). Both signatures are unchanged.
 - An IPv4-mapped remote address is turned into its IPv4 address before it becomes a key: `remoteAddr` ends with `ip.Unmap().WithZone("")` (`internal/webui/auth.go:338` at `8cf8ea2`).
 - `login` checks the lockout three times, at `internal/webui/auth.go:135`, `:155` and `:164` at `8cf8ea2`, each under `a.mu`, and reads the clock right before each. Task 1's `TestALockLandingMidLoginRefusesIt` relies on exactly these three clock reads.
@@ -114,27 +124,34 @@ Names one task adds and a later task uses.
 - Before Task 3 no call through `api.NewUnixClient` could outlive 30 seconds: `http.Client.Timeout` covered the whole exchange (`internal/api/client.go:31` at `8cf8ea2`). `ghr logs -f` polls one short `Log` call a second (`cmd/ghr/cli.go:238-262`), and `ghr setup github` polls `SetupState` (`cmd/ghr/setup.go:123-137`). No client method streams. So a 30-second limit per call keeps every caller's behaviour, and only `Kill` gets longer.
 - `socketCall` (`internal/daemon/run_test.go:601-615` at `8cf8ea2`) is the only code that calls `.HTTP.Do` on a client from `NewUnixClient` (`rg -n 'NewUnixClient|HTTP\.Do' --glob '*.go'`, 2026-10-12: line 608 is the one hit with both). Its file is identical on `master` and at the Task 2 commit, so the lines Task 3 quotes are `master`'s. `context` and `time` are already imported there (lines 5 and 23). The two other raw clients in that file set their own 10-second `Timeout` (lines 310 and 638).
 - `main.run` prints `ghr: <error>` and exits 1, or 2 with the usage for a `usageError` (`cmd/ghr/main.go:75-86` at `8cf8ea2`). `logs` returns nil when its context has ended (`cmd/ghr/cli.go:241`), so Ctrl-C in `ghr logs -f` still exits 0 without a message.
-- The web listener's `WriteTimeout` is 60 seconds (`internal/daemon/run.go:42` and `:287`). Nothing between it and the API handler wraps the `http.ResponseWriter` (`rg -n 'Unwrap\(\) http.ResponseWriter|http.ResponseWriter$' internal --glob '!*_test.go'` printed nothing, 2026-10-12), so `http.NewResponseController` reaches the connection.
-- Go clears a connection's write deadline after every response: `c.rwc.SetWriteDeadline(time.Time{})` at `/usr/local/go/src/net/http/server.go:2081` (Go 1.26.1). The kill route's deadline therefore cannot reach a later request on the same connection, also on the Unix socket, whose server sets no `WriteTimeout`.
-- `term.ReadPassword` leaves signals on while echo is off (`newState.Lflag |= unix.ICANON | unix.ISIG`, `golang.org/x/term@v0.46.0/term_unix.go:82`), so Ctrl-C at the prompt does raise the interrupt that cancels the context.
+- The web listener's `WriteTimeout` is 60 seconds and the socket's server sets none: `internal/daemon/run.go:284` is `srv := &http.Server{ReadHeaderTimeout: 10 * time.Second}`, and lines 286-287 give the web server `WriteTimeout: webWriteTimeout` (`run.go:42`, 60 s). Nothing between the web listener and the API handler wraps the `http.ResponseWriter` (`rg -n 'Unwrap\(\) http.ResponseWriter|http.ResponseWriter$' internal --glob '!*_test.go'` printed nothing, 2026-10-12), so `http.NewResponseController` reaches the connection.
+- Every request a Go server hands to a handler carries that `*http.Server` in its context under `http.ServerContextKey` (documented on the key in `net/http`). On the web path the value survives the wrappers: `requireSession` derives its context from the request's (`internal/webui/handler.go:148` and `:175` at `8cf8ea2`) and `http.StripPrefix` keeps it. Read from the code; Task 5's test puts the server into the context itself and does not go through `internal/webui`.
+- Go clears a connection's write deadline after every response: `c.rwc.SetWriteDeadline(time.Time{})` at `/usr/local/go/src/net/http/server.go:2081` (Go 1.26.1). The kill route's longer deadline therefore cannot reach a later request on the same connection.
+- golang.org/x/term v0.46.0, read on 2026-10-12: `term.ReadPassword` changes the mode, reads and changes it back inside one call (`term_unix.go:74-91`), so a caller cannot order its own restore after that mode change. `term.MakeRaw` clears `ECHO` and `ISIG` among others (`term_unix.go:34`), so in raw mode nothing typed is shown and Ctrl-C is a byte. `term.Terminal` returns `io.EOF` for Ctrl-C and for Ctrl-D on an empty line (`terminal.go:827-833`), ends a line at a carriage return or a line feed (`terminal.go:582`) and holds lines of up to 4,096 characters (`terminal.go:366`). The package has no call that turns echo off and leaves signals on.
+- `cmd/ghr` builds for darwin, freebsd and windows today (`GOOS=<os> go build ./cmd/ghr`, 2026-10-12, before and after Task 7). Turning echo off with the terminal's own ioctls would need golang.org/x/sys imported directly, which `go.mod` lists as indirect, and one file per system family; `term.MakeRaw` and `term.Restore` exist for all of them.
+- The pseudo-terminal test ran on the dev host and did not skip (`go test ./cmd/ghr/ -run TestPasswordPromptOnARealTerminal -v`, 2026-10-12: three rows `PASS`). With `restore()` removed from `askPassword` both it and the table test failed (mutation run, 2026-10-12).
 - `flag.FlagSet.Parse` stops at the first argument that is not a flag and may be called again on the rest; Task 6's `repo add` relies on both, and its tests cover flags before the name, after it, and on both sides (run green on 2026-10-12).
 - No ghr daemon runs on the dev host (`ls /run/ghr` failed, 2026-10-12). The new CLI tests replace `newClient` anyway, so none of them can reach a real socket.
 - `unverified`: that a runner stop really takes up to 90 seconds. The spec reads it from the code (no `TimeoutStopSec` on runner units). Timing one `ghr kill` of a busy runner on the runner LXC would settle it; that needs the owner's yes.
-- `unverified`: the terminal after Ctrl-C at a real prompt. The test proves `askPassword` calls the restore function; that `term.Restore` with the saved state turns echo back on was not tried at a real terminal. Running a built `ghr web set-password` in a terminal, pressing Ctrl-C at the prompt and then typing would settle it.
+- `unverified`: the prompt at a real keyboard. On a pseudo-terminal the state after the prompt equals the state before it for a typed line, for Ctrl-C typed in raw mode and for a cancel before the read starts. Nobody typed at an interactive terminal: that nothing typed is shown, that Backspace works and that the shell prompt looks right afterwards. Running a built `ghr web set-password` in a terminal, typing, and pressing Ctrl-C at the second prompt would settle it.
+- `unverified`: that CI's runner has `/dev/ptmx`. Without it the pseudo-terminal test skips and says so.
 - `unverified`: whether the test binary's stdin can be a terminal under `go test`. The token and password tests replace `stdinIsTerminal`, so they do not depend on the answer.
 - `Validate` already rejects `global_max > MaxRunners`, a repository `max` or `warm` above it (`internal/config/config.go`, lines near 340 to 380 at `8cf8ea2`); the label checks are added next to them and do not depend on them.
 - `Parse` runs `dropBadLabels` after `clampRunners` and before `Validate`; `Validate` runs on the repaired config, so a repaired file saves and loads again (`TestParseDropsInvalidLabels`, ran green 2026-10-12).
 - Every `Decode` of a document-less file returns `io.EOF`: `TestParseEmptyFileLoadsDefaults` failed with `parse config: EOF` for an empty, a blank and a comments-only input before the fix (2026-10-12).
 - A second `Decode` after an `io.EOF` first one also returns `io.EOF`, so the "expected exactly one YAML document" check stays correct for an empty file (the three inputs load as defaults, test green 2026-10-12).
-- `filepath.EvalSymlinks` resolves a relative link against the link's directory and returns an error for a path that does not exist, so a first save uses `path` unchanged (`TestSaveRoundTrip` and `TestSaveRejectsInvalid` stay green; the symlink test uses a relative link; 2026-10-12).
-- `Save` sync is not testable without a fault-injection seam; I added none. Unverified beyond reading: that `tmp.Sync()` runs before the rename. Settling it would take a test seam on `*os.File`, which I judged speculative.
-- A dangling symlink at `path` is not handled: `EvalSymlinks` fails, `path` is used as it is, and the rename replaces the link with a regular file. `Load` of a dangling link fails first, so the daemon cannot normally reach this. Unverified; a test with a dangling link would settle it.
+- `saveTarget` resolves the directory part with `filepath.EvalSymlinks` at every hop, so a `..` in a relative link is joined onto a real directory; a `path` that does not exist yet (the first save) is returned unchanged (`TestSaveRoundTrip` and `TestSaveRejectsInvalid` stay green; 2026-10-12).
+- A dangling link, a chain of links (relative, then absolute) and an existing target all keep every link and write the file at the end; a link loop and a link into a missing directory return an error and leave the directory as it was. All four tests ran red against the old `Save` and green against `saveTarget` on 2026-10-12.
+- A resolution failure other than "the last file does not exist" (for example a permission error from `Lstat`) takes the same error branches; I could not test a permission error because the dev host runs as root. Unverified; a test as a non-root user would settle it.
+- The sync order and failure handling are proved through `syncFile`: the test reads `config.yaml` and the temporary file at the moment the stub runs (old content in the first, new content in the second), and a failing stub leaves the old file and only one directory entry (2026-10-12; red with the seam declared and not called: `sync ran 0 times, want 1`). That the real `(*os.File).Sync` is what runs is the variable's initial value, read in the code.
 - Other packages' tests that use labels pass with the rules: `go test -count=1 -timeout 300s ./...` ran green on 2026-10-12 after Task 10 (list below).
 - The 100-character limit is the web form's; GitHub's own limit is not verified (spec 3.1 and section 7).
 - Every `download_url` in the Node manifest (1473) begins `https://github.com/actions/node-versions/releases/download/`, every one in the Python manifest (2392) begins `https://github.com/actions/python-versions/releases/download/`, and none contains `?`, `#`, `%`, `\`, `..` or a doubled slash: `curl` of both `versions-manifest.json` files with `jq`, run 2026-10-12.
-- Adoptium's package link for JDK 8, 11, 17, 21, 24 and 25 begins `https://github.com/adoptium/temurin<major>-binaries/releases/download/`, where `<major>` equals the first part of `version_data.semver` (for example `8.0.504+1` and `temurin8-binaries`). The links for 11 to 25 contain `%2B`, an encoded `+`, which is why `httpsUnder` allows escapes other than `%2f`, `%2e` and `%5c`: `curl` of `api.adoptium.net/v3/assets/feature_releases/<major>/ga?...` for those six majors, run 2026-10-12.
+- Adoptium's package link for JDK 8, 11, 17, 21, 24 and 25 begins `https://github.com/adoptium/temurin<major>-binaries/releases/download/`, where `<major>` equals the first part of `version_data.semver` (for example `8.0.504+1` and `temurin8-binaries`). The links for 11 to 25 contain `%2B`, an encoded `+`, which is why `httpsFrom` allows escapes other than `%2f`, `%2e` and `%5c`: `curl` of `api.adoptium.net/v3/assets/feature_releases/<major>/ga?...` for those six majors, run 2026-10-12.
 - `Release.Version` of a Java release is `version_data.semver`, so its part before the first `.` is the major: `internal/toolchain/java.go:74-78` (as found).
 - The Go and .NET download URLs are built from constants ghr sets, not from list data: `Sources.GoDownload + name` at `internal/toolchain/golang.go:29` and `URL: d.e.Sources.DotnetScript` at `internal/toolchain/dotnet.go:78` (as found); `DefaultSources` at `internal/toolchain/env.go:15-26`.
+- .NET downloads exactly one file, the configured script, and nothing below or beside it: `Resolve` sets `URL: d.e.Sources.DotnetScript` for every release (`internal/toolchain/dotnet.go:78`, as found) and `Install` fetches only `rel.URL`. So its rule is an exact match, not a prefix. Every other installer's URL lies below a directory whose configured or constant URL ends in `/`: `nodeReleases`, `pythonReleases`, `javaReleases` (Task 11) and `GoDownload: "https://go.dev/dl/"` (`internal/toolchain/env.go:21`, as found; its field comment at `internal/toolchain/toolchain.go:32` already says "ending in "/"").
+- A string prefix without its closing slash also matches sibling paths (`/dl` is a prefix of `/dlx/`, and `.../dotnet-install.sh` of `.../dotnet-install.sh.other`). Before the two rules were separated, the check passed `dotnet-install.sh.other`, `dotnet-install.sh/another-script` and, with `GoDownload` set to `https://go.dev/dl`, `https://go.dev/dlx/...`: the rows added for them failed with `got download: fetched, want it refused`. Run 2026-10-12.
 - The version lists (`Sources.NodeManifest`, `GoManifest`, `PythonManifest`, `GoReleases`, `Adoptium`, `DotnetIndex`) are constants ghr sets and are read by `Env.Get`, never by `Env.Fetch`, so they need no allowlist. The no-plain-http-redirect rule of Task 12 covers `Get` too, through Task 13: `NewEnv` sets `Get: httpGet` (`internal/toolchain/env.go:38`, as found) and `httpGet` uses `getClient` after Task 13, pinned by `TestHTTPGetFollowsARedirectOnlyToHTTPS`.
 - Redirect targets are left unpinned by host on purpose. The first URL is authenticated by TLS to the pinned origin, and an origin that can redirect anywhere can equally serve any content itself, so pinning the target adds nothing; and GitHub has changed its asset host name before, so a pinned name would break installs. Observed on 2026-10-12 with `curl -sIL`: `https://go.dev/dl/go1.20.linux-amd64.tar.gz` redirects once to `https://dl.google.com/go/...`; the Temurin 21 package link redirects once to `https://release-assets.githubusercontent.com/...`; `dotnet-install.sh` and the three kinds of version list answer without a redirect.
 - `os.OpenRoot` follows a symlink at the path it is given ("It follows symbolic links in the directory name", `/usr/local/go/src/os/root.go:80`, Go 1.26.1), and `Root.OpenRoot` follows one that stays inside the root (`os/root_unix.go`, `openRootInRoot`). Hence `openOwned` compares `Root.Stat(".")` with `os.Lstat(path)`. `TestOpenOwnedOpensOnlyTheDirectoryItself` fails without the comparison (Task 17, Step 6).
@@ -154,13 +171,14 @@ Names one task adds and a later task uses.
 - The real import, list and export path works on the real key and exports the same 3817 bytes. Evidence, 2026-10-12: `install_docker_key` sourced from `deploy/setup.sh` and called alone with `KEYRING_DIR` set to a directory under the scratchpad (real `curl` and `gpg`, nothing under `/etc`) installed a mode 0644 `docker.asc` that starts with `-----BEGIN PGP PUBLIC KEY BLOCK-----`, holds one `pub` record whose first `fpr` is the pinned value, and was byte-identical to the download (`cmp`); `pgrep -ac gpg-agent` was 0 afterwards.
 - `gpg --export` exits 0 when it exports nothing (hence the header check in `export_docker_key`). Unverified here against the real binary; the fake `gpg` in the tests models it, and the header check does not depend on it. Running `gpg --homedir <empty dir> --armor --export 9DC8...` would settle it.
 - `WantedBy=docker.service` plus enable starts a dependent unit again after Docker restarts. Evidence (Debian 13, systemd 257, two throwaway units, 2026-10-12): with `Requires=` and `After=` only, the dependent unit stays inactive after its required unit is stopped and started; with the dependent unit also linked into the required unit's `.wants` directory it starts again, also on a restart. Not re-run by this drafter.
-- `systemctl reenable` exists and recreates the links from the unit's current `[Install]` section. Unverified on a live host (the tests replace `systemctl`); the live check in spec section 8 (stop and start Docker on the runner LXC) settles it.
+- `systemctl --no-reload` exists and keeps `enable` and `disable` from reloading the manager. Evidence: `systemctl --help` on this host, 2026-10-12, prints `--no-reload         Don't reload daemon after en-/dis-abling unit files`. That a plain `reenable` reloads the manager on every run is the plan reviewer's finding and what that help text implies; I did not run it, because systemd changes on this host are not allowed. The tests replace `systemctl`, so they check only the arguments and the order of the calls (`--no-reload reenable`, then at most one `daemon-reload`, then `restart`). That `reenable` recreates the links from the unit's current `[Install]` section, and that a changed unit file that is not yet reloaded is enabled correctly, are unverified on a live host; the live check in spec section 8 (stop and start Docker on the runner LXC) settles it.
+- Bash `read` returns non-zero both at end of input and when stdin is closed, and a partial last line comes back in the variable with status 1; an empty line returns 0. Evidence, 2026-10-12: `bash -c 'IFS= read -rs p </dev/null; echo "eof rc=$? p=[$p]"; IFS= read -rs p <&-; echo "closed rc=$? p=[$p]"; IFS= read -rs p < <(printf abc); echo "partial rc=$? p=[$p]"; IFS= read -rs p <<<""; echo "enter rc=$? p=[$p]"'` printed `eof rc=1 p=[]`, `read: read error: 0: Bad file descriptor` then `closed rc=1 p=[]`, `partial rc=1 p=[abc]`, `enter rc=0 p=[]`.
 - An instance directory is a full copy of the runner files and nothing reads an old version directory after that: `internal/runner/lifecycle.go:93-101` (`dist, err := m.Host.ReadLink(m.Paths.Dist)`, `m.Host.CopyTree(ctx, dist, dir)`, `DistVersion: filepath.Base(dist)`), and `internal/daemon/run.go:91` (`Dist: "/opt/ghr/dist/current"`). `stop_ghr` stops the daemon before `install_runner` (`deploy/setup.sh`, `main`), so no copy is in progress while `gc_dist` runs.
 - `web:` in `ghr setup` is `web.listen` from the config, or `-` when the web UI is off. Evidence: `cmd/ghr/setup.go:97` prints `web: %s` from `orDash(st.WebListen)`; `internal/daemon/run.go:332-335` sets `webListen = webCfg.Listen`; `deploy/config.example.yaml:15` is `listen: 0.0.0.0:8080`.
 - An IPv6 `web.listen` has its host in brackets. Evidence: the address goes through `net.Listen("tcp", webCfg.Listen)` (`internal/daemon/run.go:302`) and is validated with `net.SplitHostPort` (`internal/config/config.go:430`), which requires brackets around an IPv6 host.
 - `hostname -I` prints addresses separated by spaces, IPv4 or IPv6 first, unbracketed. Evidence: the existing fake in the tests (`192.168.0.99 fd00::99`) and `man hostname`; not run on the runner LXC.
 - The release job needs no git credential after the checkout. Evidence: `.github/workflows/ci.yml` as found, lines 62 and 68 (`git tag --points-at HEAD --list ...`, `git tag --list ... --sort=-v:refname`) read local tags, which `fetch-depth: 0` has already fetched; line 111 publishes with `gh release create ... --target "$GITHUB_SHA"` and `GH_TOKEN: ${{ github.token }}`; no other `git` or `gh` call is in the file.
-- Action pins, resolved 2026-10-12 with read-only calls. Newest release of the major in use: `gh api repos/actions/checkout/tags --paginate -q '.[].name' | rg '^v4\.[0-9]+\.[0-9]+$' | sort -V | tail -1` gave `v4.4.0`; the same for `setup-go` with `^v5\.` gave `v5.6.0`; for `setup-node` with `^v4\.` gave `v4.4.0`. Each is a published, non-pre-release release: `gh api repos/actions/checkout/releases/tags/v4.4.0` (published 2026-07-20), `repos/actions/setup-go/releases/tags/v5.6.0` (2025-12-16), `repos/actions/setup-node/releases/tags/v4.4.0` (2025-04-14). SHAs: `gh api repos/actions/checkout/git/ref/tags/v4.4.0 -q '.object.type + " " + .object.sha'` gave `commit 11d5960a326750d5838078e36cf38b85af677262`; `repos/actions/setup-go/git/ref/tags/v5.6.0` gave `commit 40f1582b2485089dde7abd97c1529aa768e1baff`; `repos/actions/setup-node/git/ref/tags/v4.4.0` gave `commit 49933ea5288caeca8642d1e84afbd3f7d6820020`. All three tags are lightweight (object type `commit`), so no dereference was needed.
+- Action pins, resolved 2026-10-12 with read-only calls. Newest release of the major in use: `gh api repos/actions/checkout/tags --paginate -q '.[].name' | rg '^v4\.[0-9]+\.[0-9]+$' | sort -V | tail -1` gave `v4.4.0`; the same for `setup-go` with `^v5\.` gave `v5.6.0`; for `setup-node` with `^v4\.` gave `v4.4.0`. Each is a published, non-pre-release release: `gh api repos/actions/checkout/releases/tags/v4.4.0` (published 2026-07-20), `repos/actions/setup-go/releases/tags/v5.6.0` (2025-12-16), `repos/actions/setup-node/releases/tags/v4.4.0` (2025-04-14). SHAs: `gh api repos/actions/checkout/git/ref/tags/v4.4.0 -q '.object.type + " " + .object.sha'` gave `commit 11d5960a326750d5838078e36cf38b85af677262`; `repos/actions/setup-go/git/ref/tags/v5.6.0` gave `commit 40f1582b2485089dde7abd97c1529aa768e1baff`; `repos/actions/setup-node/git/ref/tags/v4.4.0` gave `commit 49933ea5288caeca8642d1e84afbd3f7d6820020`. All three tags are lightweight (object type `commit`), so no dereference was needed. Task 23's text states these three SHAs as verified on 2026-10-12 and tells the implementer to change no pin and resolve nothing; these commands are evidence for reviewers only.
 - The README line being replaced is the second item of "Requirements" (`README.md:18-19` as found). The per-repository setting is `allow_public` (`internal/config/config.go:84`, with the comment that a job in a public repository can come from anyone's pull request).
 - `shellcheck` is not installed on this host (`which shellcheck` printed nothing), so the script is not verified clean under it. `bash -n deploy/setup.sh` passes. Running `shellcheck deploy/setup.sh deploy/tests/setup_test.sh` where it is available would settle it.
 Line numbers are those of commit `76066ff` (local `master` on 2026-10-12), the commit the work started from.
@@ -182,17 +200,22 @@ Line numbers are those of commit `76066ff` (local `master` on 2026-10-12), the c
 - `logJobOf` gives a job that completed at `actionsT0` plus one minute: `internal/daemon/joblogs_test.go:31`. `TestRunAnnotationsCountsLogOutcomes` froze its clock at `actionsT0`: `internal/daemon/annotations_test.go:149`.
 - Unverified: whether GitHub can answer 404 for a log right after a job completes (spec section 7, row 213). It would be settled by requesting a log the moment a job finishes. The task is correct either way.
 - `readJSON` is `os.ReadFile`: `internal/runner/manager.go:595-601`. The reads of job-writable files are `internal/runner/private.go:50` (`ghr.json`), `internal/runner/adopt.go:90`, `internal/runner/lifecycle.go:170` and `:431` (`job.json`). The root-owned reads that keep `readJSON` are `internal/runner/private.go:48`, `internal/runner/lifecycle.go:435`, `:546`, `:626` and `internal/runner/update.go:115`.
-- `readFrom` opens with `O_NONBLOCK` and accepts only a regular file, checked on the open file: `internal/runner/cleanup.go:513-524`.
+- `readFrom` checks the name with `Lstat`, opens with `O_NONBLOCK`, and accepts only a regular file, checked again on the open file: `internal/runner/cleanup.go:513-524`. It reads through an `os.Root` of the log directory, which `openLogs` opens: `internal/runner/cleanup.go:488-506`.
 - The directory that holds the instance directories is root's, and each instance directory is given to the runner user, so a job controls only the last part of the path: `deploy/setup.sh:80-81` (`install -d -m 0755 ... "$STATE_DIR/instances"`), `internal/runner/lifecycle.go:114` (`ChownR(ctx, dir, RunnerUser)`).
-- `internal/runner` already builds only where `syscall.O_NONBLOCK` exists (`internal/runner/cleanup.go:517`); `syscall.O_NOFOLLOW` exists on the same systems. The new test file is tagged `//go:build unix`, like `internal/runner/runnerlog_unix_test.go`.
+- The tree type-checks for Windows and must keep doing so: `GOOS=windows go vet ./...` prints nothing at the finished branch (2026-10-12). `syscall.O_NONBLOCK` exists there (`internal/runner/cleanup.go:517` uses it untagged); `syscall.O_NOFOLLOW` does not. My first version of Task 29 used `O_NOFOLLOW` and was the only thing in the tree that failed that check, which is how I know the base passes it. `internal/runner/cleanup_test.go:202` skips a test on Windows, so someone runs these tests there. Test files that make FIFOs are tagged `//go:build unix`, like `internal/runner/runnerlog_unix_test.go`.
 - Each run in GitHub's runs listing carries `repository.private`: `gh api 'repos/darkraise/ghr/actions/runs?per_page=1' --jq '.workflow_runs[0] | {id, private: .repository.private, repo: .repository.full_name}'` answered `{"id":38115999933,"private":false,"repo":"darkraise/ghr"}` on 2026-10-12.
-- `repoDemand` lists the queued, in-progress and waiting runs on every poll (`internal/runner/tick.go:191-195`); `gatherDemand` calls `readVisibility` right after it and drops the queue of a repository that has just become blocked (`internal/runner/tick.go:129-153`); `readVisibility` makes no call while the answer is younger than 6 hours (`internal/runner/visibility.go:38-40`, `:14`).
-- Unverified: that a 304 from GitHub for a runs listing always means `repository.private` is unchanged, that is, that the listing's ETag changes when only the repository's visibility changes. Task 31 relies on it only in one direction: a cached listing that still said "public" after the repository was made private again would keep the block until the listing changes. It would be settled by making a test repository with a queued run private and comparing the listing's ETag before and after, which is a write to GitHub.
+- `repoDemand` lists the queued, in-progress and waiting runs on every poll (`internal/runner/tick.go:191-195`); `gatherDemand` calls `readVisibility` right after it and drops the queue of a repository that has just become blocked (`internal/runner/tick.go:129-153`); `readVisibility` makes no call while the answer is younger than 6 hours (`internal/runner/visibility.go:38-40`, `:14`). When a poll fails, `gatherDemand` goes on to the next repository without touching the queued jobs it copied from the last poll (`internal/runner/tick.go:100-104`, `:135-145`), and status counts a repository's queue from that record (`internal/runner/manager.go:618`).
+- `readVisibility` copies the record under the manager's lock, releases the lock for the `GetRepo` call and then stores the answer without looking at the record again: `internal/runner/visibility.go:33-51`. `ClearDegraded`, which a reload and a new token call, sets `readAt` to zero on every record: `internal/runner/manager.go:740-750`.
+- A tick takes the config once, at its start, and passes that copy to every step: `internal/runner/tick.go:18`. The manager reaches the config only through its `Config` func (`internal/runner/manager.go:164`), which the daemon sets to `store.Config` (`internal/daemon/run.go:173`), an atomic load that takes no lock (`internal/daemon/store.go:43`). `internal/runner` does not import `internal/daemon`, so the manager cannot call the store while it holds its own lock.
+- `Store.Update` holds the store's lock while it runs the function it is given: `internal/daemon/store.go:105-109`. Task 25's tests use that to start reloads that are certain to run after the update.
+- `Validate` warns about `cleanup_name_prefixes` only when the repository's effective `max` is not 1, and a repository without `max` counts as 1 outside mode `all`: `internal/config/config.go:403-405`, `:288-296`.
+- Unverified: that a 304 from GitHub for a runs listing always means `repository.private` is unchanged, that is, that the listing's ETag changes when only the repository's visibility changes. Task 31 relies on it only in one direction: a cached listing that still said "public" after the repository was made private again would block the repository again at every poll, and `GetRepo`'s "private" would lift the block only in a poll whose own listing did not say public. It would be settled by making a test repository with a queued run private and comparing the listing's ETag before and after, which is a write to GitHub.
 - The manager forgets a removed repository only at the start of a tick: `internal/runner/tick.go:25`, `internal/runner/visibility.go:137-150`. `AddRepo` reads the repository at `internal/daemon/backend.go:542` and saves at `:558`; the save wakes the run loop (`internal/daemon/backend.go:437-439`).
 - Only `*runner.Manager` and the daemon's `fakeManager` implement the daemon's `Manager` interface: `rg 'func \(.*\) CancelUpdate\(\) error' internal cmd` on 2026-10-12 found `internal/runner/update.go:258` and `internal/daemon/backend_test.go`.
 - `history.Store.Writes()` counts "the appends that wrote a line and the prunes that replaced the file" (`internal/history/history.go:40-46`), and a prune replaces the file only when a line went (`internal/history/history.go:235-237`).
 - `forcedPrune` wrote the retention event whenever the step did not fail: `internal/runner/cleanup.go:363-370`. `prune` has two callers: `internal/runner/cleanup.go:364` and `internal/runner/tick.go:66`, which ignores the result.
 - `metrics.Load` kept every rollup not dated after now: `internal/metrics/metrics.go:177-182`; `addToHour` drops the rollups that are not before the sample's hour on a step back: `internal/metrics/metrics.go:310-312`. `Hours()` returns the closed rollups followed by the open hour: `internal/metrics/metrics.go:256-264`.
+
 
 ## Task index
 
@@ -231,6 +254,7 @@ Line numbers are those of commit `76066ff` (local `master` on 2026-10-12), the c
 33. Adding a repository hands over what it just read
 34. The retention event and an honest comment
 35. One rollup per hour after a clock step back
+36. Whole-tree verification
 
 ---
 
@@ -1168,7 +1192,7 @@ git commit -m "fix(webui): answer 405 and 413 on /auth routes"
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: for Task 4, the three ways a `Client` method fails without an answer. When the caller's context ends, the method returns that context's own error, unwrapped (`ctx.Err()`, so `context.Canceled` after a cancel). When the call outlives its limit, it returns a plain error, wrapping nothing, with the text `ghr daemon did not answer within <n>s; the request may still be running`, where `<n>` is 30 for every call and 100 for `Kill`. Any other transport failure returns `ghr daemon unreachable: <error>`, wrapping the cause. For Task 5, the `"testing/synctest"` import in `internal/api/api_test.go`.
+- Produces: for Task 4, the three ways a `Client` method fails without an answer. When the caller's context ends, the method returns that context's own error, unwrapped (`ctx.Err()`, so `context.Canceled` after a cancel). When the call outlives its limit, it returns a plain error, wrapping nothing, with the text `ghr daemon did not answer within <n>s; the request may still be running`, where `<n>` is 30 for every call and 100 for `Kill`. Any other transport failure returns `ghr daemon unreachable: <error>`, wrapping the cause. The first two also hold when the call is cut short while it reads a response, an error response included. For Task 5, the `"testing/synctest"` import in `internal/api/api_test.go`.
 
 **Items:** 48
 **Implementer:** dr-superpowers:impl-sonnet-high
@@ -1177,6 +1201,8 @@ git commit -m "fix(webui): answer 405 and 413 on /auth routes"
 Every `ghr` subcommand but `daemon` talks to the daemon through `api.Client`. Its HTTP client has one 30-second timeout for every request, and `call` reports every transport error as `ghr daemon unreachable`. Stopping a runner can take 90 seconds (systemd's default stop timeout), so `Kill` gives up while the daemon is still working. A caller that cancels its context is also told the daemon is unreachable.
 
 After this task the client's HTTP client has no timeout and every call sets its own limit: 30 seconds by default, 100 seconds for `Kill`. A call tells its caller why it ended without an answer, in the three forms the Interfaces section lists. Nothing in `cmd/ghr` changes here; Task 4 turns the caller's context error into the CLI's message.
+
+The limit and the caller's context cover the whole call, the reading of the response included. That matters most for an error response: `call` answers a 404 or 405 whose body is not JSON with the advice to restart an older daemon, and a body that was cut short is not JSON either. A call cut short there must report the cut, not that advice and not the bare status.
 
 One test helper outside the package relied on the timeout this task removes: `socketCall` in `internal/daemon/run_test.go` sends raw requests through `NewUnixClient(socket).HTTP`. Step 4 gives its request a 30-second deadline, so a daemon that hangs in one of those tests fails the test instead of holding it until `go test -timeout`.
 
@@ -1278,20 +1304,43 @@ func (b stalledBody) Read([]byte) (int, error) {
 
 func (stalledBody) Close() error { return nil }
 
-type stalledDaemon struct{}
+// stalledDaemon answers at once with its status and then never sends the body.
+type stalledDaemon int
 
-func (stalledDaemon) RoundTrip(r *http.Request) (*http.Response, error) {
-	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: stalledBody{r.Context()}, Request: r}, nil
+func (d stalledDaemon) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: int(d), Status: fmt.Sprintf("%d %s", int(d), http.StatusText(int(d))),
+		Header: http.Header{}, Body: stalledBody{r.Context()}, Request: r,
+	}, nil
 }
 
-func TestCallLimitCoversTheResponseBody(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		c := &Client{Base: "http://ghr", HTTP: &http.Client{Transport: stalledDaemon{}}}
-		_, err := c.Status(context.Background())
-		if want := "ghr daemon did not answer within 30s; the request may still be running"; err == nil || err.Error() != want {
-			t.Fatalf("err %v, want %s", err, want)
+// A call cut short while it reads the response is reported like one cut
+// short before it: by its limit, or by its caller. That holds for an error
+// response too. Its unread body must not become an API error, nor the advice
+// to restart an older daemon that a 404 or 405 without JSON gets.
+func TestCallCutShortWhileReadingTheResponse(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusInternalServerError} {
+		for _, cancelled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("status %d, cancelled %v", status, cancelled), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					c := &Client{Base: "http://ghr", HTTP: &http.Client{Transport: stalledDaemon(status)}}
+					ctx, cancel := context.WithCancel(context.Background())
+					defer cancel()
+					if cancelled {
+						time.AfterFunc(10*time.Second, cancel)
+					}
+					_, err := c.Status(ctx)
+					const limit = "ghr daemon did not answer within 30s; the request may still be running"
+					switch {
+					case cancelled && err != context.Canceled:
+						t.Fatalf("err %v, want the caller's own context error", err)
+					case !cancelled && (err == nil || err.Error() != limit):
+						t.Fatalf("err %v, want %s", err, limit)
+					}
+				})
+			})
 		}
-	})
+	}
 }
 
 // A caller that gives up (Ctrl-C in the CLI) gets its own context's error
@@ -1312,14 +1361,18 @@ func TestCallEndedByItsCaller(t *testing.T) {
 
 - [ ] **Step 2: Run the client tests to verify they fail**
 
-Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/api/ -run 'TestUnreachableDaemon|TestCallTimeLimits|TestCallEndedByItsCaller|TestCallLimitCoversTheResponseBody'`
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/api/ -run 'TestUnreachableDaemon|TestCallTimeLimits|TestCallEndedByItsCaller|TestCallCutShortWhileReadingTheResponse'`
 Expected: FAIL with
 
 - `TestUnreachableDaemon`: `the client cuts every call after 30s, also the ones with a longer limit of their own`
 - `TestCallTimeLimits/a_call_not_answered`: `err <nil>, want ghr daemon did not answer within 30s; the request may still be running`
 - `TestCallTimeLimits/a_stop_not_answered`: `err <nil>, want ghr daemon did not answer within 100s; the request may still be running`
-- `TestCallLimitCoversTheResponseBody`: `err EOF, want ghr daemon did not answer within 30s; the request may still be running`
+- `TestCallCutShortWhileReadingTheResponse/status_200,_cancelled_false`: `err EOF, want ghr daemon did not answer within 30s; the request may still be running`
+- `TestCallCutShortWhileReadingTheResponse/status_404,_cancelled_true`: `err the running ghr daemon does not know GET /status; it is older than this ghr, restart it: systemctl restart ghr, want the caller's own context error`
+- `TestCallCutShortWhileReadingTheResponse/status_500,_cancelled_false`: `err 500 Internal Server Error, want ghr daemon did not answer within 30s; the request may still be running`
 - `TestCallEndedByItsCaller`: `err ghr daemon unreachable: Delete "http://ghr/runners/a3f9c1": context canceled after 10s`
+
+Seven of the eight rows of `TestCallCutShortWhileReadingTheResponse` fail; `status 200, cancelled true` passes already.
 
 - [ ] **Step 3: Write the client implementation**
 
@@ -1408,7 +1461,25 @@ func (c *Client) callWithin(ctx context.Context, limit time.Duration, method, pa
 	defer resp.Body.Close()
 ```
 
-The block that handles `resp.StatusCode >= 300`, directly below, is not changed. At the end of the same function replace
+In the block that handles `resp.StatusCode >= 300`, directly below, replace
+
+```go
+		derr := json.NewDecoder(resp.Body).Decode(&e)
+```
+
+with
+
+```go
+		derr := json.NewDecoder(resp.Body).Decode(&e)
+		if derr != nil {
+			// An error body cut short says nothing about the daemon.
+			if cut := early(); cut != nil {
+				return cut
+			}
+		}
+```
+
+The rest of that block stays: the comment about a plain-text 404 or 405 and what follows it. At the end of the same function replace
 
 ```go
 	if out == nil || resp.StatusCode == http.StatusNoContent {
@@ -1701,7 +1772,9 @@ git commit -m "fix(cli): name why a daemon call ended early"
 
 The browser reaches the API through the web listener, whose `WriteTimeout` is 60 seconds (`internal/daemon/run.go`, not edited here). The route that stops a runner waits for the runner's systemd unit to stop, which can take 90 seconds, so the listener cuts the response and the browser sees a failure while the stop goes on.
 
-After this task the route sets its own write deadline, 100 seconds from its start, before it begins the stop. It does so through `http.NewResponseController`, the way `streamChanges` and `streamLog` in the same file already extend theirs, and ignores the error: a writer without deadline support (a test recorder) returns one, and then nothing needs doing. On the Unix socket, which has no write timeout, the deadline only bounds this one response; Go clears it when the response is finished.
+After this task the route sets its own write deadline, 100 seconds from its start, before it begins the stop, but only on a server that has a write timeout. It does so through `http.NewResponseController`, the way `streamChanges` and `streamLog` in the same file already extend theirs, and ignores the error: a writer without deadline support (a test recorder) returns one, and then nothing needs doing.
+
+The same handler also serves the Unix socket, whose server sets no `WriteTimeout`. A kill over the socket had no write deadline and must keep none, so the handler must not set one there. It tells the two apart without a new parameter: Go puts the `*http.Server` that accepted a connection into every request's context under `http.ServerContextKey`, and the handler extends the deadline only when that server's `WriteTimeout` is above zero. A request with no server in its context (a handler called directly, as most tests do) gets no deadline either.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1758,39 +1831,72 @@ func (w *deadlineWriter) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
+// servedBy is a request as srv's connection would hand it to a handler: the
+// server is in its context. A nil srv leaves the context without one.
+func servedBy(srv *http.Server, method, path string) *http.Request {
+	r := httptest.NewRequest(method, path, nil)
+	if srv == nil {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), http.ServerContextKey, srv))
+}
+
 // A stop can take systemd's 90 seconds, longer than the web listener's
-// WriteTimeout, so the kill route sets its own deadline before it starts the
-// stop. The bubble's clock stands still, so the deadline is exact.
-func TestKillRouteSetsItsOwnWriteDeadline(t *testing.T) {
+// WriteTimeout, so the kill route sets its own write deadline before it
+// starts the stop. The Unix socket's server has no write timeout: its
+// responses had no deadline and must keep none. The bubble's clock stands
+// still, so the deadline is exact.
+func TestKillRouteExtendsOnlyAServersWriteTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		web, socket := &http.Server{WriteTimeout: 60 * time.Second}, &http.Server{}
+		const kill = "/runners/a3f9c1"
+		for _, tc := range []struct {
+			name string
+			req  *http.Request
+			want time.Duration // 0 is no deadline
+		}{
+			{"a kill on a server with a write timeout", servedBy(web, http.MethodDelete, kill), 100 * time.Second},
+			{"a kill on a server without one", servedBy(socket, http.MethodDelete, kill), 0},
+			{"a kill outside a server", servedBy(nil, http.MethodDelete, kill), 0},
+			{"another route on a server with a write timeout", servedBy(web, http.MethodDelete, "/repos/old"), 0},
+		} {
+			b := &fakeBackend{}
+			w := &deadlineWriter{ResponseRecorder: httptest.NewRecorder()}
+			atKill := w.deadline
+			b.onKill = func() { atKill = w.deadline }
+			NewServer(b).ServeHTTP(w, tc.req)
+			var want time.Time
+			if tc.want != 0 {
+				want = time.Now().Add(tc.want)
+			}
+			left := func(deadline time.Time) string {
+				if deadline.IsZero() {
+					return "none"
+				}
+				return time.Until(deadline).String()
+			}
+			if w.Code != http.StatusNoContent || !w.deadline.Equal(want) || !atKill.Equal(want) {
+				t.Errorf("%s: status %d, write deadline %s (%s when the stop began), want %s",
+					tc.name, w.Code, left(w.deadline), left(atKill), left(want))
+			}
+		}
+		// A recorder cannot take a write deadline; the stop must still run.
 		b := &fakeBackend{}
-		srv := NewServer(b)
-		w := &deadlineWriter{ResponseRecorder: httptest.NewRecorder()}
-		var atKill time.Time
-		b.onKill = func() { atKill = w.deadline }
-		srv.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/runners/a3f9c1", nil))
-		if want := time.Now().Add(100 * time.Second); w.Code != http.StatusNoContent || !atKill.Equal(want) {
-			t.Fatalf("status %d, write deadline when the stop began %v, want %v", w.Code, atKill, want)
-		}
-		other := &deadlineWriter{ResponseRecorder: httptest.NewRecorder()}
-		srv.ServeHTTP(other, httptest.NewRequest(http.MethodDelete, "/repos/old", nil))
-		if other.Code != http.StatusNoContent || !other.deadline.IsZero() {
-			t.Fatalf("another route: status %d, write deadline %v", other.Code, other.deadline)
-		}
-		// A recorder has no write deadline, like the writers of other tests.
 		plain := httptest.NewRecorder()
-		srv.ServeHTTP(plain, httptest.NewRequest(http.MethodDelete, "/runners/a3f9c1", nil))
-		if plain.Code != http.StatusNoContent || len(b.killed) != 2 {
+		NewServer(b).ServeHTTP(plain, servedBy(web, http.MethodDelete, kill))
+		if plain.Code != http.StatusNoContent || len(b.killed) != 1 {
 			t.Fatalf("a writer without deadlines: status %d, kills %v", plain.Code, b.killed)
 		}
 	})
 }
 ```
 
+`servedBy` builds the request a server's connection would hand to the handler. The test runs inside `synctest.Test`, where the clock stands still, so the deadline can be compared exactly.
+
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/api/ -run 'TestKillRouteSetsItsOwnWriteDeadline'`
-Expected: FAIL with a line starting `status 204, write deadline when the stop began 0001-01-01 00:00:00 +0000 UTC, want 2000-01-01` (the rest of the line depends on the machine's time zone)
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/api/ -run 'TestKillRouteExtendsOnlyAServersWriteTimeout'`
+Expected: FAIL with `a kill on a server with a write timeout: status 204, write deadline none (none when the stop began), want 1m40s`. The three other rows pass already: they are the cases that must keep having no deadline, and they fail if Step 3 sets the deadline without looking at the server.
 
 - [ ] **Step 3: Write the implementation**
 
@@ -1806,8 +1912,11 @@ with
 
 ```go
 	mux.HandleFunc("DELETE /runners/{id}", func(w http.ResponseWriter, r *http.Request) {
-		// The Unix socket and test writers have no write deadline.
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(killWriteWindow))
+		// Only a server that cuts its responses needs the longer deadline. The
+		// Unix socket's server sets no WriteTimeout and keeps no deadline.
+		if srv, ok := r.Context().Value(http.ServerContextKey).(*http.Server); ok && srv.WriteTimeout > 0 {
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(killWriteWindow))
+		}
 		respond(w, nil, b.KillRunner(r.Context(), r.PathValue("id")))
 	})
 ```
@@ -1815,9 +1924,10 @@ with
 Directly above the comment that begins `// rawWriteWindow bounds a raw log request`, add (followed by one empty line):
 
 ```go
-// killWriteWindow bounds the answer to a kill from the route's start. The
-// daemon waits for the runner's unit to stop, which systemd allows 90
-// seconds by default, longer than the web listener's WriteTimeout.
+// killWriteWindow bounds the answer to a kill from the route's start, on a
+// server that has a WriteTimeout. The daemon waits for the runner's unit to
+// stop, which systemd allows 90 seconds by default, longer than the web
+// listener's WriteTimeout.
 const killWriteWindow = 100 * time.Second
 ```
 
@@ -1832,7 +1942,7 @@ Run `PATH=/usr/local/go/bin:$PATH gofmt -l internal/ cmd/` (must print nothing),
 
 ```bash
 git add internal/api/server.go internal/api/api_test.go
-git commit -m "fix(api): give the kill route 100s to answer"
+git commit -m "fix(api): extend the kill route's write deadline"
 ```
 
 ### Task 6: Token prompt and argument checks
@@ -2082,26 +2192,111 @@ git commit -m "fix(cli): prompt for the token, check arguments"
 ### Task 7: Ctrl-C at a password prompt
 
 **Files:**
-- Modify: `cmd/ghr/password.go` (the test-seam variables, `askPassword`)
+- Modify: `cmd/ghr/password.go` (the test-seam variables, `askPassword`; new `errInterrupted`, `hideTerminal`, `readHidden`)
+- Create: `cmd/ghr/password_linux_test.go`
 - Test: `cmd/ghr/cli_test.go`
 
 **Interfaces:**
-- Consumes: nothing a task must add first. With Task 4 in place, `run` prints `ghr: interrupted` for the error this task returns; without it the text is `ghr: context canceled`.
+- Consumes: nothing a task must add first. With Task 4 in place, `run` prints `ghr: interrupted` when the command's context was cancelled from outside the prompt; without it that text is `ghr: context canceled`. Ctrl-C typed at the prompt prints `ghr: interrupted` either way.
 - Produces: nothing a later task names
 
 **Items:** 56
 **Implementer:** dr-superpowers:impl-sonnet-medium
 **Evaluation:** files 1 - spec 0 - coupling 0 - risk 3 = 4
 
-`askPassword` prints a prompt and reads one line from the terminal with echo off. It is used by `ghr web set-password`, `ghr setup github` and `ghr token set`. Ctrl-C cancels the command's context, but `askPassword` looks at the context only after the read has returned, so nothing happens until the user presses Enter.
+`askPassword` prints a prompt and reads one line from the terminal with echo off. It is used by `ghr web set-password`, `ghr setup github` and `ghr token set`. Today it calls `term.ReadPassword`, which turns echo off, blocks in the read and turns echo on again when the read returns. Ctrl-C cancels the command's context, but `askPassword` looks at the context only after the read has returned, so nothing happens until the user presses Enter.
 
-After this task the read runs on its own goroutine. When the context ends first, `askPassword` puts the terminal back into the state it saved before the read (the read had turned echo off and will never get to turn it on again), ends the prompt's line and returns the context's error. The blocked read is left behind: the process is about to exit. A read that returns on its own has restored the terminal itself, so nothing is restored then.
+After this task the read runs on its own goroutine, and `askPassword` returns as soon as the read or the context has ended. The blocked read is left behind: the process is about to exit.
 
-The two existing test seams stay (`stdinIsTerminal`, `readPassword`). A third, `saveTerminal`, lets a test see the restore.
+The rule that makes this safe: **only `askPassword` changes the terminal's mode, on its own goroutine; the goroutine that reads changes none.** If the reading goroutine turned echo off itself, as `term.ReadPassword` does, a cancel could arrive before it had done so: the prompt would put the terminal back, the read would then turn echo off, and the process would exit with the terminal left that way. So `askPassword` hides the input before it starts the read and puts the terminal back after the read or the context has ended. Both happen in one function, in that order, on every path.
 
-- [ ] **Step 1: Write the failing test**
+The golang.org/x/term package can hide input from the caller's side in one portable way, raw mode (`term.MakeRaw`, undone by `term.Restore`). Two things follow from raw mode. The line must be read by code that understands raw input (Enter arrives as a carriage return, Backspace as a byte): the package's own `term.Terminal` does that. And the terminal no longer turns Ctrl-C into a signal: Ctrl-C, like Ctrl-D on an empty line, arrives as a byte, and `term.Terminal` reports it as end of input. The new `readHidden` turns that into the error `errInterrupted`, whose text is `interrupted`, so `run` prints `ghr: interrupted` and exits 1. The context still ends the prompt when the interrupt comes from elsewhere (`kill -INT`).
 
-Add the new seam first, unused, so the test compiles. In `cmd/ghr/password.go` replace
+Three seams let tests stand in for the terminal: `stdinIsTerminal` (unchanged), `readPassword` (now only reads) and the new `hideInput`.
+
+- [ ] **Step 1: Write the failing tests of the reader**
+
+In `cmd/ghr/cli_test.go`, directly above `func TestStatusWarnsWhileTheWebUIHasNoPassword`, add the two tests below. Type the escapes exactly: `\x7f` is Backspace, `\x03` is Ctrl-C, `\x04` is Ctrl-D.
+
+```go
+// readHidden reads what a terminal in raw mode delivers: Enter arrives as a
+// carriage return, and Ctrl-C and Ctrl-D arrive as bytes, not as a signal.
+func TestReadHidden(t *testing.T) {
+	for _, tc := range []struct {
+		name, typed, want string
+		err               error
+	}{
+		{"a line ended by Enter", "a long secret\r", "a long secret", nil},
+		{"a line ended by a line feed", "a long secret\n", "a long secret", nil},
+		{"spaces are kept", " a long secret \r", " a long secret ", nil},
+		{"backspace removes a character", "a lomg\x7f\x7fng secret\r", "a long secret", nil},
+		{"Ctrl-C", "\x03", "", errInterrupted},
+		{"Ctrl-C after some typing", "a long\x03", "", errInterrupted},
+		{"Ctrl-D on an empty line", "\x04", "", errInterrupted},
+		{"the terminal goes away", "", "", errInterrupted},
+	} {
+		got, err := readHidden(strings.NewReader(tc.typed))
+		if string(got) != tc.want || !errors.Is(err, tc.err) {
+			t.Errorf("%s: read %q err %v, want %q and %v", tc.name, got, err, tc.want, tc.err)
+		}
+	}
+}
+
+func TestCtrlCAtAPromptPrintsInterrupted(t *testing.T) {
+	reqs := fakeDaemon(t)
+	stubPasswordInput(t, true)
+	readPassword = func() ([]byte, error) { return readHidden(strings.NewReader("a long\x03")) }
+	code, out, errOut := runCLI(t, "", "web", "set-password")
+	if code != 1 || out != "" || errOut != "New web password: \nghr: interrupted\n" || len(*reqs) != 0 {
+		t.Fatalf("exit %d out %q err %q requests %v", code, out, errOut, *reqs)
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./cmd/ghr/ -run 'TestReadHidden|TestCtrlCAtAPromptPrintsInterrupted'`
+Expected: FAIL. The package does not build: `undefined: errInterrupted` and `undefined: readHidden`, then `FAIL	github.com/darkraise/ghr/cmd/ghr [build failed]`.
+
+- [ ] **Step 3: Write the reader**
+
+In `cmd/ghr/password.go`, directly above the comment `// stdinIsTerminal and readPassword are replaced in tests.`, add (followed by one empty line):
+
+```go
+// errInterrupted reports Ctrl-C or Ctrl-D at a prompt. In raw mode the
+// terminal hands both to the reader as bytes and raises no signal.
+var errInterrupted = errors.New("interrupted")
+```
+
+and directly above the comment `// maxPipedPassword bounds a password read from a pipe`, add (followed by one empty line):
+
+```go
+// readHidden reads one line typed into a terminal that is in raw mode. It
+// changes no terminal mode itself: askPassword must stay the only code that
+// does, or a cancelled prompt could put the terminal back too early.
+func readHidden(in io.Reader) ([]byte, error) {
+	rw := struct {
+		io.Reader
+		io.Writer
+	}{in, io.Discard}
+	line, err := term.NewTerminal(rw, "").ReadPassword("")
+	if errors.Is(err, io.EOF) {
+		return nil, errInterrupted
+	}
+	return []byte(line), err
+}
+```
+
+No import changes: the file already imports `errors`, `io` and `golang.org/x/term`.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./cmd/ghr/`
+Expected: PASS (`ok  	github.com/darkraise/ghr/cmd/ghr`)
+
+- [ ] **Step 5: Write the failing test of the prompt**
+
+Add the seam for hiding the input first, not yet used, so the test compiles. In `cmd/ghr/password.go` replace
 
 ```go
 // stdinIsTerminal and readPassword are replaced in tests.
@@ -2114,26 +2309,36 @@ var (
 with
 
 ```go
-// stdinIsTerminal, readPassword and saveTerminal are replaced in tests.
+// stdinIsTerminal, hideInput and readPassword are replaced in tests.
 var (
 	stdinIsTerminal = func() bool { return fdIsTerminal(os.Stdin.Fd()) }
-	readPassword    = func() ([]byte, error) { return term.ReadPassword(int(os.Stdin.Fd())) }
-	// saveTerminal returns a function that puts stdin's terminal back into
-	// the state it is in now.
-	saveTerminal = func() (func(), error) {
-		fd := int(os.Stdin.Fd())
-		state, err := term.GetState(fd)
-		if err != nil {
-			return nil, err
-		}
-		return func() { term.Restore(fd, state) }, nil
-	}
+	hideInput       = func() (func(), error) { return hideTerminal(os.Stdin) }
+	readPassword    = func() ([]byte, error) { return readHidden(os.Stdin) }
 )
 ```
 
-The remaining edits of this step are in `cmd/ghr/cli_test.go`. Add the `testing/synctest` import. Replace
+and add `hideTerminal` directly below that block, above `readHidden`:
 
 ```go
+// hideTerminal puts f's terminal into raw mode, which echoes nothing, and
+// returns the function that puts back the state it found.
+func hideTerminal(f *os.File) (func(), error) {
+	fd := int(f.Fd())
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		return nil, err
+	}
+	return func() { term.Restore(fd, state) }, nil
+}
+```
+
+Between this step and Step 7 the real prompt would read without hiding the input. Nothing is committed in between, and the tests replace both variables.
+
+The remaining edits of this step are in `cmd/ghr/cli_test.go`. In the import block replace
+
+```go
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 ```
@@ -2141,21 +2346,26 @@ The remaining edits of this step are in `cmd/ghr/cli_test.go`. Add the `testing/
 with
 
 ```go
+	"net/http/httptest"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 ```
 
-Replace the whole `stubPasswordInput` function, including its comment, with the version below. It also replaces `saveTerminal`: under `go test` stdin is not a terminal, and the real one would fail.
+Replace the whole `stubPasswordInput` function, including its comment, with the version below. It now also replaces `hideInput`: under `go test` stdin is not a terminal, and the real one would fail.
 
 ```go
 // stubPasswordInput makes stdin look like a terminal, or not, and feeds the
-// no-echo reads from answers. There is no terminal state to save or restore.
+// no-echo reads from answers. There is no terminal whose input could be
+// hidden.
 func stubPasswordInput(t *testing.T, terminal bool, answers ...string) {
 	t.Helper()
-	oldTerm, oldRead, oldSave := stdinIsTerminal, readPassword, saveTerminal
+	oldTerm, oldRead, oldHide := stdinIsTerminal, readPassword, hideInput
 	stdinIsTerminal = func() bool { return terminal }
-	saveTerminal = func() (func(), error) { return func() {}, nil }
+	hideInput = func() (func(), error) { return func() {}, nil }
 	readPassword = func() ([]byte, error) {
 		if len(answers) == 0 {
 			return nil, io.EOF
@@ -2164,80 +2374,104 @@ func stubPasswordInput(t *testing.T, terminal bool, answers ...string) {
 		answers = answers[1:]
 		return []byte(a), nil
 	}
-	t.Cleanup(func() { stdinIsTerminal, readPassword, saveTerminal = oldTerm, oldRead, oldSave })
+	t.Cleanup(func() { stdinIsTerminal, readPassword, hideInput = oldTerm, oldRead, oldHide })
 }
 ```
 
-Directly above `func TestStatusWarnsWhileTheWebUIHasNoPassword`, add:
+Directly above the comment that begins `// readHidden reads what a terminal in raw mode delivers`, add:
 
 ```go
-// Ctrl-C cancels the context, but the read of the terminal stays blocked
-// until Enter. The prompt must return at once and put back the terminal
-// state it saved, because the read it leaves behind has turned echo off.
-func TestPasswordPromptEndsWithItsContext(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		stubPasswordInput(t, true)
-		enter := make(chan struct{})
-		defer close(enter)
-		readPassword = func() ([]byte, error) {
-			<-enter
-			return []byte("typed too late"), nil
-		}
-		saved, restored := 0, 0
-		saveTerminal = func() (func(), error) {
-			saved++
-			return func() { restored++ }, nil
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		var prompts bytes.Buffer
-		var got string
-		var err error
-		returned := make(chan struct{})
-		go func() {
-			got, err = askPassword(ctx, &prompts, "New web password: ")
-			close(returned)
-		}()
-		synctest.Wait()
-		if restored != 0 || prompts.String() != "New web password: " {
-			t.Fatalf("while reading: restored %d prompts %q", restored, prompts.String())
-		}
-		cancel()
-		synctest.Wait()
-		select {
-		case <-returned:
-		default:
-			t.Fatal("the prompt still waits for the read after its context ended")
-		}
-		if got != "" || !errors.Is(err, context.Canceled) {
-			t.Fatalf("password %q err %v", got, err)
-		}
-		if saved != 1 || restored != 1 || prompts.String() != "New web password: \n" {
-			t.Fatalf("saved the terminal %d times, restored it %d times, prompts %q", saved, restored, prompts.String())
-		}
-	})
-}
-
-// A read that returns on its own has put the terminal back itself.
-func TestPasswordPromptLeavesTheTerminalToTheRead(t *testing.T) {
-	stubPasswordInput(t, true, "a long secret")
-	restored := 0
-	saveTerminal = func() (func(), error) { return func() { restored++ }, nil }
-	var prompts bytes.Buffer
-	got, err := askPassword(context.Background(), &prompts, "New web password: ")
-	if got != "a long secret" || err != nil || restored != 0 || prompts.String() != "New web password: \n" {
-		t.Fatalf("password %q err %v restored %d prompts %q", got, err, restored, prompts.String())
+// askPassword is the only code that changes the terminal's mode: it hides
+// the input before the read starts and puts the terminal back when the read
+// or the context has ended, whichever is first. Whenever the context ends,
+// also before the read has started, the change back must be the last one,
+// and the read left behind must change nothing after it.
+func TestPasswordPromptAlwaysPutsTheTerminalBack(t *testing.T) {
+	const beforePrompt, whileHidden, whileReading = "before the prompt", "while the input is hidden", "while the read waits"
+	failed := errors.New("stdin closed")
+	for _, tc := range []struct {
+		name   string
+		cancel string
+		read   func() ([]byte, error) // nil waits for an Enter that comes too late
+		want   string
+		err    error
+	}{
+		{"the read returns", "", func() ([]byte, error) { return []byte("a long secret"), nil }, "a long secret", nil},
+		{"the read fails", "", func() ([]byte, error) { return nil, failed }, "", failed},
+		{"cancelled before the prompt", beforePrompt, nil, "", context.Canceled},
+		{"cancelled before the read starts", whileHidden, nil, "", context.Canceled},
+		{"cancelled while the read waits", whileReading, nil, "", context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				stubPasswordInput(t, true)
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				terminal, changes := "saved", []string(nil)
+				hideInput = func() (func(), error) {
+					terminal, changes = "raw", append(changes, "raw")
+					if tc.cancel == whileHidden {
+						cancel()
+					}
+					return func() { terminal, changes = "saved", append(changes, "saved") }, nil
+				}
+				enter := make(chan struct{})
+				pressEnter := sync.OnceFunc(func() { close(enter) })
+				defer pressEnter()
+				if readPassword = tc.read; tc.read == nil {
+					readPassword = func() ([]byte, error) {
+						<-enter
+						return []byte("typed too late"), nil
+					}
+				}
+				if tc.cancel == beforePrompt {
+					cancel()
+				}
+				var prompts bytes.Buffer
+				var got string
+				var err error
+				returned := make(chan struct{})
+				go func() {
+					got, err = askPassword(ctx, &prompts, "New web password: ")
+					close(returned)
+				}()
+				synctest.Wait()
+				if tc.cancel == whileReading {
+					if terminal != "raw" || prompts.String() != "New web password: " {
+						t.Errorf("while the read waits: terminal %s, prompts %q", terminal, prompts.String())
+					}
+					cancel()
+					synctest.Wait()
+				}
+				select {
+				case <-returned:
+				default:
+					pressEnter()
+					<-returned
+					t.Fatal("the prompt still waits for the read after its context ended")
+				}
+				if got != tc.want || !errors.Is(err, tc.err) {
+					t.Errorf("password %q err %v, want %q and %v", got, err, tc.want, tc.err)
+				}
+				pressEnter()
+				synctest.Wait()
+				if terminal != "saved" || !slices.Equal(changes, []string{"raw", "saved"}) || prompts.String() != "New web password: \n" {
+					t.Fatalf("terminal %s after the changes %v, prompts %q", terminal, changes, prompts.String())
+				}
+			})
+		})
 	}
 }
 ```
 
-`synctest.Wait()` returns once every other goroutine of the test is blocked, so the test needs no sleep to know that the prompt is waiting.
+The test models the terminal as a string that only `hideInput` and the function it returns change. Its row `cancelled before the read starts` cancels the context from inside `hideInput`, before the reading goroutine exists. After every row the test lets the read that was left behind finish and then checks the terminal once more. `synctest.Wait()` returns once every other goroutine of the test is blocked, so the test needs no sleep to know that the prompt is waiting.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 6: Run the test to verify it fails**
 
 Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./cmd/ghr/`
-Expected: FAIL with `the prompt still waits for the read after its context ended`. Every other test of the package passes.
+Expected: FAIL in all five rows of `TestPasswordPromptAlwaysPutsTheTerminalBack`. The rows `the read returns` and `the read fails` print `terminal saved after the changes [], prompts "New web password: \n"`; the three cancelled rows print `the prompt still waits for the read after its context ended`. Every other test of the package passes.
 
-- [ ] **Step 3: Write the implementation**
+- [ ] **Step 7: Write the implementation**
 
 In `cmd/ghr/password.go` replace the whole `askPassword` function, including its comment,
 
@@ -2261,12 +2495,13 @@ func askPassword(ctx context.Context, prompts io.Writer, prompt string) (string,
 with
 
 ```go
-// askPassword reads one line without echo. Ctrl-C only cancels ctx, which
-// the blocked read does not see, so the read runs on its own goroutine. When
-// ctx ends first, the read is left behind for the exiting process, and the
-// terminal gets back the state saved before the read turned echo off.
+// askPassword reads one line without echo. It alone changes the terminal's
+// mode, on this goroutine: it hides the input before the read starts and puts
+// the terminal back once the read or ctx has ended, whichever is first. The
+// read blocks and does not see ctx, so it runs on its own goroutine and, when
+// ctx ends first, is left behind for the exiting process.
 func askPassword(ctx context.Context, prompts io.Writer, prompt string) (string, error) {
-	restore, err := saveTerminal()
+	restore, err := hideInput()
 	if err != nil {
 		return "", err
 	}
@@ -2275,45 +2510,167 @@ func askPassword(ctx context.Context, prompts io.Writer, prompt string) (string,
 		b   []byte
 		err error
 	}
+	// The goroutine calls the function read here: a prompt that was
+	// cancelled must not read the variable later.
 	read, done := readPassword, make(chan answer, 1)
 	go func() {
 		b, err := read()
 		done <- answer{b, err}
 	}()
+	var a answer
 	select {
-	case a := <-done:
-		fmt.Fprintln(prompts)
-		if a.err != nil {
-			return "", a.err
-		}
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		return string(a.b), nil
+	case a = <-done:
 	case <-ctx.Done():
-		restore()
-		fmt.Fprintln(prompts)
-		return "", ctx.Err()
 	}
+	restore()
+	fmt.Fprintln(prompts)
+	if a.err != nil {
+		return "", a.err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return string(a.b), nil
 }
 ```
 
-The line `read, done := readPassword, make(chan answer, 1)` matters: the goroutine must call the function value taken here, not read the package variable later. A goroutine left behind by a cancelled prompt would otherwise read the variable while a test puts the original back.
+Two things in it must stay as written. `restore()` is called once, after the `select`, on every path: do not move it into one of the cases, and do not let `readPassword` or `readHidden` change a terminal mode. And the line `read, done := readPassword, make(chan answer, 1)` takes the function value before the goroutine starts: a goroutine left behind by a cancelled prompt must not read the package variable later, while a test puts the original back.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 8: Run the tests to verify they pass**
 
 Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./cmd/ghr/`
 Expected: PASS (`ok  	github.com/darkraise/ghr/cmd/ghr`)
 
-Then run the package under the race detector: `PATH=/usr/local/go/bin:$PATH go test -race -count=20 ./cmd/ghr/`
+- [ ] **Step 9: Add the test on a real terminal**
+
+The tests so far only model a terminal. This one runs the real mode changes and the real read against a pseudo-terminal, which Linux provides without a new dependency, and compares the terminal's state before and after. It is added after the implementation because it cannot fail first in a useful way: against the old `askPassword` its last row would wait for input for ever. Create `cmd/ghr/password_linux_test.go` with exactly this content:
+
+```go
+package main
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"reflect"
+	"syscall"
+	"testing"
+	"unsafe"
+
+	"golang.org/x/term"
+)
+
+// openPTY returns both ends of a new pseudo-terminal. The second is a real
+// terminal as far as the prompt can tell; what is written to the first
+// arrives there as typed.
+func openPTY(t *testing.T) (master, tty *os.File) {
+	t.Helper()
+	master, err := os.OpenFile("/dev/ptmx", os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		t.Skipf("no pseudo-terminals here: %v", err)
+	}
+	t.Cleanup(func() { master.Close() })
+	var unlock int32
+	var number uint32
+	for _, call := range []struct {
+		request uintptr
+		arg     unsafe.Pointer
+	}{{syscall.TIOCSPTLCK, unsafe.Pointer(&unlock)}, {syscall.TIOCGPTN, unsafe.Pointer(&number)}} {
+		if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, master.Fd(), call.request, uintptr(call.arg)); errno != 0 {
+			t.Fatalf("pseudo-terminal ioctl %#x: %v", call.request, errno)
+		}
+	}
+	tty, err = os.OpenFile(fmt.Sprintf("/dev/pts/%d", number), os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tty.Close() })
+	return master, tty
+}
+
+// The stubs of the other tests only model a terminal. Here the prompt runs
+// its real mode changes and its real read against a pseudo-terminal, and the
+// terminal must end in the state it was found in.
+func TestPasswordPromptOnARealTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		typed string // typed once the input is hidden; "" cancels before the read starts
+		want  string
+		err   error
+	}{
+		{"a line is typed", "a long secret\r", "a long secret", nil},
+		{"Ctrl-C is typed", "a long\x03", "", errInterrupted},
+		{"cancelled before the read starts", "", "", context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			master, tty := openPTY(t)
+			stubPasswordInput(t, true)
+			found, err := term.GetState(int(tty.Fd()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			hideInput = func() (func(), error) {
+				restore, err := hideTerminal(tty)
+				if err != nil {
+					return nil, err
+				}
+				if tc.typed == "" {
+					cancel()
+				} else if _, err := master.WriteString(tc.typed); err != nil {
+					t.Error(err)
+				}
+				return restore, nil
+			}
+			readDone := make(chan struct{})
+			readPassword = func() ([]byte, error) {
+				defer close(readDone)
+				return readHidden(tty)
+			}
+			var prompts bytes.Buffer
+			got, err := askPassword(ctx, &prompts, "New web password: ")
+			if got != tc.want || !errors.Is(err, tc.err) {
+				t.Errorf("password %q err %v, want %q and %v", got, err, tc.want, tc.err)
+			}
+			if tc.typed == "" {
+				// The read left behind ends with the next line typed. It
+				// must leave the terminal as the prompt put it back.
+				if _, err := master.WriteString("typed too late\r"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			<-readDone
+			left, err := term.GetState(int(tty.Fd()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(left, found) {
+				t.Fatalf("the terminal was left in another state than it was found in:\n%+v\n%+v", left, found)
+			}
+		})
+	}
+}
+```
+
+The file name ends in `_linux_test.go`, so other systems do not build it. The row `Ctrl-C is typed` types into the terminal once it is in raw mode, from inside `hideInput`; the row `cancelled before the read starts` cancels at the same point.
+
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./cmd/ghr/ -run 'TestPasswordPromptOnARealTerminal' -v`
+Expected: PASS, with `--- PASS` for all three rows. A `--- SKIP` with `no pseudo-terminals here` means the machine has no `/dev/ptmx`; report that instead of continuing.
+
+- [ ] **Step 10: Run the package under the race detector**
+
+Run: `PATH=/usr/local/go/bin:$PATH go test -race -count=10 ./cmd/ghr/`
 Expected: PASS (`ok  	github.com/darkraise/ghr/cmd/ghr`), with no `WARNING: DATA RACE`
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 11: Commit**
 
 Run `PATH=/usr/local/go/bin:$PATH gofmt -l internal/ cmd/` (must print nothing), then:
 
 ```bash
-git add cmd/ghr/password.go cmd/ghr/cli_test.go
+git add cmd/ghr/password.go cmd/ghr/cli_test.go cmd/ghr/password_linux_test.go
 git commit -m "fix(cli): end a password prompt on Ctrl-C"
 ```
 
@@ -2703,12 +3060,12 @@ git commit -m "fix(config): load an empty file as defaults"
 ### Task 10: Save through a symlink, and sync
 
 **Files:**
-- Modify: `internal/config/config.go` (`Save`)
-- Test: `internal/config/config_test.go` (`TestSaveThroughSymlinkReplacesTheTarget`)
+- Modify: `internal/config/config.go` (`Save`, new `saveTarget`, new `maxLinkHops`, new `syncFile`)
+- Test: `internal/config/config_test.go` (imports, helpers `saveOwner`, `isSymlink` and `stubSync`, `TestSaveThroughSymlinkReplacesTheTarget`, `TestSaveThroughDanglingSymlinkCreatesTheTarget`, `TestSaveThroughLinkChain`, `TestSaveWritesNothingWhenTheLinkCannotBeResolved`, `TestSaveSyncsBeforeTheRename`, `TestSaveKeepsTheFileWhenSyncFails`)
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: nothing
+- Produces: nothing a later task names (`syncFile` and `saveTarget` are unexported and only this package's tests use them)
 
 **Items:** 59, 206
 **Implementer:** dr-superpowers:impl-sonnet-medium
@@ -2716,15 +3073,37 @@ git commit -m "fix(config): load an empty file as defaults"
 
 `Save` writes a temporary file beside `path` and renames it over `path`. When `path` is a symbolic link (an administrator keeps `config.yaml` in another directory and links it), the rename replaces the link with a regular file, and the real file is never updated. `Save` also never syncs the temporary file, so a power loss after the rename can leave an empty `config.yaml`; `metrics.Save` and the history store already sync before they rename.
 
-After this task `Save` resolves `path` first, so the temporary file is created beside the file the link names and the rename replaces that file; the link stays. The temporary file is synced before the rename. Mode 0600 stays: the directory is 0700 and only the daemon reads the file.
+This task has two cycles, each with its own test.
 
-The sync has no test: nothing observable differs without it short of killing the machine. It is one call, checked by the existing round-trip tests staying green.
+- **The link.** `Save` first resolves where `path` leads: if `path` is a symbolic link it reads the link, resolves a relative target against the link's directory, and follows a chain of links, at most 8. The last file may not exist yet (the target can disappear after the config was loaded); it is then created. The temporary file is created beside that final file and renamed onto it, never onto a link, so every link in the chain stays. Any other resolution failure (a missing directory on the way, a loop, more than 8 links) is returned as an error and nothing is written. A `path` that does not exist yet (the first save) is used as it is.
+- **The sync.** The temporary file is synced before the rename. The call goes through a package variable, `syncFile`, so a test can see when it runs and make it fail. If the sync fails, `Save` returns the error, `config.yaml` keeps its old content and the temporary file is removed (the existing `defer os.Remove` does that).
 
-- [ ] **Step 1: Write the failing test**
+Mode 0600 stays: the directory is 0700 and only the daemon reads the file.
 
-In `internal/config/config_test.go`, add this test directly above `func TestSaveRejectsInvalid(t *testing.T) {`:
+- [ ] **Step 1: Write the failing link tests**
+
+In `internal/config/config_test.go`, add this code directly above `func TestSaveRejectsInvalid(t *testing.T) {`:
 
 ```go
+func saveOwner(t *testing.T, path, owner string) error {
+	t.Helper()
+	c, _, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Owner = owner
+	return Save(path, c)
+}
+
+func isSymlink(t *testing.T, path string) bool {
+	t.Helper()
+	fi, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fi.Mode()&os.ModeSymlink != 0
+}
+
 func TestSaveThroughSymlinkReplacesTheTarget(t *testing.T) {
 	dir := t.TempDir()
 	targetDir := filepath.Join(dir, "elsewhere")
@@ -2739,20 +3118,11 @@ func TestSaveThroughSymlinkReplacesTheTarget(t *testing.T) {
 	if err := os.Symlink(filepath.Join("elsewhere", "config.yaml"), link); err != nil {
 		t.Fatal(err)
 	}
-	c, _, err := Parse([]byte(sample))
-	if err != nil {
+	if err := saveOwner(t, link, "after"); err != nil {
 		t.Fatal(err)
 	}
-	c.Owner = "after"
-	if err := Save(link, c); err != nil {
-		t.Fatal(err)
-	}
-	fi, err := os.Lstat(link)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("the link was replaced by a file with mode %v", fi.Mode())
+	if !isSymlink(t, link) {
+		t.Fatal("the link was replaced by a file")
 	}
 	if got, _ := os.Readlink(link); got != filepath.Join("elsewhere", "config.yaml") {
 		t.Fatalf("link now points at %q", got)
@@ -2771,14 +3141,103 @@ func TestSaveThroughSymlinkReplacesTheTarget(t *testing.T) {
 		}
 	}
 }
+
+// The target can disappear after the file was loaded; the link must still
+// stay a link and the target must be created.
+func TestSaveThroughDanglingSymlinkCreatesTheTarget(t *testing.T) {
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "elsewhere")
+	if err := os.Mkdir(targetDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink(filepath.Join("elsewhere", "config.yaml"), link); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveOwner(t, link, "after"); err != nil {
+		t.Fatal(err)
+	}
+	if !isSymlink(t, link) {
+		t.Fatal("the link was replaced by a file")
+	}
+	back, _, err := Load(filepath.Join(targetDir, "config.yaml"))
+	if err != nil || back.Owner != "after" {
+		t.Fatalf("target after save: owner %q, err %v", back.Owner, err)
+	}
+}
+
+func TestSaveThroughLinkChain(t *testing.T) {
+	dir := t.TempDir()
+	realDir := filepath.Join(dir, "real")
+	if err := os.Mkdir(realDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(realDir, "config.yaml")
+	middle := filepath.Join(dir, "middle.yaml")
+	if err := os.Symlink(target, middle); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink("middle.yaml", link); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveOwner(t, link, "after"); err != nil {
+		t.Fatal(err)
+	}
+	if !isSymlink(t, link) || !isSymlink(t, middle) {
+		t.Fatal("a link in the chain was replaced by a file")
+	}
+	back, _, err := Load(target)
+	if err != nil || back.Owner != "after" {
+		t.Fatalf("target after save: owner %q, err %v", back.Owner, err)
+	}
+}
+
+func TestSaveWritesNothingWhenTheLinkCannotBeResolved(t *testing.T) {
+	for name, build := range map[string]func(t *testing.T, dir string) string{
+		"loop": func(t *testing.T, dir string) string {
+			a, b := filepath.Join(dir, "a.yaml"), filepath.Join(dir, "b.yaml")
+			if err := os.Symlink("b.yaml", a); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("a.yaml", b); err != nil {
+				t.Fatal(err)
+			}
+			return a
+		},
+		"missing directory": func(t *testing.T, dir string) string {
+			link := filepath.Join(dir, "config.yaml")
+			if err := os.Symlink(filepath.Join("missing", "config.yaml"), link); err != nil {
+				t.Fatal(err)
+			}
+			return link
+		},
+	} {
+		dir := t.TempDir()
+		link := build(t, dir)
+		before, _ := os.ReadDir(dir)
+		if err := saveOwner(t, link, "after"); err == nil {
+			t.Errorf("%s: Save returned nil", name)
+		}
+		after, _ := os.ReadDir(dir)
+		if len(after) != len(before) {
+			t.Errorf("%s: directory held %v, now %v", name, before, after)
+		}
+		for _, e := range before {
+			if fi, err := os.Lstat(filepath.Join(dir, e.Name())); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+				t.Errorf("%s: %s is no longer a link (%v)", name, e.Name(), err)
+			}
+		}
+	}
+}
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/config/ -run TestSaveThroughSymlinkReplacesTheTarget`
-Expected: FAIL with `the link was replaced by a file with mode -rw-------`
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/config/ -run 'TestSaveThrough|TestSaveWritesNothing'`
+Expected: FAIL with `the link was replaced by a file` (in `TestSaveThroughSymlinkReplacesTheTarget` and in `TestSaveThroughDanglingSymlinkCreatesTheTarget`), `a link in the chain was replaced by a file`, and `loop: Save returned nil` and `missing directory: Save returned nil`
 
-- [ ] **Step 3: Write the implementation**
+- [ ] **Step 3: Write the link implementation**
 
 In `internal/config/config.go`, replace the comment and the start of `Save`
 
@@ -2798,9 +3257,48 @@ func Save(path string, c *Config) error {
 with
 
 ```go
-// Save validates c, then writes it atomically (temp file beside the file, synced,
-// then renamed over it). When path is a symbolic link, the file it names is
-// replaced and the link stays.
+// maxLinkHops is how many symbolic links saveTarget follows before it gives up.
+const maxLinkHops = 8
+
+// saveTarget returns the file Save replaces: path itself, or the file at the
+// end of the symbolic links that start there. That file may not exist yet.
+// Anything else that stops the resolution is an error, so Save never writes
+// over a link.
+func saveTarget(path string) (string, error) {
+	orig := path
+	for hops := 0; ; hops++ {
+		dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(dir, filepath.Base(path))
+		fi, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return path, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+		if hops == maxLinkHops {
+			return "", fmt.Errorf("%s: more than %d symbolic links", orig, maxLinkHops)
+		}
+		dest, err := os.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(dest) {
+			dest = filepath.Join(dir, dest)
+		}
+		path = dest
+	}
+}
+
+// Save validates c, then writes it atomically (temp file beside the file, then
+// renamed over it). When path is a symbolic link, the file at the end of the
+// link is replaced and the link stays.
 func Save(path string, c *Config) error {
 	if _, err := c.Validate(); err != nil {
 		return err
@@ -2809,13 +3307,118 @@ func Save(path string, c *Config) error {
 	if err != nil {
 		return err
 	}
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		path = real
+	path, err = saveTarget(path)
+	if err != nil {
+		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.yaml")
 ```
 
-Then, in the same function, replace
+`errors` and `fmt` are already imported in this file.
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/config/`
+Expected: PASS (`ok  	github.com/darkraise/ghr/internal/config`)
+
+- [ ] **Step 5: Add the sync seam**
+
+In `internal/config/config.go`, directly above the line `// maxLinkHops is how many symbolic links saveTarget follows before it gives up.`, add:
+
+```go
+// syncFile is os.File.Sync; a test replaces it to see when the sync runs and to
+// make it fail.
+var syncFile = (*os.File).Sync
+
+```
+
+Nothing calls it yet, so behaviour is unchanged.
+
+- [ ] **Step 6: Write the failing sync tests**
+
+In `internal/config/config_test.go`, replace
+
+```go
+import (
+	"encoding/json"
+	"os"
+```
+
+with
+
+```go
+import (
+	"encoding/json"
+	"errors"
+	"os"
+```
+
+Then add this code directly above `func TestSaveRejectsInvalid(t *testing.T) {`:
+
+```go
+func stubSync(t *testing.T, stub func(*os.File) error) {
+	t.Helper()
+	orig := syncFile
+	syncFile = stub
+	t.Cleanup(func() { syncFile = orig })
+}
+
+func TestSaveSyncsBeforeTheRename(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("owner: before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	var targetAtSync, tempAtSync string
+	stubSync(t, func(f *os.File) error {
+		calls++
+		b, _ := os.ReadFile(path)
+		targetAtSync = string(b)
+		b, _ = os.ReadFile(f.Name())
+		tempAtSync = string(b)
+		return nil
+	})
+	if err := saveOwner(t, path, "after"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("sync ran %d times, want 1", calls)
+	}
+	if targetAtSync != "owner: before\n" {
+		t.Fatalf("config.yaml held %q when the temp file was synced, want the old content", targetAtSync)
+	}
+	if !strings.Contains(tempAtSync, "owner: after") {
+		t.Fatalf("temp file held %q when synced, want the new config", tempAtSync)
+	}
+}
+
+func TestSaveKeepsTheFileWhenSyncFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("owner: before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stubSync(t, func(*os.File) error { return errors.New("disk full") })
+	if err := saveOwner(t, path, "after"); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("Save returned %v, want the sync error", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "owner: before\n" {
+		t.Fatalf("config.yaml now holds %q", b)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Fatalf("directory holds %v, want only config.yaml", entries)
+	}
+}
+```
+
+- [ ] **Step 7: Run the tests to verify they fail**
+
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/config/ -run 'TestSaveSyncs|TestSaveKeepsTheFile'`
+Expected: FAIL with `sync ran 0 times, want 1` and `Save returned <nil>, want the sync error`
+
+- [ ] **Step 8: Write the sync implementation**
+
+In `internal/config/config.go`, in `Save`, replace
 
 ```go
 	if err := tmp.Chmod(0o600); err != nil {
@@ -2832,21 +3435,19 @@ with
 		tmp.Close()
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
+	if err := syncFile(tmp); err != nil {
 		tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 ```
 
-`EvalSymlinks` fails when `path` does not exist yet (the first save), and `path` is then used as it is.
-
-- [ ] **Step 4: Run the tests to verify they pass**
+- [ ] **Step 9: Run the tests to verify they pass**
 
 Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/config/`
 Expected: PASS (`ok  	github.com/darkraise/ghr/internal/config`)
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 10: Commit**
 
 Run `PATH=/usr/local/go/bin:$PATH gofmt -l internal/config/` (must print nothing), then:
 
@@ -2858,8 +3459,8 @@ git commit -m "fix(config): save through a symlink and sync"
 ### Task 11: Downloads only from the tool's own releases
 
 **Files:**
-- Modify: `internal/toolchain/toolchain.go` (`Env`)
-- Modify: `internal/toolchain/env.go` (`NewEnv`, new `httpsUnder`)
+- Modify: `internal/toolchain/toolchain.go` (`Env`, new `Origin`)
+- Modify: `internal/toolchain/env.go` (`NewEnv`, new `httpsFrom`)
 - Modify: `internal/toolchain/layout.go` (new `fetch`, `installArchive`)
 - Modify: `internal/toolchain/node.go`
 - Modify: `internal/toolchain/python.go`
@@ -2873,7 +3474,7 @@ git commit -m "fix(config): save through a symlink and sync"
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `Env.Allow func(url, base string) error`; `(*Env).fetch(ctx context.Context, base, rawURL, dst string) error`; `(*Env).installArchive(ctx, toolDir, base string, rel Release, progress func(string)) error`; `httpsUnder(rawURL, base string) error`; `nodeReleases`, `pythonReleases`, `javaReleases(version string) string`; the error text `refusing to download <url>`
+- Produces: `type Origin struct{ Dir, File string }`; `Env.Allow func(url string, from Origin) error`; `(*Env).fetch(ctx context.Context, from Origin, rawURL, dst string) error`; `(*Env).installArchive(ctx context.Context, toolDir string, from Origin, rel Release, progress func(string)) error`; `httpsFrom(rawURL string, from Origin) error`; `nodeReleases`, `pythonReleases`, `javaReleases(version string) string`; the error text `refusing to download <url>`
 
 **Items:** 60
 **Implementer:** dr-superpowers:impl-opus-high
@@ -2881,7 +3482,7 @@ git commit -m "fix(config): save through a symlink and sync"
 
 The daemon runs as root. It downloads each toolchain from a URL that a version list names (Node, Python, Java) or that it builds from a configured source (Go, .NET), and then unpacks the archive or runs the script. Today any URL is fetched: a tampered list can point the download anywhere.
 
-After this task every download goes through one function, `Env.fetch`. It first asks `Env.Allow` whether the URL lies under the URL prefix the installer itself passes (its own releases, never anything read from the list), and only then hands that same string to `Env.Fetch`. `NewEnv` sets the strict check `httpsUnder`. A refused URL fails the install with exactly `refusing to download <url>`. The test fixture replaces `Allow`, so the other tests keep their local `httptest` servers.
+After this task every download goes through one function, `Env.fetch`. It first asks `Env.Allow` whether the URL comes from the `Origin` the installer itself passes (never anything read from the list), and only then hands that same string to `Env.Fetch`. An `Origin` is one of two rules. A directory rule (`Dir`: Node, Python, Java, Go) passes a URL below a directory whose URL ends in `/`; a directory written without that slash passes nothing, because `/dl` is also a prefix of `/dlx/`. An exact-file rule (`File`: .NET) passes only the configured script URL itself. `NewEnv` sets the strict check `httpsFrom`. A refused URL fails the install with exactly `refusing to download <url>`. The test fixture replaces `Allow`, so the other tests keep their local `httptest` servers.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2977,6 +3578,14 @@ func TestInstallDownloadsOnlyFromItsOwnToolsReleases(t *testing.T) {
 		{"dotnet", "8.0.414", "http://builds.dotnet.microsoft.com/dotnet/scripts/v1/dotnet-install.sh", true},
 		{"dotnet", "8.0.414", "https://github.com/dotnet/install-scripts/raw/main/src/dotnet-install.sh", true},
 		{"dotnet", "8.0.414", "https://builds.dotnet.microsoft.com/dotnet/scripts/v2/dotnet-install.sh", true},
+		{"dotnet", "8.0.414", realDotnetURL + ".other", true},
+		{"dotnet", "8.0.414", realDotnetURL + "/another-script", true},
+		{"dotnet", "8.0.414", realDotnetURL + "/", true},
+		{"dotnet", "8.0.414", "https://builds.dotnet.microsoft.com/dotnet/scripts/v1/dotnet-install", true},
+		{"dotnet", "8.0.414", "https://user@builds.dotnet.microsoft.com/dotnet/scripts/v1/dotnet-install.sh", true},
+		{"dotnet", "8.0.414", "https://builds.dotnet.microsoft.com:443/dotnet/scripts/v1/dotnet-install.sh", true},
+		{"dotnet", "8.0.414", realDotnetURL + "?x=1", true},
+		{"dotnet", "8.0.414", realDotnetURL + "#x", true},
 	}
 	for _, c := range cases {
 		fetched, err := strictInstall(t, c.tool, c.version, c.url, nil)
@@ -3047,22 +3656,57 @@ func TestNewEnvRefusesALocalSource(t *testing.T) {
 	wantRefused(t, "go", "http://127.0.0.1:8080/dl/go1.25.1.linux-amd64.tar.gz", fetched, err)
 	fetched, err = strictInstall(t, "dotnet", "8.0.414", "http://127.0.0.1:8080/dotnet-install.sh", local)
 	wantRefused(t, "dotnet", "http://127.0.0.1:8080/dotnet-install.sh", fetched, err)
-	tls := func(s *Sources) { s.GoDownload = "https://127.0.0.1:8080/dl/" }
+	tls := func(s *Sources) {
+		s.GoDownload = "https://127.0.0.1:8080/dl/"
+		s.DotnetScript = "https://127.0.0.1:8080/dotnet-install.sh"
+	}
 	fetched, err = strictInstall(t, "go", "1.25.1", "https://127.0.0.1:8080/dl/go1.25.1.linux-amd64.tar.gz", tls)
 	wantRefused(t, "go", "https://127.0.0.1:8080/dl/go1.25.1.linux-amd64.tar.gz", fetched, err)
+	fetched, err = strictInstall(t, "dotnet", "8.0.414", "https://127.0.0.1:8080/dotnet-install.sh", tls)
+	wantRefused(t, "dotnet", "https://127.0.0.1:8080/dotnet-install.sh", fetched, err)
+}
+
+// A directory given without its closing slash would also cover its siblings
+// ("/dl" is a prefix of "/dlx/"), so it is no directory at all.
+func TestInstallRefusesADirectoryWithoutItsSlash(t *testing.T) {
+	noSlash := func(s *Sources) { s.GoDownload = "https://go.dev/dl" }
+	for _, u := range []string{
+		"https://go.dev/dl/go1.25.1.linux-amd64.tar.gz",
+		"https://go.dev/dlx/go1.25.1.linux-amd64.tar.gz",
+		"https://go.dev/dl",
+	} {
+		fetched, err := strictInstall(t, "go", "1.25.1", u, noSlash)
+		wantRefused(t, "go", u, fetched, err)
+	}
+}
+
+// The one file an installer may fetch is held to the same shape rules as a
+// URL below a directory, even when the configured URL breaks them itself.
+func TestInstallRefusesAConfiguredFileThatIsNotPlain(t *testing.T) {
+	for _, script := range []string{
+		realDotnetURL + "?x=1",
+		realDotnetURL + "#x",
+		"https://user@builds.dotnet.microsoft.com/dotnet/scripts/v1/dotnet-install.sh",
+		"https://builds.dotnet.microsoft.com/dotnet/scripts/v1/../v1/dotnet-install.sh",
+	} {
+		fetched, err := strictInstall(t, "dotnet", "8.0.414", script, func(s *Sources) { s.DotnetScript = script })
+		wantRefused(t, "dotnet", script, fetched, err)
+	}
 }
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/toolchain/ -run 'TestInstallDownloadsOnlyFromItsOwnToolsReleases|TestInstallRefusesAURLThatIsNotPlain|TestNewEnvRefusesALocalSource'`
-Expected: FAIL in all three tests. The first line is `download_test.go:94: node "http://github.com/actions/node-versions/releases/download/22.11.0-11593095476/node-22.11.0-linux-x64.tar.gz": got download: fetched, want it refused`
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/toolchain/ -run 'TestInstallDownloadsOnlyFromItsOwnToolsReleases|TestInstallRefuses|TestNewEnvRefusesALocalSource'`
+Expected: FAIL in all five new tests. The first line is `download_test.go:102: node "http://github.com/actions/node-versions/releases/download/22.11.0-11593095476/node-22.11.0-linux-x64.tar.gz": got download: fetched, want it refused`
 
-If your shell refuses a `|` inside a command, run the three tests one at a time instead. Each must FAIL:
+If your shell refuses a `|` inside a command, run the five tests one at a time instead. Each must FAIL:
 
 - `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/toolchain/ -run 'TestInstallDownloadsOnlyFromItsOwnToolsReleases'`, first line as above
-- `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/toolchain/ -run 'TestInstallRefusesAURLThatIsNotPlain'`, first line `download_test.go:145: node "https://GitHub.com/actions/node-versions/releases/download/1/node.tar.gz": got download: fetched, want it refused`
-- `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/toolchain/ -run 'TestNewEnvRefusesALocalSource'`, first line `download_test.go:157: go "http://127.0.0.1:8080/dl/go1.25.1.linux-amd64.tar.gz": got download: fetched, want it refused`
+- `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/toolchain/ -run 'TestInstallRefusesAURLThatIsNotPlain'`, first line `download_test.go:153: node "https://GitHub.com/actions/node-versions/releases/download/1/node.tar.gz": got download: fetched, want it refused`
+- `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/toolchain/ -run 'TestNewEnvRefusesALocalSource'`, first line `download_test.go:165: go "http://127.0.0.1:8080/dl/go1.25.1.linux-amd64.tar.gz": got download: fetched, want it refused`
+- `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/toolchain/ -run 'TestInstallRefusesADirectoryWithoutItsSlash'`, first line `download_test.go:188: go "https://go.dev/dl/go1.25.1.linux-amd64.tar.gz": got download: fetched, want it refused`
+- `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/toolchain/ -run 'TestInstallRefusesAConfiguredFileThatIsNotPlain'`, first line `download_test.go:202: dotnet "https://builds.dotnet.microsoft.com/dotnet/scripts/v1/dotnet-install.sh?x=1": got download: fetched, want it refused`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -3078,10 +3722,27 @@ with
 ```go
 	Fetch   func(ctx context.Context, url, dst string) error
 	// Allow returns an error unless url may be downloaded for an installer
-	// whose files live under the URL prefix base. A version list names the
-	// URL, and what it downloads is unpacked or run on this machine.
-	Allow   func(url, base string) error
+	// whose files come from from. A version list names the URL, and what it
+	// downloads is unpacked or run on this machine.
+	Allow   func(url string, from Origin) error
 	Run     func(ctx context.Context, name string, args ...string) ([]byte, error)
+```
+
+In the same file, replace the line
+
+```go
+// Env is what the installers need from the host.
+```
+
+with
+
+```go
+// Origin is where an installer's downloads may come from: every URL below
+// the directory Dir, which must end in "/", or the one URL File. Exactly one
+// of the two is set.
+type Origin struct{ Dir, File string }
+
+// Env is what the installers need from the host.
 ```
 
 In `internal/toolchain/env.go`, in the import block, replace
@@ -3112,32 +3773,28 @@ with
 
 ```go
 		Fetch:   fetch,
-		Allow:   httpsUnder,
+		Allow:   httpsFrom,
 		Run:     run,
 ```
 
 and add this function directly above the line `// GetTimeout bounds one read of a version list.`:
 
 ```go
-// httpsUnder is the download check the daemon uses. It passes rawURL only
-// when it is an https URL on base's host, with no user, port, query or
-// fragment, whose path lies below base's and holds nothing a server could
-// resolve to another place: dot segments, doubled or encoded slashes, encoded
-// dots, backslashes. The host must match byte for byte, because case folding
-// maps some non-ASCII letters onto ASCII ones.
-func httpsUnder(rawURL, base string) error {
+// httpsFrom is the download check the daemon uses. It passes rawURL only when
+// it is an https URL with no user, port, query or fragment, whose path holds
+// nothing a server could resolve to another place (dot segments, doubled or
+// encoded slashes, encoded dots, backslashes), and which is from's one file
+// or lies below from's directory on the same host. The host must match byte
+// for byte, because case folding maps some non-ASCII letters onto ASCII ones.
+func httpsFrom(rawURL string, from Origin) error {
 	refused := fmt.Errorf("refusing to download %s", rawURL)
-	b, err := url.Parse(base)
-	if err != nil || b.Scheme != "https" || b.Host == "" {
-		return refused
-	}
 	u, err := url.Parse(rawURL)
 	// A URL that does not print back as written carries something the parsed
 	// fields do not show, such as an empty fragment.
 	if err != nil || u.String() != rawURL {
 		return refused
 	}
-	if u.Scheme != "https" || u.User != nil || u.Port() != "" || u.Host != b.Host {
+	if u.Scheme != "https" || u.Host == "" || u.User != nil || u.Port() != "" {
 		return refused
 	}
 	if u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
@@ -3147,7 +3804,22 @@ func httpsUnder(rawURL, base string) error {
 	if strings.Contains(escaped, "%2f") || strings.Contains(escaped, "%2e") || strings.Contains(u.Path, `\`) {
 		return refused
 	}
-	if path.Clean(u.Path) != u.Path || !strings.HasPrefix(u.Path, b.Path) {
+	if path.Clean(u.Path) != u.Path {
+		return refused
+	}
+	switch {
+	case from.File != "" && from.Dir == "":
+		if rawURL != from.File {
+			return refused
+		}
+	case from.Dir != "" && from.File == "":
+		// Without its closing slash a directory would also cover its
+		// siblings: "/dl" is a prefix of "/dlx/".
+		d, err := url.Parse(from.Dir)
+		if err != nil || d.Scheme != "https" || d.Host != u.Host || !strings.HasSuffix(d.Path, "/") || !strings.HasPrefix(u.Path, d.Path) {
+			return refused
+		}
+	default:
 		return refused
 	}
 	return nil
@@ -3166,9 +3838,9 @@ with
 
 ```go
 // fetch is the one way an installer downloads: Allow judges rawURL against
-// the installer's own base, and Fetch then gets that same string.
-func (e *Env) fetch(ctx context.Context, base, rawURL, dst string) error {
-	if err := e.Allow(rawURL, base); err != nil {
+// the installer's own origin, and Fetch then gets that same string.
+func (e *Env) fetch(ctx context.Context, from Origin, rawURL, dst string) error {
+	if err := e.Allow(rawURL, from); err != nil {
 		return err
 	}
 	if err := e.Fetch(ctx, rawURL, dst); err != nil {
@@ -3177,10 +3849,10 @@ func (e *Env) fetch(ctx context.Context, base, rawURL, dst string) error {
 	return nil
 }
 
-// installArchive installs rel's archive, which must lie under base, at
+// installArchive installs rel's archive, which must come from from, at
 // <Root>/<toolDir>/<rel.Folder>/x64, the layout @actions/tool-cache find()
 // reads, writing the marker last.
-func (e *Env) installArchive(ctx context.Context, toolDir, base string, rel Release, progress func(string)) error {
+func (e *Env) installArchive(ctx context.Context, toolDir string, from Origin, rel Release, progress func(string)) error {
 ```
 
 and in the body of `installArchive` replace
@@ -3195,7 +3867,7 @@ and in the body of `installArchive` replace
 with
 
 ```go
-	if err := e.fetch(ctx, base, rel.URL, archive); err != nil {
+	if err := e.fetch(ctx, from, rel.URL, archive); err != nil {
 		return err
 	}
 	if err := verify(archive, rel.SHA256); err != nil {
@@ -3226,7 +3898,7 @@ and replace
 with
 
 ```go
-	return n.e.installArchive(ctx, n.dir, nodeReleases, rel, progress)
+	return n.e.installArchive(ctx, n.dir, Origin{Dir: nodeReleases}, rel, progress)
 ```
 
 In `internal/toolchain/python.go`, replace
@@ -3257,7 +3929,7 @@ and replace
 with
 
 ```go
-	if err := e.fetch(ctx, pythonReleases, rel.URL, archive); err != nil {
+	if err := e.fetch(ctx, Origin{Dir: pythonReleases}, rel.URL, archive); err != nil {
 		return err
 	}
 	progress("extracting")
@@ -3295,7 +3967,7 @@ and replace
 with
 
 ```go
-	return j.e.installArchive(ctx, javaDir, javaReleases(rel.Version), rel, progress)
+	return j.e.installArchive(ctx, javaDir, Origin{Dir: javaReleases(rel.Version)}, rel, progress)
 ```
 
 In `internal/toolchain/golang.go`, replace
@@ -3307,7 +3979,7 @@ In `internal/toolchain/golang.go`, replace
 with
 
 ```go
-	return g.e.installArchive(ctx, g.dir, g.e.Sources.GoDownload, rel, progress)
+	return g.e.installArchive(ctx, g.dir, Origin{Dir: g.e.Sources.GoDownload}, rel, progress)
 ```
 
 In `internal/toolchain/dotnet.go`, replace
@@ -3321,7 +3993,7 @@ In `internal/toolchain/dotnet.go`, replace
 with
 
 ```go
-	if err := e.fetch(ctx, e.Sources.DotnetScript, rel.URL, filepath.Join(op, "dotnet-install.sh")); err != nil {
+	if err := e.fetch(ctx, Origin{File: e.Sources.DotnetScript}, rel.URL, filepath.Join(op, "dotnet-install.sh")); err != nil {
 		return err
 	}
 ```
@@ -3341,20 +4013,20 @@ with
 
 ```go
 		Fetch: system.Download,
-		Allow: func(string, string) error { return nil },
+		Allow: func(string, Origin) error { return nil },
 		Run:   f.host.run,
 ```
 
-`installArchive` has a new third parameter. `internal/toolchain/install_test.go` calls it seven times and `internal/toolchain/hardening_test.go` twice, each time with `"demo", rel, func(`. Give every call the fixture server as its base:
+`installArchive` has a new third parameter. `internal/toolchain/install_test.go` calls it seven times and `internal/toolchain/hardening_test.go` twice, each time with `"demo", rel, func(`. Give every call the fixture server as its directory:
 
 ```bash
-sed -i 's|"demo", rel, func(|"demo", f.url+"/", rel, func(|' internal/toolchain/install_test.go internal/toolchain/hardening_test.go
+sed -i 's|"demo", rel, func(|"demo", Origin{Dir: f.url + "/"}, rel, func(|' internal/toolchain/install_test.go internal/toolchain/hardening_test.go
 ```
 
 After it, a call reads for example
 
 ```go
-	if err := f.installArchive(context.Background(), "demo", f.url+"/", rel, func(string) {}); err != nil {
+	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); err != nil {
 ```
 
 - [ ] **Step 5: Run the tests to verify they pass**
@@ -4521,13 +5193,13 @@ git commit -m "fix(storage): count a hard-linked file once"
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `KEYRING_DIR` and `DOCKER_KEY_FINGERPRINT` in `deploy/setup.sh`; `new_case` in the test script sets `KEYRING_DIR` per case
+- Produces: `KEYRING_DIR` and `DOCKER_KEY_FINGERPRINT` in `deploy/setup.sh`; in the test script, `KEYRING_DIR` redirected into `$T` for the whole run (`DEFAULT_KEYRING_DIR` keeps the script's value), set per case by `new_case`, and checked by `run`
 
 **Items:** 67
 **Implementer:** dr-superpowers:impl-sonnet-medium
 **Evaluation:** files 1 - spec 0 - coupling 0 - risk 3 = 4
 
-`install_docker` downloads Docker's apt key straight into `/etc/apt/keyrings/docker.asc` and trusts whatever arrives. apt trusts every key in a `Signed-By` file and may read a crafted file differently from `gpg`, so checking the downloaded file and then installing the same bytes is not enough. After this task the key is downloaded once into a fresh temporary directory, imported into a throwaway keyring (a `--homedir` of mode 0700 inside it), and only `gpg`'s own export of the pinned key (primary fingerprint `9DC858229FC7DD38854AE2D88D81803C0EBFCD88`, the full 40 characters) is installed to `docker.asc`. Any failure before the install (download, import, the pinned key missing, a different primary fingerprint, an empty or header-less export) stops with `Docker apt key has an unexpected fingerprint` and writes nothing to the keyring directory, so an existing `docker.asc` stays as it was. `gnupg` joins `ca-certificates` and `curl` in the first `apt-get install`. The key directory becomes a variable, `KEYRING_DIR`, so the tests can redirect it.
+`install_docker` downloads Docker's apt key straight into `/etc/apt/keyrings/docker.asc` and trusts whatever arrives. apt trusts every key in a `Signed-By` file and may read a crafted file differently from `gpg`, so checking the downloaded file and then installing the same bytes is not enough. After this task the key is downloaded once into a fresh temporary directory, imported into a throwaway keyring (a `--homedir` of mode 0700 inside it), and only `gpg`'s own export of the pinned key (primary fingerprint `9DC858229FC7DD38854AE2D88D81803C0EBFCD88`, the full 40 characters) is installed to `docker.asc`. Any failure before the install (download, import, the pinned key missing, a different primary fingerprint, an empty or header-less export) stops with `Docker apt key has an unexpected fingerprint` and writes nothing to the keyring directory, so an existing `docker.asc` stays as it was. `gnupg` joins `ca-certificates` and `curl` in the first `apt-get install`. The key directory becomes a variable, `KEYRING_DIR`, so the tests can redirect it; the test script redirects it into its temporary tree for the whole run, and its `run` helper refuses to start a function while it points anywhere else.
 
 Do not run `deploy/setup.sh` itself on a development host; it installs Docker. The steps below run only `deploy/tests/setup_test.sh`, which replaces every external command with a function and points every path into a temporary directory.
 
@@ -4580,7 +5252,49 @@ with
 
 - [ ] **Step 2: Write the failing test**
 
-Three edits in `deploy/tests/setup_test.sh`. First, every case gets its own keyring directory.
+Five edits in `deploy/tests/setup_test.sh`. First, the whole run is redirected: the keyring directory points into the temporary tree before any case runs, and `run`, which starts every `setup.sh` function under test, refuses to start while it points anywhere else. This keeps the tests away from the real `/etc/apt/keyrings`.
+
+In `deploy/tests/setup_test.sh`, replace
+
+```bash
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
+```
+
+with
+
+```bash
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
+
+# setup.sh installs Docker's key under /etc. The directory is redirected into $T
+# before any case runs; run refuses to start a function while it points elsewhere.
+DEFAULT_KEYRING_DIR=$KEYRING_DIR
+KEYRING_DIR="$T/keyrings"
+```
+
+In `deploy/tests/setup_test.sh`, replace
+
+```bash
+# Runs a setup.sh function the way main runs: errexit on, die exits a subshell.
+run() { (set -e; "$@"); }
+```
+
+with
+
+```bash
+# Runs a setup.sh function the way main runs: errexit on, die exits a subshell.
+# It refuses to run while a redirected directory points outside the temporary tree.
+run() {
+  case "$KEYRING_DIR" in
+    "$T"/*) ;;
+    *) echo "refusing to run: KEYRING_DIR=$KEYRING_DIR is outside $T" >&2; return 99 ;;
+  esac
+  (set -e; "$@")
+}
+```
+
+Second, every case gets its own keyring directory.
 
 In `deploy/tests/setup_test.sh`, replace
 
@@ -4597,24 +5311,26 @@ with
   mkdir -p "$DIST_DIR" "$MARK_DIR" "$STATE_DIR" "$OPT_DIR"
 ```
 
-Second, section `(e)` checks the `Signed-By` line against the real path, so it pins `KEYRING_DIR` back.
+Third, section `(e)` expects the real default path in the `Signed-By` line. It now expects the redirected directory there, and checks the script's default separately.
 
 In `deploy/tests/setup_test.sh`, replace
 
 ```bash
-VERSION_CODENAME=trixie
-APT_SOURCES_DIR="$T/apt-sources"
+  "Architectures: amd64" "Signed-By: /etc/apt/keyrings/docker.asc"; do
+  check "e: docker.sources has $line" contains "$src" "$line"
+done
 ```
 
 with
 
 ```bash
-VERSION_CODENAME=trixie
-KEYRING_DIR=/etc/apt/keyrings
-APT_SOURCES_DIR="$T/apt-sources"
+  "Architectures: amd64" "Signed-By: $KEYRING_DIR/docker.asc"; do
+  check "e: docker.sources has $line" contains "$src" "$line"
+done
+check "e: Docker's key goes to /etc/apt/keyrings by default" [ "$DEFAULT_KEYRING_DIR" = /etc/apt/keyrings ]
 ```
 
-Third, section `(f)` is rewritten. The existing `f-apt` case stubbed `curl`, `install` and `chmod` and checked only the apt line; it now also needs the key steps to succeed, so it runs against the fake `gpg` too. The fake `gpg` reads the "downloaded" file as lines of `KEY <primary fingerprint> [<subkey fingerprint> ...]`, imports, lists and exports those keys the way `gpg` does, and refuses to run (status 99) without a mode-0700 `--homedir`. `install` is not stubbed: the key is really installed into the per-case `KEYRING_DIR`.
+Fourth, section `(f)` is rewritten. The existing `f-apt` case stubbed `curl`, `install` and `chmod` and checked only the apt line; it now also needs the key steps to succeed, so it runs against the fake `gpg` too. The fake `gpg` reads the "downloaded" file as lines of `KEY <primary fingerprint> [<subkey fingerprint> ...]`, imports, lists and exports those keys the way `gpg` does, and refuses to run (status 99) without a mode-0700 `--homedir`. `install` is not stubbed: the key is really installed into the per-case `KEYRING_DIR`.
 
 In `deploy/tests/setup_test.sh`, replace
 
@@ -4863,13 +5579,13 @@ git commit -m "fix(deploy): install gpg's export of Docker's key"
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `SYSTEMD_DIR` in `deploy/setup.sh`
+- Produces: `SYSTEMD_DIR` in `deploy/setup.sh`; in the test script, `SYSTEMD_DIR` redirected into `$T` for the whole run (`DEFAULT_SYSTEMD_DIR` keeps the script's value), set per case by `new_case`, and checked by `run`
 
 **Items:** 68
 **Implementer:** dr-superpowers:impl-sonnet-low
 **Evaluation:** files 1 - spec 0 - coupling 0 - risk 1 = 2
 
-The unit has `Requires=docker.service`. Stopping Docker therefore stops ghr, and starting Docker again does not start it. Adding the unit to `docker.service`'s `.wants` directory (what `WantedBy=docker.service` plus `systemctl enable` creates) makes the start of Docker start ghr after it. After this task `[Install]` reads `WantedBy=multi-user.target docker.service`, `Requires=docker.service` stays, and `install_service` runs `systemctl reenable` so an existing install gets the new link. The unit file is written, and `daemon-reload` run, only when its content differs from what is on disk; the restart still happens on every run, because the binary may be new.
+The unit has `Requires=docker.service`. Stopping Docker therefore stops ghr, and starting Docker again does not start it. Adding the unit to `docker.service`'s `.wants` directory (what `WantedBy=docker.service` plus `systemctl enable` creates) makes the start of Docker start ghr after it. After this task `[Install]` reads `WantedBy=multi-user.target docker.service`, `Requires=docker.service` stays, and `install_service` runs `systemctl --no-reload reenable ghr.service` so an existing install gets the new link. Plain `reenable` reloads the system manager by itself on every run, which would reload an unchanged install too, so `--no-reload` is needed for the next rule. The unit file is written, and one explicit `systemctl daemon-reload` run after the file and the links are in place, only when something changed: the unit's content differed from what is on disk, or `docker.service.wants/ghr.service` did not exist before. An unchanged install reloads nothing. The restart still happens on every run, because the binary may be new.
 
 - [ ] **Step 1: Make the unit directory a variable**
 
@@ -4902,7 +5618,66 @@ with
 
 - [ ] **Step 2: Write the failing test**
 
-In `deploy/tests/setup_test.sh`, add a new section before section `(c)`.
+Four edits in `deploy/tests/setup_test.sh`. First, the unit directory is redirected into the temporary tree for the whole run, as the keyring directory already is, and `run` checks both.
+
+In `deploy/tests/setup_test.sh`, replace
+
+```bash
+DEFAULT_KEYRING_DIR=$KEYRING_DIR
+KEYRING_DIR="$T/keyrings"
+```
+
+with
+
+```bash
+DEFAULT_KEYRING_DIR=$KEYRING_DIR
+KEYRING_DIR="$T/keyrings"
+DEFAULT_SYSTEMD_DIR=$SYSTEMD_DIR
+SYSTEMD_DIR="$T/systemd"
+```
+
+In `deploy/tests/setup_test.sh`, replace
+
+```bash
+# It refuses to run while a redirected directory points outside the temporary tree.
+run() {
+  case "$KEYRING_DIR" in
+    "$T"/*) ;;
+    *) echo "refusing to run: KEYRING_DIR=$KEYRING_DIR is outside $T" >&2; return 99 ;;
+  esac
+  (set -e; "$@")
+}
+```
+
+with
+
+```bash
+# It refuses to run while a redirected directory points outside the temporary tree.
+run() {
+  case "$KEYRING_DIR:$SYSTEMD_DIR" in
+    "$T"/*:"$T"/*) ;;
+    *) echo "refusing to run: KEYRING_DIR=$KEYRING_DIR or SYSTEMD_DIR=$SYSTEMD_DIR is outside $T" >&2; return 99 ;;
+  esac
+  (set -e; "$@")
+}
+```
+
+Second, every case gets its own unit directory.
+
+In `deploy/tests/setup_test.sh`, replace
+
+```bash
+  KEYRING_DIR="$T/$1/keyrings"
+```
+
+with
+
+```bash
+  KEYRING_DIR="$T/$1/keyrings"
+  SYSTEMD_DIR="$T/$1/systemd"
+```
+
+Third, a new section before section `(c)`. The fake `systemctl` records every call and, like `reenable`, creates the `docker.service.wants` link; `--no-reload` is part of the recorded line, so a call without it does not match.
 
 In `deploy/tests/setup_test.sh`, replace
 
@@ -4914,39 +5689,50 @@ check_host() { :; }
 with
 
 ```bash
-# (n) The unit comes back with Docker; it is rewritten, and systemd reloaded, only
-# when its content changes. The restart happens on every run.
+# (n) The unit comes back with Docker. It is rewritten only when its content
+# changes, and systemd is reloaded once, after reenable, only when the unit or the
+# docker.service.wants link was not already in place. The restart happens on every run.
 new_case n-service
-SYSTEMD_DIR="$T/n-service/systemd"
 mkdir -p "$SYSTEMD_DIR"
 unit="$SYSTEMD_DIR/ghr.service"
-(
-  systemctl() { echo "$*" >> "$MARK_DIR/systemctl"; }
-  run install_service
-) >/dev/null 2>&1
-rc=$?
+link="$SYSTEMD_DIR/docker.service.wants/ghr.service"
+fake_unit_systemctl() {
+  systemctl() {
+    echo "$*" >> "$MARK_DIR/systemctl"
+    case " $* " in
+      *" reenable "*) mkdir -p "$SYSTEMD_DIR/docker.service.wants" && : > "$link" ;;
+    esac
+  }
+}
+install_unit() {
+  : > "$MARK_DIR/systemctl"
+  (fake_unit_systemctl; run install_service) >/dev/null 2>&1
+  rc=$?
+}
+reloaded=$'--no-reload reenable ghr.service\ndaemon-reload\nrestart ghr.service'
+unchanged=$'--no-reload reenable ghr.service\nrestart ghr.service'
+check "n: the unit goes to /etc/systemd/system by default" [ "$DEFAULT_SYSTEMD_DIR" = /etc/systemd/system ]
+install_unit
 check "n: install_service succeeds" [ "$rc" -eq 0 ]
 check "n: the unit starts again with Docker" contains "$(cat "$unit")" "WantedBy=multi-user.target docker.service"
 check "n: the unit still requires Docker" contains "$(cat "$unit")" "Requires=docker.service"
-check "n: a new unit is loaded, enabled again and started" \
-  [ "$(cat "$MARK_DIR/systemctl")" = $'daemon-reload\nreenable ghr.service\nrestart ghr.service' ]
+check "n: a first install enables without a reload, reloads once, then starts" [ "$(cat "$MARK_DIR/systemctl")" = "$reloaded" ]
+check "n: and leaves the docker.service link" [ -e "$link" ]
 touch -d '2020-01-01 00:00:00' "$unit"
-: > "$MARK_DIR/systemctl"
-(
-  systemctl() { echo "$*" >> "$MARK_DIR/systemctl"; }
-  run install_service
-) >/dev/null 2>&1
+install_unit
 check "n: an unchanged unit is not rewritten" [ "$(date -r "$unit" +%Y)" = 2020 ]
-check "n: an unchanged unit is not reloaded, but still restarted" \
-  [ "$(cat "$MARK_DIR/systemctl")" = $'reenable ghr.service\nrestart ghr.service' ]
+check "n: an unchanged install reloads nothing, but still starts the unit" [ "$(cat "$MARK_DIR/systemctl")" = "$unchanged" ]
+rm -rf "$SYSTEMD_DIR/docker.service.wants"
+install_unit
+check "n: an unchanged unit with no docker.service link reloads once, after reenable" [ "$(cat "$MARK_DIR/systemctl")" = "$reloaded" ]
 printf '[Install]\nWantedBy=multi-user.target\n' > "$unit"
-: > "$MARK_DIR/systemctl"
-(
-  systemctl() { echo "$*" >> "$MARK_DIR/systemctl"; }
-  run install_service
-) >/dev/null 2>&1
+install_unit
 check "n: an older unit is replaced" contains "$(cat "$unit")" "WantedBy=multi-user.target docker.service"
-check "n: and reloaded" contains "$(cat "$MARK_DIR/systemctl")" "daemon-reload"
+check "n: and, with its link already there, reloaded once after reenable" [ "$(cat "$MARK_DIR/systemctl")" = "$reloaded" ]
+printf '[Install]\nWantedBy=multi-user.target\n' > "$unit"
+rm -rf "$SYSTEMD_DIR/docker.service.wants"
+install_unit
+check "n: an upgrade from the old unit reloads exactly once, after reenable" [ "$(cat "$MARK_DIR/systemctl")" = "$reloaded" ]
 
 # (c) Dist GC.
 check_host() { :; }
@@ -4955,7 +5741,7 @@ check_host() { :; }
 - [ ] **Step 3: Run the test to verify it fails**
 
 Run: `bash deploy/tests/setup_test.sh`
-Expected: FAIL with `FAIL n: the unit starts again with Docker`, followed by `FAIL n: a new unit is loaded, enabled again and started`, `FAIL n: an unchanged unit is not rewritten`, `FAIL n: an unchanged unit is not reloaded, but still restarted` and `FAIL n: an older unit is replaced`, ending with `5 assertion(s) failed`
+Expected: FAIL with `FAIL n: the unit starts again with Docker`, followed by `FAIL n: a first install enables without a reload, reloads once, then starts`, `FAIL n: and leaves the docker.service link`, `FAIL n: an unchanged unit is not rewritten`, `FAIL n: an unchanged install reloads nothing, but still starts the unit` and the `FAIL n: ...` lines for the unit with no link, the older unit and the upgrade, ending with `9 assertion(s) failed`
 
 - [ ] **Step 4: Write the implementation**
 
@@ -4971,7 +5757,7 @@ with
 
 ```bash
 install_service() {
-  local unit="$SYSTEMD_DIR/ghr.service" want
+  local unit="$SYSTEMD_DIR/ghr.service" want reload=0
   want=$(cat <<'EOF'
 [Unit]
 ```
@@ -4995,11 +5781,14 @@ EOF
   )
   if [ "$(cat "$unit" 2>/dev/null)" != "$want" ]; then
     printf '%s\n' "$want" > "$unit"
-    systemctl daemon-reload
+    reload=1
   fi
+  [ -e "$SYSTEMD_DIR/docker.service.wants/ghr.service" ] || reload=1
   # Requires= alone stops ghr with Docker and never starts it again; the
-  # docker.service.wants link made by WantedBy= does.
-  systemctl reenable ghr.service >/dev/null
+  # docker.service.wants link made by WantedBy= does. Without --no-reload,
+  # reenable reloads systemd itself on every run.
+  systemctl --no-reload reenable ghr.service >/dev/null
+  [ "$reload" = 0 ] || systemctl daemon-reload
   systemctl restart ghr.service
 }
 ```
@@ -5030,7 +5819,7 @@ git commit -m "fix(deploy): restart ghr when Docker starts again"
 **Implementer:** dr-superpowers:impl-sonnet-low
 **Evaluation:** files 1 - spec 0 - coupling 0 - risk 1 = 2
 
-`FIRST_INSTALL` is a shell variable, so a first install that dies after `install_config` never asks for the web password when it is run again: the second run finds an existing `config.yaml` and treats itself as an upgrade. After this task `install_config` also creates `$STATE_DIR/web-password-pending` (next to `toolchains-pending` and `setup-pending`), and `set_web_password` runs whenever that file exists. The file is removed once a password is set, or once the owner pressed Enter to skip at a terminal. With no terminal and no `GHR_WEB_PASSWORD` (a `curl | bash` run) the file stays, so a later run asks. A refused password keeps it too. `FIRST_INSTALL` was read nowhere else; it is removed from the script, and the tests that set it are rewritten around the marker file. Those tests asserted the old variable, so this task corrects them.
+`FIRST_INSTALL` is a shell variable, so a first install that dies after `install_config` never asks for the web password when it is run again: the second run finds an existing `config.yaml` and treats itself as an upgrade. After this task `install_config` also creates `$STATE_DIR/web-password-pending` (next to `toolchains-pending` and `setup-pending`), and `set_web_password` runs whenever that file exists. The file is removed once a password is set, or once the owner pressed Enter to skip at a terminal, which means a read that succeeded and returned an empty line. End of input or a failed read at the prompt is not a skip: it keeps the file, and whatever the read left in the buffer (a partial line) is not sent. With no terminal and no `GHR_WEB_PASSWORD` (a `curl | bash` run) the file stays, so a later run asks. A refused password keeps it too. `FIRST_INSTALL` was read nowhere else; it is removed from the script, and the tests that set it are rewritten around the marker file. Those tests asserted the old variable, so this task corrects them.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5140,12 +5929,26 @@ out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_pa
 check "h: Enter at the prompt sends nothing" absent "$MARK_DIR/ghr-calls"
 check "h: Enter at the prompt clears the marker" absent "$pending"
 check "h: Enter at the prompt still prints the reminder" contains "$out" "has no password"
+
+# End of input and a failed read are not an Enter: the marker stays.
+for ending in "end of input:/dev/null" "closed input:-" "a partial line:partial"; do
+  touch "$pending"
+  rm -f "$MARK_DIR/ghr-calls"
+  case "${ending##*:}" in
+    /dev/null) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) </dev/null 2>&1) ;;
+    -) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) <&- 2>&1) ;;
+    partial) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) < <(printf 'a long secret') 2>&1) ;;
+  esac
+  check "h: ${ending%%:*} at the prompt sends nothing" absent "$MARK_DIR/ghr-calls"
+  check "h: ${ending%%:*} at the prompt keeps the marker" [ -f "$pending" ]
+  check "h: ${ending%%:*} at the prompt still prints the reminder" contains "$out" "has no password"
+done
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `bash deploy/tests/setup_test.sh`
-Expected: FAIL with `FAIL h: writing config.yaml marks the web password pending`, followed by the `FAIL h: ...` lines for the password being sent, reported and cleared, ending with `12 assertion(s) failed`
+Expected: FAIL with `FAIL h: writing config.yaml marks the web password pending`, followed by the `FAIL h: ...` lines for the password being sent, reported and cleared, and `FAIL h: end of input at the prompt still prints the reminder` (the old code never looks at the marker), ending with `15 assertion(s) failed`
 
 - [ ] **Step 3: Write the implementation**
 
@@ -5209,9 +6012,14 @@ set_web_password() {
   local pending="$STATE_DIR/web-password-pending" pw="${GHR_WEB_PASSWORD:-}" out
   [ -f "$pending" ] || return 0
   if [ -z "$pw" ] && stdin_is_tty; then
-    IFS= read -rsp "Web UI password (12 to 1024 bytes; Enter to skip): " pw || true
+    # Only a line that was read and is empty is a skip. End of input or a failed
+    # read keeps the marker and drops whatever it left in $pw.
+    if IFS= read -rsp "Web UI password (12 to 1024 bytes; Enter to skip): " pw; then
+      [ -n "$pw" ] || rm -f "$pending"
+    else
+      pw=
+    fi
     echo
-    [ -n "$pw" ] || rm -f "$pending"
   fi
   if [ -n "$pw" ]; then
     if out=$(printf '%s' "$pw" | ghr web set-password 2>&1); then
@@ -5530,7 +6338,7 @@ git commit -m "fix(deploy): clean dist early, name the listen host"
 
 This task has no failing test: neither a workflow file nor a README line can be exercised by a test in this repository, so the check is a set of `grep` commands in Step 4. Today the workflow runs with the repository's default token rights, its two checkouts leave the token in `.git/config`, and every action is named by a movable tag (`@v4`). After this task the workflow has a top-level `permissions: contents: read` (the `release` job keeps its own `contents: write`), both checkouts set `persist-credentials: false`, and every action is pinned to a full 40-character commit SHA with its tag in a trailing comment. The `release` job needs no git credential after the checkout: its `version` step only reads tags the checkout already fetched (`git tag --points-at`, `git tag --list`), and it publishes with `gh release create` using `GH_TOKEN`. The README's Requirements list says ghr serves private repositories, and a public one only with `allow_public` set for it, and keeps the warning about fork pull requests.
 
-The pinned commits are the newest release of the major version the workflow uses today: `actions/checkout` v4.4.0, `actions/setup-go` v5.6.0 and `actions/setup-node` v4.4.0. Re-resolve them with read-only calls before committing if time has passed (the commands are in the Assumptions of this plan).
+The pins below were resolved and verified on 2026-10-12. Each is the newest release of the major version the workflow uses today, and each SHA is the commit that the release's tag names in the `actions` organisation's own repository: `actions/checkout` v4.4.0 is `11d5960a326750d5838078e36cf38b85af677262`, `actions/setup-go` v5.6.0 is `40f1582b2485089dde7abd97c1529aa768e1baff`, and `actions/setup-node` v4.4.0 is `49933ea5288caeca8642d1e84afbd3f7d6820020`. Type them exactly as given in the steps below; change no pin and resolve nothing.
 
 - [ ] **Step 1: Limit the token and pin the actions in the test job**
 
@@ -5868,24 +6676,26 @@ git commit -m "fix(daemon): answer a failed config save with 500"
 ### Task 25: A reload repeats no warning
 
 **Files:**
-- Modify: `internal/daemon/store.go` (`Store`, `Warnings`, `Reload`, `Update`, `Configure`)
+- Modify: `internal/daemon/store.go` (`Store`, `OpenStore`, `Reload`, `Update`, `Configure`)
 - Modify: `internal/daemon/backend.go` (`Backend.Reload`)
 - Modify: `internal/daemon/run.go` (the reload case of the not-configured loop in `Run`)
 - Test: `internal/daemon/store_test.go`, `internal/daemon/backend_test.go`, `internal/daemon/run_test.go`
 
 **Interfaces:**
 - Consumes: `daemon.SaveError` in `Store.Update` (Task 24), only as lines this task quotes
-- Produces: `func (s *Store) Warnings() []string`
+- Produces: `func (s *Store) Reload() (warnings, added []string, tokenChanged bool, err error)`, which has one more return value than before (`added`); every caller is in `internal/daemon` and is changed here
 
 **Items:** 208
-**Implementer:** dr-superpowers:impl-sonnet-medium
-**Evaluation:** files 2 - spec 0 - coupling 1 - risk 1 = 4
+**Implementer:** dr-superpowers:impl-sonnet-high
+**Evaluation:** files 2 - spec 0 - coupling 1 - risk 2 = 5
 
 A load of `config.yaml` can produce warnings. One of them is the runner cap: `global_max: 500` is lowered to 99 in memory with the warning `global_max 500 is above 99; using 99`, and the file keeps saying 500 until something saves the config. A reload writes every warning of its load as an event, so that warning comes back on every reload.
 
-After this task the store remembers the warnings of its last load (`OpenStore` and `Reload` both load), and a reload writes an event only for a warning the load before did not have. A save replaces the remembered list with the saved config's own warnings, because the file then holds the lowered value: if the owner edits it back to 500, that is news again. The lowered-value warnings come from `config.Parse`, not from `Config.Validate`, which is why a save drops them from the list. `Backend.Reload` still returns every warning of the load to its caller; only the events change.
+After this task the store remembers the warnings of its last load (`OpenStore` and `Reload` both load), and `Reload` itself says which warnings of its load are new: `added` holds those that were neither in the load before nor in the config saved since. A save replaces the remembered list with the saved config's own warnings, because the file then holds the lowered value: if the owner edits it back to 500, that is new again. The lowered-value warnings come from `config.Parse`, not from `Config.Validate`, which is why a save drops them from the list. A reload writes an event only for what is in `added`; `Backend.Reload` still returns every warning of the load to its caller.
 
-There are two reload paths. `Backend.Reload` serves a configured daemon. Before ghr has an owner and a token, `Run` handles a reload itself. Both get the same rule.
+The comparison is made inside `Reload`, under the same hold of the store's lock as the load, and the save paths replace the list under that lock too. Two reloads at the same moment therefore report a new warning once, and a reload can never be compared with a list that a save has already replaced. That is why `Reload` returns the difference, and why there is no method that reads the remembered list.
+
+There are two reload paths. `Backend.Reload` serves a configured daemon. Before ghr has an owner and a token, `Run` handles a reload itself. Both write only what is in `added`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -5904,43 +6714,104 @@ with
 	"strconv"
 ```
 
-In the same file, add this test directly above the comment `// unconfiguredStore opens a store whose config names owner (possibly empty)`:
+`Reload` gains a return value, so the ten existing calls in this file each take one more blank. Replace each of the 6 occurrences of `if _, _, err := s.Reload()` with `if _, _, _, err := s.Reload()`.
+
+Replace each of the 2 occurrences of `if _, changed, err := s.Reload()` with `if _, _, changed, err := s.Reload()`.
+
+Replace each of the 2 occurrences of `if _, changed, err := first.Reload()` with `if _, _, changed, err := first.Reload()`.
+
+Then add these three tests directly above the comment `// unconfiguredStore opens a store whose config names owner (possibly empty)`:
 
 ```go
-// The store remembers the warnings of its last load. A rejected reload keeps
-// them. A save replaces them with the saved config's, because the file then
-// holds the value the load had to lower.
-func TestStoreRemembersItsLoadWarnings(t *testing.T) {
+// Reload says which warnings of its load are new: neither in the load before
+// nor in the config saved since. A rejected reload changes nothing. A save
+// writes the lowered value to the file, so the same bad edit made again is
+// new again.
+func TestStoreReloadSaysWhichWarningsAreNew(t *testing.T) {
 	const clamp = "global_max 500 is above 99; using 99"
-	bad := strings.Replace(cfgYAML, "global_max: 2", "global_max: 500", 1)
+	bad := []byte(strings.Replace(cfgYAML, "global_max: 2", "global_max: 500", 1))
 	s := newStore(t)
-	if ws := s.Warnings(); len(ws) != 0 {
-		t.Fatalf("a load without warnings: %v", ws)
+	reload := func(s *Store, what string, wantAdded ...string) {
+		t.Helper()
+		os.WriteFile(s.ConfigPath, bad, 0o600)
+		ws, added, _, err := s.Reload()
+		if err != nil || !slices.Equal(ws, []string{clamp}) || !slices.Equal(added, wantAdded) {
+			t.Fatalf("%s: warnings %v, new %v, err %v", what, ws, added, err)
+		}
 	}
-	os.WriteFile(s.ConfigPath, []byte(bad), 0o600)
-	if _, _, err := s.Reload(); err != nil || !slices.Equal(s.Warnings(), []string{clamp}) {
-		t.Fatalf("after a load that warned: %v %v", s.Warnings(), err)
-	}
+	reload(s, "the bad edit", clamp)
+	reload(s, "the same file again")
 	os.WriteFile(s.ConfigPath, []byte("mode: fast\n"), 0o600)
-	if _, _, err := s.Reload(); err == nil || !slices.Equal(s.Warnings(), []string{clamp}) {
-		t.Fatalf("after a rejected reload: %v %v", s.Warnings(), err)
+	if _, _, _, err := s.Reload(); err == nil {
+		t.Fatal("an invalid config was loaded")
 	}
-	if _, err := s.Update(func(c *config.Config) error { c.Mode = config.ModeAll; return nil }); err != nil || len(s.Warnings()) != 0 {
-		t.Fatalf("after a save: %v %v", s.Warnings(), err)
+	reload(s, "after a rejected reload")
+	if _, err := s.Update(func(c *config.Config) error { c.Mode = config.ModeAll; return nil }); err != nil {
+		t.Fatal(err)
 	}
+	reload(s, "the bad edit made again after a save", clamp)
 
-	first := unconfiguredStore(t, "", nil)
-	os.WriteFile(first.ConfigPath, []byte(strings.Replace(bad, "owner: darkraise", `owner: ""`, 1)), 0o600)
-	if _, _, err := first.Reload(); err != nil || !slices.Equal(first.Warnings(), []string{clamp}) {
-		t.Fatalf("unconfigured, after a load that warned: %v %v", first.Warnings(), err)
+	first := unconfiguredStore(t, "darkraise", nil)
+	reload(first, "before the first-run save", clamp)
+	if err := first.Configure("DarkRaise", "tok1"); err != nil {
+		t.Fatal(err)
 	}
-	if err := first.Configure("darkraise", "tok1"); err != nil || len(first.Warnings()) != 0 {
-		t.Fatalf("after the first-run save: %v %v", first.Warnings(), err)
+	bad = []byte(strings.Replace(string(bad), "owner: darkraise", "owner: DarkRaise", 1))
+	reload(first, "the bad edit made again after the first-run save", clamp)
+}
+
+// Two reloads at once report a new warning once: the comparison with the
+// remembered list is made under the same hold of the lock as the load. Both
+// reloads are started while an update that saves nothing holds that lock.
+func TestStoreReloadsAtOnceReportAWarningOnce(t *testing.T) {
+	s := newStore(t)
+	os.WriteFile(s.ConfigPath, []byte(strings.Replace(cfgYAML, "global_max: 2", "global_max: 500", 1)), 0o600)
+	var wg sync.WaitGroup
+	var added [2][]string
+	var errs [2]error
+	s.Update(func(*config.Config) error {
+		for i := range 2 {
+			wg.Go(func() { _, added[i], _, errs[i] = s.Reload() })
+		}
+		return errors.New("nothing to save")
+	})
+	wg.Wait()
+	if errs[0] != nil || errs[1] != nil || len(added[0])+len(added[1]) != 1 {
+		t.Fatalf("new warnings %v and %v, errors %v and %v; want one new warning in all", added[0], added[1], errs[0], errs[1])
+	}
+}
+
+// A reload that starts while a save is in progress is compared with what the
+// save left. The save reports the warning it introduced, so the reload that
+// follows it has nothing new.
+func TestStoreReloadBehindASaveReportsNothingNew(t *testing.T) {
+	s := newStore(t)
+	const warning = "darkmem: cleanup_name_prefixes can remove a concurrent job's containers when max is not 1"
+	var loaded, added []string
+	var rerr error
+	done := make(chan struct{})
+	saved, err := s.Update(func(c *config.Config) error {
+		go func() {
+			defer close(done)
+			loaded, added, _, rerr = s.Reload()
+		}()
+		two := 2
+		c.Repo("darkmem").Max, c.Repo("darkmem").CleanupNamePrefixes = &two, []string{"dm-"}
+		return nil
+	})
+	<-done
+	if err != nil || !slices.Equal(saved, []string{warning}) {
+		t.Fatalf("the save: warnings %v, err %v", saved, err)
+	}
+	if rerr != nil || !slices.Equal(loaded, []string{warning}) || len(added) != 0 {
+		t.Fatalf("the reload behind it: warnings %v, new %v, err %v", loaded, added, rerr)
 	}
 }
 ```
 
-In `internal/daemon/backend_test.go`, add this test directly above `func TestPatchCannotChangeWeb(t *testing.T) {`:
+The second and third tests control the order of events through `Store.Update`, which holds the store's lock while it runs the function it is given. A reload started from inside that function has to wait for the lock, so it is certain to run after the update. In the second test the update returns an error and saves nothing; in the third it saves a config with a warning of its own, which `Validate` gives for a repository that has `cleanup_name_prefixes` and a `max` other than 1.
+
+In `internal/daemon/backend_test.go`, add these two tests directly above `func TestPatchCannotChangeWeb(t *testing.T) {`:
 
 ```go
 // A reload writes a warning as an event when the load before did not have it,
@@ -5977,6 +6848,33 @@ func TestReloadRepeatsNoWarning(t *testing.T) {
 	}
 	reload(2, "the bad edit made again after a save")
 }
+
+// Two reloads at once write a new warning as one event. Both are started
+// while an update that saves nothing holds the store's lock.
+func TestReloadsAtOnceWriteAWarningOnce(t *testing.T) {
+	b, _, _ := newBackend(t)
+	const clamp = "global_max 500 is above 99; using 99"
+	if err := os.WriteFile(b.Store.ConfigPath, []byte(strings.Replace(cfgYAML, "global_max: 2", "global_max: 500", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	b.Store.Update(func(*config.Config) error {
+		for range 2 {
+			wg.Go(func() { b.Reload() })
+		}
+		return errors.New("nothing to save")
+	})
+	wg.Wait()
+	n := 0
+	for _, e := range b.Events.After(0) {
+		if e.Level == "warn" && e.Msg == "config: "+clamp {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d warning events, want 1", n)
+	}
+}
 ```
 
 In `internal/daemon/run_test.go`, add this test directly above `func TestRunConfiguresOnceWhenReloadAndSetupRace(t *testing.T) {`:
@@ -6005,10 +6903,10 @@ func TestRunUnconfiguredReloadRepeatsNoWarning(t *testing.T) {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/daemon/ -run 'TestStoreRemembersItsLoadWarnings|TestReloadRepeatsNoWarning|TestRunUnconfiguredReloadRepeatsNoWarning'`
-Expected: FAIL with `s.Warnings undefined (type *Store has no field or method Warnings)` (the package's tests do not build yet)
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/daemon/ -run 'TestStoreReload|TestReload|TestRunUnconfiguredReloadRepeatsNoWarning'`
+Expected: FAIL with `assignment mismatch: 4 variables but s.Reload returns 3 values` (the package's tests do not build yet)
 
-- [ ] **Step 3: Remember the warnings in the store**
+- [ ] **Step 3: Let the store say which warnings are new**
 
 In `internal/daemon/store.go`, add `slices` to the imports: replace
 
@@ -6046,40 +6944,91 @@ with
 }
 ```
 
-Replace
+In `OpenStore`, replace
 
 ```go
-func (s *Store) Config() *config.Config { return s.cfg.Load() }
+	warnings, _, err := s.Reload()
+	return s, warnings, err
 ```
 
 with
 
 ```go
-func (s *Store) Config() *config.Config { return s.cfg.Load() }
+	warnings, _, _, err := s.Reload()
+	return s, warnings, err
+```
 
-// Warnings returns the warnings of the last load, or of the config last
-// saved. A caller that reads them before a Reload can tell which of the
-// reload's warnings are new.
-func (s *Store) Warnings() []string {
+Replace the whole of `Reload`, with its comment,
+
+```go
+// Reload re-reads config and token; on any error the previous values stay active.
+// The owner cannot change while the daemon runs: the GitHub client and every
+// live runner belong to the owner it started with. A first owner may be set.
+// tokenChanged reports whether the token now in use differs from the one
+// before the call, so a caller can keep what it fetched with an unchanged one.
+func (s *Store) Reload() (warnings []string, tokenChanged bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return slices.Clone(s.warnings)
+	cfg, warnings, err := config.Load(s.ConfigPath)
+	if err != nil {
+		return nil, false, err
+	}
+	if cur := s.cfg.Load(); cur != nil && cur.Owner != "" && cur.Owner != cfg.Owner {
+		return nil, false, fmt.Errorf("owner changed from %s to %s: restart ghr to switch owners", cur.Owner, cfg.Owner)
+	}
+	tok, err := s.readToken()
+	if err != nil {
+		return nil, false, err
+	}
+	s.cfg.Store(cfg)
+	if tok != "" && tok != s.Token() {
+		s.token.Store(&tok)
+		tokenChanged = true
+	}
+	return warnings, tokenChanged, nil
 }
 ```
 
-In `Reload`, replace
-
-```go
-	s.cfg.Store(cfg)
-	if tok != "" && tok != s.Token() {
-```
-
 with
 
 ```go
+// Reload re-reads config and token; on any error the previous values stay active.
+// The owner cannot change while the daemon runs: the GitHub client and every
+// live runner belong to the owner it started with. A first owner may be set.
+// tokenChanged reports whether the token now in use differs from the one
+// before the call, so a caller can keep what it fetched with an unchanged one.
+// added are the warnings of this load that the store did not have yet: those
+// that were neither in the load before nor in the config saved since. They
+// are worked out under the same hold of the lock as the load, so of two
+// reloads at once only one reports a warning as new.
+func (s *Store) Reload() (warnings, added []string, tokenChanged bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cfg, warnings, err := config.Load(s.ConfigPath)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if cur := s.cfg.Load(); cur != nil && cur.Owner != "" && cur.Owner != cfg.Owner {
+		return nil, nil, false, fmt.Errorf("owner changed from %s to %s: restart ghr to switch owners", cur.Owner, cfg.Owner)
+	}
+	tok, err := s.readToken()
+	if err != nil {
+		return nil, nil, false, err
+	}
 	s.cfg.Store(cfg)
-	s.warnings = warnings
+	for _, w := range warnings {
+		if !slices.Contains(s.warnings, w) {
+			added = append(added, w)
+		}
+	}
+	// A copy: the caller may append to what it gets.
+	s.warnings = slices.Clone(warnings)
 	if tok != "" && tok != s.Token() {
+		s.token.Store(&tok)
+		tokenChanged = true
+	}
+	return warnings, added, tokenChanged, nil
+}
 ```
 
 In `Update`, replace
@@ -6097,7 +7046,7 @@ with
 		return nil, &SaveError{Err: err}
 	}
 	s.cfg.Store(c)
-	s.warnings = warnings
+	s.warnings = slices.Clone(warnings)
 	return warnings, nil
 ```
 
@@ -6122,7 +7071,7 @@ with
 	s.token.Store(&token)
 ```
 
-A reload that is rejected returns before `s.cfg.Store(cfg)`, so it leaves the list alone, like the config.
+A reload that is rejected returns before `s.cfg.Store(cfg)`, so it leaves the list alone, like the config. `Update` and `Configure` already hold `s.mu` for their whole length.
 
 - [ ] **Step 4: Write only the new warnings as events**
 
@@ -6147,42 +7096,23 @@ with
 
 ```go
 func (b *Backend) Reload() ([]string, error) {
-	known := b.Store.Warnings()
-	warnings, tokenChanged, err := b.Store.Reload()
+	warnings, added, tokenChanged, err := b.Store.Reload()
 	if err != nil {
 		b.Events.Add("error", "", "reload rejected, keeping previous config: %v", err)
 		return nil, api.BadRequest(err.Error())
 	}
-	if w := b.Store.Config().Web; w.Listen != b.WebApplied.Listen || !slices.Equal(w.Hosts, b.WebApplied.Hosts) {
-		warnings = append(warnings, "web settings changed; restart ghr to apply")
-	}
 	// The web warning is not the store's, so it is written on every reload
 	// until the restart it asks for.
-	for _, w := range warnings {
-		if !slices.Contains(known, w) {
-			b.Events.Add("warn", "", "config: %s", w)
-		}
+	if w := b.Store.Config().Web; w.Listen != b.WebApplied.Listen || !slices.Equal(w.Hosts, b.WebApplied.Hosts) {
+		const restart = "web settings changed; restart ghr to apply"
+		warnings, added = append(warnings, restart), append(added, restart)
+	}
+	for _, w := range added {
+		b.Events.Add("warn", "", "config: %s", w)
 	}
 ```
 
-In `internal/daemon/run.go`, add `slices` to the imports: replace
-
-```go
-	"path/filepath"
-	"strconv"
-	"sync"
-```
-
-with
-
-```go
-	"path/filepath"
-	"slices"
-	"strconv"
-	"sync"
-```
-
-In the same file, in `Run`, replace
+In `internal/daemon/run.go`, in `Run`, replace
 
 ```go
 			case <-reload:
@@ -6200,25 +7130,22 @@ with
 
 ```go
 			case <-reload:
-				known := store.Warnings()
-				ws, _, err := store.Reload()
+				_, added, _, err := store.Reload()
 				if err != nil {
 					ev.Add("error", "", "reload rejected, keeping previous config: %v", err)
 					continue
 				}
-				for _, w := range ws {
-					if !slices.Contains(known, w) {
-						ev.Add("warn", "", "config: %s", w)
-					}
+				for _, w := range added {
+					ev.Add("warn", "", "config: %s", w)
 				}
 ```
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/daemon/`
-Expected: PASS (`ok  	github.com/darkraise/ghr/internal/daemon`)
+Run: `PATH=/usr/local/go/bin:$PATH go vet ./... && PATH=/usr/local/go/bin:$PATH go test -race -count=1 -timeout 300s ./internal/daemon/`
+Expected: no output from `go vet`, then PASS (`ok  	github.com/darkraise/ghr/internal/daemon`)
 
-The whole package runs here because `TestReloadWarnsOnWebChange` and `TestReloadAppliesWakesAndRejects` cover the parts of `Reload` this task must not change.
+The whole package runs here because `TestReloadWarnsOnWebChange` and `TestReloadAppliesWakesAndRejects` cover the parts of `Reload` this task must not change, and under the race detector because two of the new tests reload from two goroutines.
 
 - [ ] **Step 6: Commit**
 
@@ -7225,7 +8152,9 @@ git commit -m "fix(daemon): ask again soon for a fresh job's log"
 
 Every runner instance has a directory the job's user owns, so a job can put anything there. The daemon runs as root and reads two files in it with `readJSON`, which is `os.ReadFile`: `job.json`, which the job-started hook writes, and `ghr.json`, the metadata copy an older ghr left there. Opening a FIFO for reading blocks until someone opens it for writing. A job that replaces `job.json` with a FIFO therefore blocks the tick, which is the loop that manages every runner.
 
-After this task those two files are read through a helper that opens without blocking and without following a symbolic link, accepts only a regular file, and reads at most 1 MiB. These are the checks `readFrom` in `cleanup.go` already makes for runner logs. The files root alone can write (the private records, the pending records, the update state) keep `readJSON`.
+After this task those two files are read through a helper that makes the checks `readFrom` in `cleanup.go` already makes for runner logs: it does not follow a symbolic link, opens without blocking, accepts only a regular file, and reads at most 1 MiB. Like `readFrom`, it opens the directory as an `os.Root` and reads through it. The check for a regular file is made on the name and again on the open file, because the job can swap the name between the two; whatever it swaps in, the root lets the open reach only a file inside the instance directory. The files root alone can write (the private records, the pending records, the update state) keep `readJSON`.
+
+Do not use `syscall.O_NOFOLLOW` for this: it does not exist on Windows, and the tree must keep building there.
 
 There are four reads to change: the legacy `ghr.json` in `readMeta`, and `job.json` in `Adopt`, `readJobFiles` and `finish`.
 
@@ -7437,13 +8366,27 @@ func readJSON(path string, v any) error {
 const maxJobFile = 1 << 20
 
 // readJobJSON reads a JSON file from an instance directory. The job can
-// write that directory and root reads the file, so a link is not followed,
-// only a regular file is read, and at most maxJobFile of it: a FIFO would
-// block the caller, which is the tick, and a device would feed it for ever.
-// The file is checked once it is open, so swapping the name afterwards
-// changes nothing.
+// write that directory and root reads the file, so it gets the checks
+// readFrom makes for logs: a link is not followed, only a regular file is
+// read, and at most maxJobFile of it. A FIFO would block the caller, which is
+// the tick, and a device would feed it for ever. The check is repeated on the
+// open file, because the job can swap the name between the two; whatever it
+// swaps in, the root lets the open reach only a file inside that directory.
 func readJobJSON(path string, v any) error {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	name := filepath.Base(path)
+	fi, err := root.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if !fi.Mode().IsRegular() {
+		return fs.ErrInvalid
+	}
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return err
 	}
@@ -7462,7 +8405,7 @@ func readJobJSON(path string, v any) error {
 }
 ```
 
-`O_NOFOLLOW` refuses a symbolic link as the last part of the path. That is the only part a job controls: the directory that holds the instance directories belongs to root.
+The directory that holds the instance directories belongs to root, so a job cannot replace its own instance directory with something else; only what is inside it is the job's.
 
 - [ ] **Step 4: Use it for the four reads**
 
@@ -7523,7 +8466,12 @@ Every other `readJSON` call in the package stays: `m.pendingPath(id)`, `path` an
 Run: `PATH=/usr/local/go/bin:$PATH go test -race -count=1 -timeout 300s ./internal/runner/`
 Expected: PASS (`ok  	github.com/darkraise/ghr/internal/runner`)
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Check that the tree still builds for Windows**
+
+Run: `GOOS=windows PATH=/usr/local/go/bin:$PATH go vet ./...`
+Expected: no output
+
+- [ ] **Step 7: Commit**
 
 Run `PATH=/usr/local/go/bin:$PATH gofmt -l internal/runner` (must print nothing), then:
 
@@ -7641,28 +8589,31 @@ git commit -m "feat(github): decode a run's repository visibility"
 ### Task 31: A repository that turned public is blocked from the poll that shows it
 
 **Files:**
-- Modify: `internal/runner/tick.go` (`repoDemand`)
-- Modify: `internal/runner/visibility.go` (new `sawPublic`)
+- Modify: `internal/runner/visibility.go` (`visibility`, `visibilityLocked`, `readVisibility`, new `sawPublic`)
+- Modify: `internal/runner/tick.go` (`repoDemand`, `gatherDemand`)
 - Test: `internal/runner/blocked_test.go`
 
 **Interfaces:**
 - Consumes: from Task 30, in package `github`: `type RunRepository struct { Private *bool }`, the field `Run.Repository RunRepository`, and `func (r Run) RepoPublic() bool`
-- Produces: `func (m *Manager) sawPublic(repo string, now time.Time)` in `internal/runner/visibility.go`, placed directly above `blockedLocked`; Task 32 adds its method directly above it
+- Produces: `func (m *Manager) sawPublic(repo string, now time.Time)` in `internal/runner/visibility.go`, placed directly above `blockedLocked`, and the field `listedAt time.Time` of the `visibility` struct; Task 32 adds to the same struct and places its method directly above `sawPublic`
 
 **Items:** 214
 **Implementer:** dr-superpowers:impl-sonnet-high
 **Evaluation:** files 1 - spec 0 - coupling 1 - risk 3 = 5
 
-ghr serves only private repositories unless a repository has `allow_public` in the config: a job in a public repository can come from anyone's pull request. The manager keeps GitHub's last answer on whether each repository is public and reads it again every 6 hours with `GetRepo`. A repository whose answer is public and which has no `allow_public` is **blocked**: it gets no new runner, its queued jobs are not counted, and status says why. So a repository that is made public keeps being served for up to 6 hours.
+ghr serves only private repositories unless a repository has `allow_public` in the config: a job in a public repository can come from anyone's pull request. The manager keeps GitHub's last answer on whether each repository is public and reads it again every 6 hours with `GetRepo`, and at the next poll after a reload. A repository whose answer is public and which has no `allow_public` is **blocked**: it gets no new runner, its queued jobs are not counted, and status says why. So a repository that is made public keeps being served for up to 6 hours.
 
-GitHub already says more often than that. On every poll `repoDemand` lists the repository's queued, in-progress and waiting runs, and since Task 30 each `github.Run` can say whether its repository is public (`run.RepoPublic()`). After this task, when any listed run says so, the manager records that answer at once, as a read made now. The existing code then blocks the repository in the same tick, before anything is planned.
+GitHub already says more often than that. On every poll `repoDemand` lists the repository's queued, in-progress and waiting runs, and since Task 30 each `github.Run` can say whether its repository is public (`run.RepoPublic()`). After this task, when any listed run says so, the manager blocks the repository at once, in that tick, before anything is planned.
 
-Two limits on what a listing may do, both because a listing can come from the client's response cache:
+What a listing says is kept apart from what `GetRepo` said. The manager's record for a repository gets a second time, `listedAt`: the time of the tick in which a listing last said public. `GetRepo`'s answer and its time are not touched by a listing. The rules:
 
-- It never lifts a block. A listing that says private changes nothing; only `GetRepo` does, on its 6-hour schedule or after a reload.
-- It never gives an unread repository its first "private" answer.
+- A repository is blocked when `GetRepo` last said public, or when `listedAt` is set.
+- A listing never makes `GetRepo`'s answer look fresh. The 6-hour read, and the read a reload asks for, still happen while public runs keep being listed.
+- A listing never lifts a block and never gives an unread repository a "private" answer: a listing can come from the client's response cache. `GetRepo`'s answer is what clears `listedAt`.
+- In a poll whose own listing says public, the block holds for that tick whatever `GetRepo` then says: `GetRepo` clears `listedAt` only when it is from an earlier tick.
+- When a listing has blocked the repository and a later call of the same poll fails, the queued jobs an earlier poll counted for it are dropped all the same.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 Add this to the end of `internal/runner/blocked_test.go`:
 
@@ -7680,7 +8631,7 @@ func listedRun(h *harness, repo string, runID int64, private bool, jobs ...githu
 // before the next read of the repository is due. It is blocked in that tick:
 // no runner starts for the job the listing shows and the job is not counted.
 // A later listing that says private lifts nothing; the repository's own read
-// does, six hours after the listing's answer.
+// does, six hours after its last answer.
 func TestRunListingBlocksAPublicRepositoryInTheSameTick(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -7711,9 +8662,9 @@ func TestRunListingBlocksAPublicRepositoryInTheSameTick(t *testing.T) {
 			h.m.blocked(h.cfg, h.cfg.Repos[1]), spawnsFor(h, "darkmem"), h.repoReads("darkmem"))
 	}
 
-	tick(visibilityTTL - 10*time.Second)
+	tick(visibilityTTL - 20*time.Second)
 	if h.m.blocked(h.cfg, h.cfg.Repos[1]) || spawnsFor(h, "darkmem") != 1 || h.repoReads("darkmem") != 2 {
-		t.Fatalf("six hours after the listing's answer: blocked %v, %d spawns, %d reads\n%s",
+		t.Fatalf("six hours after the repository's last read: blocked %v, %d spawns, %d reads\n%s",
 			h.m.blocked(h.cfg, h.cfg.Repos[1]), spawnsFor(h, "darkmem"), h.repoReads("darkmem"), h.eventText())
 	}
 }
@@ -7730,34 +8681,200 @@ func TestRunListingThatSaysPrivateLeavesARepositoryUnread(t *testing.T) {
 		t.Fatalf("known %v, %d spawns", known, spawnsFor(h, "darkmem"))
 	}
 }
+
+// A listing that keeps saying public is not the repository's own read. That
+// read is still made six hours after its last answer, and once.
+func TestPublicListingsDoNotPostponeTheRepositoryRead(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	start := h.now
+	h.m.Tick(ctx) // darkmem is read: private
+	h.gh.setPublic("darkmem", true)
+	listedRun(h, "darkmem", 7, false, homelabJob(h, 71))
+	for _, step := range []struct {
+		at    time.Duration
+		reads int
+	}{{10 * time.Second, 1}, {3 * time.Hour, 1}, {visibilityTTL - time.Second, 1}, {visibilityTTL, 2}, {visibilityTTL + 10*time.Second, 2}} {
+		h.now = start.Add(step.at)
+		h.m.Tick(ctx)
+		h.m.Wait()
+		if h.repoReads("darkmem") != step.reads || !h.m.blocked(h.cfg, h.cfg.Repos[1]) || spawnsFor(h, "darkmem") != 0 {
+			t.Fatalf("at %v: %d reads, want %d; blocked %v, %d spawns", step.at, h.repoReads("darkmem"), step.reads,
+				h.m.blocked(h.cfg, h.cfg.Repos[1]), spawnsFor(h, "darkmem"))
+		}
+	}
+}
+
+// A reload asks for every repository to be read again, and a listing that
+// says public in the next poll does not cancel that. The read's answer does
+// not lift the block in a poll whose own listing says public; it does in one
+// whose listing does not.
+func TestPublicListingKeepsTheReadAReloadAskedFor(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.m.Tick(ctx) // darkmem is read: private
+	tick := func() {
+		h.now = h.now.Add(10 * time.Second)
+		h.m.Tick(ctx)
+		h.m.Wait()
+	}
+	check := func(when string, reads int, blocked bool, spawns int) {
+		t.Helper()
+		if h.repoReads("darkmem") != reads || h.m.blocked(h.cfg, h.cfg.Repos[1]) != blocked || spawnsFor(h, "darkmem") != spawns {
+			t.Fatalf("%s: %d reads, blocked %v, %d spawns; want %d, %v, %d\n%s", when, h.repoReads("darkmem"),
+				h.m.blocked(h.cfg, h.cfg.Repos[1]), spawnsFor(h, "darkmem"), reads, blocked, spawns, h.eventText())
+		}
+	}
+	listedRun(h, "darkmem", 7, false, homelabJob(h, 71))
+	tick()
+	check("a public listing", 1, true, 0)
+
+	h.m.ClearDegraded()
+	tick()
+	check("a reload, then another public listing", 2, true, 0)
+
+	listedRun(h, "darkmem", 7, true, homelabJob(h, 71))
+	tick()
+	check("a private listing without a read", 2, true, 0)
+
+	h.m.ClearDegraded()
+	tick()
+	check("a reload, then a private listing", 3, false, 1)
+}
+
+// The listing blocks before the runs' jobs are read. When that read then
+// fails, the jobs an earlier poll counted for the repository go all the same.
+func TestRunListingBlockDropsTheQueueWhenThePollThenFails(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.GlobalMax = 0 // nothing spawns, so the job stays queued
+	queuedRun(h, "darkmem", 7, homelabJob(h, 71))
+	h.m.Tick(context.Background())
+	if r := h.m.Status().Repos[1]; r.Queued != 1 {
+		t.Fatalf("setup: queued %d", r.Queued)
+	}
+	listedRun(h, "darkmem", 7, false, homelabJob(h, 71))
+	h.gh.setErr("ListJobs darkmem", &github.APIError{Status: 502, Kind: github.ErrServer, Message: "Bad Gateway"})
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background())
+	if r := h.m.Status().Repos[1]; r.Queued != 0 || r.OldestQueuedAt != nil || r.Error != darkmemBlocked {
+		t.Fatalf("queued %d, oldest %v, error %q", r.Queued, r.OldestQueuedAt, r.Error)
+	}
+}
 ```
 
-`homelabJob`, `queuedRun`, `spawnsFor`, `eventCount`, `darkmemBlocked`, `h.repoReads` and `h.visibility` are the package's existing test helpers. The fake GitHub answers `GetRepo` with "private" unless a test says otherwise, so in the first test only the listing says the repository is public. `darkmem` is `h.cfg.Repos[1]`.
+`homelabJob`, `queuedRun`, `spawnsFor`, `eventCount`, `darkmemBlocked`, `h.repoReads` and `h.visibility` are the package's existing test helpers; `h.repoReads` counts the `GetRepo` calls for a repository, and `h.m.ClearDegraded()` is what a reload calls. The fake GitHub answers `GetRepo` with "private" unless a test says otherwise. `darkmem` is `h.cfg.Repos[1]`.
 
-The second test passes before and after this task. It pins the rule that a listing saying private is not an answer, so that a later change cannot break it unnoticed.
+`TestRunListingThatSaysPrivateLeavesARepositoryUnread` passes before and after this task. It pins the rule that a listing saying private is not an answer, so that a later change cannot break it unnoticed.
 
-- [ ] **Step 2: Run the tests to verify the first one fails**
+- [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/runner/ -run 'TestRunListing'`
-Expected: FAIL in `TestRunListingBlocksAPublicRepositoryInTheSameTick` with `spawns: darkmem 1, darkcloud 1`
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/runner/ -run 'TestRunListing|TestPublicListing'`
+Expected: FAIL in four tests, because nothing blocks the repository yet:
 
-- [ ] **Step 3: Write the implementation**
+- `TestRunListingBlocksAPublicRepositoryInTheSameTick`: `spawns: darkmem 1, darkcloud 1`
+- `TestPublicListingsDoNotPostponeTheRepositoryRead`: `at 10s: 1 reads, want 1; blocked false, 1 spawns`
+- `TestPublicListingKeepsTheReadAReloadAskedFor`: `a public listing: 1 reads, blocked false, 1 spawns; want 1, true, 0`
+- `TestRunListingBlockDropsTheQueueWhenThePollThenFails`: `queued 1, oldest 2026-10-03 12:00:00 +0000 UTC, error "github: 502 Bad Gateway"`
 
-In `internal/runner/visibility.go`, add this method directly above the comment `// blockedLocked is blocked with m.mu held.`:
+- [ ] **Step 3: Keep what a listing said apart from GetRepo's answer**
+
+In `internal/runner/visibility.go`, replace the `visibility` struct and `visibilityLocked`
+
+```go
+// visibility is GitHub's last answer on whether a repository is public. A
+// zero readAt makes the next poll read it again whatever its age.
+type visibility struct {
+	public bool
+	readAt time.Time
+}
+
+// visibilityLocked reports whether GitHub last said repo is public, and
+// whether it has answered for repo at all; m.mu must be held.
+func (m *Manager) visibilityLocked(repo string) (public, known bool) {
+	v, known := m.vis[strings.ToLower(repo)]
+	return v.public, known
+}
+```
+
+with
+
+```go
+// visibility is what GitHub last said about whether a repository is public.
+// public and readAt are GetRepo's answer and its time; a zero readAt makes
+// the next poll ask GetRepo again whatever the answer's age. listedAt is the
+// time of the tick in which a runs listing last said public, zero when none
+// has since GetRepo cleared it. The two are kept apart so that a listing
+// blocks without making GetRepo's answer look fresh.
+type visibility struct {
+	public   bool
+	readAt   time.Time
+	listedAt time.Time
+}
+
+// visibilityLocked reports whether GitHub last said repo is public, through
+// GetRepo or through a runs listing, and whether it has said anything for
+// repo at all; m.mu must be held.
+func (m *Manager) visibilityLocked(repo string) (public, known bool) {
+	v, known := m.vis[strings.ToLower(repo)]
+	return v.public || !v.listedAt.IsZero(), known
+}
+```
+
+At the end of `readVisibility`, replace
+
+```go
+	m.mu.Lock()
+	nv := visibility{public: !r.Private, readAt: now}
+	if m.visGen != gen {
+		nv.readAt = time.Time{} // ClearDegraded ran during the read; the next poll reads again
+	}
+	m.vis[key] = nv
+	m.mu.Unlock()
+	return nil
+}
+```
+
+with
+
+```go
+	m.mu.Lock()
+	nv := visibility{public: !r.Private, readAt: now}
+	if m.visGen != gen {
+		nv.readAt = time.Time{} // ClearDegraded ran during the read; the next poll reads again
+	}
+	// A listing of this same poll said public: the block holds for this tick
+	// whatever GetRepo says. An older one is what this answer replaces.
+	if at := m.vis[key].listedAt; at.Equal(now) {
+		nv.listedAt = at
+	}
+	m.vis[key] = nv
+	m.mu.Unlock()
+	return nil
+}
+```
+
+Add this method directly above the comment `// blockedLocked is blocked with m.mu held.`:
 
 ```go
 // sawPublic records that a run GitHub just listed for repo says its
-// repository is public, as a read made now: the repository is blocked from
-// this tick on, six hours before readVisibility would have asked. A listing
-// only ever blocks. One that says private is no answer, because a listing can
-// come from the client's cache; lifting a block and the first answer for a
-// repository stay with readVisibility.
+// repository is public: the repository is blocked from this tick on, without
+// waiting for readVisibility's next turn. GetRepo's answer and its time are
+// left as they are, so that read still comes when it is due. A listing only
+// ever blocks. One that says private is no answer, because a listing can come
+// from the client's cache; lifting a block stays with readVisibility.
 func (m *Manager) sawPublic(repo string, now time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.vis[strings.ToLower(repo)] = visibility{public: true, readAt: now}
+	key := strings.ToLower(repo)
+	v := m.vis[key]
+	v.listedAt = now
+	m.vis[key] = v
 }
 ```
+
+`now` in `readVisibility` and in `sawPublic` is the same value within one tick: `gatherDemand` passes its own `now` to both. `ClearDegraded` in `manager.go` sets `readAt` to zero on every record and leaves the rest of the record alone, so it needs no change.
+
+- [ ] **Step 4: Record a public listing, and drop the queue on the failure path**
 
 In `internal/runner/tick.go`, add `slices` to the imports: replace
 
@@ -7776,7 +8893,7 @@ with
 	"time"
 ```
 
-In the same file, in `repoDemand`, replace
+In `repoDemand`, replace
 
 ```go
 		runs, err := m.GH.ListRuns(ctx, r.Name, status)
@@ -7801,14 +8918,39 @@ with
 		for _, run := range runs {
 ```
 
-Nothing else is needed. `gatherDemand` calls `readVisibility` right after `repoDemand`; with an answer recorded "now" it does not call `GetRepo`, and the code after it already drops the queued jobs of a repository that has just become blocked. `spawnPlanned` plans from a copy of the config in which a blocked repository is paused, and `noteBlocked` writes the event.
+In `gatherDemand`, replace
 
-- [ ] **Step 4: Run the tests to verify they pass**
+```go
+		if err != nil {
+			missed(r)
+			if tokenRejected(err) {
+				authFailed = true
+			}
+```
+
+with
+
+```go
+		if err != nil {
+			missed(r)
+			if !served(r) {
+				// The listing blocked the repo before a later call of its poll
+				// failed; what an earlier poll left for it goes all the same.
+				delete(demand, r.Name)
+			}
+			if tokenRejected(err) {
+				authFailed = true
+			}
+```
+
+On the path without an error nothing else is needed: `gatherDemand` calls `readVisibility` right after `repoDemand`, and the code after it already drops the queued jobs of a repository that has just become blocked. `spawnPlanned` plans from a copy of the config in which a blocked repository is paused, and `noteBlocked` writes the event.
+
+- [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `PATH=/usr/local/go/bin:$PATH go vet ./... && PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/github/ ./internal/runner/ ./internal/daemon/`
 Expected: no output from `go vet`, then PASS for the three packages
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 Run `PATH=/usr/local/go/bin:$PATH gofmt -l internal/runner` (must print nothing), then:
 
@@ -7820,24 +8962,44 @@ git commit -m "fix(runner): block a public repo from its run listing"
 ### Task 32: The manager takes a visibility answer from outside
 
 **Files:**
-- Modify: `internal/runner/visibility.go` (new `RecordVisibility`)
-- Test: `internal/runner/visibility_test.go` (`TestRecordVisibilityReplacesAnOlderAnswer`)
+- Modify: `internal/runner/visibility.go` (`visibility`, `readVisibility`, new `RecordVisibility`, `forgetRemoved`)
+- Test: `internal/runner/visibility_test.go`
 
 **Interfaces:**
-- Consumes: the position of `func (m *Manager) sawPublic(repo string, now time.Time)` in `internal/runner/visibility.go` (Task 31), above which this task adds its method
-- Produces: `func (m *Manager) RecordVisibility(repo string, public bool)` on `*runner.Manager`, exported; Task 33 calls it from the daemon
+- Consumes: the `visibility` struct with its field `listedAt`, the end of `readVisibility`, and the position of `func (m *Manager) sawPublic(repo string, now time.Time)` in `internal/runner/visibility.go`, all as Task 31 left them
+- Produces: `func (m *Manager) RecordVisibility(repo string, public bool)` on `*runner.Manager`, exported; Task 33 calls it from the daemon. Its contract: the caller hands an answer over only for a repository it is adding, and does so before the config that holds the repository can be seen
 
 **Items:** 211
-**Implementer:** dr-superpowers:impl-sonnet-medium
-**Evaluation:** files 1 - spec 0 - coupling 2 - risk 1 = 4
+**Implementer:** dr-superpowers:impl-opus-high
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 3 = 6
 
 The runner manager keeps, per repository, GitHub's last answer on whether the repository is public, and when it was read. Until now only the manager itself writes that record: from its own `GetRepo` read every 6 hours, and from the runs listing.
 
-The daemon also reads a repository from GitHub, when the owner adds one. The next task hands that answer to the manager, so that a repository removed and added again never keeps the answer from before its removal. This task gives the manager the method that takes such an answer: it records it as a read made now, replacing whatever was there, in either direction. Nothing calls it yet.
+The daemon also reads a repository from GitHub, when the owner adds one. The next task hands that answer to the manager, so that a repository removed and added again never keeps the answer from before its removal. This task gives the manager the method that takes such an answer. It records the answer as a read made now, replacing whatever was there, in either direction. Nothing calls it yet.
 
-- [ ] **Step 1: Write the failing test**
+Two things make the hand-over safe against the manager's own work, which runs on the tick's goroutine while the hand-over comes from a request's:
 
-Add this to the end of `internal/runner/visibility_test.go`:
+- **A read in flight.** `readVisibility` releases the manager's lock while it waits for `GetRepo` and then stores the answer. A read that began before a hand-over can end after it and would put its older answer back. So each record counts its hand-overs in `rev`, and a read stores its answer only when `rev` is what it was when the read began.
+- **A tick before the repository is in the config.** `forgetRemoved` drops the record of every repository that is not in the config, at the start of each tick. An answer handed over for a repository that is being added is not in the config yet. So a handed-over record is marked `handed`, and `forgetRemoved` keeps it until the repository has been seen in the config once; from then on it is forgotten like any other when the repository is removed.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `internal/runner/visibility_test.go`, add the `config` import: replace
+
+```go
+	"github.com/darkraise/ghr/internal/github"
+)
+```
+
+with
+
+```go
+	"github.com/darkraise/ghr/internal/config"
+	"github.com/darkraise/ghr/internal/github"
+)
+```
+
+Then add this to the end of the file:
 
 ```go
 // AddRepo reads a repository before it saves it and hands the answer over,
@@ -7864,34 +9026,222 @@ func TestRecordVisibilityReplacesAnOlderAnswer(t *testing.T) {
 		t.Fatal("not blocked after a public answer")
 	}
 }
+
+// A read of the repository that began before an answer was handed over ends
+// after it. The handed-over answer is the newer one and stays.
+func TestOlderRepositoryReadDoesNotReplaceAHandedOverAnswer(t *testing.T) {
+	h := newHarness(t)
+	h.gh.hook = func(method string) {
+		if method == "GetRepo" && strings.HasSuffix(h.gh.callsText(), "GetRepo darkmem") {
+			h.m.RecordVisibility("darkmem", true)
+		}
+	}
+	h.m.Tick(context.Background()) // the read in flight will answer private
+	h.gh.hook = nil
+	if public, known := h.visibility("darkmem"); !public || !known || h.repoReads("darkmem") != 1 {
+		t.Fatalf("public %v known %v after %d reads; the read that began first replaced the answer", public, known, h.repoReads("darkmem"))
+	}
+}
+
+// An answer is handed over just before its repository shows up in the
+// config. A tick that still sees the config without the repository keeps the
+// answer, the tick that first sees the repository plans with it without a
+// read of its own, and removing the repository later drops it.
+func TestHandedOverAnswerWaitsForItsRepository(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	with := h.cfg
+	without := h.cfg.Clone()
+	without.Repos = without.Repos[:1]
+	tick := func(cfg *config.Config) {
+		h.cfg = cfg
+		h.now = h.now.Add(10 * time.Second)
+		h.m.Tick(ctx)
+		h.m.Wait()
+	}
+	tick(without)
+	h.m.RecordVisibility("darkmem", false)
+	tick(without)
+	if _, known := h.visibility("darkmem"); !known {
+		t.Fatal("a tick before the repository was in the config dropped the answer")
+	}
+	queuedRun(h, "darkmem", 7, homelabJob(h, 71))
+	tick(with)
+	if spawnsFor(h, "darkmem") != 1 || h.repoReads("darkmem") != 0 {
+		t.Fatalf("%d spawns, %d reads; want a runner planned on the handed-over answer\n%s", spawnsFor(h, "darkmem"), h.repoReads("darkmem"), h.eventText())
+	}
+	tick(without)
+	if _, known := h.visibility("darkmem"); known {
+		t.Fatal("the answer outlived its repository")
+	}
+}
 ```
 
-`blockDarkmem` makes the fake GitHub answer "public" for darkmem and runs the tick that finds out; the fake keeps answering "public" for the rest of the test, which is how the test shows that the handed-over answer counts as a read made now. `queuedRun`, `homelabJob`, `spawnsFor` and `h.repoReads` are the package's existing helpers.
+`blockDarkmem` makes the fake GitHub answer "public" for darkmem and runs the tick that finds out; the fake keeps answering "public" for the rest of that test, which is how the test shows that the handed-over answer counts as a read made now. The fake GitHub's `hook` runs during every call, after the call is recorded and before it answers, so the second test hands an answer over while the manager's own `GetRepo` for darkmem is in flight. `queuedRun`, `homelabJob`, `spawnsFor`, `h.repoReads` and `h.visibility` are the package's existing helpers.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/runner/ -run 'TestRecordVisibility'`
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/runner/ -run 'TestRecordVisibility|TestOlderRepositoryRead|TestHandedOverAnswer'`
 Expected: FAIL with `h.m.RecordVisibility undefined (type *Manager has no field or method RecordVisibility)` (the package's tests do not build yet)
 
 - [ ] **Step 3: Write the implementation**
 
-In `internal/runner/visibility.go`, add this method directly above the comment `// sawPublic records that a run GitHub just listed for repo says its`:
+In `internal/runner/visibility.go`, replace the `visibility` struct
+
+```go
+// visibility is what GitHub last said about whether a repository is public.
+// public and readAt are GetRepo's answer and its time; a zero readAt makes
+// the next poll ask GetRepo again whatever the answer's age. listedAt is the
+// time of the tick in which a runs listing last said public, zero when none
+// has since GetRepo cleared it. The two are kept apart so that a listing
+// blocks without making GetRepo's answer look fresh.
+type visibility struct {
+	public   bool
+	readAt   time.Time
+	listedAt time.Time
+}
+```
+
+with
+
+```go
+// visibility is what GitHub last said about whether a repository is public.
+// public and readAt are GetRepo's answer and its time; a zero readAt makes
+// the next poll ask GetRepo again whatever the answer's age. listedAt is the
+// time of the tick in which a runs listing last said public, zero when none
+// has since GetRepo cleared it. The two are kept apart so that a listing
+// blocks without making GetRepo's answer look fresh.
+type visibility struct {
+	public   bool
+	readAt   time.Time
+	listedAt time.Time
+	// rev counts the answers handed over through RecordVisibility. A GetRepo
+	// read applies its answer only when rev is what it was as the read began.
+	rev uint64
+	// handed marks an answer handed over for a repository that is being
+	// added: it is kept until that repository shows up in the config.
+	handed bool
+}
+```
+
+At the end of `readVisibility`, replace
+
+```go
+	m.mu.Lock()
+	nv := visibility{public: !r.Private, readAt: now}
+	if m.visGen != gen {
+		nv.readAt = time.Time{} // ClearDegraded ran during the read; the next poll reads again
+	}
+	// A listing of this same poll said public: the block holds for this tick
+	// whatever GetRepo says. An older one is what this answer replaces.
+	if at := m.vis[key].listedAt; at.Equal(now) {
+		nv.listedAt = at
+	}
+	m.vis[key] = nv
+	m.mu.Unlock()
+	return nil
+}
+```
+
+with
+
+```go
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	nv := m.vis[key]
+	if nv.rev != v.rev {
+		return nil // an answer was handed over during the read; it is the newer one
+	}
+	nv.public, nv.readAt = !r.Private, now
+	if m.visGen != gen {
+		nv.readAt = time.Time{} // ClearDegraded ran during the read; the next poll reads again
+	}
+	// A listing of this same poll said public: the block holds for this tick
+	// whatever GetRepo says. An older one is what this answer replaces.
+	if !nv.listedAt.Equal(now) {
+		nv.listedAt = time.Time{}
+	}
+	m.vis[key] = nv
+	return nil
+}
+```
+
+`v` is the record `readVisibility` copied under the lock before it called `GetRepo`; for a repository with no record yet it is the zero record, whose `rev` is 0. The new code starts from the record as it is now and changes only what `GetRepo` answers, so `rev` and `handed` are carried over.
+
+Add this method directly above the comment `// sawPublic records that a run GitHub just listed for repo says its`:
 
 ```go
 // RecordVisibility takes an answer the caller has just read from GitHub for
 // repo, as a read made now. Adding a repository reads it first; handing that
-// answer over replaces whatever is left from before the repository was removed.
+// answer over replaces whatever is left from before the repository was
+// removed, and a read of the manager's own that is still in flight does not
+// replace it. The caller hands over only for a repository it is adding: the
+// answer is kept until that repository shows up in the config, so it must be
+// handed over before the config with the repository can be seen.
 func (m *Manager) RecordVisibility(repo string, public bool) {
 	now := m.Now()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.vis[strings.ToLower(repo)] = visibility{public: public, readAt: now}
+	key := strings.ToLower(repo)
+	m.vis[key] = visibility{public: public, readAt: now, rev: m.vis[key].rev + 1, handed: true}
+}
+```
+
+Replace the whole of `forgetRemoved`, with its comment,
+
+```go
+// forgetRemoved drops what is kept about visibility for repos that are no
+// longer in the config, so one that is removed and added again starts unread
+// and its removal is not reported as a block being lifted. It needs no API
+// call, so it runs on every tick.
+func (m *Manager) forgetRemoved(cfg *config.Config) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key := range m.vis {
+		if cfg.Repo(key) == nil {
+			delete(m.vis, key)
+		}
+	}
+	for key := range m.wasBlocked {
+		if cfg.Repo(key) == nil {
+			delete(m.wasBlocked, key)
+		}
+	}
+}
+```
+
+with
+
+```go
+// forgetRemoved drops what is kept about visibility for repos that are no
+// longer in the config, so one that is removed and added again starts unread
+// and its removal is not reported as a block being lifted. An answer handed
+// over for a repo that is being added is not in the config yet; it is kept
+// until the repo has been seen there once. It needs no API call, so it runs
+// on every tick.
+func (m *Manager) forgetRemoved(cfg *config.Config) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, v := range m.vis {
+		switch listed := cfg.Repo(key) != nil; {
+		case listed && v.handed:
+			v.handed = false
+			m.vis[key] = v
+		case !listed && !v.handed:
+			delete(m.vis, key)
+		}
+	}
+	for key := range m.wasBlocked {
+		if cfg.Repo(key) == nil {
+			delete(m.wasBlocked, key)
+		}
+	}
 }
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `PATH=/usr/local/go/bin:$PATH go vet ./... && PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/github/ ./internal/runner/ ./internal/daemon/`
+Run: `PATH=/usr/local/go/bin:$PATH go vet ./... && PATH=/usr/local/go/bin:$PATH go test -race -count=1 -timeout 300s ./internal/runner/ && PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/github/ ./internal/daemon/`
 Expected: no output from `go vet`, then PASS for the three packages
 
 - [ ] **Step 5: Commit**
@@ -7906,26 +9256,27 @@ git commit -m "feat(runner): take a visibility answer from outside"
 ### Task 33: Adding a repository hands over what it just read
 
 **Files:**
-- Modify: `internal/daemon/backend.go` (the `Manager` interface, `AddRepo`)
-- Test: `internal/daemon/backend_test.go` (`fakeManager`, `TestAddRepo`)
+- Modify: `internal/daemon/store.go` (`Update`, new `UpdateThen`)
+- Modify: `internal/daemon/backend.go` (the `Manager` interface, `update`, new `updateThen`, `AddRepo`)
+- Test: `internal/daemon/backend_test.go` (`fakeManager`, `TestAddRepo`, `TestConcurrentAddRepoConflicts`)
 
 **Interfaces:**
-- Consumes: `func (m *Manager) RecordVisibility(repo string, public bool)` on `*runner.Manager` (Task 32)
-- Produces: `RecordVisibility(repo string, public bool)` as the last method of the daemon's `Manager` interface, and the same method on the test fake `fakeManager`
+- Consumes: `func (m *Manager) RecordVisibility(repo string, public bool)` on `*runner.Manager` (Task 32), with its contract: hand over only for a repository being added, before the config that holds it can be seen
+- Produces: `func (s *Store) UpdateThen(fn func(c *config.Config) error, saved func()) ([]string, error)`; `RecordVisibility(repo string, public bool)` as the last method of the daemon's `Manager` interface, and the same method on the test fake `fakeManager`
 
 **Items:** 211
-**Implementer:** dr-superpowers:impl-sonnet-high
-**Evaluation:** files 1 - spec 0 - coupling 2 - risk 2 = 5
+**Implementer:** dr-superpowers:impl-opus-high
+**Evaluation:** files 1 - spec 0 - coupling 2 - risk 3 = 6
 
 The manager keeps GitHub's last answer on whether each repository is public, and drops the answer of a repository that is no longer in the config at the start of every tick. A repository that is removed and added again before a tick runs therefore keeps its old answer for up to 6 hours. The one wrong outcome is a repository that is private again and stays blocked.
 
-`AddRepo` reads the repository from GitHub with `GetRepo` before it saves anything. After this task it hands that answer to the manager through `RecordVisibility`, which Task 32 added and which records it as a read made now, replacing whatever was there.
+`AddRepo` reads the repository from GitHub with `GetRepo` before it saves anything. After this task it hands that answer to the manager through `RecordVisibility`, which Task 32 added.
 
-The hand-over comes before the save, on purpose. The save wakes the run loop, which ticks at once on another goroutine; that tick must find the new answer. If the save is then refused, the manager drops the answer at its next tick, because the repository is not in the config.
+**When the answer is handed over, and why.** The hand-over happens inside the store's update, after `config.yaml` is written and before the new config is published. A refused add (a duplicate under the name GitHub reports, a concurrent add that lost, a failed validation or save) never reaches that step, so it hands over nothing and the answer of a repository that is already configured is left alone. Every reader of the config, the tick included, can see the repository only after its answer is in the manager, so the first tick that plans for the repository plans with that answer. A tick that runs between the hand-over and the publication still sees the old config; Task 32 makes the manager keep a handed-over answer until its repository has shown up in the config once, so that tick does not drop it.
 
-The daemon talks to the manager through its own `Manager` interface, and its tests use `fakeManager`. Both get the method.
+For this the store gets `UpdateThen`: `Update` with a step that runs between the save and the swap, with the store's lock held. The daemon talks to the manager through its own `Manager` interface, and its tests use `fakeManager`; both get the method.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 In `internal/daemon/backend_test.go`, give `fakeManager` the method. At the end of the `fakeManager` struct, replace
 
@@ -7964,33 +9315,105 @@ func (f *fakeManager) RecordVisibility(repo string, public bool) {
 }
 ```
 
-At the start of `TestAddRepo`, replace
+Replace the whole of `TestAddRepo`
 
 ```go
 func TestAddRepo(t *testing.T) {
 	b, _, _ := newBackend(t)
 	ctx := context.Background()
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "missing"}); apiStatus(err) != 400 || !strings.Contains(err.Error(), "repository access") {
+		t.Fatalf("missing err %v", err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "public"}); apiStatus(err) != 409 {
+		t.Fatalf("public err %v", err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "darkcloud"}); apiStatus(err) != 409 {
+		t.Fatalf("duplicate err %v", err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "public", AllowPublic: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "newrepo", Labels: []string{"x"}}); err != nil {
+		t.Fatal(err)
+	}
+	if b.Store.Config().Repo("newrepo") == nil {
+		t.Fatal("repo not saved")
+	}
+}
 ```
 
 with
 
 ```go
 func TestAddRepo(t *testing.T) {
-	b, m, _ := newBackend(t)
+	b, m, gh := newBackend(t)
 	ctx := context.Background()
-	var savedFirst []string
+	// oldcloud is a former name of darkcloud, which is configured.
+	gh.repos["oldcloud"] = &github.Repository{FullName: "darkraise/darkcloud", Private: true}
+	var order, misplaced []string
+	b.Wake = func() { order = append(order, "wake") }
 	m.onVisibility = func(repo string) {
-		if b.Store.Config().Repo(repo) != nil {
-			savedFirst = append(savedFirst, repo)
+		order = append(order, "hand-over "+repo)
+		saved, _, err := config.Load(b.Store.ConfigPath)
+		if err != nil || saved.Repo(repo) == nil || b.Store.Config().Repo(repo) != nil {
+			misplaced = append(misplaced, repo)
 		}
 	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "missing"}); apiStatus(err) != 400 || !strings.Contains(err.Error(), "repository access") {
+		t.Fatalf("missing err %v", err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "public"}); apiStatus(err) != 409 {
+		t.Fatalf("public err %v", err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "darkcloud"}); apiStatus(err) != 409 {
+		t.Fatalf("duplicate err %v", err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "oldcloud"}); apiStatus(err) != 409 {
+		t.Fatalf("duplicate under a former name: err %v", err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "public", AllowPublic: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "newrepo", Labels: []string{"x"}}); err != nil {
+		t.Fatal(err)
+	}
+	if b.Store.Config().Repo("newrepo") == nil {
+		t.Fatal("repo not saved")
+	}
+	// What AddRepo read goes to the manager only for an add that is saved. A
+	// refused one hands over nothing, so the answer of the repository that
+	// is already configured is left alone.
+	if want := []string{"public public", "newrepo private"}; !reflect.DeepEqual(m.visibility, want) {
+		t.Fatalf("handed over %v, want %v", m.visibility, want)
+	}
+	// The hand-over comes once config.yaml holds the repository and before
+	// the new config can be seen, so before the loop is woken: a tick that
+	// sees the repository finds its answer.
+	if want := []string{"hand-over public", "wake", "hand-over newrepo", "wake"}; !reflect.DeepEqual(order, want) || len(misplaced) != 0 {
+		t.Fatalf("order %v, want %v; handed over before the save or after the new config showed: %v", order, want, misplaced)
+	}
+}
+```
+
+At the start of `TestConcurrentAddRepoConflicts`, replace
+
+```go
+func TestConcurrentAddRepoConflicts(t *testing.T) {
+	b, _, gh := newBackend(t)
+```
+
+with
+
+```go
+func TestConcurrentAddRepoConflicts(t *testing.T) {
+	b, m, gh := newBackend(t)
 ```
 
 and at its end, replace
 
 ```go
-	if b.Store.Config().Repo("newrepo") == nil {
-		t.Fatal("repo not saved")
+	if n != 1 {
+		t.Fatalf("newrepo configured %d times", n)
 	}
 }
 ```
@@ -7998,26 +9421,73 @@ and at its end, replace
 with
 
 ```go
-	if b.Store.Config().Repo("newrepo") == nil {
-		t.Fatal("repo not saved")
+	if n != 1 {
+		t.Fatalf("newrepo configured %d times", n)
 	}
-	// What AddRepo read goes to the manager before the repository is saved:
-	// the tick the save wakes must find the new answer, not one left from
-	// before the repository was removed. A refused add hands over nothing.
-	if want := []string{"public public", "newrepo private"}; !reflect.DeepEqual(m.visibility, want) || len(savedFirst) != 0 {
-		t.Fatalf("handed over %v, want %v; saved before the hand-over: %v", m.visibility, want, savedFirst)
+	if !reflect.DeepEqual(m.visibility, []string{"newrepo private"}) {
+		t.Fatalf("handed over %v, want one answer from the add that won", m.visibility)
 	}
 }
 ```
 
-The fake needs the mutex because `TestConcurrentAddRepoConflicts` adds from two goroutines. In `TestAddRepo` the three refused adds come first (a repository the token cannot see, a public one without `AllowPublic`, one already configured), then `public` with `AllowPublic` and `newrepo`; the fake GitHub of `newBackend` knows `public` as public and `newrepo` as private.
+In `TestAddRepo` the fake's `onVisibility` runs at the moment of the hand-over. It checks that `config.yaml` on disk already holds the repository and that `b.Store.Config()`, which is what every reader sees, does not yet. `b.Wake` is what wakes the run loop after a saved change. The four refused adds are a repository the token cannot see, a public one without `AllowPublic`, one already configured, and `oldcloud`, which GitHub reports as `darkcloud`, already configured. The fake needs its mutex because `TestConcurrentAddRepoConflicts` adds from two goroutines.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/daemon/ -run 'TestAddRepo'`
-Expected: FAIL with `handed over [], want [public public newrepo private]; saved before the hand-over: []`
+Run: `PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/daemon/ -run 'TestAddRepo$|TestConcurrentAddRepoConflicts'`
+Expected: FAIL in both tests with `handed over [], want` followed by the expected answers
 
-- [ ] **Step 3: Write the implementation**
+- [ ] **Step 3: Give the store a step between the save and the swap**
+
+In `internal/daemon/store.go`, replace
+
+```go
+// Update applies fn to a copy of the config, validates, saves, then swaps it in.
+// A failed save is returned as a *SaveError.
+func (s *Store) Update(fn func(c *config.Config) error) ([]string, error) {
+	s.mu.Lock()
+```
+
+with
+
+```go
+// Update applies fn to a copy of the config, validates, saves, then swaps it in.
+// A failed save is returned as a *SaveError.
+func (s *Store) Update(fn func(c *config.Config) error) ([]string, error) {
+	return s.UpdateThen(fn, nil)
+}
+
+// UpdateThen is Update with a step between the save and the swap: saved, when
+// not nil, runs once config.yaml holds the change and before any reader of
+// Config can see it. Whatever must be in place when the change shows is put
+// in place there. It runs with the store's lock held and must not call the
+// store.
+func (s *Store) UpdateThen(fn func(c *config.Config) error, saved func()) ([]string, error) {
+	s.mu.Lock()
+```
+
+and, in what is now the body of `UpdateThen`, replace
+
+```go
+		return nil, &SaveError{Err: err}
+	}
+	s.cfg.Store(c)
+	s.warnings = slices.Clone(warnings)
+```
+
+with
+
+```go
+		return nil, &SaveError{Err: err}
+	}
+	if saved != nil {
+		saved()
+	}
+	s.cfg.Store(c)
+	s.warnings = slices.Clone(warnings)
+```
+
+- [ ] **Step 4: Hand the answer over from `AddRepo`**
 
 In `internal/daemon/backend.go`, at the end of the `Manager` interface, replace
 
@@ -8036,39 +9506,83 @@ with
 }
 ```
 
-In `AddRepo`, replace
+Replace the start of `update`
 
 ```go
-		return api.Conflict(name + " is public; self-hosted runners must only serve private repos (pass --allow-public to override)")
-	}
-	if err := b.update(func(c *config.Config) error {
+func (b *Backend) update(fn func(c *config.Config) error) error {
+	var before []string
+	warnings, err := b.Store.Update(func(c *config.Config) error {
+		// Until fn runs, c is a copy of the config this update replaces.
+		before, _ = c.Validate()
+		return fn(c)
+	})
 ```
 
 with
 
 ```go
-		return api.Conflict(name + " is public; self-hosted runners must only serve private repos (pass --allow-public to override)")
-	}
-	// Before the save: the tick the save wakes must find this answer, not one
-	// left from before the repository was removed. If the save is refused,
-	// the manager drops the answer at its next tick.
-	b.M.RecordVisibility(name, !repo.Private)
-	if err := b.update(func(c *config.Config) error {
+func (b *Backend) update(fn func(c *config.Config) error) error {
+	return b.updateThen(fn, nil)
+}
+
+// updateThen is update with a step that runs once the change is saved and
+// before it can be seen, as Store.UpdateThen runs it.
+func (b *Backend) updateThen(fn func(c *config.Config) error, saved func()) error {
+	var before []string
+	warnings, err := b.Store.UpdateThen(func(c *config.Config) error {
+		// Until fn runs, c is a copy of the config this update replaces.
+		before, _ = c.Validate()
+		return fn(c)
+	}, saved)
 ```
 
-`name` is the name GitHub reports for the repository, which is the one the config stores; `repo` is what `GetRepo` returned. `run.go` puts a `*runner.Manager` into `Backend.M`; it has the method since Task 32, so the daemon still builds.
+The comment above `update` stays where it is, above `func (b *Backend) update`.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+In `AddRepo`, replace
 
-Run: `PATH=/usr/local/go/bin:$PATH go vet ./... && PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/github/ ./internal/runner/ ./internal/daemon/`
+```go
+	if err := b.update(func(c *config.Config) error {
+		if c.Repo(name) != nil {
+			return api.Conflict("repo " + name + " is already configured")
+		}
+		c.WatchRepos = slices.DeleteFunc(c.WatchRepos, func(w string) bool { return strings.EqualFold(w, name) || strings.EqualFold(w, typed) })
+		c.Repos = append(c.Repos, config.Repo{Name: name, Max: req.Max, Labels: req.Labels, AllowPublic: req.AllowPublic})
+		return nil
+	}); err != nil {
+```
+
+with
+
+```go
+	if err := b.updateThen(func(c *config.Config) error {
+		if c.Repo(name) != nil {
+			return api.Conflict("repo " + name + " is already configured")
+		}
+		c.WatchRepos = slices.DeleteFunc(c.WatchRepos, func(w string) bool { return strings.EqualFold(w, name) || strings.EqualFold(w, typed) })
+		c.Repos = append(c.Repos, config.Repo{Name: name, Max: req.Max, Labels: req.Labels, AllowPublic: req.AllowPublic})
+		return nil
+	}, func() {
+		// The answer just read goes to the manager only for an add that is
+		// saved, and before the config with the repository can be seen: a
+		// tick that sees the repository then finds this answer, not one
+		// left from before the repository was removed.
+		b.M.RecordVisibility(name, !repo.Private)
+	}); err != nil {
+```
+
+`name` is the name GitHub reports for the repository, which is the one the config stores; `repo` is what `GetRepo` returned. The step runs with the store's lock held and takes the manager's lock inside `RecordVisibility`. That order is safe: the manager reads the config through `Store.Config`, which takes no lock, and never calls the store while it holds its own. `run.go` puts a `*runner.Manager` into `Backend.M`; it has the method since Task 32, so the daemon still builds.
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `PATH=/usr/local/go/bin:$PATH go vet ./... && PATH=/usr/local/go/bin:$PATH go test -race -count=1 -timeout 300s ./internal/daemon/ && PATH=/usr/local/go/bin:$PATH go test -count=1 ./internal/github/ ./internal/runner/`
 Expected: no output from `go vet`, then PASS for the three packages
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 Run `PATH=/usr/local/go/bin:$PATH gofmt -l internal/daemon` (must print nothing), then:
 
 ```bash
-git add internal/daemon/backend.go internal/daemon/backend_test.go
+git add internal/daemon/store.go internal/daemon/backend.go internal/daemon/backend_test.go
 git commit -m "fix(daemon): hand the manager what AddRepo read"
 ```
 
@@ -8509,3 +10023,45 @@ Run `PATH=/usr/local/go/bin:$PATH gofmt -l internal/metrics` (must print nothing
 git add internal/metrics/metrics.go internal/metrics/metrics_test.go
 git commit -m "fix(metrics): drop the current hour's rollup on load"
 ```
+
+### Task 36: Whole-tree verification
+
+**Files:**
+- Test: the whole tree; this task changes no file and makes no commit
+
+**Interfaces:**
+- Consumes: the finished state of Tasks 1 to 35
+- Produces: nothing
+**Implementer:** dr-superpowers:impl-sonnet-low
+**Evaluation:** files 0 - spec 0 - coupling 0 - risk 0 = 0
+
+The tasks before this one each ran the tests of the packages they touched. This task runs everything once on the finished branch, with the race detector, because the spec asks for the whole suite and the last tasks changed code after the last whole-tree run.
+
+- [ ] **Step 1: Check formatting**
+
+Run: `PATH=/usr/local/go/bin:$PATH gofmt -l internal/ cmd/`
+Expected: no output.
+
+- [ ] **Step 2: Vet the whole tree**
+
+Run: `mkdir -p /root/.cache/ghr-plan-tmp && TMPDIR=/root/.cache/ghr-plan-tmp GOTMPDIR=/root/.cache/ghr-plan-tmp PATH=/usr/local/go/bin:$PATH go vet ./...`
+Expected: no output, exit status 0.
+
+- [ ] **Step 3: Run every Go test with the race detector**
+
+Run: `TMPDIR=/root/.cache/ghr-plan-tmp GOTMPDIR=/root/.cache/ghr-plan-tmp PATH=/usr/local/go/bin:$PATH go test -race -count=1 -timeout 480s ./...`
+Expected: one `ok` line for each of the 22 packages that have tests, no `FAIL` line and no `DATA RACE` text. Give the command at least nine minutes before treating it as hung.
+
+- [ ] **Step 4: Run the installer tests**
+
+Run: `bash deploy/tests/setup_test.sh`
+Expected: the last line is `all assertions passed`.
+
+- [ ] **Step 5: Confirm nothing under `web/` changed**
+
+Run: `git diff --stat "$(git merge-base HEAD master)" HEAD -- web/`
+Expected: no output.
+
+- [ ] **Step 6: Report**
+
+Report the result of each step. When a step fails, report the failing package or assertion with its output and stop: this task fixes nothing and commits nothing.
