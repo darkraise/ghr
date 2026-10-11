@@ -54,8 +54,11 @@ type detailCache struct {
 	histFailing bool
 }
 
-func detailTTL(d model.RunDetail) time.Duration {
-	if d.Status == "completed" {
+// detailTTL is how long d is kept under k. The latest-attempt key (attempt
+// 0) is always short-lived, because a re-run of a finished run changes which
+// attempt it stands for; a numbered attempt that has completed never changes.
+func detailTTL(k detailKey, d model.RunDetail) time.Duration {
+	if k.attempt != 0 && d.Status == "completed" {
 		return detailDoneTTL
 	}
 	return detailActiveTTL
@@ -157,8 +160,9 @@ func runJob(repo string, runID int64, j github.Job, ours map[string]bool) model.
 }
 
 // RunDetail returns one attempt of a run, 0 meaning the latest. Callers for
-// the same key share one fetch, detached from any one request; the result is
-// kept 15 s while the attempt runs and 60 s once it has completed.
+// the same key share one fetch, detached from any one request. The result is
+// kept 15 s as the latest attempt; under its attempt number it is kept 15 s
+// while the attempt runs and 60 s once it has completed.
 func (b *Backend) RunDetail(ctx context.Context, repo string, id int64, attempt int) (model.RunDetail, error) {
 	name, watched, err := b.coveredName(repo)
 	if err != nil {
@@ -174,7 +178,7 @@ func (b *Backend) RunDetail(ctx context.Context, repo string, id int64, attempt 
 	if gen != c.gen {
 		c.entries, c.gen = nil, gen
 	}
-	if e, ok := c.entries[key]; ok && b.now().Sub(e.at) < detailTTL(e.val) {
+	if e, ok := c.entries[key]; ok && b.now().Sub(e.at) < detailTTL(key, e.val) {
 		c.mu.Unlock()
 		return e.val, nil
 	}
@@ -202,7 +206,7 @@ func (b *Backend) RunDetail(ctx context.Context, repo string, id int64, attempt 
 	if call.err == nil && b.tokenGen() == gen {
 		now := b.now()
 		for k, e := range c.entries {
-			if now.Sub(e.at) >= detailTTL(e.val) {
+			if now.Sub(e.at) >= detailTTL(k, e.val) {
 				delete(c.entries, k)
 			}
 		}

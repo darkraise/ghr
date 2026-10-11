@@ -76,9 +76,13 @@ export function useActions() {
   return useQuery({ queryKey: keys.actions, queryFn: ({ signal }) => api.actions(signal), refetchInterval: POLL_ACTIONS })
 }
 
-// A run's details change only while the shown attempt runs.
-export function runDetailPoll(data: RunDetail | undefined): number | false {
-  return data && data.status !== "completed" ? POLL_ACTIONS : false
+// A run's details change while the shown attempt runs. A completed run read
+// as its latest attempt (no attempt number) is still read once a minute, so a
+// re-run shows up; a numbered attempt that has completed never changes.
+export function runDetailPoll(data: RunDetail | undefined, attempt: number | undefined): number | false {
+  if (!data) return false
+  if (data.status !== "completed") return POLL_ACTIONS
+  return attempt ? false : POLL_SAFETY
 }
 
 // The daemon answers within 20 seconds with the logs it has read, so jobs it
@@ -94,7 +98,7 @@ export function useRunDetail(repo: string, id: number, attempt: number | undefin
     queryKey: keys.runDetail(repo, id, attempt),
     queryFn: ({ signal }) => api.runDetail(repo, id, attempt, signal),
     enabled,
-    refetchInterval: (q) => runDetailPoll(q.state.data),
+    refetchInterval: (q) => runDetailPoll(q.state.data, attempt),
   })
 }
 

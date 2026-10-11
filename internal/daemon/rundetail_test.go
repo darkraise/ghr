@@ -186,11 +186,20 @@ func TestRunDetailLatestSharesAnEntryWithItsNumber(t *testing.T) {
 	}
 }
 
+// The latest attempt (0) is read again after 15 s whatever its status, so a
+// re-run of a finished run shows up; a numbered attempt that has completed
+// never changes and is kept 60 s.
 func TestRunDetailCacheLifetime(t *testing.T) {
 	for _, tc := range []struct {
-		status string
-		ttl    time.Duration
-	}{{"in_progress", detailActiveTTL}, {"completed", detailDoneTTL}} {
+		status  string
+		attempt int
+		ttl     time.Duration
+	}{
+		{"in_progress", 0, detailActiveTTL},
+		{"in_progress", 2, detailActiveTTL},
+		{"completed", 0, detailActiveTTL},
+		{"completed", 2, detailDoneTTL},
+	} {
 		b, _, gh := newBackend(t)
 		clock := frozenClock(b, actionsT0)
 		detailRun(gh, tc.status)
@@ -199,10 +208,29 @@ func TestRunDetailCacheLifetime(t *testing.T) {
 			want int
 		}{{0, 1}, {tc.ttl - time.Millisecond, 1}, {tc.ttl, 2}} {
 			clock.Store(actionsT0.Add(step.at).UnixNano())
-			if _, err := b.RunDetail(context.Background(), "darkmem", 102, 0); err != nil || gh.count("GetRun") != step.want {
-				t.Fatalf("%s step %d: %d calls, want %d, err %v", tc.status, i, gh.count("GetRun"), step.want, err)
+			if _, err := b.RunDetail(context.Background(), "darkmem", 102, tc.attempt); err != nil || gh.count("GetRun") != step.want {
+				t.Fatalf("%s attempt %d step %d: %d calls, want %d, err %v", tc.status, tc.attempt, i, gh.count("GetRun"), step.want, err)
 			}
 		}
+	}
+}
+
+// A fetch of the latest attempt also fills that attempt's numbered entry,
+// which outlives the latest-attempt entry once the attempt has completed.
+func TestRunDetailNumberedEntryOutlivesTheLatest(t *testing.T) {
+	b, _, gh := newBackend(t)
+	clock := frozenClock(b, actionsT0)
+	detailRun(gh, "completed")
+	ctx := context.Background()
+	if _, err := b.RunDetail(ctx, "darkmem", 102, 0); err != nil {
+		t.Fatal(err)
+	}
+	clock.Store(actionsT0.Add(detailActiveTTL).UnixNano())
+	if _, err := b.RunDetail(ctx, "darkmem", 102, 2); err != nil || gh.count("GetRun") != 1 {
+		t.Fatalf("attempt 2 after 15 s: %d calls, want 1, err %v", gh.count("GetRun"), err)
+	}
+	if _, err := b.RunDetail(ctx, "darkmem", 102, 0); err != nil || gh.count("GetRun") != 2 {
+		t.Fatalf("the latest attempt after 15 s: %d calls, want 2, err %v", gh.count("GetRun"), err)
 	}
 }
 

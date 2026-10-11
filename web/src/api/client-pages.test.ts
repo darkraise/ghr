@@ -4,7 +4,7 @@ import { mockApi, noContent } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
 import { api } from "./client"
-import { annotationsPoll, keys, POLL_ACTIONS, POLL_SLOW, runDetailPoll, useJobLog, useRunAnnotations, useRunDetail } from "./hooks"
+import { annotationsPoll, keys, POLL_ACTIONS, POLL_SAFETY, POLL_SLOW, runDetailPoll, useJobLog, useRunAnnotations, useRunDetail } from "./hooks"
 
 const ok = () => noContent()
 
@@ -100,10 +100,15 @@ describe("api for the run pages", () => {
     expect(keys.jobLog("DarkMem", 1002)).toEqual(["job-log", "darkmem", 1002])
   })
 
-  it("polls a run only while its attempt is not completed", () => {
-    expect(runDetailPoll(undefined)).toBe(false)
-    expect(runDetailPoll(fixtures.runDetail)).toBe(false)
-    expect(runDetailPoll({ ...fixtures.runDetail, status: "in_progress" })).toBe(POLL_ACTIONS)
+  it.each([
+    ["no data, latest attempt", undefined, undefined, false],
+    ["no data, numbered attempt", undefined, 2, false],
+    ["an active run, latest attempt", { ...fixtures.runDetail, status: "in_progress" }, undefined, POLL_ACTIONS],
+    ["an active run, numbered attempt", { ...fixtures.runDetail, status: "in_progress" }, 2, POLL_ACTIONS],
+    ["a completed run, latest attempt", fixtures.runDetail, undefined, POLL_SAFETY],
+    ["a completed run, numbered attempt", fixtures.runDetail, 2, false],
+  ])("polls a run's details with %s", (_why, data, attempt, want) => {
+    expect(runDetailPoll(data, attempt)).toBe(want)
   })
 
   it.each([
