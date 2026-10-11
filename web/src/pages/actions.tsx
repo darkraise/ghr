@@ -147,7 +147,11 @@ export function ActionsPage() {
       </ToggleGroup>
     </>
   )
-  let listed = false
+  // One box holds the filters in every state, so they keep their place and
+  // their focus while the body under them changes. The count is unknown
+  // until the first read answers.
+  let title = data ? "0 workflow runs" : "Workflow runs"
+  let flush = false
   let body
   if (actions.isError && !data) body = <ErrorLine onRetry={() => void actions.refetch()}>{errorText(actions.error)}</ErrorLine>
   else if (!data) body = <Spinner label="Loading" />
@@ -166,61 +170,48 @@ export function ActionsPage() {
       </div>
     )
   } else if (status !== "active" && data.runs.length === 0) {
-    listed = true
-    body = (
-      <Section title="0 workflow runs" aside={<div className="ml-auto flex flex-wrap items-center gap-3">{filters}</div>}>
-        <p className="text-sm text-muted-foreground">No workflow runs in the covered repositories yet.</p>
-      </Section>
-    )
+    body = <p className="text-sm text-muted-foreground">No workflow runs in the covered repositories yet.</p>
   } else if (status !== "active" && active.length === 0 && recent.length === 0) {
-    listed = true
     body = (
-      <Section title="0 workflow runs" aside={<div className="ml-auto flex flex-wrap items-center gap-3">{filters}</div>}>
-        <div className="flex flex-col items-start gap-2">
-          <p className="text-sm text-muted-foreground">No runs match these filters.</p>
-          <Button size="sm" variant="outline" onClick={() => update({ repo: "", status: "" })}>
-            Clear filters
-          </Button>
-        </div>
-      </Section>
+      <div className="flex flex-col items-start gap-2">
+        <p className="text-sm text-muted-foreground">No runs match these filters.</p>
+        <Button size="sm" variant="outline" onClick={() => update({ repo: "", status: "" })}>
+          Clear filters
+        </Button>
+      </div>
     )
   } else {
-    listed = true
     const shown = active.length + recent.length
     const cols = runCols(wide, false)
+    title = `${shown} workflow ${shown === 1 ? "run" : "runs"}`
+    flush = true
     body = (
-      <Section
-        title={`${shown} workflow ${shown === 1 ? "run" : "runs"}`}
-        aside={<div className="ml-auto flex flex-wrap items-center gap-3">{filters}</div>}
-        flush
-      >
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            {(active.length > 0 || status === "active") && (
-              <tbody>
-                <RunGroup label="In progress" cols={cols} />
-                {active.length === 0 ? (
-                  <tr>
-                    <td colSpan={cols} className="px-4 py-3 text-sm text-muted-foreground">
-                      Nothing is running or queued.
-                    </td>
-                  </tr>
-                ) : (
-                  active.map((r) => <ActionRow key={`${r.repo}#${r.id}`} run={r} now={now} wide={wide} />)
-                )}
-              </tbody>
-            )}
-            {groupByDayOf(recent, (r) => r.started_at, now).map((g) => (
-              <tbody key={g.key}>
-                <RunGroup label={g.label} cols={cols} />
-                {g.rows.map((r) => (
-                  <ActionRow key={`${r.repo}#${r.id}`} run={r} now={now} wide={wide} />
-                ))}
-              </tbody>
-            ))}
-          </table>
-        </div>
-      </Section>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          {(active.length > 0 || status === "active") && (
+            <tbody>
+              <RunGroup label="In progress" cols={cols} />
+              {active.length === 0 ? (
+                <tr>
+                  <td colSpan={cols} className="px-4 py-3 text-sm text-muted-foreground">
+                    Nothing is running or queued.
+                  </td>
+                </tr>
+              ) : (
+                active.map((r) => <ActionRow key={`${r.repo}#${r.id}`} run={r} now={now} wide={wide} />)
+              )}
+            </tbody>
+          )}
+          {groupByDayOf(recent, (r) => r.started_at, now).map((g) => (
+            <tbody key={g.key}>
+              <RunGroup label={g.label} cols={cols} />
+              {g.rows.map((r) => (
+                <ActionRow key={`${r.repo}#${r.id}`} run={r} now={now} wide={wide} />
+              ))}
+            </tbody>
+          ))}
+        </table>
+      </div>
     )
   }
 
@@ -236,7 +227,6 @@ export function ActionsPage() {
         description={data ? actionsSummary(data.runs, data.repos.length, repo, new Date(data.fetched_at)) : undefined}
         actions={watchLink}
       />
-      {!listed && <div className="flex flex-wrap items-center gap-3">{filters}</div>}
       {failed.length > 0 && (
         <Alert variant="warning">
           <AlertTitle as="h2">Some repositories could not be read</AlertTitle>
@@ -250,7 +240,9 @@ export function ActionsPage() {
         </Alert>
       )}
       {actions.isError && data && <ErrorLine onRetry={() => void actions.refetch()}>{errorText(actions.error)}</ErrorLine>}
-      {body}
+      <Section title={title} aside={<div className="ml-auto flex flex-wrap items-center gap-3">{filters}</div>} flush={flush}>
+        {body}
+      </Section>
     </div>
   )
 }
