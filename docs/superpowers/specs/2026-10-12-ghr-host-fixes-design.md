@@ -1,7 +1,7 @@
 # ghr: host fixes
 
 **Date:** 2026-10-12
-**Status:** design presented in chat and approved by the owner on 2026-10-12, with the rulings on public visibility (row 214), download integrity (rows 60 and 67), the login lockout (row 47), the unscheduled rows, the packaging and the execution strategy made the same day. Amended the same day while the plan was drafted (§1.2, §1.4, §1.5, §3.1, §4.1, §4.4, §4.5, §4.6, §5.1 and §6.4): three checks were tightened after a security review of the drafts, and the rest records what the code had to decide. The owner was told of each.
+**Status:** design presented in chat and approved by the owner on 2026-10-12, with the rulings on public visibility (row 214), download integrity (rows 60 and 67), the login lockout (row 47), the unscheduled rows, the packaging and the execution strategy made the same day. Amended the same day while the plan was drafted and after its first review (§1.2, §1.4, §1.5, §2.3, §3.1, §3.3, §3.4, §4.1, §4.4, §4.5, §4.6, §5.1, §5.2, §5.3, §6.1, §6.2 and §6.4): three checks were tightened after a security review of the drafts, and the rest records what the code had to decide. The owner was told of each.
 **Execution strategy:** sequential — the fixes are small and split by package, but the security parts (lockout, root-owned toolchain paths, root reads of job-writable files) must run alone anyway, and the dev host is the limit: `/tmp` is a nearly full tmpfs and both test suites time out under load (register rows 224 and 225).
 **Register:** docs/superpowers/registers/2026-10-11-ghr-comprehensive-review.md (rows 47 to 74, 186, 199, 203, 205 to 208 and 210 to 214). This is sub-project 3 of 6.
 **Code:** `internal/webui`, `internal/api`, `cmd/ghr`, `internal/config`, `internal/toolchain`, `internal/storage`, `internal/system` (the download client), `internal/daemon`, `internal/runner`, `internal/github` (the `Run` type), `internal/metrics`, `deploy/setup.sh` with `deploy/tests/setup_test.sh`, `.github/workflows/ci.yml`, `README.md`. No web file changes.
@@ -41,7 +41,8 @@ Not closed here: behind a reverse proxy every client reaches ghr from the proxy'
 
 - `api.Client` drops its client-wide 30-second timeout for a per-call one: 30 seconds by default, 100 seconds for `Kill`.
 - The CLI tells three failures apart. Ctrl-C prints `interrupted`, for any command that ends because its context was cancelled, so also for `ghr setup github` interrupted while it waits. A call that ran out of time prints `ghr daemon did not answer within <n>s; the request may still be running`. Anything else keeps `ghr daemon unreachable: <error>`.
-- The kill route sets its own write deadline of 100 seconds through `http.ResponseController`, so the web listener's 60-second `WriteTimeout` does not cut it. On the socket server, which has no write timeout, the call changes nothing.
+- The kill route sets its own write deadline of 100 seconds through `http.ResponseController`, so the web listener's 60-second `WriteTimeout` does not cut it. It does so only on a server that has a write timeout, so the socket server, which has none, keeps having none.
+- A cancel or a time limit that ends a call while an error response is still being read is reported as that cancel or time limit, not as the error status.
 
 ### 1.3 Save failures (row 49)
 
@@ -78,7 +79,8 @@ The web listener accepts without limit, and every open connection holds a file d
 
 `askPassword` checks its context only after the blocked read returns, so Ctrl-C takes effect at the next Enter.
 
-- The read runs on its own goroutine. When the context ends first, `askPassword` restores the terminal state it saved before the read, ends the prompt's line and returns the context's error. The blocked read is left behind; the process is exiting.
+- The read runs on its own goroutine, and `askPassword` itself makes both terminal mode changes, before and after waiting, so no ordering lets a mode change follow the restore. When the context ends first, it restores the terminal state it saved, ends the prompt's line and returns the context's error. The blocked read is left behind; the process is exiting.
+- The terminal library can hide typing from the caller's side only by raw mode, so the prompt now waits in raw mode. Consequences at the prompt: Ctrl-C ends the read itself and prints `interrupted`; Ctrl-D on an empty line prints `interrupted` where it printed `EOF`; Ctrl-Z and Ctrl-\ do nothing; a `ghr` killed there leaves the terminal raw, where it left it without echo. Keeping today's mode would need per-system terminal code for Linux, the BSDs and Windows. The owner was told on 2026-10-12 and may choose that instead.
 
 ## 3. Config
 
@@ -100,15 +102,15 @@ A label is **valid** when, after trimming, it has 1 to 100 characters, holds no 
 
 ### 3.3 Saving (rows 59 and 206)
 
-- `Save` resolves `path` when it is a symbolic link and replaces the file the link names, so the link stays. The temporary file is created beside that file.
-- `Save` syncs the temporary file before the rename, as `metrics.Save` and the history store do.
+- `Save` resolves `path` when it is a symbolic link and replaces the file the link names, so the link stays. It follows a chain of at most 8 links, and the last target need not exist yet, so a dangling link stays a link too. The temporary file is created beside the final target. A loop, a longer chain or a link into a missing directory is an error and nothing is written.
+- `Save` syncs the temporary file before the rename, as `metrics.Save` and the history store do. A failed sync returns the error, leaves the old file and removes the temporary one.
 - Mode 0600 stays. It is deliberate: the directory is 0700 and nothing reads the file but the daemon.
 
 ### 3.4 Repeated load warnings (row 208)
 
 A reload writes every warning of the load as an event, so `global_max 500 is above 99; using 99` repeats on every reload until a save rewrites the file.
 
-- The store remembers the warnings of its last load. `Backend.Reload` writes an event only for a warning that load did not have. A save replaces the remembered list with the saved config's warnings, so editing the file back to an out-of-range value is reported again.
+- The store remembers the warnings of its last load. A reload reports which of its warnings that load did not have, worked out under the same hold of the store's lock as the load itself, and `Backend.Reload` writes an event only for those. The reload of a daemon that is not configured yet follows the same rule. A save replaces the remembered list with the saved config's warnings, so editing the file back to an out-of-range value is reported again.
 
 ## 4. Toolchains and storage
 
@@ -116,7 +118,7 @@ A reload writes every warning of the load as an event, so `global_max 500 is abo
 
 Checked on 2026-10-12: every `download_url` in the Node and Python manifests, and the link Adoptium returns for a Temurin JDK, is on `https://github.com`.
 
-- Before an archive or script is fetched, its URL must be `https`, on the host its tool expects and below that tool's own release path: `https://github.com/actions/node-versions/releases/download/` for Node, `https://github.com/actions/python-versions/releases/download/` for Python, `https://github.com/adoptium/temurin<major>-binaries/releases/download/` for Java with the major being installed, and the configured `Sources.GoDownload` and `Sources.DotnetScript` for Go and .NET. A host alone would let a tampered version list name any repository on GitHub. Anything else fails the install with `refusing to download <url>`.
+- Before an archive or script is fetched, its URL must be `https`, on the host its tool expects and below that tool's own release path: `https://github.com/actions/node-versions/releases/download/` for Node, `https://github.com/actions/python-versions/releases/download/` for Python, `https://github.com/adoptium/temurin<major>-binaries/releases/download/` for Java with the major being installed, the configured `Sources.GoDownload` for Go, and for .NET exactly the configured `Sources.DotnetScript`, nothing below or beside it. A directory rule whose base does not end in `/` passes nothing, because it would also match sibling paths. A host alone would let a tampered version list name any repository on GitHub. Anything else fails the install with `refusing to download <url>`.
 - The URL is judged by its parsed fields: no user, port, query or fragment, the host equal byte for byte, and a path with no dot segment, doubled or encoded slash, encoded dot or backslash.
 - Every download goes through one function on `Env`, which applies the rule of the installer that called it and then fetches that same string. The check is a field of `Env` whose strict form is the default, so tests keep their local servers.
 - Where a redirect leads is not pinned by host: the first URL is authenticated by TLS, an origin that can redirect anywhere can serve anything itself, and GitHub has changed its asset host before.
@@ -164,15 +166,15 @@ Checked on 2026-10-12: the manifest lists `1.20.0` and `1.19.0`, and go.dev name
 
 With `Requires=docker.service`, stopping Docker stops ghr, and starting Docker again does not start it.
 
-- `[Install]` becomes `WantedBy=multi-user.target docker.service`, so a start of Docker starts ghr after it. `Requires=` stays: ghr must not start runners without Docker. `install_service` uses `systemctl reenable` so an existing install gets the new link.
-- The unit file is written, and `daemon-reload` run, only when its content differs. The restart still happens on every run, because the binary may be new.
+- `[Install]` becomes `WantedBy=multi-user.target docker.service`, so a start of Docker starts ghr after it. `Requires=` stays: ghr must not start runners without Docker. `install_service` uses `systemctl --no-reload reenable` so an existing install gets the new link without an implicit reload.
+- The unit file is written only when its content differs, and one `daemon-reload` runs after the reenable only when the unit file differed or the link under `docker.service.wants` was missing. The restart still happens on every run, because the binary may be new. That `--no-reload` behaves so is taken from systemd's documentation and the test's recorded commands, not from a run; the live check settles it.
 - The start-after-Docker behaviour was checked on systemd 257 (§7).
 
 ### 5.3 The password prompt after a failed first install (row 69)
 
 `FIRST_INSTALL` lives in the script's memory, so a first install that dies after `install_config` never asks for the web password on the re-run.
 
-- `install_config` also creates `$STATE_DIR/web-password-pending`. `set_web_password` runs when that file exists and removes it once a password is set, or once the owner pressed Enter to skip at a terminal. Without a terminal and without `GHR_WEB_PASSWORD` the file stays, so a later run asks.
+- `install_config` also creates `$STATE_DIR/web-password-pending`. `set_web_password` runs when that file exists and removes it once a password is set, or once the owner pressed Enter to skip at a terminal. Only a read that succeeded and returned an empty line counts as that Enter: end of input or a failed read keeps the file. Without a terminal and without `GHR_WEB_PASSWORD` the file stays, so a later run asks.
 - `FIRST_INSTALL` is read nowhere else and is removed, in the script and in the tests that set it.
 
 ### 5.4 Old runner versions (row 70)
@@ -202,16 +204,17 @@ With `Requires=docker.service`, stopping Docker stops ghr, and starting Docker a
 
 `readJSON` uses `os.ReadFile`. For `job.json` and the legacy `ghr.json`, both inside the instance directory a job can write, a FIFO planted under either name blocks the tick.
 
-- Those two files are read through a helper that opens without blocking and without following a link, accepts only a regular file and reads at most 1 MiB, the checks `readFrom` already makes for logs. Root-owned files (private records, pending records, the update state) keep `readJSON`.
+- Those two files are read through a helper that opens without blocking and without following a link, accepts only a regular file and reads at most 1 MiB, the checks `readFrom` already makes for logs, through an `os.Root` so the code also builds for Windows. Root-owned files (private records, pending records, the update state) keep `readJSON`.
 
 ### 6.2 A repository that becomes public (rows 214 and 211)
 
 Checked on 2026-10-12 with `gh api`: each run in GitHub's runs listing carries `repository.private`.
 
-- `github.Run` gains the repository's `private` flag. `repoDemand` already lists a repository's queued, in-progress and waiting runs on every poll. When any of them says the repository is public, the manager records that answer at once, as a read made now. The block then applies in the same tick, before anything is planned: its queued jobs are discarded and no runner starts.
+- `github.Run` gains the repository's `private` flag. `repoDemand` already lists a repository's queued, in-progress and waiting runs on every poll. When any of them says the repository is public, the manager records that at once, apart from `GetRepo`'s own answer and its time, so the 6-hour read and the read after a reload still happen while public runs keep being listed. The block then applies in the same tick, before anything is planned: its queued jobs are discarded and no runner starts, also when a later request of that poll fails.
+- When `GetRepo` answers private in a poll whose own listing says public, the block holds for that tick: the listing may be the newer of the two, and the next poll decides. The owner was told of this rule on 2026-10-12.
 - The listing never lifts a block and never marks an unread repository as private: a listing may be served from the ETag cache. Only `GetRepo` does, on its 6-hour schedule or after a reload.
 - A repository with no run in the three listings gives no answer, and needs none: without a queued run nothing is started for it.
-- `AddRepo` has just read the repository from GitHub. It hands that answer to the manager, so a repository removed and added again never keeps an older one (row 211).
+- `AddRepo` has just read the repository from GitHub. It hands that answer to the manager, so a repository removed and added again never keeps an older one (row 211). The hand-over happens after the save and before the new config is published, so a refused add hands over nothing and the tick the save wakes plans on the new answer. A `GetRepo` read that began before a hand-over does not overwrite it.
 - The known limits of the daemon-fixes spec §3 still hold: a runner already starting is not stopped, and during an API pause nothing is polled.
 
 ### 6.3 A log that is not there yet (row 213)
