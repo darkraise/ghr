@@ -20,6 +20,7 @@ const (
 	noteNoFile       = "This run has no workflow file to read."
 	noteMismatch     = "The workflow file at this commit does not match the run's jobs."
 	noteInvalid      = "ghr could not read %s."
+	noteNoJobs       = "This run has no jobs yet."
 
 	wfFileEntries = 64
 	wfMissingTTL  = 10 * time.Minute
@@ -87,6 +88,10 @@ func (b *Backend) runGraph(ctx context.Context, repo, sha, path string, jobs []g
 			graph, note, err = nil, fmt.Sprintf(noteInvalid, path), nil
 		}
 	}()
+	// Without jobs there is nothing to lay out, so the file is not read.
+	if len(jobs) == 0 {
+		return nil, noteNoJobs, nil
+	}
 	if !strings.HasPrefix(path, ".github/workflows/") {
 		return nil, noteNoFile, nil
 	}

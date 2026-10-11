@@ -30,6 +30,7 @@ func TestRunGraphNotes(t *testing.T) {
 		jobs             []github.Job
 		note             string
 	}{
+		{"no jobs yet", ciPath, ciYAML, nil, nil, "This run has no jobs yet."},
 		{"dynamic workflow", "dynamic/dependabot/dependabot-updates", ciYAML, nil, ciJobs(), "This run has no workflow file to read."},
 		{"missing file", ciPath, "", nil, ciJobs(), "This run has no workflow file to read."},
 		{"no Contents permission", ciPath, "", &github.APIError{Status: 403, Kind: github.ErrAuth, Permissions: "contents=read"}, ciJobs(),
@@ -49,6 +50,9 @@ func TestRunGraphNotes(t *testing.T) {
 			g, note, err := b.runGraph(context.Background(), "darkmem", "abc", tc.path, tc.jobs)
 			if err != nil || g != nil || note != tc.note {
 				t.Fatalf("graph %+v note %q err %v", g, note, err)
+			}
+			if len(tc.jobs) == 0 && gh.count("GetContent") != 0 {
+				t.Fatalf("the workflow file was read for a run with no jobs: %v", gh.calls)
 			}
 		})
 	}
