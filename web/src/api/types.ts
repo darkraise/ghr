@@ -325,9 +325,10 @@ export interface RunnerLimitsPatch {
   cpu_quota?: string
 }
 
+// A null max or warm clears the value, so the repository inherits it again.
 export interface RepoPatch {
-  max?: number
-  warm?: number
+  max?: number | null
+  warm?: number | null
   labels?: string[]
   cleanup_name_prefixes?: string[]
   paused?: boolean

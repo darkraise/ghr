@@ -158,12 +158,8 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
   const changed = changedKeys(draft, loaded)
   const maxValue = values.max as number | undefined
   const warmValue = (values.warm as number | undefined) ?? 1
-  // RepoPatch cannot unset a value, so emptying a box that holds one is an
-  // error, not a change; the empty edit stays so the box does not refill.
-  const blank = (key: "max" | "warm") =>
-    key in draft && draft[key] === undefined && loaded[key] !== undefined ? "Enter a number from 0 to 99" : ""
-  const maxError = blank("max")
-  const warmError = blank("warm") || (maxValue !== undefined && maxValue > 0 && warmValue > maxValue ? "Warm must be <= max" : "")
+  // An emptied Max is undefined here, so warm has no explicit bound, as in the daemon.
+  const warmError = maxValue !== undefined && maxValue > 0 && warmValue > maxValue ? "Warm must be <= max" : ""
   const locked = Boolean(repoStatus?.removing) || status.isError
 
   function setNumber(key: "max" | "warm", text: string) {
@@ -178,15 +174,18 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
   }
 
   async function save(): Promise<boolean> {
-    if (maxError || warmError) {
+    if (warmError) {
       toast.error("Fix the highlighted settings first")
       return false
     }
     const sent: Values = Object.fromEntries(changed.map((k) => [k, draft[k]]))
+    // An emptied Max or Warm box is undefined in the draft; null tells the
+    // daemon to clear the value, where a missing key would leave it.
+    const patch = Object.fromEntries(changed.map((k) => [k, draft[k] ?? null])) as RepoPatch
     setSaving(true)
     setRejection("")
     try {
-      await api.patchConfig({ repos: { [name]: sent as RepoPatch } })
+      await api.patchConfig({ repos: { [name]: patch } })
     } catch (err) {
       if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
         setRejection(err.message)
@@ -208,7 +207,7 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
       // Until a read succeeds the cached config shows what was sent; the next
       // poll replaces it with what the daemon holds.
       queryClient.setQueryData<Config>(keys.config, (c) =>
-        c && { ...c, repos: c.repos?.map((r) => (r.name === name ? { ...r, ...(sent as RepoPatch) } : r)) ?? null },
+        c && { ...c, repos: c.repos?.map((r) => (r.name === name ? { ...r, ...(sent as Partial<RepoConfig>) } : r)) ?? null },
       )
     }
     setDraft((d) => settle(d, sent))
@@ -283,8 +282,7 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
               <Field
                 label="Max"
                 htmlFor="repo-max"
-                help="Leave empty for the default: 1 in queue mode, no limit in all mode. Once set, it stays explicit."
-                error={maxError}
+                help="Leave empty for the default: 1 in queue mode, no limit in all mode."
                 changed={is("max")}
               >
                 <Input

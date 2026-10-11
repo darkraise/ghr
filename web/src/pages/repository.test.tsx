@@ -1,6 +1,6 @@
 import { act, screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import type { Config } from "@/api/types"
+import type { Config, RepoConfig } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
@@ -10,13 +10,15 @@ function routes(over: Record<string, unknown> = {}) {
 }
 
 // The daemon applies a PATCH, so the config read after it reflects the save.
+// A null clears the value, and the daemon then leaves the key out.
 function applyingRoutes() {
   let config: Config = fixtures.config
   return routes({
     "GET /api/config": () => config,
     "PATCH /api/config": ({ body }: { body: unknown }) => {
       const patch = (body as { repos: Record<string, Record<string, unknown>> }).repos.darkmem
-      config = { ...config, repos: (config.repos ?? []).map((r) => (r.name === "darkmem" ? { ...r, ...patch } : r)) }
+      const apply = (r: RepoConfig) => Object.fromEntries(Object.entries({ ...r, ...patch }).filter(([, v]) => v !== null)) as unknown as RepoConfig
+      config = { ...config, repos: (config.repos ?? []).map((r) => (r.name === "darkmem" ? apply(r) : r)) }
       return noContent()
     },
   })
@@ -38,7 +40,7 @@ describe("repository page", () => {
       "homelabglobal",
       "gpu",
     ])
-    expect(screen.getByText("Leave empty for the default: 1 in queue mode, no limit in all mode. Once set, it stays explicit.")).toBeInTheDocument()
+    expect(screen.getByText("Leave empty for the default: 1 in queue mode, no limit in all mode.")).toBeInTheDocument()
     expect(screen.getByRole("region", { name: "Capacity" })).toBeInTheDocument()
   })
 
@@ -127,16 +129,33 @@ describe("repository page", () => {
     expect(calls.some((c) => c.method === "PATCH")).toBe(false)
   })
 
-  it("keeps an emptied box empty and refuses to save it", async () => {
-    const { calls } = mockApi(routes())
+  it("sends null for an emptied box, so the value is inherited again", async () => {
+    const { calls } = mockApi(applyingRoutes())
     const { user } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     expect(max).toHaveValue(null)
-    expect(screen.getByText("Enter a number from 0 to 99")).toBeInTheDocument()
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
+    expect(screen.queryByText("Enter a number from 0 to 99")).toBeNull()
     await user.click(screen.getByRole("button", { name: "Save changes" }))
-    expect((await screen.findAllByText("Fix the highlighted settings first")).length).toBeGreaterThan(0)
-    expect(calls.some((c) => c.method === "PATCH")).toBe(false)
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ repos: { darkmem: { max: null } } }))
+    await waitFor(() => expect(screen.queryByText("1 unsaved change")).toBeNull())
+    // Toasts of earlier tests stay on screen, so this names the field.
+    expect(screen.queryAllByText(/Daemon did not apply darkmem\.max/)).toHaveLength(0)
+    expect(screen.getByLabelText("Max")).toHaveValue(null)
+  })
+
+  it("stops checking warm against max once max is emptied", async () => {
+    const { calls } = mockApi(applyingRoutes())
+    const { user } = renderApp("/repositories/darkmem/settings")
+    const warm = await screen.findByLabelText("Warm")
+    await user.clear(warm)
+    await user.type(warm, "3")
+    expect(screen.getByText("Warm must be <= max")).toBeInTheDocument()
+    await user.clear(screen.getByLabelText("Max"))
+    expect(screen.queryByText("Warm must be <= max")).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ repos: { darkmem: { max: null, warm: 3 } } }))
   })
 
   it("disables the form while the daemon is unreachable", async () => {
