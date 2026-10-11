@@ -131,7 +131,7 @@ export function LogViewer({
         {start > 0 && (
           <button
             type="button"
-            className="ghr-log-command px-2 pb-1 hover:underline"
+            className="ghr-log-command focus-ring-tight px-2 pb-1 hover:underline"
             onClick={() => setShowAll((all) => new Set(all).add(s.number))}
           >
             {`Show ${start} earlier lines`}
@@ -148,7 +148,7 @@ export function LogViewer({
                 type="button"
                 aria-expanded={open}
                 onClick={() => toggle(setOpenGroups, key)}
-                className="flex w-full items-start gap-1 text-left hover:underline"
+                className="focus-ring-tight flex w-full items-start gap-1 text-left hover:underline"
               >
                 <ChevronRight aria-hidden="true" size={14} className={`mt-0.5 ml-12 shrink-0 ${open ? "rotate-90" : ""}`} />
                 <span className="min-w-0 break-all whitespace-pre-wrap">
