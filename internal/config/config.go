@@ -78,6 +78,10 @@ type Repo struct {
 	Labels              []string `yaml:"labels,omitempty" json:"labels,omitempty"`
 	CleanupNamePrefixes []string `yaml:"cleanup_name_prefixes,omitempty" json:"cleanup_name_prefixes,omitempty"`
 	Paused              bool     `yaml:"paused,omitempty" json:"paused,omitempty"`
+	// AllowPublic lets ghr serve the repository while GitHub reports it
+	// public. A job in a public repository can come from anyone's pull
+	// request and runs on this host.
+	AllowPublic bool `yaml:"allow_public,omitempty" json:"allow_public,omitempty"`
 	// Removing is daemon-managed: set with Paused by DELETE /repos/{name} so a
 	// pending removal survives restarts; a per-repo resume cancels it.
 	Removing bool `yaml:"removing,omitempty" json:"removing,omitempty"`

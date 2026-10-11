@@ -474,3 +474,44 @@ func TestWatchReposRoundTripAndLookup(t *testing.T) {
 		t.Fatalf("empty watch_repos saved:\n%s", raw)
 	}
 }
+
+// allow_public is the only thing that lets ghr serve a public repository, so
+// it must survive a load, a clone and a save, and stay out of the file and the
+// API's JSON when it is off.
+func TestAllowPublicRoundTrips(t *testing.T) {
+	c, _, err := Parse([]byte(sample + "    allow_public: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Repo("darkmem").AllowPublic || c.Repo("darkcloud").AllowPublic {
+		t.Fatalf("parsed %+v", c.Repos)
+	}
+	if !c.Clone().Repo("darkmem").AllowPublic {
+		t.Fatal("clone lost allow_public")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	back, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !back.Repo("darkmem").AllowPublic || back.Repo("darkcloud").AllowPublic {
+		t.Fatalf("saved %+v", back.Repos)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(raw), "allow_public: true"); n != 1 || strings.Count(string(raw), "allow_public") != 1 {
+		t.Fatalf("allow_public must be written once, for darkmem only:\n%s", raw)
+	}
+	data, err := json.Marshal(back)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(data), `"allow_public":true`) != 1 || strings.Count(string(data), "allow_public") != 1 {
+		t.Fatalf("JSON %s", data)
+	}
+}
