@@ -324,3 +324,21 @@ func TestShutdownDuringIdleStopsKeepsTheQueue(t *testing.T) {
 		t.Fatalf("an install ran: fetched %v current %s", *fetched, current(t, h))
 	}
 }
+
+// The tick's idle stop and the update start of the same tick both stop the
+// same idle runner. The second stop finds the unit gone and must not postpone
+// the update.
+func TestUpdateStartsInTheTickThatStoppedItsIdleRunner(t *testing.T) {
+	h := newHarness(t)
+	queuedUpdate(t, h, tarballSum())
+	id := idleRunner(t, h)
+	h.now = h.now.Add(6 * time.Minute) // past idle_timeout
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if len(h.sd.stopped) != 2 || h.sd.stopped[0] != UnitPrefix+id || h.sd.stopped[1] != UnitPrefix+id {
+		t.Fatalf("stopped %v, want the idle stop and then the update's own stop", h.sd.stopped)
+	}
+	if strings.Contains(h.eventText(), "runner update postponed") || current(t, h) != "2.338.0" {
+		t.Fatalf("current %s\n%s", current(t, h), h.eventText())
+	}
+}

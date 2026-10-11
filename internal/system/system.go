@@ -105,8 +105,14 @@ func (s Systemd) Start(ctx context.Context, u UnitSpec) error {
 	return err
 }
 
+// Stop stops a unit. A unit systemd no longer has is stopped already;
+// systemctl answers that with exit status 5 and "not loaded".
 func (s Systemd) Stop(ctx context.Context, unit string) error {
 	_, err := s.Run(ctx, "systemctl", "stop", unit)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 5 && strings.Contains(err.Error(), "not loaded") {
+		return nil
+	}
 	return err
 }
 

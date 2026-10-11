@@ -290,3 +290,28 @@ func TestExecGroupForOutlastsCommandTimeout(t *testing.T) {
 		t.Fatalf("ExecGroupFor used CommandTimeout: %v", err)
 	}
 }
+
+// systemd answers a stop of a unit it no longer has with exit status 5 and
+// "not loaded". The unit is stopped, so that is not a failure.
+func TestSystemdStopOfAnUnloadedUnitSucceeds(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not on PATH")
+	}
+	script := func(s string) Systemd {
+		return Systemd{Run: func(ctx context.Context, _ string, _ ...string) ([]byte, error) {
+			return Exec(ctx, "sh", "-c", s)
+		}}
+	}
+	gone := script("echo 'Failed to stop ghr-runner-gone00.service: Unit ghr-runner-gone00.service not loaded.' >&2; exit 5")
+	if err := gone.Stop(context.Background(), "ghr-runner-gone00"); err != nil {
+		t.Fatalf("a unit that is not loaded: %v", err)
+	}
+	for name, s := range map[string]string{
+		"another exit status": "echo 'Unit x.service not loaded.' >&2; exit 1",
+		"another message":     "echo 'Failed to stop x.service: Access denied' >&2; exit 5",
+	} {
+		if err := script(s).Stop(context.Background(), "ghr-runner-busy00"); err == nil {
+			t.Fatalf("%s must stay an error", name)
+		}
+	}
+}
