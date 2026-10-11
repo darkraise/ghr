@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -140,10 +141,12 @@ func (s *Sampler) Save() error {
 	return os.Rename(tmp.Name(), s.Path)
 }
 
-// Load restores what Save wrote, dropping minutes older than three hours and
-// rollups older than 30 days. A saved open hour resumes when it is the
-// current UTC hour and is closed as it stands otherwise. A missing file is an
-// empty start; a malformed one returns an error and changes nothing.
+// Load restores what Save wrote, dropping minutes older than three hours,
+// rollups older than 30 days, and minutes and rollups dated after now (the
+// clock was set back). A saved open hour resumes when it is the current UTC
+// hour, is closed as it stands when it is an earlier one, and is dropped when
+// it is a later one. A missing file is an empty start; a malformed one
+// returns an error and changes nothing.
 func (s *Sampler) Load() error {
 	if s.Path == "" {
 		return nil
@@ -164,7 +167,7 @@ func (s *Sampler) Load() error {
 	defer s.mu.Unlock()
 	s.samples = nil
 	for _, m := range st.Minutes {
-		if now.Sub(m.At) <= keepMinutes*time.Minute {
+		if !m.At.After(now) && now.Sub(m.At) <= keepMinutes*time.Minute {
 			s.samples = append(s.samples, m)
 		}
 	}
@@ -173,7 +176,7 @@ func (s *Sampler) Load() error {
 	}
 	s.hours = nil
 	for _, r := range st.Hours {
-		if now.Sub(r.At) <= keepHours*time.Hour {
+		if !r.At.After(now) && now.Sub(r.At) <= keepHours*time.Hour {
 			s.hours = append(s.hours, r)
 		}
 	}
@@ -218,6 +221,8 @@ func (s *Sampler) Sample() {
 		smp.Mem = &used
 		s.cur.MemUsed, s.cur.MemTotal = &used, &total
 	}
+	// A sample dated after this one is from before a backwards clock step.
+	s.samples = slices.DeleteFunc(s.samples, func(m model.MetricSample) bool { return m.At.After(now) })
 	s.samples = append(s.samples, smp)
 	if len(s.samples) > keepMinutes {
 		s.samples = s.samples[len(s.samples)-keepMinutes:]
@@ -292,15 +297,18 @@ func (o *openHour) rollup() model.MetricRollup {
 }
 
 // addToHour folds smp into the open UTC hour, closing it when smp belongs to
-// a later one. Rollups are keyed on UTC so every one spans 60 minutes; a
-// sample from before the open hour (a backwards clock step) is left out.
+// a later one. Rollups are keyed on UTC so every one spans 60 minutes. A
+// sample from before the open hour means the clock stepped back: the open
+// hour and every rollup that is not before the sample's hour are dropped,
+// because those hours will be lived again, and the sample's hour is opened.
 // The caller holds s.mu.
 func (s *Sampler) addToHour(smp model.MetricSample) {
 	hour := smp.At.UTC().Truncate(time.Hour)
-	if s.open != nil && hour.Before(s.open.At) {
-		return
-	}
-	if s.open != nil && hour.After(s.open.At) {
+	switch {
+	case s.open != nil && hour.Before(s.open.At):
+		s.open = nil
+		s.hours = slices.DeleteFunc(s.hours, func(r model.MetricRollup) bool { return !r.At.Before(hour) })
+	case s.open != nil && hour.After(s.open.At):
 		s.closeHour()
 	}
 	if s.open == nil {

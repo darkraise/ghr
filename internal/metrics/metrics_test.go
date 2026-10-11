@@ -228,14 +228,32 @@ func TestClockJumps(t *testing.T) {
 	h.s.Sample()                     // 12:00
 	h.now = h.now.Add(3 * time.Hour) // 15:00: 12:00 closes, 13:00 and 14:00 stay absent
 	h.s.Sample()
-	h.now = h.now.Add(-2 * time.Hour) // 13:00: a backwards clock step
+	h.now = h.now.Add(time.Hour) // 16:00: 15:00 closes
 	h.s.Sample()
-	hrs := h.s.Hours()
-	if len(hrs) != 2 || hrs[0].At.Hour() != 12 || hrs[1].At.Hour() != 15 || hrs[1].Samples != 1 {
-		t.Fatalf("hours %+v", hrs)
+	if hrs := h.s.Hours(); len(hrs) != 3 || hrs[1].At.Hour() != 15 || hrs[2].At.Hour() != 16 {
+		t.Fatalf("hours before the step %+v", hrs)
 	}
-	if n := len(h.s.Minutes()); n != 3 {
-		t.Fatalf("minutes = %d", n)
+	h.now = h.now.Add(-3 * time.Hour) // 13:00: a backwards clock step
+	h.s.Sample()
+	h.now = h.now.Add(time.Minute) // 13:01
+	h.s.Sample()
+	// 15:00 and 16:00 will be lived again, so what was counted for them goes.
+	hrs := h.s.Hours()
+	if len(hrs) != 2 || hrs[0].At.Hour() != 12 || hrs[1].At.Hour() != 13 || hrs[1].Samples != 2 {
+		t.Fatalf("hours after the step %+v", hrs)
+	}
+	mins := h.s.Minutes()
+	if len(mins) != 3 || mins[0].At.Hour() != 12 || mins[1].At.Hour() != 13 || mins[2].At.Minute() != 1 {
+		t.Fatalf("minutes after the step %+v", mins)
+	}
+	h.now = h.now.Add(-30 * time.Second) // 13:00:30: a step back inside the open hour
+	h.s.Sample()
+	mins = h.s.Minutes()
+	if len(mins) != 3 || mins[2].At.Second() != 30 {
+		t.Fatalf("minutes after a step inside the hour %+v", mins)
+	}
+	if hrs := h.s.Hours(); len(hrs) != 2 || hrs[1].Samples != 3 {
+		t.Fatalf("hours after a step inside the hour %+v", hrs)
 	}
 }
 
@@ -320,6 +338,41 @@ func TestLoadDropsStaleAndClosesAnOldOpenHour(t *testing.T) {
 	back.Sample()
 	if hrs := back.Hours(); len(hrs) != 2 || hrs[0].Samples != 30 || hrs[1].Samples != 1 {
 		t.Fatalf("after a new sample %+v", hrs)
+	}
+}
+
+// A clock set back before a restart leaves the file ahead of the clock. What
+// is dated after now would otherwise sit in the rings until real time passed it.
+func TestLoadDropsWhatIsDatedAfterNow(t *testing.T) {
+	h := newHost(t)
+	h.write(t, "cpu.stat", "usage_usec 0\n")
+	h.s.Path = filepath.Join(h.dir, "metrics.json")
+	noon := h.now
+	// 12:00, 12:01, 14:00, 14:01 and 15:00
+	for _, after := range []time.Duration{0, time.Minute, 2 * time.Hour, 2*time.Hour + time.Minute, 3 * time.Hour} {
+		h.now = noon.Add(after)
+		h.s.Sample()
+	}
+	if hrs := h.s.Hours(); len(hrs) != 3 { // 12:00 and 14:00 closed, 15:00 open
+		t.Fatalf("saved hours %+v", hrs)
+	}
+	if err := h.s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	h.now = noon.Add(90 * time.Minute) // 13:30
+	back := NewSampler(h.s.Counts, h.s.Disk)
+	back.Now = func() time.Time { return h.now }
+	back.Path = h.s.Path
+	if err := back.Load(); err != nil {
+		t.Fatal(err)
+	}
+	mins := back.Minutes()
+	if len(mins) != 2 || mins[1].At.Hour() != 12 || mins[1].At.Minute() != 1 {
+		t.Fatalf("minutes %+v", mins)
+	}
+	hrs := back.Hours()
+	if len(hrs) != 1 || hrs[0].At.Hour() != 12 || hrs[0].Samples != 2 {
+		t.Fatalf("hours %+v", hrs)
 	}
 }
 
