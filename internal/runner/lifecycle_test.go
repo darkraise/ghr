@@ -178,6 +178,26 @@ func TestExitWithoutJobRecordsNoHistory(t *testing.T) {
 	}
 }
 
+// A runner that ran no job reports every container its cleanup attempts
+// removed, not only the last attempt's.
+func TestExitWithoutJobSumsCleanupAcrossAttempts(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.docker.byLabel["com.docker.compose.project=ghr-aaaaaa"] = []string{"c1"}
+	h.docker.setErr("RemoveVolumesByLabel", errors.New("volume in use"))
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	h.docker.setErr("RemoveVolumesByLabel", nil)
+	h.docker.byLabel["com.docker.compose.project=ghr-aaaaaa"] = []string{"c2"}
+	h.now = h.now.Add(finishRetry)
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if !strings.Contains(h.eventText(), "exited without a job; cleanup: 2 ctrs") {
+		t.Fatalf("state %s events %s", h.state("aaaaaa"), h.eventText())
+	}
+}
+
 // A killed job's conclusion arrives after the runner exits: history waits for it.
 func TestDelayedConclusionIsRetried(t *testing.T) {
 	h := newHarness(t)

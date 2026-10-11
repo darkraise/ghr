@@ -74,6 +74,7 @@ func TestAdoptKeepsDirWhenStopFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.m.Reconcile(context.Background(), h.cfg)
+	h.m.Reconcile(context.Background(), h.cfg) // the second sighting that would delete an unguarded registration
 	if _, err := os.Stat(h.m.instanceDir("cccccc")); err != nil {
 		t.Fatal("dir removed while its unit may still run")
 	}

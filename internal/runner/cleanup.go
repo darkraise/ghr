@@ -51,7 +51,7 @@ func (m *Manager) projects(ctx context.Context, id string) ([]string, error) {
 	// Cleanup remembers the projects it has seen: custom projects are found
 	// only through their containers, so a retry after those are removed must
 	// still reach the project's networks and volumes. The list is kept where
-	// the job cannot write, or a job could name any project on the host.
+	// the job cannot write, so it cannot edit the names already remembered.
 	if b, err := os.ReadFile(m.privateProjects(id)); err == nil {
 		for _, p := range strings.Fields(string(b)) {
 			set[p] = true
@@ -492,7 +492,10 @@ func (m *Manager) openLogs(id string) (*os.Root, error) {
 			if !fi.IsDir() {
 				return nil, fs.ErrInvalid
 			}
-			return inst.OpenRoot("_diag")
+			logs, err := inst.OpenRoot("_diag")
+			if err == nil || !errors.Is(err, fs.ErrNotExist) {
+				return logs, err
+			}
 		}
 	}
 	dir := filepath.Join(m.Paths.Logs, id)

@@ -148,6 +148,7 @@ type instance struct {
 	adopted      bool      // rebuilt by Adopt, not spawned by this process
 	stopping     bool      // Kill asked systemd to stop the unit
 	cameOnline   bool      // it has been idle or busy at least once
+	cleaned      int       // containers removed by earlier finish attempts of a runner that ran no job
 	answered     bool      // the runners API answered for it in the current tick
 }
 
@@ -796,6 +797,7 @@ func (m *Manager) apiErr(repo string, err error, now time.Time) {
 	// A 403 from a call that does not wait for the repo's backoff repeats on
 	// every tick; it is filed once per backoff window.
 	if github.IsKind(err, github.ErrAuth) && now.Before(m.retryAt[repo]) {
+		m.repoErr[repo] = msg
 		m.mu.Unlock()
 		return
 	}

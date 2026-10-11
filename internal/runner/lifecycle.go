@@ -465,6 +465,12 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	}
 
 	removed, err := m.cleanupDocker(ctx, cfg, id, i.Repo)
+	if !hadJob {
+		m.mu.Lock()
+		ip.cleaned += removed
+		removed = ip.cleaned
+		m.mu.Unlock()
+	}
 	if hadJob && removed > 0 {
 		// Summed in the pending record, which the start of finish reads back:
 		// a retry, even one after a restart, adds to what earlier attempts

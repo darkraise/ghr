@@ -350,6 +350,22 @@ func TestForbiddenRunnerCheckIsThatRepositorysError(t *testing.T) {
 	}
 }
 
+// A 403 that arrives inside another error's backoff window is not filed as an
+// event, but the repository's status line shows it at once.
+func TestForbiddenInsideAnotherBackoffShowsAtOnce(t *testing.T) {
+	h := newHarness(t)
+	h.m.apiErr("darkcloud", &github.APIError{Status: 502, Kind: github.ErrServer}, h.now)
+	h.m.apiErr("darkcloud", &github.APIError{Status: 403, Kind: github.ErrAuth,
+		Message: "Resource not accessible by personal access token", Permissions: "administration=read"}, h.now)
+	want := "token lacks permission for this repository (needs administration=read): github: 403 Resource not accessible by personal access token"
+	if got := h.m.Status().Repos[0].Error; got != want {
+		t.Fatalf("status error %q, want %q", got, want)
+	}
+	if strings.Contains(h.eventText(), "token lacks permission") {
+		t.Fatalf("an event was filed inside the window:\n%s", h.eventText())
+	}
+}
+
 func TestForbiddenPollIsThatRepositorysError(t *testing.T) {
 	h := newHarness(t)
 	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 403, Kind: github.ErrAuth,
