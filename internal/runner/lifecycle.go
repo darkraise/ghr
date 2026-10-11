@@ -185,7 +185,8 @@ func (m *Manager) readJobFiles() {
 
 // refreshRunners moves starting and idle instances to idle or busy from the
 // runners API, so an idle runner GitHub reports busy is busy even before its
-// hook record or the jobs API shows the job.
+// hook record or the jobs API shows the job, and notes how long an idle
+// runner has been offline.
 func (m *Manager) refreshRunners(ctx context.Context) {
 	now := m.Now()
 	for _, i := range m.snapshot() {
@@ -214,6 +215,7 @@ func (m *Manager) refreshRunners(ctx context.Context) {
 		} else if r.Status == "online" {
 			m.move(i.ID, sched.Idle, sched.Starting)
 		}
+		m.noteOnline(i.ID, r.Busy || r.Status == "online", now)
 	}
 }
 
@@ -643,14 +645,17 @@ func (m *Manager) stopIdleRunner(ctx context.Context, i instance, now time.Time)
 		return idleKept
 	}
 	m.mu.Lock()
-	lost := false
+	lost, offline := false, time.Time{}
 	if p := m.insts[i.ID]; p != nil {
-		lost = p.lost
+		lost, offline = p.lost, p.offlineSince
 	}
 	m.mu.Unlock()
-	if lost {
+	switch {
+	case lost:
 		m.Events.Add("warn", i.Repo, "runner %s registration is gone; stopped", i.ID)
-	} else {
+	case !offline.IsZero() && now.Sub(offline) >= m.Config().StartTimeout.D():
+		m.Events.Add("warn", i.Repo, "runner %s offline for %s; replaced", i.ID, now.Sub(offline).Round(time.Second))
+	default:
 		m.Events.Add("info", i.Repo, "stopped idle runner %s", i.ID)
 	}
 	return idleStopped

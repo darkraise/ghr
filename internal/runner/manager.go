@@ -138,6 +138,7 @@ type instance struct {
 	cleanupFails int       // consecutive failed Docker cleanups
 	deregistered bool      // its registration was deleted by ghr or confirmed missing
 	lost         bool      // the registration was confirmed missing, not deleted by ghr
+	offlineSince time.Time // when an idle runner was first seen offline; zero while online
 	stopping     bool      // Kill asked systemd to stop the unit
 	cameOnline   bool      // it has been idle or busy at least once
 	answered     bool      // the runners API answered for it in the current tick
@@ -417,6 +418,21 @@ func (m *Manager) markAnswered(id string) {
 	}
 }
 
+// noteOnline records what the runners API said about a runner's connection:
+// the first time an idle runner is seen offline, or that it is connected.
+func (m *Manager) noteOnline(id string, online bool, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	i, ok := m.insts[id]
+	switch {
+	case !ok:
+	case online:
+		i.offlineSince = time.Time{}
+	case i.State == sched.Idle && i.offlineSince.IsZero():
+		i.offlineSince = now
+	}
+}
+
 func (m *Manager) snapshot() []instance {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -443,10 +459,14 @@ func stale(cfg *config.Config, i instance) bool {
 }
 
 func (m *Manager) schedInstances(cfg *config.Config) []sched.Instance {
+	now, grace := m.Now(), cfg.StartTimeout.D()
 	var out []sched.Instance
 	for _, i := range m.snapshot() {
+		// An idle runner may be reconnecting; start_timeout is how long a
+		// runner gets to connect in the first place.
+		offline := i.State == sched.Idle && !i.offlineSince.IsZero() && now.Sub(i.offlineSince) >= grace
 		out = append(out, sched.Instance{ID: i.ID, Repo: i.Repo, State: i.State, StateSince: i.StateSince,
-			JobConfirmed: i.JobConfirmed, Stale: stale(cfg, i), Unusable: i.deregistered})
+			JobConfirmed: i.JobConfirmed, Stale: stale(cfg, i), Unusable: i.deregistered || offline})
 	}
 	return out
 }

@@ -1273,3 +1273,41 @@ func TestGoneRunnerIsStoppedDuringAnAPIPause(t *testing.T) {
 		t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
 	}
 }
+
+// An idle runner whose process hangs shows as offline. Within start_timeout it
+// may be reconnecting; past it, it is replaced.
+func TestIdleRunnerOfflinePastStartTimeoutIsReplaced(t *testing.T) {
+	h := newHarness(t)
+	idleOnline(t, h, "darkmem")
+	h.gh.setRunner(101, "offline", false)
+	h.m.Tick(context.Background()) // first seen offline
+	h.now = h.now.Add(time.Minute)
+	h.m.Tick(context.Background())
+	if len(h.sd.stopped) != 0 || sched.Covering(h.m.schedInstances(h.cfg), "darkmem", h.now) != 1 {
+		t.Fatalf("replaced within the grace: stopped %v", h.sd.stopped)
+	}
+	h.now = h.now.Add(time.Minute)
+	h.m.Tick(context.Background())
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || !reflect.DeepEqual(h.gh.deleted, []int64{101}) ||
+		!strings.Contains(h.eventText(), "warn darkmem runner aaaaaa offline for 2m0s; replaced") {
+		t.Fatalf("stopped %v deleted %v\n%s", h.sd.stopped, h.gh.deleted, h.eventText())
+	}
+}
+
+func TestIdleRunnerBackOnlineRestartsTheOfflineClock(t *testing.T) {
+	h := newHarness(t)
+	idleOnline(t, h, "darkmem")
+	h.gh.setRunner(101, "offline", false)
+	h.m.Tick(context.Background())
+	h.now = h.now.Add(time.Minute)
+	h.gh.setRunner(101, "online", false)
+	h.m.Tick(context.Background())
+	h.now = h.now.Add(time.Minute)
+	h.gh.setRunner(101, "offline", false)
+	h.m.Tick(context.Background()) // offline again: the clock starts here
+	h.now = h.now.Add(time.Minute)
+	h.m.Tick(context.Background())
+	if len(h.sd.stopped) != 0 {
+		t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
+	}
+}
