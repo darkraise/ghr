@@ -456,7 +456,16 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	}
 
 	removed, err := m.cleanupDocker(ctx, cfg, id, i.Repo)
-	fails := 0
+	if hadJob && removed > 0 {
+		// Summed in the pending record, which the start of finish reads back:
+		// a retry, even one after a restart, adds to what earlier attempts
+		// removed. A failed write here loses this attempt's count only.
+		p.Cleanup += removed
+		if werr := writeJSONAtomic(pendingPath, p); werr != nil && err == nil {
+			return fmt.Errorf("write pending history: %w", werr)
+		}
+	}
+	fails, announce := 0, false
 	m.mu.Lock()
 	if ip, ok := m.insts[id]; ok {
 		if errors.Is(err, errListProjects) {
@@ -468,6 +477,9 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 			ip.cleanupFails = 0
 		}
 		fails = ip.cleanupFails
+		if err != nil && fails >= maxCleanupFailures && !ip.gaveUp {
+			ip.gaveUp, announce = true, true
+		}
 	}
 	m.mu.Unlock()
 	if err != nil {
@@ -477,11 +489,13 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 		if fails < maxCleanupFailures {
 			return fmt.Errorf("docker cleanup: %w", err)
 		}
-		m.Events.Add("error", i.Repo, "cleanup of %s failed %d times in a row; releasing its slot, remove the leftovers by hand: %v",
-			id, fails, err)
+		// A later step that fails brings finish back here on every retry.
+		if announce {
+			m.Events.Add("error", i.Repo, "cleanup of %s failed %d times in a row; releasing its slot, remove the leftovers by hand: %v",
+				id, fails, err)
+		}
 	}
 	if hadJob {
-		p.Cleanup = removed
 		if err := writeJSONAtomic(pendingPath, p); err != nil {
 			return fmt.Errorf("write pending history: %w", err)
 		}

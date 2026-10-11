@@ -137,6 +137,7 @@ type instance struct {
 	finishing    bool      // a finish goroutine is running
 	retryFinish  time.Time // when a failed finish may run again
 	cleanupFails int       // consecutive failed Docker cleanups
+	gaveUp       bool      // the cleanup give-up has been reported
 	deregistered bool      // its registration was deleted by ghr or confirmed missing
 	lost         bool      // the registration was confirmed missing, not deleted by ghr
 	offlineSince time.Time // when an idle runner was first seen offline; zero while online

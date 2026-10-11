@@ -1311,3 +1311,58 @@ func TestIdleRunnerBackOnlineRestartsTheOfflineClock(t *testing.T) {
 		t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
 	}
 }
+
+// The history record counts every container the cleanup removed, not only
+// what its last attempt removed, even when the daemon restarted in between.
+func TestCleanupCountSumsAttemptsAcrossARestart(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud")
+	h.writeJob(t, "aaaaaa", 55)
+	h.gh.setJobs(55, completedJob(h, 55, "ghr-darkcloud-aaaaaa", "success"))
+	h.docker.byLabel["com.docker.compose.project=ghr-aaaaaa"] = []string{"c1", "c2"}
+	h.docker.setErr("RemoveNetworksByLabel", errors.New("network busy"))
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	h.docker.byLabel = map[string][]string{} // the containers are gone now
+	h.docker.setErr("RemoveNetworksByLabel", nil)
+	h.restart(t)
+	if err := h.m.Adopt(context.Background()); err != nil { // the unit is gone: cleanup resumes
+		t.Fatal(err)
+	}
+	h.m.Wait()
+	if h.state("aaaaaa") != "gone" || !strings.Contains(h.eventText(), "cleanup: 2 ctrs") {
+		t.Fatalf("state %s\n%s", h.state("aaaaaa"), h.eventText())
+	}
+}
+
+// Once cleanup has given up, a later step that keeps failing retries every
+// 30 s; the give-up itself is said once.
+func TestCleanupGiveUpIsReportedOnce(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud")
+	h.writeJob(t, "aaaaaa", 55)
+	h.docker.setErr("RemoveNetworksByLabel", errors.New("network busy"))
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	for n := 1; n < maxCleanupFailures; n++ {
+		h.m.refreshUnits(context.Background())
+		h.m.Wait()
+		h.now = h.now.Add(finishRetry)
+	}
+	orig := writeFile
+	t.Cleanup(func() { writeFile = orig })
+	writeFile = func(name string, data []byte, perm os.FileMode) error {
+		if strings.HasPrefix(name, h.m.Paths.Pending) {
+			return &fs.PathError{Op: "write", Path: name, Err: syscall.EIO}
+		}
+		return orig(name, data, perm)
+	}
+	for range 3 {
+		h.m.refreshUnits(context.Background())
+		h.m.Wait()
+		h.now = h.now.Add(finishRetry)
+	}
+	if n := strings.Count(h.eventText(), "releasing its slot"); n != 1 || h.state("aaaaaa") != "cleaning" {
+		t.Fatalf("give-up said %d times, state %s\n%s", n, h.state("aaaaaa"), h.eventText())
+	}
+}
