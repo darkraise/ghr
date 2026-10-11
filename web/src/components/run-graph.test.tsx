@@ -56,6 +56,11 @@ describe("JobGraph", () => {
     expect(section.getByRole("link", { name: "E2E (api), Succeeded" })).toBeInTheDocument()
   })
 
+  it("rounds a group's job row with the small radius token", () => {
+    const { section } = show()
+    expect(section.getByRole("link", { name: "Frontend tests (1/2), Succeeded, needs Pick runner" })).toHaveClass("rounded-sm", "hover:bg-muted")
+  })
+
   it("shows a large group's first five jobs and the rest on request", async () => {
     const base = run.jobs[2] as RunJob
     const shards = Array.from({ length: 7 }, (_, i) => ({ ...base, id: 2000 + i, name: `Shard ${i + 1}` }))
