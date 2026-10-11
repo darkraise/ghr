@@ -247,8 +247,9 @@ one that triggered it. Demand is recomputed each tick, so this self-corrects.
 ### Runner lifecycle
 
 1. **Spawn:** `POST /repos/{owner}/{repo}/actions/runners/generate-jitconfig` with
-   name `ghr-<repo>-<id>`, `runner_group_id: 1`, the effective labels minus the
-   system ones, `work_folder: _work`. Then `cp -a` dist → instance dir, `chown -R
+   name `ghr-<repo>-<id>`, `runner_group_id: 1`, the effective labels (system
+   labels included: GitHub gives a just-in-time runner exactly the labels it is
+   registered with), `work_folder: _work`. Then `cp -a` dist → instance dir, `chown -R
    ghrunner`, write `ghr.json` (`id`, `repo`, `runner_id`, `runner_name`,
    `dist_version`, `spawned_at`), and launch:
 
@@ -349,7 +350,8 @@ instance dirs with no unit. Runners not named `ghr-*` are never touched.
 |---|---|
 | API 5xx / network | per-repo exponential backoff (cap 2m); running instances untouched |
 | 403/429 with `x-ratelimit-remaining: 0` or `retry-after` | sleep until `x-ratelimit-reset` / `retry-after`; not degraded |
-| 401, or other 403 | daemon `degraded`: no spawns, re-check every 60s; TUI red banner |
+| 401 | daemon `degraded`: no spawns, re-check every 60s; TUI red banner |
+| other 403 | that repo in error ("token lacks permission for this repository"); others continue. Changed 2026-10-11 by docs/superpowers/specs/2026-10-11-ghr-runner-lifecycle-fixes-design.md |
 | 404 on a configured repo | that repo in error ("token lacks access to repo"); others continue |
 | JIT config failure | event logged; retried next tick |
 | Unit fails to start | event logged; dir removed; registration deleted |
