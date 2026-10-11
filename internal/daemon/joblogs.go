@@ -13,6 +13,7 @@ import (
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/joblog"
+	"github.com/darkraise/ghr/internal/lru"
 	"github.com/darkraise/ghr/internal/model"
 )
 
@@ -86,8 +87,8 @@ type logCache struct {
 	// Backend.
 	slots  chan struct{}
 	calls  map[int64]*logCall
-	parsed *lru[int64, model.JobLog]
-	notes  *lru[int64, jobNotes]
+	parsed *lru.Cache[int64, model.JobLog]
+	notes  *lru.Cache[int64, jobNotes]
 	misses map[int64]logMiss
 }
 
@@ -98,8 +99,8 @@ func (c *logCache) initLocked() {
 	}
 	c.slots = make(chan struct{}, logSlots)
 	c.calls = map[int64]*logCall{}
-	c.parsed = newLRU[int64, model.JobLog](1<<30, parsedLogBytes)
-	c.notes = newLRU[int64, jobNotes](annotationEntries, 0)
+	c.parsed = lru.New[int64, model.JobLog](1<<30, parsedLogBytes)
+	c.notes = lru.New[int64, jobNotes](annotationEntries, 0)
 	c.misses = map[int64]logMiss{}
 }
 
@@ -136,8 +137,8 @@ func (b *Backend) downloadLog(j logJob, call *logCall, queueWait time.Duration) 
 	delete(c.calls, j.id)
 	switch res.outcome {
 	case logParsed:
-		c.parsed.add(j.id, res.log, size)
-		c.notes.add(j.id, res.notes, 0)
+		c.parsed.Add(j.id, res.log, size)
+		c.notes.Add(j.id, res.notes, 0)
 		delete(c.misses, j.id)
 	case logBusy:
 	default:
@@ -248,7 +249,7 @@ func (b *Backend) JobLog(ctx context.Context, repo string, jobID int64) (model.J
 	c := &b.logs
 	c.mu.Lock()
 	c.initLocked()
-	if l, ok := c.parsed.get(jobID); ok {
+	if l, ok := c.parsed.Get(jobID); ok {
 		c.mu.Unlock()
 		return l, nil
 	}

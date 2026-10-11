@@ -116,8 +116,25 @@ func TestJobLogParsesAndKeepsTheLog(t *testing.T) {
 	if gh.count("GetJob darkmem 1002") != 2 || gh.count("JobLog darkmem 1002") != 1 {
 		t.Fatalf("calls %v", gh.calls)
 	}
-	if b.logs.notes.maxEntries != annotationEntries || b.logs.parsed.maxSize != parsedLogBytes {
-		t.Fatalf("bounds %d entries, %d bytes", b.logs.notes.maxEntries, b.logs.parsed.maxSize)
+	// The caches' bounds, read from what they keep: the notes cache holds
+	// annotationEntries entries, and the parsed cache refuses one log larger
+	// than parsedLogBytes.
+	b.logs.mu.Lock()
+	defer b.logs.mu.Unlock()
+	for i := range annotationEntries {
+		b.logs.notes.Add(int64(5000+i), jobNotes{}, 0)
+	}
+	_, oldest := b.logs.notes.Get(1002)
+	_, next := b.logs.notes.Get(5000)
+	if oldest || !next {
+		t.Fatalf("notes cache after %d more entries: kept the first %v, kept the second %v", annotationEntries, oldest, next)
+	}
+	b.logs.parsed.Add(7001, model.JobLog{JobID: 7001}, parsedLogBytes)
+	b.logs.parsed.Add(7002, model.JobLog{JobID: 7002}, parsedLogBytes+1)
+	_, fits := b.logs.parsed.Get(7001)
+	_, tooBig := b.logs.parsed.Get(7002)
+	if !fits || tooBig {
+		t.Fatalf("parsed cache: kept a log of parsedLogBytes %v, kept a larger one %v", fits, tooBig)
 	}
 }
 
@@ -239,7 +256,7 @@ func TestJobLogStopsWaitingButKeepsTheDownload(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		b.logs.mu.Lock()
-		_, ok := b.logs.parsed.get(1002)
+		_, ok := b.logs.parsed.Get(1002)
 		b.logs.mu.Unlock()
 		if ok {
 			break

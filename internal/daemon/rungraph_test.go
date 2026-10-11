@@ -23,25 +23,6 @@ func ciJobs() []github.Job {
 	return []github.Job{{ID: 1, Name: "Build"}, {ID: 2, Name: "test"}}
 }
 
-func TestLRUBoundsEntriesAndSize(t *testing.T) {
-	c := newLRU[string, int](2, 10)
-	c.add("a", 1, 4)
-	c.add("b", 2, 4)
-	c.get("a")
-	c.add("c", 3, 4)
-	if _, ok := c.get("b"); ok || c.len() != 2 {
-		t.Fatalf("b should be evicted as least recently used, len %d", c.len())
-	}
-	c.add("d", 4, 8)
-	if _, ok := c.get("a"); ok || c.len() != 1 || c.size != 8 {
-		t.Fatalf("size bound: len %d size %d", c.len(), c.size)
-	}
-	c.add("e", 5, 11)
-	if _, ok := c.get("e"); ok || c.len() != 1 {
-		t.Fatalf("an entry above maxSize must not be kept, len %d", c.len())
-	}
-}
-
 func TestRunGraphNotes(t *testing.T) {
 	for _, tc := range []struct {
 		name, path, yaml string

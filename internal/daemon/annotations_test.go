@@ -86,7 +86,7 @@ func TestRunAnnotationsReusesTheParsedLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.logs.mu.Lock()
-	b.logs.notes.remove(2001)
+	b.logs.notes.Remove(2001)
 	b.logs.mu.Unlock()
 	a, err := b.RunAnnotations(ctx, "darkmem", 102, 0)
 	if err != nil || len(a.Items) != 1 || gh.count("JobLog") != 1 {

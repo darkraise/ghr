@@ -31,14 +31,14 @@ func (b *Backend) RunAnnotations(ctx context.Context, repo string, id int64, att
 		if j.Status != "completed" || j.Conclusion == "skipped" {
 			continue
 		}
-		if n, ok := c.notes.get(j.ID); ok {
+		if n, ok := c.notes.Get(j.ID); ok {
 			notes[j.ID] = n
 			continue
 		}
-		if l, ok := c.parsed.get(j.ID); ok {
+		if l, ok := c.parsed.Get(j.ID); ok {
 			items, omitted := joblog.Annotations(j.ID, j.Name, l.Steps)
 			n := jobNotes{items: items, omitted: omitted}
-			c.notes.add(j.ID, n, 0)
+			c.notes.Add(j.ID, n, 0)
 			notes[j.ID] = n
 			continue
 		}

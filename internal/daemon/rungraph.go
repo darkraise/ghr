@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/darkraise/ghr/internal/github"
+	"github.com/darkraise/ghr/internal/lru"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/wfgraph"
 )
@@ -37,7 +37,7 @@ type wfFile struct {
 // graph on the next call.
 type wfCache struct {
 	mu    sync.Mutex
-	files *lru[string, wfFile]
+	files *lru.Cache[string, wfFile]
 }
 
 func (b *Backend) workflowFile(ctx context.Context, repo, sha, path string) ([]byte, error) {
@@ -45,9 +45,9 @@ func (b *Backend) workflowFile(ctx context.Context, repo, sha, path string) ([]b
 	key := strings.ToLower(repo) + "\x00" + sha + "\x00" + path
 	c.mu.Lock()
 	if c.files == nil {
-		c.files = newLRU[string, wfFile](wfFileEntries, 0)
+		c.files = lru.New[string, wfFile](wfFileEntries, 0)
 	}
-	f, ok := c.files.get(key)
+	f, ok := c.files.Get(key)
 	c.mu.Unlock()
 	if ok && f.missingAt.IsZero() {
 		return f.data, nil
@@ -65,7 +65,7 @@ func (b *Backend) workflowFile(ctx context.Context, repo, sha, path string) ([]b
 		return nil, err
 	}
 	c.mu.Lock()
-	c.files.add(key, f, 0)
+	c.files.Add(key, f, 0)
 	c.mu.Unlock()
 	return data, err
 }
@@ -111,59 +111,3 @@ func (b *Backend) runGraph(ctx context.Context, repo, sha, path string, jobs []g
 	}
 	return &model.RunGraph{Nodes: nodes}, "", nil
 }
-
-// lru is a map bounded by entry count and, when maxSize is above 0, by the
-// total of the sizes given to add; the least recently used entries go
-// first. Callers hold their own lock.
-type lru[K comparable, V any] struct {
-	maxEntries int
-	maxSize    int64
-	size       int64
-	order      *list.List // front is the most recently used
-	items      map[K]*list.Element
-}
-
-type lruItem[K comparable, V any] struct {
-	key  K
-	val  V
-	size int64
-}
-
-func newLRU[K comparable, V any](maxEntries int, maxSize int64) *lru[K, V] {
-	return &lru[K, V]{maxEntries: maxEntries, maxSize: maxSize, order: list.New(), items: map[K]*list.Element{}}
-}
-
-func (c *lru[K, V]) get(k K) (V, bool) {
-	e, ok := c.items[k]
-	if !ok {
-		var zero V
-		return zero, false
-	}
-	c.order.MoveToFront(e)
-	return e.Value.(*lruItem[K, V]).val, true
-}
-
-// add stores v under k. An entry larger than maxSize on its own is not kept.
-func (c *lru[K, V]) add(k K, v V, size int64) {
-	c.remove(k)
-	if c.maxSize > 0 && size > c.maxSize {
-		return
-	}
-	c.items[k] = c.order.PushFront(&lruItem[K, V]{key: k, val: v, size: size})
-	c.size += size
-	for c.order.Len() > c.maxEntries || (c.maxSize > 0 && c.size > c.maxSize) {
-		c.remove(c.order.Back().Value.(*lruItem[K, V]).key)
-	}
-}
-
-func (c *lru[K, V]) remove(k K) {
-	e, ok := c.items[k]
-	if !ok {
-		return
-	}
-	c.order.Remove(e)
-	delete(c.items, k)
-	c.size -= e.Value.(*lruItem[K, V]).size
-}
-
-func (c *lru[K, V]) len() int { return c.order.Len() }
