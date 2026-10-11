@@ -37,6 +37,8 @@ func TestRunGraphNotes(t *testing.T) {
 		{"job not in the file", ciPath, ciYAML, nil, append(ciJobs(), github.Job{ID: 3, Name: "Deploy"}),
 			"The workflow file at this commit does not match the run's jobs."},
 		{"invalid YAML", ciPath, "jobs: [", nil, ciJobs(), "ghr could not read .github/workflows/ci.yml."},
+		{"undecodable file", ciPath, "", fmt.Errorf("%w: %s has encoding %q, not base64", github.ErrBadContent, ciPath, "none"), ciJobs(),
+			"ghr could not read .github/workflows/ci.yml."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b, _, gh := newBackend(t)
@@ -98,6 +100,19 @@ func TestWorkflowFileCache(t *testing.T) {
 		clock.Store(actionsT0.Add(wfMissingTTL).UnixNano())
 		if _, note, _ := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs()); note != "" || gh.count("GetContent") != 2 {
 			t.Fatalf("note %q, %d calls", note, gh.count("GetContent"))
+		}
+	})
+	t.Run("keeps an undecodable file for good", func(t *testing.T) {
+		b, _, gh := newBackend(t)
+		clock := frozenClock(b, actionsT0)
+		gh.contentErr = fmt.Errorf("%w: %s has encoding %q, not base64", github.ErrBadContent, ciPath, "none")
+		b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs())
+		gh.contentErr = nil
+		gh.content = map[string][]byte{contentKey("darkmem", ciPath, "abc"): []byte(ciYAML)}
+		clock.Store(actionsT0.Add(24 * time.Hour).UnixNano())
+		g, note, err := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs())
+		if err != nil || g != nil || note != fmt.Sprintf(noteInvalid, ciPath) || gh.count("GetContent") != 1 {
+			t.Fatalf("graph %+v note %q err %v, %d calls", g, note, err, gh.count("GetContent"))
 		}
 	})
 	t.Run("never keeps a 403", func(t *testing.T) {

@@ -25,16 +25,18 @@ const (
 	wfMissingTTL  = 10 * time.Minute
 )
 
-// wfFile is a workflow file's bytes, or the time GitHub answered 404 for it.
+// wfFile is a workflow file's bytes, the time GitHub answered 404 for it, or
+// the mark that GitHub delivered it in a form that cannot be decoded.
 type wfFile struct {
 	data      []byte
 	missingAt time.Time
+	bad       bool
 }
 
 // wfCache keeps workflow files by repository, commit and path. A file at a
-// commit never changes, so bytes do not expire; only "not found" does, and
-// a 403, 429 or 5xx is never kept, so granting the permission shows the
-// graph on the next call.
+// commit never changes, so neither its bytes nor the mark that it cannot be
+// decoded expire; only "not found" does, and a 403, 429 or 5xx is never
+// kept, so granting the permission shows the graph on the next call.
 type wfCache struct {
 	mu    sync.Mutex
 	files *lru.Cache[string, wfFile]
@@ -49,10 +51,12 @@ func (b *Backend) workflowFile(ctx context.Context, repo, sha, path string) ([]b
 	}
 	f, ok := c.files.Get(key)
 	c.mu.Unlock()
-	if ok && f.missingAt.IsZero() {
+	switch {
+	case ok && f.bad:
+		return nil, github.ErrBadContent
+	case ok && f.missingAt.IsZero():
 		return f.data, nil
-	}
-	if ok && b.now().Sub(f.missingAt) < wfMissingTTL {
+	case ok && b.now().Sub(f.missingAt) < wfMissingTTL:
 		return nil, &github.APIError{Status: 404, Kind: github.ErrNotFound, Message: "Not Found"}
 	}
 	data, err := b.GH.GetContent(ctx, repo, path, sha)
@@ -61,6 +65,8 @@ func (b *Backend) workflowFile(ctx context.Context, repo, sha, path string) ([]b
 		f = wfFile{data: data}
 	case github.IsKind(err, github.ErrNotFound):
 		f = wfFile{missingAt: b.now()}
+	case errors.Is(err, github.ErrBadContent):
+		f = wfFile{bad: true}
 	default:
 		return nil, err
 	}
@@ -91,6 +97,8 @@ func (b *Backend) runGraph(ctx context.Context, repo, sha, path string, jobs []g
 		return nil, noteNoFile, nil
 	case errors.As(err, &ge) && ge.Kind == github.ErrAuth && ge.Status == 403:
 		return nil, noteNoPermission, nil
+	case errors.Is(err, github.ErrBadContent):
+		return nil, fmt.Sprintf(noteInvalid, path), nil
 	case err != nil:
 		return nil, "", err
 	}
