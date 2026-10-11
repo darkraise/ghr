@@ -24,9 +24,9 @@ func (m *Manager) Tick(ctx context.Context) {
 	if m.apiAllowed(now) {
 		m.refreshRunners(ctx)
 	}
-	demandOK := false
+	demandOK, unanswered := false, ""
 	if m.apiAllowed(now) {
-		demandOK = m.gatherDemand(ctx, cfg, now)
+		demandOK, unanswered = m.gatherDemand(ctx, cfg, now)
 	}
 	if m.apiAllowed(now) && !m.isDegraded() && m.releaseCheckDue(now) {
 		m.checkRelease(ctx)
@@ -37,7 +37,7 @@ func (m *Manager) Tick(ctx context.Context) {
 		m.stopDeregistered(ctx, now)
 	}
 	m.stopStartTimedOut(ctx, cfg, now)
-	m.startUpdateIfFree(ctx, cfg, now, demandOK)
+	m.startUpdateIfFree(ctx, cfg, now, demandOK, unanswered)
 	if m.apiAllowed(now) && !m.isDegraded() {
 		m.spawnPlanned(ctx, cfg, now)
 	}
@@ -69,14 +69,20 @@ func (m *Manager) Tick(ctx context.Context) {
 
 // gatherDemand lists matching queued jobs per repo and confirms our in-progress
 // jobs. Degraded clears only after a tick in which some repo answered and none
-// failed authentication. It reports whether every unpaused repo answered.
-func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time.Time) bool {
+// rejected the token. It reports whether every unpaused repo answered, and
+// the first one, in config order, that did not.
+func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time.Time) (bool, string) {
 	ours := map[string]string{}
 	for _, i := range m.snapshot() {
 		ours[i.RunnerName] = i.ID
 	}
 	demand := sched.Demand{}
-	anyOK, authFailed, allAnswered := false, false, true
+	anyOK, authFailed, unanswered := false, false, ""
+	missed := func(name string) {
+		if unanswered == "" {
+			unanswered = name
+		}
+	}
 	for _, r := range cfg.Repos {
 		if r.Paused {
 			continue
@@ -85,12 +91,12 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 		wait := now.Before(m.retryAt[r.Name])
 		m.mu.Unlock()
 		if wait {
-			allAnswered = false
+			missed(r.Name)
 			continue
 		}
 		jobs, err := m.repoDemand(ctx, cfg, r, ours, now)
 		if err != nil {
-			allAnswered = false
+			missed(r.Name)
 			if tokenRejected(err) {
 				authFailed = true
 			}
@@ -119,7 +125,7 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 	if recovered {
 		m.Events.Add("ok", "", "GitHub token accepted again")
 	}
-	return allAnswered
+	return unanswered == "", unanswered
 }
 
 func (m *Manager) repoDemand(ctx context.Context, cfg *config.Config, r config.Repo, ours map[string]string, now time.Time) ([]sched.QueuedJob, error) {

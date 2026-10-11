@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -338,5 +339,55 @@ func TestUpdateStartsInTheTickThatStoppedItsIdleRunner(t *testing.T) {
 	}
 	if strings.Contains(h.eventText(), "runner update postponed") || current(t, h) != "2.338.0" {
 		t.Fatalf("current %s\n%s", current(t, h), h.eventText())
+	}
+}
+
+// A queued update that cannot start for a reason other than runners working
+// says why, once per reason.
+func TestQueuedUpdateSaysWhyItWaits(t *testing.T) {
+	h := newHarness(t)
+	queuedUpdate(t, h, tarballSum())
+	waiting := func() []string {
+		var out []string
+		for _, line := range strings.Split(h.eventText(), "\n") {
+			if strings.Contains(line, "runner update waiting") {
+				out = append(out, line)
+			}
+		}
+		return out
+	}
+	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 502, Kind: github.ErrServer})
+	h.m.Tick(context.Background())
+	h.now = h.now.Add(5 * time.Second) // darkcloud is still in its 10 s backoff
+	h.m.Tick(context.Background())
+	want := []string{"warn  runner update waiting: darkcloud did not answer its poll"}
+	if got := waiting(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events %q", got)
+	}
+	// A queue made anew is a new wait: its reason is said again.
+	if err := h.m.CancelUpdate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.m.QueueUpdate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.m.Tick(context.Background())
+	want = append(want, want[0])
+	if got := waiting(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events after a requeue %q", got)
+	}
+	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Hour)})
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background())
+	want = append(want, "warn  runner update waiting: GitHub API calls are paused")
+	if got := waiting(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events %q", got)
+	}
+	h.gh.setErr("ListRuns darkcloud", nil)
+	h.now = h.now.Add(time.Hour)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if got := waiting(); !reflect.DeepEqual(got, want) || current(t, h) != "2.338.0" {
+		t.Fatalf("current %s events %q", current(t, h), got)
 	}
 }
