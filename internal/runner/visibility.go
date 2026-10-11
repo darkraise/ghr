@@ -32,6 +32,7 @@ func (m *Manager) readVisibility(ctx context.Context, repo string, now time.Time
 	key := strings.ToLower(repo)
 	m.mu.Lock()
 	v, known := m.vis[key]
+	gen := m.visGen
 	m.mu.Unlock()
 	if known && now.Sub(v.readAt) < visibilityTTL {
 		return nil
@@ -41,7 +42,11 @@ func (m *Manager) readVisibility(ctx context.Context, repo string, now time.Time
 		return err
 	}
 	m.mu.Lock()
-	m.vis[key] = visibility{public: !r.Private, readAt: now}
+	nv := visibility{public: !r.Private, readAt: now}
+	if m.visGen != gen {
+		nv.readAt = time.Time{} // ClearDegraded ran during the read; the next poll reads again
+	}
+	m.vis[key] = nv
 	m.mu.Unlock()
 	return nil
 }

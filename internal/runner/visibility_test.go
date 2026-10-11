@@ -184,3 +184,21 @@ func TestRemovedRepositoryIsForgotten(t *testing.T) {
 		t.Fatalf("darkcloud known %v, API calls during the pause %d", known, h.gh.callCount()-calls)
 	}
 }
+
+// A reload that lands while a read is in flight must not be undone by that
+// read's answer: the repository is read again at its next poll.
+func TestClearDegradedDuringAReadLeavesItDue(t *testing.T) {
+	h := newHarness(t)
+	h.gh.hook = func(method string) {
+		if method == "GetRepo" {
+			h.m.ClearDegraded()
+		}
+	}
+	h.m.Tick(context.Background())
+	h.gh.hook = nil
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background())
+	if h.repoReads("darkmem") != 2 || h.repoReads("darkcloud") != 2 {
+		t.Fatalf("reads darkmem %d darkcloud %d, want 2 each", h.repoReads("darkmem"), h.repoReads("darkcloud"))
+	}
+}

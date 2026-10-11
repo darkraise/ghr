@@ -192,6 +192,7 @@ type Manager struct {
 	spawnRetryAt   map[string]time.Time  // no spawn for the repo before this
 	spawnErr       map[string]string     // the last failed start's message
 	vis            map[string]visibility // by lower-cased repo; a repo without an entry is unread
+	visGen         uint64                // bumped by ClearDegraded; guarded by mu
 	degraded       bool
 	degradedReason string
 	authCheckAt    time.Time
@@ -733,6 +734,7 @@ func (m *Manager) ClearDegraded() {
 	m.degraded = false
 	m.degradedReason = ""
 	m.spawnFails, m.spawnRetryAt, m.spawnErr = map[string]int{}, map[string]time.Time{}, map[string]string{}
+	m.visGen++
 	for key, v := range m.vis {
 		v.readAt = time.Time{}
 		m.vis[key] = v
