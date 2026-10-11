@@ -251,7 +251,9 @@ one that triggered it. Demand is recomputed each tick, so this self-corrects.
    labels included: GitHub gives a just-in-time runner exactly the labels it is
    registered with), `work_folder: _work`. Then `cp -a` dist → instance dir, `chown -R
    ghrunner`, write `ghr.json` (`id`, `repo`, `runner_id`, `runner_name`,
-   `dist_version`, `spawned_at`), and launch:
+   `dist_version`, `spawned_at`) and, before the unit starts, the same record
+   in the root-only `/var/lib/ghr/private/<id>.json`, which is the copy the
+   daemon trusts (Changed 2026-10-11 by docs/superpowers/specs/2026-10-11-ghr-runner-lifecycle-fixes-design.md), and launch:
 
    ```
    systemd-run --unit ghr-runner-<id> --uid ghrunner --gid ghrunner
@@ -289,9 +291,10 @@ one that triggered it. Demand is recomputed each tick, so this self-corrects.
    cancelled after it loses contact; cleanup runs as normal.
 
 Transient units survive daemon restarts and upgrades. On startup the daemon lists
-`ghr-runner-*` units and re-adopts each from its instance dir's `ghr.json` and
-`job.json`. A unit whose `ghr.json` is missing or unparsable is stopped, its dir
-removed, and any registration named `ghr-*-<id>` deleted.
+`ghr-runner-*` units and re-adopts each from its private record (a legacy
+`ghr.json` in the instance dir is migrated once) and the instance dir's
+`job.json`. A unit whose record is missing or unparsable is stopped and its dir
+removed; its registration is then deleted by reconciliation (Changed 2026-10-11 by docs/superpowers/specs/2026-10-11-ghr-runner-lifecycle-fixes-design.md).
 
 ### Idle and pause
 
@@ -341,8 +344,10 @@ daily.
 ### Reconciliation
 
 At startup and every 30 ticks, per repo: list registered runners; delete any named
-`ghr-<repo>-<id>` with no matching local unit (`404`/`422` handled as above); remove
-instance dirs with no unit. Runners not named `ghr-*` are never touched.
+`ghr-<repo>-<id>` with no matching local unit only after GitHub reported it offline
+at two reconciles in a row, because another ghr host serving the repository names
+its runners the same way (`404`/`422` handled as above); remove instance dirs with
+no unit. Runners not named `ghr-*` are never touched. Changed 2026-10-11 by docs/superpowers/specs/2026-10-11-ghr-runner-lifecycle-fixes-design.md.
 
 ### Error handling
 
@@ -353,7 +358,7 @@ instance dirs with no unit. Runners not named `ghr-*` are never touched.
 | 401 | daemon `degraded`: no spawns, re-check every 60s; TUI red banner |
 | other 403 | that repo in error ("token lacks permission for this repository"); others continue. Changed 2026-10-11 by docs/superpowers/specs/2026-10-11-ghr-runner-lifecycle-fixes-design.md |
 | 404 on a configured repo | that repo in error ("token lacks access to repo"); others continue |
-| JIT config failure | event logged; retried next tick |
+| JIT config failure | event logged; retried with a per-repo backoff from 10s up to 10m, which a runner that comes online clears. Changed 2026-10-11 by docs/superpowers/specs/2026-10-11-ghr-runner-lifecycle-fixes-design.md |
 | Unit fails to start | event logged; dir removed; registration deleted |
 | `start_timeout` exceeded | unit stopped; registration deleted; respawned by `Plan` |
 | Invalid config on write or reload | rejected; previous config stays active |
