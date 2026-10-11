@@ -113,6 +113,8 @@ func fakeGitHub(t *testing.T) *httptest.Server {
 			fmt.Fprint(w, `{"id":5,"status":"offline","busy":false}`)
 		case strings.HasSuffix(p, "/actions/runners"):
 			fmt.Fprint(w, `{"runners":[]}`)
+		case p == "/repos/darkraise/darkcloud" || p == "/repos/darkraise/darkmem":
+			fmt.Fprintf(w, `{"full_name":%q,"private":true}`, strings.TrimPrefix(p, "/repos/"))
 		default:
 			w.WriteHeader(404)
 		}

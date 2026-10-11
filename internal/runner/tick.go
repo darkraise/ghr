@@ -22,6 +22,7 @@ func (m *Manager) Tick(ctx context.Context) {
 	m.refreshUnits(ctx)
 	m.readJobFiles()
 	m.forgetPaused(cfg)
+	m.forgetRemoved(cfg)
 	if m.apiAllowed(now) {
 		m.refreshRunners(ctx)
 	}
@@ -121,6 +122,11 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 			continue
 		}
 		jobs, err := m.repoDemand(ctx, cfg, r, ours, now)
+		if err == nil {
+			// Read here, before the tick plans anything, so nothing is planned
+			// on an answer that is due. A failed read is this poll's failure.
+			err = m.readVisibility(ctx, r.Name, now)
+		}
 		if err != nil {
 			missed(r)
 			if tokenRejected(err) {

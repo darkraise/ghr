@@ -47,6 +47,7 @@ type GitHub interface {
 	GetRunner(ctx context.Context, repo string, id int64) (*github.Runner, error)
 	DeleteRunner(ctx context.Context, repo string, id int64) error
 	GenerateJITConfig(ctx context.Context, repo, name string, labels []string) (*github.JITConfig, error)
+	GetRepo(ctx context.Context, repo string) (*github.Repository, error)
 	ListRunnerReleases(ctx context.Context) ([]github.Release, error)
 	RateRemaining() int
 }
@@ -190,6 +191,7 @@ type Manager struct {
 	spawnFails     map[string]int        // failed starts in a row, by lower-cased repo
 	spawnRetryAt   map[string]time.Time  // no spawn for the repo before this
 	spawnErr       map[string]string     // the last failed start's message
+	vis            map[string]visibility // by lower-cased repo; a repo without an entry is unread
 	degraded       bool
 	degradedReason string
 	authCheckAt    time.Time
@@ -225,6 +227,7 @@ func (m *Manager) Init() error {
 	m.spawnFails = map[string]int{}
 	m.spawnRetryAt = map[string]time.Time{}
 	m.spawnErr = map[string]string{}
+	m.vis = map[string]visibility{}
 	m.lastJob = map[string]model.HistoryEntry{}
 	m.lastPrune = m.Now()
 	m.maintCtx, m.maintCancel = context.WithCancel(context.Background())
@@ -722,12 +725,18 @@ func (m *Manager) PausedUntil() time.Time {
 }
 
 // ClearDegraded is called after the token is replaced or reloaded. A new
-// token may also be what a failing spawn was waiting for.
+// token may also be what a failing spawn was waiting for. Every repository's
+// visibility is read again at its next poll; the last answer stands until
+// then.
 func (m *Manager) ClearDegraded() {
 	m.mu.Lock()
 	m.degraded = false
 	m.degradedReason = ""
 	m.spawnFails, m.spawnRetryAt, m.spawnErr = map[string]int{}, map[string]time.Time{}, map[string]string{}
+	for key, v := range m.vis {
+		v.readAt = time.Time{}
+		m.vis[key] = v
+	}
 	m.mu.Unlock()
 }
 

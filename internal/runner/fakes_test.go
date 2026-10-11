@@ -31,12 +31,13 @@ type fakeGH struct {
 	errs      map[string]error // key "<method> <repo>"
 	remaining int
 	releases  []github.Release
+	public    map[string]bool     // repos GetRepo reports public; any other is private
 	hook      func(method string) // runs during every call, after it is recorded
 }
 
 func newFakeGH() *fakeGH {
 	return &fakeGH{runs: map[string][]github.Run{}, jobs: map[int64][]github.Job{}, runners: map[int64]*github.Runner{},
-		listed: map[string][]github.Runner{}, errs: map[string]error{}, nextID: 100, remaining: 4999}
+		listed: map[string][]github.Runner{}, errs: map[string]error{}, public: map[string]bool{}, nextID: 100, remaining: 4999}
 }
 
 // call records the call and returns its injected error, if any.
@@ -147,6 +148,21 @@ func (f *fakeGH) setReleases(rels ...github.Release) {
 }
 
 func (f *fakeGH) RateRemaining() int { return f.remaining }
+
+func (f *fakeGH) GetRepo(_ context.Context, repo string) (*github.Repository, error) {
+	if err := f.call("GetRepo", repo); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return &github.Repository{FullName: "darkraise/" + repo, Private: !f.public[repo]}, nil
+}
+
+func (f *fakeGH) setPublic(repo string, public bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.public[repo] = public
+}
 
 func (f *fakeGH) setRunner(id int64, status string, busy bool) {
 	f.mu.Lock()
