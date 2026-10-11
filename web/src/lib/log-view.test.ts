@@ -74,6 +74,7 @@ describe("findMatches", () => {
       job_id: 1,
       too_large: false,
       expired: false,
+      no_log: false,
       steps: [{ number: 1, name: "s", lines: [line(1, "", "aa aa"), line(2, "endgroup", "aa")] }],
     }
     expect(findMatches(log, "aa")).toEqual([

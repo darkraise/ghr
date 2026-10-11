@@ -568,6 +568,7 @@ export interface JobLog {
   job_id: number
   too_large: boolean
   expired: boolean
+  no_log: boolean
   steps: LogStep[]
 }
 

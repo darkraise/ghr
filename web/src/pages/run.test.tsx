@@ -219,6 +219,14 @@ describe("Job page", () => {
     expect(screen.queryByRole("button", { name: "Raw log" })).toBeNull()
   })
 
+  it("says when the job produced no log and offers no raw log", async () => {
+    mockApi(runRoutes({ "GET /api/actions/darkmem/jobs/1002/log": { ...fixtures.jobLog, no_log: true, steps: [] } }))
+    renderApp("/actions/darkmem/runs/102/jobs/1002")
+    expect(await screen.findByText("This job produced no log.")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Raw log" })).toBeNull()
+    expect(screen.queryByLabelText("Search logs")).toBeNull()
+  })
+
   it("saves the raw log through a Blob", async () => {
     const text = "2026-10-03T13:55:25.0000000Z Set up job\n"
     const { calls, fetchMock } = mockApi(
