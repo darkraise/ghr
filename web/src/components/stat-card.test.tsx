@@ -16,6 +16,17 @@ describe("StatCards", () => {
     for (const stat of stats) expect(stat).not.toHaveClass("border")
   })
 
+  it("divides the two-by-two grid below 641px, and only the columns from there", () => {
+    const { container } = render(<StatCards status={fixtures.status} metrics={fixtures.metrics} now={now} />)
+    expect(container.firstElementChild).toHaveClass(
+      "grid-cols-2",
+      "[&>*:nth-child(odd)]:border-r",
+      "[&>*:nth-child(-n+2)]:border-b",
+      "min-[641px]:[&>*:nth-child(-n+2)]:border-b-0",
+      "min-[641px]:divide-x",
+    )
+  })
+
   it("shows runners, waiting jobs, the API budget and the host", () => {
     render(<StatCards status={fixtures.status} metrics={fixtures.metrics} now={now} />)
     expect(card("Runners").getByText("1")).toHaveClass("font-mono")
