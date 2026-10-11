@@ -207,7 +207,9 @@ func (s *Sampler) Sample() {
 	used, total, memOK := readMem(s.MemInfo)
 	disk := s.Disk()
 
-	smp := model.MetricSample{At: now, Live: counts.Live, Queued: counts.Queued}
+	// Round(0) drops the monotonic reading, so the backwards-step filter below
+	// compares wall times; the CPU figures keep using now with its reading.
+	smp := model.MetricSample{At: now.Round(0), Live: counts.Live, Queued: counts.Queued}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if usageOK && cpusOK && s.haveCPU && usage >= s.lastCPU && now.Sub(s.lastAt) >= time.Microsecond {

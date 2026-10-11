@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -254,6 +255,20 @@ func TestClockJumps(t *testing.T) {
 	}
 	if hrs := h.s.Hours(); len(hrs) != 2 || hrs[1].Samples != 3 {
 		t.Fatalf("hours after a step inside the hour %+v", hrs)
+	}
+}
+
+// A sample from the real clock carries a monotonic reading, which never goes
+// back with the wall clock; kept on the sample it would hide a backwards step
+// from the filter that drops samples dated after the new one.
+func TestSampleKeepsOnlyWallTime(t *testing.T) {
+	h := newHost(t)
+	h.s.Now = time.Now
+	h.write(t, "cpu.stat", "usage_usec 0\n")
+	h.s.Sample()
+	mins := h.s.Minutes()
+	if len(mins) != 1 || strings.Contains(mins[0].At.String(), "m=") {
+		t.Fatalf("the stored sample keeps its monotonic reading: %+v", mins)
 	}
 }
 
