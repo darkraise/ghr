@@ -10,6 +10,9 @@ import { errorText } from "@/query"
 
 const FLOORS: Record<string, number> = { poll_interval: 5000, start_timeout: 0, idle_timeout: 0, history_retention: DAY_MS }
 
+// The daemon's cap on global_max (config.MaxRunners); it refuses a larger value.
+const MAX_RUNNERS = 99
+
 function loadedValues(c: Config): Values {
   return {
     mode: c.mode,
@@ -39,6 +42,7 @@ function fieldErrors(v: Values): Record<string, string> {
   }
   const max = Number(v.global_max)
   if (!Number.isInteger(max) || max < 1) errors.global_max = "global_max must be >= 1"
+  else if (max > MAX_RUNNERS) errors.global_max = `global_max must be <= ${MAX_RUNNERS}`
   const high = Number(v.disk_high_water)
   if (!Number.isInteger(high) || high < 1 || high > 100) errors.disk_high_water = "disk_high_water must be 1..100"
   return errors
