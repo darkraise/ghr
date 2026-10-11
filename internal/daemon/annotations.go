@@ -89,6 +89,8 @@ wait:
 			}
 		}
 		if o, ok := outcomes[j.ID]; ok {
+			// logNone is counted nowhere: a job that never ran has no log to
+			// expire, to be too large or to fail on.
 			switch o {
 			case logExpired:
 				out.ExpiredLogs++

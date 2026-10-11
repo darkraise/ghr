@@ -2,6 +2,7 @@
   "job_id": 1002,
   "too_large": false,
   "expired": false,
+  "no_log": false,
   "steps": [
     {
       "number": 1,

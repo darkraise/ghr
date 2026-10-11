@@ -178,6 +178,7 @@ func TestJobLogOutcomes(t *testing.T) {
 	}{
 		{"expired", &github.APIError{Status: 410, Kind: github.ErrGone}, model.JobLog{JobID: 1002, Expired: true}, 0, true},
 		{"too large", github.ErrTooLarge, model.JobLog{JobID: 1002, TooLarge: true}, 0, true},
+		{"no log", ghNotFound(), model.JobLog{JobID: 1002, NoLog: true}, 0, true},
 		{"failed", errors.New("boom"), model.JobLog{}, 502, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -186,7 +187,7 @@ func TestJobLogOutcomes(t *testing.T) {
 			gh.logErr[1002] = tc.err
 			for i := range 2 {
 				l, err := b.JobLog(context.Background(), "darkmem", 1002)
-				if apiStatus(err) != tc.status || l.JobID != tc.want.JobID || l.Expired != tc.want.Expired || l.TooLarge != tc.want.TooLarge {
+				if apiStatus(err) != tc.status || l.JobID != tc.want.JobID || l.Expired != tc.want.Expired || l.TooLarge != tc.want.TooLarge || l.NoLog != tc.want.NoLog {
 					t.Fatalf("call %d: log %+v err %v", i, l, err)
 				}
 			}
@@ -407,6 +408,7 @@ func TestRawLogErrorsReleaseEverything(t *testing.T) {
 	}{
 		{"expired", func(b *Backend, gh *fakeGH) { gh.logErr[1002] = &github.APIError{Status: 410, Kind: github.ErrGone} },
 			410, "GitHub no longer keeps this job's log", 0, true},
+		{"no log", func(b *Backend, gh *fakeGH) { gh.logErr[1002] = ghNotFound() }, 404, "this job produced no log", 0, true},
 		{"failed", func(b *Backend, gh *fakeGH) { gh.logErr[1002] = errors.New("boom") }, 502, "", 0, true},
 		{"declared too large", func(b *Backend, gh *fakeGH) { gh.logLen = map[int64]int64{1002: 65} }, 413, tooLarge, 1, true},
 		{"too large without a length", func(b *Backend, gh *fakeGH) {

@@ -416,11 +416,13 @@ type Annotation struct {
 }
 
 // JobLog is GET /actions/{repo}/jobs/{jobId}/log: a finished job's log split
-// into its steps.
+// into its steps. NoLog marks a job that never ran, so GitHub has no log for
+// it.
 type JobLog struct {
 	JobID    int64     `json:"job_id"`
 	TooLarge bool      `json:"too_large"`
 	Expired  bool      `json:"expired"`
+	NoLog    bool      `json:"no_log"`
 	Steps    []LogStep `json:"steps"`
 }
 

@@ -147,15 +147,17 @@ func TestRunAnnotationsCountsABusyDownloadAsUnread(t *testing.T) {
 func TestRunAnnotationsCountsLogOutcomes(t *testing.T) {
 	b, _, gh := newBackend(t)
 	clock := frozenClock(b, actionsT0)
-	annotatedRun(gh, logJobOf(gh, 2001, "a", "x"), logJobOf(gh, 2002, "b", "x"), logJobOf(gh, 2003, "c", "x"))
+	annotatedRun(gh, logJobOf(gh, 2001, "a", "x"), logJobOf(gh, 2002, "b", "x"), logJobOf(gh, 2003, "c", "x"), logJobOf(gh, 2004, "d", "x"))
 	gh.logErr[2001] = &github.APIError{Status: 410, Kind: github.ErrGone}
 	gh.logErr[2002] = github.ErrTooLarge
 	gh.logErr[2003] = errors.New("boom")
+	// Job d never ran and has no log: it is counted nowhere.
+	gh.logErr[2004] = ghNotFound()
 	ctx := context.Background()
 	for i, step := range []struct {
 		at        time.Duration
 		downloads int
-	}{{0, 3}, {logRetryTTL - time.Second, 3}, {logRetryTTL, 6}} {
+	}{{0, 4}, {logRetryTTL - time.Second, 4}, {logRetryTTL, 8}} {
 		clock.Store(actionsT0.Add(step.at).UnixNano())
 		a, err := b.RunAnnotations(ctx, "darkmem", 102, 0)
 		if err != nil || a.ExpiredLogs != 1 || a.TooLarge != 1 || a.Failed != 1 || a.Unread != 0 || len(a.Items) != 0 {

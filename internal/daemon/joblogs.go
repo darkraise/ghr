@@ -48,6 +48,8 @@ const (
 	logParsed logOutcome = iota
 	logExpired
 	logTooLarge
+	// logNone is a completed job GitHub has no log for: the job never ran.
+	logNone
 	logFailed
 	// logBusy is a download that got no slot within logRequestWindow; it is
 	// never cached, so the next call starts it again.
@@ -75,7 +77,8 @@ type logCall struct {
 	res     logResult
 }
 
-// logMiss is an expired, too large or failed outcome, kept logRetryTTL.
+// logMiss is an expired, too large, absent or failed outcome, kept
+// logRetryTTL.
 type logMiss struct {
 	at  time.Time
 	res logResult
@@ -185,13 +188,17 @@ func (b *Backend) readLog(j logJob, started chan struct{}, queueWait time.Durati
 		return logResult{outcome: logTooLarge}, 0
 	case github.IsKind(err, github.ErrGone):
 		return logResult{outcome: logExpired}, 0
+	case github.IsKind(err, github.ErrNotFound):
+		// finishedJob read this job before the download started, so the 404
+		// is about the log, not about the repository or the job.
+		return logResult{outcome: logNone}, 0
 	}
 	log.Printf("job %d log: %v", j.id, err)
 	return logResult{outcome: logFailed, err: err}, 0
 }
 
 func flaggedLog(id int64, o logOutcome) model.JobLog {
-	return model.JobLog{JobID: id, TooLarge: o == logTooLarge, Expired: o == logExpired, Steps: []model.LogStep{}}
+	return model.JobLog{JobID: id, TooLarge: o == logTooLarge, Expired: o == logExpired, NoLog: o == logNone, Steps: []model.LogStep{}}
 }
 
 // errReadingOtherLogs is the 503 for a log request that found every download
@@ -237,8 +244,8 @@ func (b *Backend) finishedJob(ctx context.Context, repo string, jobID int64) (lo
 	return logJob{repo: name, id: jobID, name: job.Name, steps: modelSteps(job.Steps)}, nil
 }
 
-// JobLog returns a finished job's log split into steps. An expired or too
-// large log comes back flagged; a failed download is tried again.
+// JobLog returns a finished job's log split into steps. An expired, too large
+// or absent log comes back flagged; a failed download is tried again.
 func (b *Backend) JobLog(ctx context.Context, repo string, jobID int64) (model.JobLog, error) {
 	wctx, cancel := context.WithTimeout(ctx, logRequestWindow)
 	defer cancel()
@@ -336,6 +343,8 @@ func (b *Backend) openRawLog(ctx context.Context, repo string, jobID int64) (rc 
 	switch {
 	case github.IsKind(err, github.ErrGone):
 		return nil, 0, &api.Error{Status: http.StatusGone, Msg: "GitHub no longer keeps this job's log"}
+	case github.IsKind(err, github.ErrNotFound):
+		return nil, 0, api.NotFound("this job produced no log")
 	case err != nil:
 		return nil, 0, detailErr(err, b.Store.Config().Owner, j.repo)
 	}
