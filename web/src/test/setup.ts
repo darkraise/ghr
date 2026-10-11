@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest"
 import { cleanup, configure } from "@testing-library/react"
 import { afterEach, vi } from "vitest"
 import { liveConfig } from "@/api/live"
+import { releaseQueryClients } from "./query-clients"
 
 // The change stream would add a fetch to every rendered app, and many tests
 // count fetch calls; the stream's own tests turn it back on.
@@ -32,7 +33,8 @@ Element.prototype.scrollIntoView = () => {}
 // get 3 seconds, under Vitest's 5-second test timeout.
 configure({ asyncUtilTimeout: 3000 })
 
-afterEach(() => {
+afterEach(async () => {
   cleanup()
+  await releaseQueryClients()
   vi.unstubAllGlobals()
 })
