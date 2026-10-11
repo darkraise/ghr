@@ -244,6 +244,8 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
   const degraded = status.data?.degraded ?? false
   const is = (key: string) => changed.includes(key)
 
+  const base = `/repositories/${name}`
+
   function addLabel(label: string) {
     const current = values.labels as string[]
     if (current.some((l) => l.toLowerCase() === label.toLowerCase())) return
@@ -355,7 +357,14 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
         {!SECTIONS.some((s) => s.id === section) && <p className="text-sm text-muted-foreground">This repository has no such section.</p>}
       </SideLayout>
       <SaveBar count={changed.length} saving={saving} disabled={status.isError} onSave={() => void save()} onDiscard={discard} />
-      <UnsavedGuard count={changed.length} page="Repositories" saving={saving} onSave={save} onDiscard={discard} />
+      <UnsavedGuard
+        count={changed.length}
+        page="Repositories"
+        saving={saving}
+        allow={(pathname) => pathname === base || pathname.startsWith(`${base}/`)}
+        onSave={save}
+        onDiscard={discard}
+      />
     </div>
   )
 }

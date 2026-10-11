@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react"
+import { act, screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import type { Config } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
@@ -279,14 +279,30 @@ describe("repository page", () => {
     expect(await screen.findByText("This repository has no such section.")).toBeInTheDocument()
   })
 
-  it("guards an unsaved change when another section is opened from the list", async () => {
+  it("keeps an unsaved change, with no guard, when another section is opened from the list", async () => {
     mockApi(routes())
-    const { user } = renderApp("/repositories/darkmem/settings")
+    const { user, router } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     await user.type(max, "3")
-    await user.click(within(screen.getByRole("navigation", { name: "Repository" })).getByRole("link", { name: "Overview" }))
+    const nav = within(screen.getByRole("navigation", { name: "Repository" }))
+    await user.click(nav.getByRole("link", { name: "Overview" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/repositories/darkmem"))
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
+    await user.click(nav.getByRole("link", { name: "Capacity and labels" }))
+    expect(await screen.findByLabelText("Max")).toHaveValue(3)
+  })
+
+  it.each(["/repositories", "/repositories/darkmem-2/settings"])("guards an unsaved change when the repository is left for %s", async (to) => {
+    mockApi(routes())
+    const { user, router } = renderApp("/repositories/darkmem/settings")
+    const max = await screen.findByLabelText("Max")
+    await user.clear(max)
+    await user.type(max, "3")
+    act(() => router.history.push(to))
     expect(await screen.findByText("Unsaved changes")).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/repositories/darkmem/settings")
   })
 
   it.each([

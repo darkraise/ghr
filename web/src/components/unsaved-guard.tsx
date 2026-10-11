@@ -14,19 +14,22 @@ export function UnsavedGuard({
   count,
   page,
   saving,
+  allow,
   onSave,
   onDiscard,
 }: {
   count: number
   page: string
   saving: boolean
+  // Pathnames that keep the form and its draft mounted, so moving there loses nothing.
+  allow?: (pathname: string) => boolean
   onSave: () => Promise<boolean>
   onDiscard: () => void
 }) {
   // A navigation inside the page (a hash change) never leaves the form, and
   // blocking one makes the router undo it with a reload.
   const blocker = useBlocker({
-    shouldBlockFn: ({ current, next }) => (count > 0 || saving) && next.pathname !== current.pathname,
+    shouldBlockFn: ({ current, next }) => (count > 0 || saving) && next.pathname !== current.pathname && !allow?.(next.pathname),
     enableBeforeUnload: count > 0,
     withResolver: true,
   })
