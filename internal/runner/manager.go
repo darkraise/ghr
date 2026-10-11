@@ -136,10 +136,18 @@ type instance struct {
 	finishing    bool      // a finish goroutine is running
 	retryFinish  time.Time // when a failed finish may run again
 	cleanupFails int       // consecutive failed Docker cleanups
-	deregistered bool      // stopIdleRunner deleted its registration
+	deregistered bool      // its registration was deleted by ghr or confirmed missing
+	lost         bool      // the registration was confirmed missing, not deleted by ghr
 	stopping     bool      // Kill asked systemd to stop the unit
 	cameOnline   bool      // it has been idle or busy at least once
 	answered     bool      // the runners API answered for it in the current tick
+}
+
+// runnerList is one repository's registered runner IDs as read in this tick;
+// ok is false when the read failed.
+type runnerList struct {
+	ids map[int64]bool
+	ok  bool
 }
 
 type Manager struct {
@@ -169,6 +177,7 @@ type Manager struct {
 	repoErr        map[string]string
 	fails          map[string]int
 	retryAt        map[string]time.Time
+	lists          map[string]runnerList // by lower-cased repo; reset every tick
 	degraded       bool
 	degradedReason string
 	authCheckAt    time.Time
@@ -199,6 +208,7 @@ func (m *Manager) Init() error {
 	m.repoErr = map[string]string{}
 	m.fails = map[string]int{}
 	m.retryAt = map[string]time.Time{}
+	m.lists = map[string]runnerList{}
 	m.lastJob = map[string]model.HistoryEntry{}
 	m.lastPrune = m.Now()
 	m.maintCtx, m.maintCancel = context.WithCancel(context.Background())
@@ -393,6 +403,7 @@ func (m *Manager) move(id string, to sched.State, from ...sched.State) bool {
 func (m *Manager) beginTick() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.lists = map[string]runnerList{}
 	for _, i := range m.insts {
 		i.answered = false
 	}
@@ -435,7 +446,7 @@ func (m *Manager) schedInstances(cfg *config.Config) []sched.Instance {
 	var out []sched.Instance
 	for _, i := range m.snapshot() {
 		out = append(out, sched.Instance{ID: i.ID, Repo: i.Repo, State: i.State, StateSince: i.StateSince,
-			JobConfirmed: i.JobConfirmed, Stale: stale(cfg, i)})
+			JobConfirmed: i.JobConfirmed, Stale: stale(cfg, i), Unusable: i.deregistered})
 	}
 	return out
 }

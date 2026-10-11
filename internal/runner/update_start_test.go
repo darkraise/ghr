@@ -234,9 +234,8 @@ func TestUpdateWaitsWhenAnIdleRunnerDoesNotStop(t *testing.T) {
 	}
 }
 
-// An idle runner that cannot be stopped (here: its registration is gone, so
-// it cannot be checked) holds the update off for a while instead of every
-// tick stopping the other idle runners again.
+// An idle runner that cannot be checked holds the update off for a while
+// instead of every tick stopping the other idle runners again.
 func TestUpdateBacksOffWhenAnIdleRunnerCannotStop(t *testing.T) {
 	h := newHarness(t)
 	queuedUpdate(t, h, tarballSum())
@@ -244,10 +243,9 @@ func TestUpdateBacksOffWhenAnIdleRunnerCannotStop(t *testing.T) {
 	if err := h.m.spawn(context.Background(), h.cfg, "darkcloud"); err != nil {
 		t.Fatal(err)
 	}
+	h.gh.setRunner(h.m.insts["bbbbbb"].RunnerID, "online", false)
 	h.m.move("bbbbbb", sched.Idle, sched.Starting)
-	h.gh.mu.Lock()
-	delete(h.gh.runners, h.m.insts["bbbbbb"].RunnerID)
-	h.gh.mu.Unlock()
+	h.gh.setErr("GetRunner darkcloud", &github.APIError{Status: 502, Kind: github.ErrServer})
 	postponed := func() int { return strings.Count(h.eventText(), "runner update postponed") }
 	h.m.Tick(context.Background())
 	h.m.Wait()
@@ -260,7 +258,7 @@ func TestUpdateBacksOffWhenAnIdleRunnerCannotStop(t *testing.T) {
 	if postponed() != 1 || strings.Contains(h.eventText(), "runner update started") {
 		t.Fatalf("retried within the backoff:\n%s", h.eventText())
 	}
-	h.gh.setRunner(h.m.insts["bbbbbb"].RunnerID, "online", false)
+	h.gh.setErr("GetRunner darkcloud", nil)
 	h.now = h.now.Add(15 * time.Minute)
 	h.m.Tick(context.Background())
 	h.m.Wait()

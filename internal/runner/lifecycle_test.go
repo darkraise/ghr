@@ -465,7 +465,6 @@ func TestStopIdleRechecksBusy(t *testing.T) {
 func TestStopIdleLeavesRunnerOnCheckFailure(t *testing.T) {
 	for _, err := range []error{
 		&github.APIError{Status: 502, Kind: github.ErrServer},
-		&github.APIError{Status: 404, Kind: github.ErrNotFound},
 		errors.New("connection reset"),
 	} {
 		h := newHarness(t)
@@ -1161,5 +1160,116 @@ func TestStartTimeoutWaitsForAnAnswerFromTheRunnersAPI(t *testing.T) {
 				t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
 			}
 		})
+	}
+}
+
+func idleOnline(t *testing.T, h *harness, repo string) {
+	t.Helper()
+	if err := h.m.spawn(context.Background(), h.cfg, repo); err != nil {
+		t.Fatal(err)
+	}
+	h.gh.setRunner(101, "online", false)
+	h.m.refreshRunners(context.Background())
+	if h.state("aaaaaa") != "idle" {
+		t.Fatalf("state %s", h.state("aaaaaa"))
+	}
+}
+
+// GitHub answers 404 for the runner and its list of the repository's runners
+// does not hold it: the registration is gone, the runner can take no job, and
+// its unit is stopped at once.
+func TestIdleRunnerWhoseRegistrationIsGoneIsStopped(t *testing.T) {
+	h := newHarness(t)
+	idleOnline(t, h, "darkmem")
+	h.gh.mu.Lock()
+	delete(h.gh.runners, 101)
+	h.gh.mu.Unlock()
+	h.m.Tick(context.Background())
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) ||
+		!strings.Contains(h.eventText(), "warn darkmem runner aaaaaa registration is gone; stopped") {
+		t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
+	}
+	if n := sched.Covering(h.m.schedInstances(h.cfg), "darkmem", h.now); n != 0 {
+		t.Fatalf("a runner without a registration still covers %d jobs", n)
+	}
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if h.state("aaaaaa") != "gone" {
+		t.Fatalf("its slot is still held: state %s", h.state("aaaaaa"))
+	}
+}
+
+// A 404 also means "the token cannot see this repository". When the list
+// cannot be read either, nothing is concluded and the runner keeps running.
+func TestIdleRunnerIsKeptWhenTheRunnerListCannotBeRead(t *testing.T) {
+	h := newHarness(t)
+	idleOnline(t, h, "darkmem")
+	h.gh.mu.Lock()
+	delete(h.gh.runners, 101)
+	h.gh.mu.Unlock()
+	h.gh.setErr("ListRunners darkmem", &github.APIError{Status: 404, Kind: github.ErrNotFound})
+	h.now = h.now.Add(6 * time.Minute) // past idle_timeout, so the idle stop asks too
+	h.m.Tick(context.Background())
+	if len(h.sd.stopped) != 0 || h.state("aaaaaa") != "idle" {
+		t.Fatalf("stopped %v state %s", h.sd.stopped, h.state("aaaaaa"))
+	}
+	if e := h.m.Status().Repos[1].Error; !strings.Contains(e, "token lacks access") {
+		t.Fatalf("repository error %q", e)
+	}
+	if n := strings.Count(h.gh.callsText(), "ListRunners darkmem"); n != 1 {
+		t.Fatalf("the runner list was read %d times in one tick", n)
+	}
+}
+
+// The list answers and still holds the runner: the 404 proved nothing.
+func TestIdleRunnerStillListedIsKept(t *testing.T) {
+	h := newHarness(t)
+	idleOnline(t, h, "darkmem")
+	h.gh.mu.Lock()
+	delete(h.gh.runners, 101)
+	h.gh.mu.Unlock()
+	h.gh.listed["darkmem"] = []github.Runner{{ID: 101, Name: "ghr-darkmem-aaaaaa", Status: "online"}}
+	h.now = h.now.Add(6 * time.Minute)
+	h.m.Tick(context.Background())
+	if len(h.sd.stopped) != 0 || h.state("aaaaaa") != "idle" || len(h.gh.deleted) != 0 {
+		t.Fatalf("stopped %v deleted %v state %s", h.sd.stopped, h.gh.deleted, h.state("aaaaaa"))
+	}
+}
+
+// A list refused for the whole token ends the runner checks of this tick.
+func TestRunnerChecksStopWhenTheRunnerListRejectsTheToken(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkcloud") // aaaaaa, runner 101
+	h.m.spawn(context.Background(), h.cfg, "darkmem")   // bbbbbb, runner 102
+	h.gh.mu.Lock()
+	delete(h.gh.runners, 101)
+	h.gh.mu.Unlock()
+	h.gh.setErr("ListRunners darkcloud", &github.APIError{Status: 401, Kind: github.ErrAuth})
+	h.m.refreshRunners(context.Background())
+	if !h.m.Status().Degraded || strings.Contains(h.gh.callsText(), "GetRunner darkmem") {
+		t.Fatalf("degraded %v, calls %s", h.m.Status().Degraded, h.gh.callsText())
+	}
+}
+
+// A runner whose registration is gone needs no GitHub call to be stopped, so
+// an API pause must not keep it running.
+func TestGoneRunnerIsStoppedDuringAnAPIPause(t *testing.T) {
+	h := newHarness(t)
+	idleOnline(t, h, "darkmem")
+	h.gh.mu.Lock()
+	delete(h.gh.runners, 101)
+	h.gh.mu.Unlock()
+	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Hour)})
+	h.sd.stopErr["ghr-runner-aaaaaa"] = errors.New("unit busy")
+	h.m.Tick(context.Background()) // confirmed gone, then the poll is rate-limited; the stop fails
+	if h.m.apiAllowed(h.now) || len(h.sd.stopped) != 0 {
+		t.Fatalf("API allowed %v, stopped %v", h.m.apiAllowed(h.now), h.sd.stopped)
+	}
+	delete(h.sd.stopErr, "ghr-runner-aaaaaa")
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background()) // still paused: the stop is retried without an API call
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) {
+		t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
 	}
 }

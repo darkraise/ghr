@@ -34,6 +34,8 @@ func (m *Manager) Tick(ctx context.Context) {
 	}
 	if m.apiAllowed(now) {
 		m.stopIdle(ctx, cfg, now)
+	} else {
+		m.stopDeregistered(ctx, now)
 	}
 	m.stopStartTimedOut(ctx, cfg, now)
 	m.startUpdateIfFree(ctx, cfg, now, demandOK)

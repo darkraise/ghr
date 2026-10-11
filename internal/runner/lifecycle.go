@@ -198,6 +198,14 @@ func (m *Manager) refreshRunners(ctx context.Context) {
 				m.apiErr(i.Repo, err, now)
 				return
 			}
+			if github.IsKind(err, github.ErrNotFound) {
+				if m.registrationGone(ctx, i.Repo, i.RunnerID, now) {
+					m.markAnswered(i.ID)
+					m.markLost(i.ID)
+				} else if !m.apiAllowed(now) {
+					return // the list was refused for the whole token, or rate-limited
+				}
+			}
 			continue // start_timeout handles runners that never appear
 		}
 		m.markAnswered(i.ID)
@@ -206,6 +214,44 @@ func (m *Manager) refreshRunners(ctx context.Context) {
 		} else if r.Status == "online" {
 			m.move(i.ID, sched.Idle, sched.Starting)
 		}
+	}
+}
+
+// registrationGone reports whether repo's runner list answers and does not
+// hold runner id. A 404 for one runner cannot say that by itself: GitHub also
+// answers 404 when the token cannot see the repository. A list that cannot be
+// read goes through apiErr and concludes nothing. The list is read once per
+// repository per tick.
+func (m *Manager) registrationGone(ctx context.Context, repo string, id int64, now time.Time) bool {
+	key := strings.ToLower(repo)
+	m.mu.Lock()
+	l, read := m.lists[key]
+	m.mu.Unlock()
+	if !read {
+		runners, err := m.GH.ListRunners(ctx, repo)
+		if err != nil {
+			m.apiErr(repo, err, now)
+		} else {
+			l = runnerList{ids: map[int64]bool{}, ok: true}
+			for _, r := range runners {
+				l.ids[r.ID] = true
+			}
+		}
+		m.mu.Lock()
+		m.lists[key] = l
+		m.mu.Unlock()
+	}
+	return l.ok && !l.ids[id]
+}
+
+// markLost records that an idle instance's registration is confirmed missing.
+// A starting one is left to the start timeout: a registration made seconds
+// ago is not declared gone on one reading.
+func (m *Manager) markLost(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if i, ok := m.insts[id]; ok && i.State == sched.Idle {
+		i.deregistered, i.lost = true, true
 	}
 }
 
@@ -548,6 +594,17 @@ func (m *Manager) stopIdle(ctx context.Context, cfg *config.Config, now time.Tim
 	}
 }
 
+// stopDeregistered retries the unit stop of idle runners whose registration
+// is already gone. It needs no GitHub call, so it runs on the ticks in which
+// API calls are not allowed and stopIdle does not run.
+func (m *Manager) stopDeregistered(ctx context.Context, now time.Time) {
+	for _, i := range m.snapshot() {
+		if i.State == sched.Idle && i.deregistered {
+			m.stopIdleRunner(ctx, i, now)
+		}
+	}
+}
+
 // idleStop is what stopIdleRunner did with an idle runner.
 type idleStop int
 
@@ -573,8 +630,8 @@ func (m *Manager) stopIdleRunner(ctx context.Context, i instance, now time.Time)
 	}
 	gone := cur.deregistered
 	m.mu.Unlock()
-	// A runner deregistered by an earlier stop can take no job and its check
-	// now answers 404, so only the unit stop is repeated.
+	// A runner whose registration is already gone can take no job and its
+	// check answers 404, so only the unit stop is repeated.
 	if !gone {
 		if res, ok := m.deregisterIdle(ctx, i, now); !ok {
 			return res
@@ -585,7 +642,17 @@ func (m *Manager) stopIdleRunner(ctx context.Context, i instance, now time.Time)
 		m.Events.Add("warn", i.Repo, "stop idle %s: %v", i.ID, err)
 		return idleKept
 	}
-	m.Events.Add("info", i.Repo, "stopped idle runner %s", i.ID)
+	m.mu.Lock()
+	lost := false
+	if p := m.insts[i.ID]; p != nil {
+		lost = p.lost
+	}
+	m.mu.Unlock()
+	if lost {
+		m.Events.Add("warn", i.Repo, "runner %s registration is gone; stopped", i.ID)
+	} else {
+		m.Events.Add("info", i.Repo, "stopped idle runner %s", i.ID)
+	}
 	return idleStopped
 }
 
@@ -596,8 +663,13 @@ func (m *Manager) deregisterIdle(ctx context.Context, i instance, now time.Time)
 	if err != nil {
 		if !github.IsKind(err, github.ErrNotFound) {
 			m.apiErr(i.Repo, err, now)
+			return idleKept, false
 		}
-		return idleKept, false
+		if !m.registrationGone(ctx, i.Repo, i.RunnerID, now) {
+			return idleKept, false
+		}
+		m.markLost(i.ID)
+		return idleStopped, true
 	}
 	if r.Busy {
 		m.move(i.ID, sched.Busy, sched.Starting, sched.Idle)
