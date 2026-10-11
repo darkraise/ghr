@@ -123,5 +123,8 @@ func (c *Client) ListUserRepos(ctx context.Context) ([]UserRepo, error) {
 		out = append(out, page...)
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }

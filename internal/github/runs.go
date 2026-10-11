@@ -61,7 +61,10 @@ func (c *Client) ListAttemptJobs(ctx context.Context, repo string, id int64, att
 		out = append(out, page.Jobs...)
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *Client) GetJob(ctx context.Context, repo string, jobID int64) (*Job, error) {
@@ -84,7 +87,10 @@ func (c *Client) ListArtifacts(ctx context.Context, repo string, runID int64) ([
 		out = append(out, page.Artifacts...)
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // GetContent reads one file at ref. GitHub answers base64 with line breaks;

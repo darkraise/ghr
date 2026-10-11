@@ -657,3 +657,147 @@ func TestRunFieldsDecode(t *testing.T) {
 		t.Fatalf("run without run_started_at %+v", runs[1])
 	}
 }
+
+// setLimit changes one of the client's bounds for the length of a test.
+func setLimit[T any](t *testing.T, p *T, v T) {
+	t.Helper()
+	old := *p
+	*p = v
+	t.Cleanup(func() { *p = old })
+}
+
+func TestETagCacheEvictsTheLeastRecentlyUsed(t *testing.T) {
+	if maxCacheEntries != 1000 || maxCacheBytes != 32<<20 {
+		t.Fatalf("cache bounds: %d entries, %d bytes", maxCacheEntries, maxCacheBytes)
+	}
+	body := func(repo string) string { return `{"full_name":"darkraise/` + repo + `"}` }
+	for _, tc := range []struct {
+		name    string
+		entries int
+		bytes   int64
+	}{
+		{"by count", 2, 1 << 20},
+		{"by bytes", 100, int64(2 * len(body("a")))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setLimit(t, &maxCacheEntries, tc.entries)
+			setLimit(t, &maxCacheBytes, tc.bytes)
+			var mu sync.Mutex
+			var seen []string
+			c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+				repo := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+				mu.Lock()
+				defer mu.Unlock()
+				if r.Header.Get("If-None-Match") != "" {
+					seen = append(seen, repo+" revalidated")
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+				seen = append(seen, repo)
+				w.Header().Set("ETag", `"`+repo+`"`)
+				fmt.Fprint(w, body(repo))
+			})
+			// The second read of a makes b the least recently used, so c
+			// evicts b and a is still revalidated afterwards.
+			for _, repo := range []string{"a", "b", "a", "c", "a", "b"} {
+				if _, err := c.GetRepo(context.Background(), repo); err != nil {
+					t.Fatal(err)
+				}
+			}
+			c.ForgetCache()
+			if _, err := c.GetRepo(context.Background(), "a"); err != nil {
+				t.Fatal(err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			want := "a, b, a revalidated, c, a revalidated, b, a"
+			if got := strings.Join(seen, ", "); got != want {
+				t.Fatalf("requests %s\nwant     %s", got, want)
+			}
+		})
+	}
+}
+
+func TestResponseBodyIsBounded(t *testing.T) {
+	if maxBodyBytes != 8<<20 {
+		t.Fatalf("body bound: %d bytes", maxBodyBytes)
+	}
+	setLimit(t, &maxBodyBytes, 64)
+	const frame = len(`{"full_name":""}`)
+	for _, tc := range []struct {
+		name    string
+		size    int
+		wantErr string
+	}{
+		{"at the limit", 64, ""},
+		{"over the limit", 65, "github: response larger than 8 MiB"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, `{"full_name":"`+strings.Repeat("x", tc.size-frame)+`"}`)
+			})
+			repo, err := c.GetRepo(context.Background(), "darkcloud")
+			if tc.wantErr == "" {
+				if err != nil || len(repo.FullName) != tc.size-frame {
+					t.Fatalf("repo %+v err %v", repo, err)
+				}
+				return
+			}
+			if repo != nil || err == nil || err.Error() != tc.wantErr {
+				t.Fatalf("repo %+v err %v", repo, err)
+			}
+		})
+	}
+}
+
+// A listing longer than 50 pages is refused whole: the caller gets the error
+// and no items.
+func TestListingStopsAfter50Pages(t *testing.T) {
+	ctx := context.Background()
+	const tooLong = "github: listing has more than 50 pages"
+	for _, tc := range []struct {
+		name    string
+		pages   int
+		list    func(c *Client) (int, error)
+		want    int
+		wantErr string
+	}{
+		{"runs, exactly 50 pages", 50, func(c *Client) (int, error) { v, err := c.ListRuns(ctx, "r", "queued"); return len(v), err }, 50, ""},
+		{"runs", 60, func(c *Client) (int, error) { v, err := c.ListRuns(ctx, "r", "queued"); return len(v), err }, 0, tooLong},
+		{"jobs", 60, func(c *Client) (int, error) { v, err := c.ListJobs(ctx, "r", 5); return len(v), err }, 0, tooLong},
+		{"runners", 60, func(c *Client) (int, error) { v, err := c.ListRunners(ctx, "r"); return len(v), err }, 0, tooLong},
+		{"attempt jobs", 60, func(c *Client) (int, error) { v, err := c.ListAttemptJobs(ctx, "r", 5, 1); return len(v), err }, 0, tooLong},
+		{"artifacts", 60, func(c *Client) (int, error) { v, err := c.ListArtifacts(ctx, "r", 5); return len(v), err }, 0, tooLong},
+		{"user repositories", 60, func(c *Client) (int, error) { v, err := c.ListUserRepos(ctx); return len(v), err }, 0, tooLong},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var base string
+			c, f := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+				page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+				page = max(page, 1)
+				if page < tc.pages {
+					w.Header().Set("Link", fmt.Sprintf(`<%s%s?page=%d>; rel="next"`, base, r.URL.Path, page+1))
+				}
+				if r.URL.Path == "/user/repos" {
+					fmt.Fprint(w, `[{"name":"r"}]`)
+					return
+				}
+				fmt.Fprint(w, `{"workflow_runs":[{"id":1}],"jobs":[{"id":1}],"runners":[{"id":1}],"artifacts":[{"id":1}]}`)
+			})
+			base = c.BaseURL
+			n, err := tc.list(c)
+			if tc.wantErr == "" {
+				if err != nil || n != tc.want {
+					t.Fatalf("%d items, err %v", n, err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tc.wantErr || n != 0 {
+				t.Fatalf("%d items, err %v", n, err)
+			}
+			if len(f.requests) != 50 {
+				t.Fatalf("%d requests, want 50", len(f.requests))
+			}
+		})
+	}
+}

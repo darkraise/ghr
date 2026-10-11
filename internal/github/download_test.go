@@ -55,8 +55,8 @@ func TestJobLogFollowsTheRedirectWithoutTheToken(t *testing.T) {
 	if len(f.requests) != 2 || f.requests[0] != "GET /repos/darkraise/darkmem/actions/jobs/1002/logs" {
 		t.Fatalf("requests %v", f.requests)
 	}
-	if len(c.cache) != 0 {
-		t.Fatalf("redirect kept in the ETag cache: %v", c.cache)
+	if _, ok := c.cache.Get(c.repoURL("darkmem", "/actions/jobs/1002/logs")); ok {
+		t.Fatal("redirect kept in the ETag cache")
 	}
 }
 
@@ -249,8 +249,8 @@ func TestArtifactURLDoesNotFollow(t *testing.T) {
 	if len(f.requests) != 1 || f.requests[0] != "GET /repos/darkraise/darkmem/actions/artifacts/11/zip" {
 		t.Fatalf("requests %v", f.requests)
 	}
-	if len(c.cache) != 0 {
-		t.Fatalf("redirect kept in the ETag cache: %v", c.cache)
+	if _, ok := c.cache.Get(c.repoURL("darkmem", "/actions/artifacts/11/zip")); ok {
+		t.Fatal("redirect kept in the ETag cache")
 	}
 }
 

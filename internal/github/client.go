@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/darkraise/ghr/internal/lru"
 )
 
 type ErrKind int
@@ -123,7 +125,21 @@ type TokenMeta struct {
 	ExpiresAt     *time.Time
 }
 
-const maxCacheEntries = 1000
+// Bounds on what the client keeps and reads. They are variables so that
+// tests can reach them with small fixtures.
+var (
+	maxCacheEntries       = 1000
+	maxCacheBytes   int64 = 32 << 20
+	maxBodyBytes    int64 = 8 << 20
+)
+
+// maxPages is how many pages of 100 a listing may have.
+const maxPages = 50
+
+var (
+	errBodyTooLarge = errors.New("github: response larger than 8 MiB")
+	errTooManyPages = errors.New("github: listing has more than 50 pages")
+)
 
 type cached struct {
 	etag string
@@ -142,8 +158,10 @@ type Client struct {
 	Now   func() time.Time
 	Sleep func(time.Duration)
 
-	mu         sync.Mutex
-	cache      map[string]cached
+	mu sync.Mutex
+	// cache holds the last body per GET URL for ETag revalidation, sized by
+	// its body bytes.
+	cache      *lru.Cache[string, cached]
 	remaining  int
 	retryAt    time.Time
 	gen        uint64 // bumped when the token changes; older responses are not recorded
@@ -156,6 +174,7 @@ func New(owner string, token func() string) *Client {
 	return &Client{
 		BaseURL: "https://api.github.com", Owner: owner, Token: token,
 		HTTP: &http.Client{Timeout: 30 * time.Second}, Blob: newBlobClient(), Now: time.Now, Sleep: time.Sleep,
+		cache:     lru.New[string, cached](maxCacheEntries, maxCacheBytes),
 		remaining: -1,
 	}
 }
@@ -171,7 +190,7 @@ func (c *Client) RateRemaining() int {
 // metadata, used after the token changes.
 func (c *Client) ForgetCache() {
 	c.mu.Lock()
-	c.cache = nil
+	c.cache = lru.New[string, cached](maxCacheEntries, maxCacheBytes)
 	c.retryAt = time.Time{}
 	c.gen++
 	c.meta = TokenMeta{}
@@ -313,7 +332,7 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 		return nil, "", err
 	}
 	c.mu.Lock()
-	prev, hasPrev := c.cache[u]
+	prev, hasPrev := c.cache.Get(u)
 	c.mu.Unlock()
 	if method == http.MethodGet && hasPrev {
 		req.Header.Set("If-None-Match", prev.etag)
@@ -323,9 +342,12 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 		return nil, "", err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
 	if err != nil {
 		return nil, "", err
+	}
+	if int64(len(data)) > maxBodyBytes {
+		return nil, "", errBodyTooLarge
 	}
 	var apiErr *APIError
 	if resp.StatusCode >= 300 && !(resp.StatusCode == http.StatusNotModified && hasPrev) {
@@ -347,11 +369,7 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 		if etag := resp.Header.Get("ETag"); etag != "" {
 			c.mu.Lock()
 			if gen == c.gen {
-				// Run and job URLs are unbounded over time; reset rather than track LRU.
-				if c.cache == nil || len(c.cache) >= maxCacheEntries {
-					c.cache = map[string]cached{}
-				}
-				c.cache[u] = cached{etag: etag, body: data, next: next}
+				c.cache.Add(u, cached{etag: etag, body: data, next: next}, int64(len(data)))
 			}
 			c.mu.Unlock()
 		}
@@ -417,8 +435,13 @@ func (c *Client) mutate(ctx context.Context, method, u string, body any) ([]byte
 	return data, err
 }
 
+// getAll reads a listing page by page. On an error the caller must drop what
+// each has collected: a listing cut short would read as a complete one.
 func (c *Client) getAll(ctx context.Context, u string, each func([]byte) error) error {
-	for u != "" {
+	for page := 0; u != ""; page++ {
+		if page == maxPages {
+			return errTooManyPages
+		}
 		data, next, err := c.do(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return err
@@ -444,7 +467,10 @@ func (c *Client) ListRuns(ctx context.Context, repo, status string) ([]Run, erro
 		out = append(out, page.WorkflowRuns...)
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ListRecentRuns lists the repo's n most recent workflow runs of any status,
@@ -476,7 +502,10 @@ func (c *Client) ListJobs(ctx context.Context, repo string, runID int64) ([]Job,
 		out = append(out, page.Jobs...)
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *Client) ListRunners(ctx context.Context, repo string) ([]Runner, error) {
@@ -491,7 +520,10 @@ func (c *Client) ListRunners(ctx context.Context, repo string) ([]Runner, error)
 		out = append(out, page.Runners...)
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *Client) GetRunner(ctx context.Context, repo string, id int64) (*Runner, error) {
