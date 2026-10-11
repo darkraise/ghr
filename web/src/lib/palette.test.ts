@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
-import { contrast, hslTriplet, over, PALETTE, PILL_ALPHA, type Role } from "./palette"
+import { BRANCH_MIX, contrast, hslTriplet, over, PALETTE, PILL_ALPHA, SERIES_MIX, type Role } from "./palette"
 
 const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../styles/ghr-theme.css"), "utf8")
 const MODES = ["light", "dark"] as const
@@ -56,6 +56,24 @@ describe("the Forge palette", () => {
         expect([role, bg, contrast(PALETTE.text[mode], tint) >= 4.5]).toEqual([role, bg, true])
       }
     }
+  })
+
+  it("mixes the accent toward sunk for a series that is not a state", () => {
+    expect(css).toContain(`--color-series: color-mix(in srgb, hsl(var(--primary)) ${SERIES_MIX * 100}%, hsl(var(--muted)));`)
+    for (const mode of MODES) {
+      const series = over(PALETTE.accent[mode], PALETTE.sunk[mode], SERIES_MIX)
+      const track = over(PALETTE.sunk[mode], PALETTE.surface[mode], 0.3)
+      expect([mode, "surface", contrast(series, PALETTE.surface[mode]) >= 3]).toEqual([mode, "surface", true])
+      expect([mode, "track", contrast(series, track) >= 3]).toEqual([mode, "track", true])
+    }
+  })
+
+  it.each(MODES)("keeps the branch label's accent text at 4.5:1 on its own fill in %s mode", (mode) => {
+    // The fill is mixed with the box colour, not translucent: a hovered row's
+    // wash under a translucent fill takes the text below 4.5:1.
+    expect(css).toContain(`--color-branch: color-mix(in srgb, hsl(var(--primary)) ${BRANCH_MIX * 100}%, hsl(var(--card)));`)
+    const fill = over(PALETTE.accent[mode], PALETTE.surface[mode], BRANCH_MIX)
+    expect(contrast(PALETTE.accent[mode], fill)).toBeGreaterThanOrEqual(4.5)
   })
 
   it("computes contrast, blends and triplets exactly", () => {

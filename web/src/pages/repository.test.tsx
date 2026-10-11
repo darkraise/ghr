@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest"
 import type { Config } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
-import { setViewport } from "@/test/media"
 import { renderApp } from "@/test/render"
 
 function routes(over: Record<string, unknown> = {}) {
@@ -160,12 +159,13 @@ describe("repository page", () => {
 
   it("asks before leaving with unsaved edits", async () => {
     mockApi(routes())
-    const { user } = renderApp("/repositories/darkmem/settings")
+    const { user, router } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     await user.type(max, "5")
     await user.click(screen.getByRole("link", { name: /^Runners/ }))
     expect(await screen.findByText("You have 1 unsaved change on the Repositories page.")).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/repositories/darkmem/settings")
   })
 
   it("locks the form while the repo is being removed", async () => {
@@ -228,8 +228,7 @@ describe("repository page", () => {
     expect(await screen.findByRole("menuitem", { name: "Remove" })).toHaveAttribute("aria-disabled", "true")
   })
 
-  it("marks a changed field at 1280px", async () => {
-    setViewport(1280)
+  it("marks a changed field", async () => {
     mockApi(routes())
     const { user } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
@@ -249,7 +248,8 @@ describe("repository page", () => {
       "GitHub registrations",
     ])
     expect(within(nav).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page")
-    expect(await screen.findByRole("group", { name: "Jobs per bucket for the last 24 hours" })).toBeInTheDocument()
+    const chart = await screen.findByRole("group", { name: "Jobs per bucket for the last 24 hours" })
+    expect(screen.getByRole("region", { name: "Last 24 hours" })).toContainElement(chart)
     expect(screen.queryByLabelText("Max")).not.toBeInTheDocument()
   })
 

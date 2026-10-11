@@ -88,13 +88,12 @@ describe("ghr palette", () => {
     for (const [fg, bg, min] of PAIRS) expect(contrast(t[fg], t[bg]), `${fg} on ${bg}`).toBeGreaterThanOrEqual(min)
   })
 
-  it("neutralises shadows, noise, gradients and the kit's overlays", () => {
+  it("neutralises shadows, noise and gradients", () => {
     const root = block(":root")
     expect(root["--shadow-card"]).toBe("none !important")
     expect(root["--shadow-dropdown"]).toBe("none !important")
     expect(root["--noise-opacity"]).toBe("0 !important")
     expect(root["--content-gradient-overlay"]).toBe("none !important")
-    expect(css).toMatch(/\.sidebar-gradient-overlay::before,\s*\.header-gradient-overlay::before,\s*main\[data-content\]::before \{\s*background: none !important;/)
   })
 })
 

@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router"
 import type { ActivityRepo, Config, RepoStatus } from "@/api/types"
 import { StatusPill } from "@/components/page/status-pill"
 import { RepoActivityStrip } from "@/components/repo-activity-strip"
-import { RowMenu } from "@/components/repo-table"
+import { RepoRowMenu } from "@/components/repo-row-menu"
 import { RunnerMeter } from "@/components/runner-meter"
 import { weekRate, weekText } from "@/lib/repos"
 import { repoStateWord } from "@/lib/status"
@@ -69,7 +69,7 @@ export function RepoList({
                 </span>
               )}
               <span className="ml-auto md:ml-0">
-                <RowMenu repo={r} offline={offline} onEdit={onEdit} />
+                <RepoRowMenu repo={r} offline={offline} onEdit={onEdit} />
               </span>
             </div>
           </li>

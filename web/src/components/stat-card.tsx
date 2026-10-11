@@ -38,7 +38,7 @@ export function StatCards({ status, metrics, now }: { status: Status; metrics: M
   const memory =
     metrics?.mem_used !== undefined && metrics.mem_total !== undefined ? `, ${fmtMem(metrics.mem_used)} of ${fmtMem(metrics.mem_total)} memory` : ""
   return (
-    <div className="grid grid-cols-2 divide-border rounded-md border border-border bg-card min-[641px]:grid-cols-4 min-[641px]:divide-x">
+    <div className="grid grid-cols-2 divide-border rounded-md border border-border bg-card [&>*:nth-child(-n+2)]:border-b [&>*:nth-child(odd)]:border-r min-[641px]:grid-cols-4 min-[641px]:divide-x min-[641px]:[&>*:nth-child(-n+2)]:border-b-0">
       <StatCard label="Runners" value={c.busy} unit={status.mode === "all" ? "busy" : `of ${status.global_max} busy`}>
         <div className="mt-2">
           <CapacitySegments status={status} size="lg" />

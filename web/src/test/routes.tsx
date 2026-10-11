@@ -6,12 +6,13 @@ import { Toaster } from "darkraise-ui/components/sonner"
 import { TooltipProvider } from "darkraise-ui/components/tooltip"
 import type { ReactNode } from "react"
 import { createQueryClient } from "@/query"
+import { trackQueryClient } from "./query-clients"
 
 // Renders components that need the router outside the app's route tree. Each
 // key is a path pattern; its view may read params with useParams, and every
 // route keeps its search as given.
 export function renderRoutes(paths: Record<string, () => ReactNode>, initial: string) {
-  const queryClient = createQueryClient()
+  const queryClient = trackQueryClient(createQueryClient())
   const root = createRootRoute({ component: () => <Outlet /> })
   const routes = Object.entries(paths).map(([path, view]) =>
     createRoute({

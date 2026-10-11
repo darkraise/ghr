@@ -190,12 +190,6 @@
   --tab-line: 10.9 97.2% 72.2%;
 }
 
-.sidebar-gradient-overlay::before,
-.header-gradient-overlay::before,
-main[data-content]::before {
-  background: none !important;
-}
-
 /* The log panel is dark in both modes. Kit controls inside it read the page tokens, so in light mode the panel rebinds them to the dark palette. */
 :root[data-mode="light"] .ghr-log-panel {
   --background: 216.0 27.8% 7.1%;
@@ -436,4 +430,10 @@ textarea {
 
 @theme inline {
   --color-running: hsl(var(--running));
+  /* A chart series that is not a state: the accent mixed toward sunk, so it
+     cannot be read as a status colour. */
+  --color-series: color-mix(in srgb, hsl(var(--primary)) 70%, hsl(var(--muted)));
+  /* The branch label's fill under its accent text. It is opaque: a hovered
+     row's wash under a translucent fill takes the text below 4.5:1. */
+  --color-branch: color-mix(in srgb, hsl(var(--primary)) 10%, hsl(var(--card)));
 }
