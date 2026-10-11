@@ -76,56 +76,54 @@ export function DashboardPage() {
         now={now}
         onOpenRunner={(id) => void navigate({ to: "/runners/$id", params: { id }, search: { tab: "steps" } })}
       />
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <Section
+        title="Repositories"
+        aside={
+          <>
+            <span className="text-sm text-muted-foreground">{configured} configured</span>
+            <Link to="/repositories" className="ml-auto text-sm text-primary hover:underline">
+              Manage
+            </Link>
+          </>
+        }
+      >
+        {st.repos.length === 0 ? (
+          <div className="flex flex-col items-start gap-2 py-2">
+            <p className="text-sm text-muted-foreground">No repositories yet</p>
+            <Button size="sm" disabled={offline} onClick={() => setAdding(true)}>
+              Add repository
+            </Button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <RepoTable
+              repos={st.repos}
+              activity={activity.data?.repos}
+              now={now}
+              offline={offline}
+              onOpen={(name) => void navigate({ to: "/repositories/$name", params: { name } })}
+              onEdit={(name) => void navigate({ to: "/repositories/$name/$section", params: { name, section: "settings" } })}
+            />
+          </div>
+        )}
+      </Section>
+      <div className="grid gap-4 xl:grid-cols-2">
         <Section
-          title="Repositories"
+          title="Disk"
           aside={
             <>
-              <span className="text-sm text-muted-foreground">{configured} configured</span>
-              <Link to="/repositories" className="ml-auto text-sm text-primary hover:underline">
-                Manage
+              {st.disk_root && <span className="font-mono text-sm text-muted-foreground">{st.disk_root}</span>}
+              <Link to="/settings/$section" params={{ section: "storage" }} className="ml-auto text-sm text-primary hover:underline">
+                Storage
               </Link>
             </>
           }
         >
-          {st.repos.length === 0 ? (
-            <div className="flex flex-col items-start gap-2 py-2">
-              <p className="text-sm text-muted-foreground">No repositories yet</p>
-              <Button size="sm" disabled={offline} onClick={() => setAdding(true)}>
-                Add repository
-              </Button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <RepoTable
-                repos={st.repos}
-                activity={activity.data?.repos}
-                now={now}
-                offline={offline}
-                onOpen={(name) => void navigate({ to: "/repositories/$name", params: { name } })}
-                onEdit={(name) => void navigate({ to: "/repositories/$name/$section", params: { name, section: "settings" } })}
-              />
-            </div>
-          )}
+          <DiskBreakdown status={st} storage={storage.data} highWater={config.data?.disk_high_water ?? 80} />
         </Section>
-        <div className="flex min-w-0 flex-col gap-4">
-          <Section
-            title="Disk"
-            aside={
-              <>
-                {st.disk_root && <span className="font-mono text-sm text-muted-foreground">{st.disk_root}</span>}
-                <Link to="/settings/$section" params={{ section: "storage" }} className="ml-auto text-sm text-primary hover:underline">
-                  Storage
-                </Link>
-              </>
-            }
-          >
-            <DiskBreakdown status={st} storage={storage.data} highWater={config.data?.disk_high_water ?? 80} />
-          </Section>
-          <Section title="Events">
-            <EventList events={events} />
-          </Section>
-        </div>
+        <Section title="Events">
+          <EventList events={events} />
+        </Section>
       </div>
       <AddRepoDialog open={adding} onClose={() => setAdding(false)} />
     </div>

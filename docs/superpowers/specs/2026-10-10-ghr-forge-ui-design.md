@@ -24,6 +24,7 @@ ghr's web UI looks and reads like a part of GitHub: the boxes, status pills, run
 - **No daemon or API change.** Every reworked page uses data it already loads. A gap found during the plan is reported, not filled with a new endpoint.
 - **Type sizes and density stay as pinned today** (the kit's `compact` density and `large` font size, the owner's choice of 2026-10-10). Only the families change.
 - **Icons stay Lucide.**
+- **The repository page's unsaved guard covers leaving the repository only**, the owner's ruling of 2026-10-11 on register row 9, replacing "leaving Capacity and labels by any route": the draft and the save bar already carry across the four sections.
 - **Not included,** because ghr has no such behaviour today: search, re-running jobs, log timestamp and wrap toggles.
 
 ## 1. Visual system
@@ -121,6 +122,7 @@ ghr's web UI looks and reads like a part of GitHub: the boxes, status pills, run
 - **Dashboard.** Same content and order as today, drawn as the Forge preview:
   - the four stats share one box, split by vertical dividers, in place of four cards;
   - Activity, Repositories, Disk and Events are boxes with header bands;
+  - Repositories spans the full width, with Disk and Events side by side below it and stacked under 1280px (the owner's ruling of 2026-10-11 on register row 15: beside Disk and Events the table did not fit its box);
   - the lanes chart uses the status colours (§1.1), and the repository table shows `StatusPill`s.
 - **Runners and the runner page.** The split view, list, panel, steps, log and stop dialog keep their behaviour. They take the box, the pill, and for the selected list entry the `sunk` fill with a 2px accent marker on its left edge.
 
@@ -217,7 +219,7 @@ The header stays above the frame: breadcrumb, name, the state sentence, and the 
 | Workflow labels | the label check | `/repositories/$name/labels` |
 | GitHub registrations | the registration list | `/repositories/$name/registrations` |
 
-- `UnsavedGuard` covers leaving "Capacity and labels" by any route.
+- `UnsavedGuard` covers leaving the repository page. Moving between its sections keeps the draft and the `SaveBar`, with no guard.
 - Unchanged: every field, check, row, button and message, the "being removed" and "daemon unreachable" locked states, and the not-found line.
 
 ### 6.5 Setup wizard and Login
@@ -239,7 +241,7 @@ Restyled only: the tokens, the box, the pill and the fonts. Steps, fields, wordi
 - every page in light and in dark, at 1440px and at 400px wide, with no sideways page scroll;
 - a real run in progress on the Dashboard, Actions, its run page and its job page;
 - a failed run's job page: the first failed step open, the error line marked;
-- General and "Capacity and labels": the unsaved guard on a left-list click;
+- General: the unsaved guard on a left-list click; "Capacity and labels": a left-list click keeps the draft with no guard, and leaving the repository opens it;
 - `/toolchains` and `/storage` land on the new sections;
 - a new browser profile opens in the system's mode.
 

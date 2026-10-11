@@ -88,13 +88,12 @@ describe("ghr palette", () => {
     for (const [fg, bg, min] of PAIRS) expect(contrast(t[fg], t[bg]), `${fg} on ${bg}`).toBeGreaterThanOrEqual(min)
   })
 
-  it("neutralises shadows, noise, gradients and the kit's overlays", () => {
+  it("neutralises shadows, noise and gradients", () => {
     const root = block(":root")
     expect(root["--shadow-card"]).toBe("none !important")
     expect(root["--shadow-dropdown"]).toBe("none !important")
     expect(root["--noise-opacity"]).toBe("0 !important")
     expect(root["--content-gradient-overlay"]).toBe("none !important")
-    expect(css).toMatch(/\.sidebar-gradient-overlay::before,\s*\.header-gradient-overlay::before,\s*main\[data-content\]::before \{\s*background: none !important;/)
   })
 })
 
@@ -165,6 +164,10 @@ describe("ghr chrome styles", () => {
   it("stops the pulse and the spinner when motion is reduced", () => {
     expect(css).toMatch(/\.ghr-pulse \{\s*animation: ghr-pulse 1\.8s ease-out infinite;/)
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.ghr-pulse \{\s*animation: none;\s*\}\s*\.dr-spinner-circle \{\s*animation: none;/)
+  })
+
+  it("lets the document scroll", () => {
+    expect(css).toMatch(/html,\s*body \{\s*height: auto;\s*overflow: visible;\s*\}/)
   })
 
   it("draws every Lucide icon at one stroke width", () => {

@@ -21,6 +21,28 @@ describe("Actions page", () => {
     expect(screen.queryByRole("region", { name: "In progress" })).not.toBeInTheDocument()
   })
 
+  it("holds the filters in the box from the first load on, so they do not move", async () => {
+    let answer: (value: unknown) => void = () => {}
+    mockApi(authedRoutes({ "GET /api/actions": () => new Promise((resolve) => (answer = resolve)) }))
+    renderApp("/actions")
+    const loading = await screen.findByRole("region", { name: "Workflow runs" })
+    const status = within(loading).getByRole("radiogroup", { name: "Status" })
+    expect(within(loading).getByRole("combobox", { name: "Repository" })).toBeInTheDocument()
+    expect(within(loading).getByText("Loading")).toBeInTheDocument()
+    answer(fixtures.actions)
+    const listed = await screen.findByRole("region", { name: `${fixtures.actions.runs.length} workflow runs` })
+    expect(listed).toBe(loading)
+    expect(within(listed).getByRole("radiogroup", { name: "Status" })).toBe(status)
+  })
+
+  it("keeps the filters in the box when the first load fails", async () => {
+    mockApi(authedRoutes({ "GET /api/actions": () => json({ error: "bad gateway" }, 502) }))
+    renderApp("/actions")
+    const box = await screen.findByRole("region", { name: "Workflow runs" })
+    expect(await within(box).findByText("bad gateway")).toBeInTheDocument()
+    expect(within(box).getByRole("radiogroup", { name: "Status" })).toBeInTheDocument()
+  })
+
   it("counts only the runs the filters leave", async () => {
     setViewport(1024)
     mockApi(authedRoutes())
@@ -54,7 +76,7 @@ describe("Actions page", () => {
     expect(row.getByText(`${run.workflow} #${run.run_number}`)).toBeInTheDocument()
     expect(row.getByText(run.repo)).toBeInTheDocument()
     expect(row.getByText(`${run.event} by ${run.actor}`)).toBeInTheDocument()
-    expect(row.getByText(run.branch)).toHaveClass("font-mono", "text-primary", "rounded-full")
+    expect(row.getByText(run.branch)).toHaveClass("font-mono", "text-primary", "rounded-full", "bg-branch")
     expect(row.queryAllByText("ghr")).toHaveLength(run.ghr ? 1 : 0)
     expect(row.getAllByRole("cell")).toHaveLength(3)
   })
@@ -213,7 +235,9 @@ describe("Actions page", () => {
   it("explains an empty page", async () => {
     mockApi(authedRoutes({ "GET /api/actions": { fetched_at: "2026-10-03T14:05:00Z", runs: [], repos: [] } }))
     renderApp("/actions")
-    expect(await screen.findByText("No repositories are covered yet.")).toBeInTheDocument()
+    const box = await screen.findByRole("region", { name: "0 workflow runs" })
+    expect(within(box).getByText("No repositories are covered yet.")).toBeInTheDocument()
+    expect(within(box).getByRole("radiogroup", { name: "Status" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Add a repository" })).toHaveAttribute("href", "/repositories")
     expect(screen.getByRole("link", { name: "Watch a repository" })).toHaveAttribute("href", "/repositories#watched")
   })

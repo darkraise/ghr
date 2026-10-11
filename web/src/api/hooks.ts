@@ -220,7 +220,7 @@ export function useToken() {
 }
 
 // A prune shows in /status, not /storage; either one running makes the
-// Storage and Toolchains pages poll every second.
+// storage poll run every second while the change stream is down.
 export function storageBusy(storage?: Storage, status?: Status): boolean {
   if (status?.maintenance.running) return true
   if (!storage) return false

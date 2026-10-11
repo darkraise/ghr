@@ -12,7 +12,7 @@ import { useState } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { UnsavedGuard } from "./unsaved-guard"
 
-function setup(saveResult = true, settles = saveResult) {
+function setup(saveResult = true, settles = saveResult, allow?: (pathname: string) => boolean) {
   const onSave = vi.fn()
   const onDiscard = vi.fn()
   function Form() {
@@ -24,6 +24,7 @@ function setup(saveResult = true, settles = saveResult) {
           count={count}
           page="Settings"
           saving={false}
+          allow={allow}
           onSave={async () => {
             onSave()
             if (settles) setCount(0)
@@ -40,7 +41,8 @@ function setup(saveResult = true, settles = saveResult) {
   const root = createRootRoute({ component: () => <Outlet /> })
   const form = createRoute({ getParentRoute: () => root, path: "/", component: Form })
   const other = createRoute({ getParentRoute: () => root, path: "/other", component: () => <p>other page</p> })
-  const router = createRouter({ routeTree: root.addChildren([form, other]), history: createMemoryHistory({ initialEntries: ["/"] }) })
+  const inside = createRoute({ getParentRoute: () => root, path: "/inside", component: () => <p>inside page</p> })
+  const router = createRouter({ routeTree: root.addChildren([form, other, inside]), history: createMemoryHistory({ initialEntries: ["/"] }) })
   render(<RouterProvider router={router} />)
   return { router, onSave, onDiscard, user: userEvent.setup() }
 }
@@ -100,6 +102,20 @@ describe("UnsavedGuard", () => {
     act(() => router.history.push("/#timing"))
     await waitFor(() => expect(router.state.location.hash).toBe("timing"))
     expect(screen.queryByText("You have 1 unsaved change on the Settings page.")).toBeNull()
+    expect(router.state.location.pathname).toBe("/")
+  })
+
+  it("lets a navigation the page allows through", async () => {
+    const { router } = setup(true, true, (pathname) => pathname === "/inside")
+    await screen.findByText("form page")
+    act(() => router.history.push("/inside"))
+    expect(await screen.findByText("inside page")).toBeInTheDocument()
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+  })
+
+  it("still guards a navigation the page does not allow", async () => {
+    const { router } = setup(true, true, (pathname) => pathname === "/inside")
+    await leave(router)
     expect(router.state.location.pathname).toBe("/")
   })
 })

@@ -4,9 +4,10 @@ import userEvent from "@testing-library/user-event"
 import { App } from "@/app"
 import { createQueryClient } from "@/query"
 import { createAppRouter } from "@/router"
+import { trackQueryClient } from "./query-clients"
 
 export function renderApp(path: string) {
-  const queryClient = createQueryClient()
+  const queryClient = trackQueryClient(createQueryClient())
   const router = createAppRouter({ queryClient, history: createMemoryHistory({ initialEntries: [path] }) })
   const user = userEvent.setup()
   const view = render(<App router={router} queryClient={queryClient} />)

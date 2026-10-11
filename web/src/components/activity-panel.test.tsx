@@ -47,6 +47,7 @@ describe("ActivityPanel", () => {
     draw({ selected: "24h", activity: fixtures.activityBuckets })
     expect(screen.getByText("Oct 2 14:00 to Oct 3 14:05, per hour")).toBeInTheDocument()
     expect(legend().getByText("Busy runner-minutes")).toBeInTheDocument()
+    expect(legend().getByText("Busy runner-minutes").querySelector("rect")).toHaveClass("fill-series", "stroke-series")
     expect(screen.getByRole("group", { name: "Activity per bucket for the last 24 hours" })).toBeInTheDocument()
   })
 
@@ -66,6 +67,8 @@ describe("ActivityPanel", () => {
     expect(screen.getByText("3 jobs in the last hour, 1 failed, 1 running.")).toHaveClass("sr-only")
     const table = screen.getByRole("table", { name: "Activity data" })
     expect(within(table).getAllByRole("row")).toHaveLength(5)
+    expect(table).not.toHaveClass("sr-only")
+    expect(table.parentElement).toHaveClass("sr-only")
   })
 
   it("keeps the last data when a refresh fails, and offers to retry", async () => {

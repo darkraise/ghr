@@ -285,10 +285,18 @@ describe("Settings page layout", () => {
 
   it("counts only config fields in the save bar", async () => {
     mockApi(routes())
-    const { user } = renderApp("/settings/account")
+    const { user, router } = renderApp("/settings/account")
     await user.type(await screen.findByLabelText("Current password"), "old password 1")
     expect(screen.queryByText(/unsaved change/)).toBeNull()
     expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull()
+    await user.click(within(screen.getByRole("navigation", { name: "Settings" })).getByRole("link", { name: "General" }))
+    const poll = await screen.findByLabelText("Poll interval")
+    expect(router.state.location.pathname).toBe("/settings")
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
+    await user.clear(poll)
+    await user.type(poll, "15s")
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument()
   })
 })
 
@@ -328,26 +336,6 @@ describe("Account section", () => {
     await fill(user, "bad password 1", "new password 12", "new password 12")
     expect(await screen.findByRole("alert")).toHaveTextContent("The current password is wrong")
     expect(router.state.location.pathname).toBe("/settings/account")
-  })
-
-  it("leaves Log out to the shell, which leaves without asking about unsaved edits", async () => {
-    let authenticated = true
-    mockApi(
-      routes({
-        "GET /auth/state": () => ({ setup_required: false, authenticated }),
-        "POST /auth/logout": () => {
-          authenticated = false
-          return noContent()
-        },
-      }),
-    )
-    const { user, router } = renderApp("/settings")
-    const poll = await screen.findByLabelText("Poll interval")
-    await user.clear(poll)
-    await user.type(poll, "15s")
-    await user.click(screen.getByRole("button", { name: "Log out" }))
-    await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
-    expect(screen.queryByText("Unsaved changes")).toBeNull()
   })
 })
 
@@ -395,12 +383,13 @@ describe("Settings sections", () => {
 
   it("guards an unsaved change when another section is opened from the list", async () => {
     mockApi(routes())
-    const { user } = renderApp("/settings")
+    const { user, router } = renderApp("/settings")
     const poll = await screen.findByLabelText("Poll interval")
     await user.clear(poll)
     await user.type(poll, "15s")
     await user.click(within(screen.getByRole("navigation", { name: "Settings" })).getByRole("link", { name: "GitHub token" }))
     expect(await screen.findByText("Unsaved changes")).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/settings")
   })
 
   it("keeps Log out out of the Account section", async () => {

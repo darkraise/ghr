@@ -152,7 +152,7 @@ export function JobGraph({
                   {shown.map((j) => (
                     <li key={j.id} className="h-7">
                       {jobLink(j.id, <JobLine job={j} now={now} />, {
-                        className: "flex h-full items-center gap-2 rounded-[4px] px-1 text-sm hover:bg-muted",
+                        className: "flex h-full items-center gap-2 rounded-sm px-1 text-sm hover:bg-muted",
                         label: label(j, node),
                       })}
                     </li>
