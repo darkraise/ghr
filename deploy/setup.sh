@@ -119,11 +119,14 @@ install_runner() {
     rm -rf "$staging"
     mkdir -p "$staging"
     fetch_runner "$version" "$staging/runner.tar.gz"
-    tar -xzf "$staging/runner.tar.gz" -C "$staging"
+    tar --no-same-owner -xzf "$staging/runner.tar.gz" -C "$staging"
     rm -f "$staging/runner.tar.gz"
     "$staging/bin/installdependencies.sh" >/dev/null || die "actions-runner $version: bin/installdependencies.sh failed"
     mv -T "$staging" "$dir"
   fi
+  # The runner tarball's owner ids (1001) may be a real user here, and a
+  # version an older setup.sh extracted kept them.
+  chown -R root:root "$dir"
   ln -sfn "$dir" "$DIST_DIR/current.tmp"
   mv -Tf "$DIST_DIR/current.tmp" "$DIST_DIR/current"
 }
