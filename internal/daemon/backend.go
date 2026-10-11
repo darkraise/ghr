@@ -471,27 +471,41 @@ func (b *Backend) PatchConfig(p model.ConfigPatch) error {
 	return nil
 }
 
+// AddRepo adds a runner repository under the name GitHub reports for it,
+// which is its new name when the typed one was redirected after a rename.
 func (b *Backend) AddRepo(ctx context.Context, req model.AddRepoRequest) error {
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
+	typed := strings.TrimSpace(req.Name)
+	if typed == "" {
 		return api.BadRequest("repo name is required")
 	}
-	if b.Store.Config().Repo(name) != nil {
-		return api.Conflict("repo " + name + " is already configured")
+	cfg := b.Store.Config()
+	// A fast path that saves the GitHub call. It knows only the typed name;
+	// the check inside the update decides.
+	if cfg.Repo(typed) != nil {
+		return api.Conflict("repo " + typed + " is already configured")
 	}
-	repo, err := b.GH.GetRepo(ctx, name)
+	repo, err := b.GH.GetRepo(ctx, typed)
 	if github.IsKind(err, github.ErrNotFound) {
-		return api.BadRequest(fmt.Sprintf("token cannot see %s/%s: add it to the PAT's repository access first", b.Store.Config().Owner, name))
+		return api.BadRequest(fmt.Sprintf("token cannot see %s/%s: add it to the PAT's repository access first", cfg.Owner, typed))
 	}
 	if err != nil {
 		return err
+	}
+	owner, name, _ := strings.Cut(repo.FullName, "/")
+	// GitHub also redirects a repository that was transferred to another
+	// owner, and every later call would go to the configured owner.
+	if !strings.EqualFold(owner, cfg.Owner) {
+		return api.BadRequest(fmt.Sprintf("%s now lives at %s; ghr serves only repositories of %s", typed, repo.FullName, cfg.Owner))
 	}
 	if !repo.Private && !req.AllowPublic {
 		return api.Conflict(name + " is public; self-hosted runners must only serve private repos (pass --allow-public to override)")
 	}
 	if err := b.update(func(c *config.Config) error {
+		if c.Repo(name) != nil {
+			return api.Conflict("repo " + name + " is already configured")
+		}
 		c.WatchRepos = slices.DeleteFunc(c.WatchRepos, func(w string) bool { return strings.EqualFold(w, name) })
-		c.Repos = append(c.Repos, config.Repo{Name: name, Max: req.Max, Labels: req.Labels})
+		c.Repos = append(c.Repos, config.Repo{Name: name, Max: req.Max, Labels: req.Labels, AllowPublic: req.AllowPublic})
 		return nil
 	}); err != nil {
 		return err

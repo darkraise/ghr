@@ -101,14 +101,15 @@ func (f *fakeManager) ClearDegraded() { f.cleared = true }
 
 type fakeGH struct {
 	fakeRuns
-	repos    map[string]*github.Repository
-	forgot   bool
-	meta     github.TokenMeta
-	runners  map[int64]github.Runner
-	getErr   error
-	delErr   error
-	deleted  []int64
-	getCalls int // GetRepo calls
+	repos     map[string]*github.Repository
+	forgot    bool
+	meta      github.TokenMeta
+	runners   map[int64]github.Runner
+	getErr    error
+	delErr    error
+	deleted   []int64
+	getCalls  int    // GetRepo calls; guarded by lmu
+	onGetRepo func() // when set, GetRepo calls it after counting the call
 
 	userRepos      []github.UserRepo
 	repoErr        error // returned by ListUserRepos
@@ -140,7 +141,12 @@ func (f *fakeGH) ListUserRepos(context.Context) ([]github.UserRepo, error) {
 }
 
 func (f *fakeGH) GetRepo(ctx context.Context, repo string) (*github.Repository, error) {
+	f.lmu.Lock()
 	f.getCalls++
+	f.lmu.Unlock()
+	if f.onGetRepo != nil {
+		f.onGetRepo()
+	}
 	r, ok := f.repos[repo]
 	if !ok {
 		return nil, &github.APIError{Status: 404, Kind: github.ErrNotFound}
@@ -265,7 +271,9 @@ func newBackend(t *testing.T) (*Backend, *fakeManager, *fakeGH) {
 	t.Helper()
 	m := &fakeManager{}
 	gh := &fakeGH{repos: map[string]*github.Repository{
-		"newrepo": {Private: true}, "public": {Private: false}, "darkcloud": {Private: true},
+		"newrepo":   {FullName: "darkraise/newrepo", Private: true},
+		"public":    {FullName: "darkraise/public"},
+		"darkcloud": {FullName: "darkraise/darkcloud", Private: true},
 	}}
 	b := &Backend{
 		Store: newStore(t), M: m, GH: gh, Events: events.New(),
@@ -451,6 +459,101 @@ func TestAddRepo(t *testing.T) {
 	}
 	if b.Store.Config().Repo("newrepo") == nil {
 		t.Fatal("repo not saved")
+	}
+}
+
+// GitHub answers for any spelling of a name, and for a renamed repository
+// under its new name. The config must hold GitHub's spelling, or one
+// repository could be configured twice under two names.
+func TestAddRepoStoresGitHubsName(t *testing.T) {
+	b, _, gh := newBackend(t)
+	ctx := context.Background()
+	gh.repos["NewRepo"] = &github.Repository{FullName: "darkraise/newrepo", Private: true}
+	gh.repos["oldcloud"] = &github.Repository{FullName: "darkraise/darkcloud", Private: true}
+	gh.repos["fresh"] = &github.Repository{FullName: "darkraise/fresh", Private: true}
+	gh.repos["stale"] = &github.Repository{FullName: "darkraise/fresh", Private: true}
+	gh.repos["moved"] = &github.Repository{FullName: "someone-else/moved", Private: true}
+	gh.repos["Public"] = &github.Repository{FullName: "DarkRaise/public"}
+
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "NewRepo"}); err != nil {
+		t.Fatal(err)
+	}
+	if r := b.Store.Config().Repo("newrepo"); r == nil || r.Name != "newrepo" || r.AllowPublic {
+		t.Fatalf("stored %+v, want GitHub's spelling and no allow_public", r)
+	}
+	ev := b.Events.After(0)
+	if last := ev[len(ev)-1]; last.Repo != "newrepo" || last.Msg != "repo added" {
+		t.Fatalf("event %+v", last)
+	}
+
+	// darkcloud is configured; its old name passes the early check, which
+	// knows only what was typed.
+	err := b.AddRepo(ctx, model.AddRepoRequest{Name: "oldcloud"})
+	if apiStatus(err) != 409 || err.Error() != "repo darkcloud is already configured" {
+		t.Fatalf("renamed duplicate: %v", err)
+	}
+
+	// A watched repository added under its old name leaves watch_repos under
+	// the name it is stored with.
+	if err := b.WatchRepo(ctx, "fresh"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "stale"}); err != nil {
+		t.Fatal(err)
+	}
+	if c := b.Store.Config(); c.Repo("fresh") == nil || c.Repo("stale") != nil || len(c.WatchRepos) != 0 {
+		t.Fatalf("repos %+v watch_repos %v", c.Repos, c.WatchRepos)
+	}
+
+	err = b.AddRepo(ctx, model.AddRepoRequest{Name: "moved"})
+	if apiStatus(err) != 400 || err.Error() != "moved now lives at someone-else/moved; ghr serves only repositories of darkraise" {
+		t.Fatalf("transferred: %v", err)
+	}
+	if b.Store.Config().Repo("moved") != nil {
+		t.Fatal("a transferred repository was stored")
+	}
+
+	// The owner is compared ignoring case, and the request's allow_public is kept.
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "Public", AllowPublic: true}); err != nil {
+		t.Fatal(err)
+	}
+	saved, _, err := config.Load(b.Store.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := saved.Repo("public"); r == nil || r.Name != "public" || !r.AllowPublic {
+		t.Fatalf("saved %+v, want public with allow_public", r)
+	}
+}
+
+// Two adds of one repository can both pass the early check. The check inside
+// the update decides, and the loser gets the 409 a late duplicate gets.
+func TestConcurrentAddRepoConflicts(t *testing.T) {
+	b, _, gh := newBackend(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	gh.onGetRepo = func() {
+		entered <- struct{}{}
+		<-release
+	}
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() { errs <- b.AddRepo(context.Background(), model.AddRepoRequest{Name: "newrepo"}) }()
+	}
+	<-entered
+	<-entered // both are past the early check
+	close(release)
+	first, second := <-errs, <-errs
+	if (first == nil) == (second == nil) || (apiStatus(first) != 409 && apiStatus(second) != 409) {
+		t.Fatalf("errors %v and %v, want one success and one 409", first, second)
+	}
+	n := 0
+	for _, r := range b.Store.Config().Repos {
+		if r.Name == "newrepo" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("newrepo configured %d times", n)
 	}
 }
 
