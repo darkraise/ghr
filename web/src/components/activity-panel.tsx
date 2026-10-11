@@ -44,7 +44,7 @@ function Legend({ lanes, capacity }: { lanes: boolean; capacity: number | null }
         ["Memory", <LineSwatch className="stroke-muted-foreground" dash />],
       ]
     : [
-        [capacity === null ? "Busy runner-minutes" : "Busy slot time", <Swatch className="fill-primary stroke-primary" />],
+        [capacity === null ? "Busy runner-minutes" : "Busy slot time", <Swatch className="fill-series stroke-series" />],
         ["Succeeded", <Swatch className="fill-success/60 stroke-success/60" />],
         ["Failed", <Swatch className="fill-destructive/70 stroke-destructive/70" />],
         ["Most jobs waiting", <LineSwatch className="stroke-warning" />],

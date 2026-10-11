@@ -66,6 +66,13 @@ describe("History page", () => {
     expect(bar?.parentElement).toHaveClass("flex-col")
   })
 
+  it("keys the chart's busy time in the series colour", async () => {
+    mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
+    renderApp("/history")
+    const legend = within(await screen.findByRole("list", { name: "Legend" }))
+    expect(legend.getByText("Busy").querySelector("span")).toHaveClass("bg-series")
+  })
+
   it("reads the table from where the chart starts", async () => {
     const { calls } = mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
     renderApp("/history")

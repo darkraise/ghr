@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
-import { contrast, hslTriplet, over, PALETTE, PILL_ALPHA, type Role } from "./palette"
+import { contrast, hslTriplet, over, PALETTE, PILL_ALPHA, SERIES_MIX, type Role } from "./palette"
 
 const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../styles/ghr-theme.css"), "utf8")
 const MODES = ["light", "dark"] as const
@@ -55,6 +55,16 @@ describe("the Forge palette", () => {
         expect([role, bg, contrast(PALETTE[role][mode], tint) >= 3]).toEqual([role, bg, true])
         expect([role, bg, contrast(PALETTE.text[mode], tint) >= 4.5]).toEqual([role, bg, true])
       }
+    }
+  })
+
+  it("mixes the accent toward sunk for a series that is not a state", () => {
+    expect(css).toContain(`--color-series: color-mix(in srgb, hsl(var(--primary)) ${SERIES_MIX * 100}%, hsl(var(--muted)));`)
+    for (const mode of MODES) {
+      const series = over(PALETTE.accent[mode], PALETTE.sunk[mode], SERIES_MIX)
+      const track = over(PALETTE.sunk[mode], PALETTE.surface[mode], 0.3)
+      expect([mode, "surface", contrast(series, PALETTE.surface[mode]) >= 3]).toEqual([mode, "surface", true])
+      expect([mode, "track", contrast(series, track) >= 3]).toEqual([mode, "track", true])
     }
   })
 

@@ -23,6 +23,9 @@ export const PALETTE: Record<Role, { light: string; dark: string }> = {
 
 export const PILL_ALPHA = 0.15
 
+// The accent's share in --color-series, the rest being sunk.
+export const SERIES_MIX = 0.7
+
 function rgb(hex: string): [number, number, number] {
   const n = Number.parseInt(hex.slice(1), 16)
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255]

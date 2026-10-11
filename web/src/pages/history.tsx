@@ -40,7 +40,7 @@ const ALL = "__all__"
 
 function Legend() {
   const items: [string, string][] = [
-    ["Busy", "bg-primary"],
+    ["Busy", "bg-series"],
     ["Succeeded", "bg-success/60"],
     ["Failed", "bg-destructive/70"],
   ]

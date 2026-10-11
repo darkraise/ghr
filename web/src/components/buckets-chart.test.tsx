@@ -44,6 +44,13 @@ describe("BucketsChart", () => {
     expect(open[0]).toHaveClass("opacity-60")
   })
 
+  it("draws busy time in the series colour, not full accent", () => {
+    const { container } = draw()
+    const bars = container.querySelectorAll('rect[data-kind="busy"]')
+    expect(bars.length).toBeGreaterThan(0)
+    for (const bar of bars) expect(bar).toHaveClass("fill-series")
+  })
+
   it("stacks failed runs on succeeded runs", () => {
     const { container } = draw()
     expect(container.querySelectorAll('rect[data-kind="succeeded"]')).toHaveLength(1)

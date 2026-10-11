@@ -175,7 +175,7 @@ export function BucketsChart({
           >
             <title>{label}</title>
             <rect x={colX(i)} y={0} width={colW} height={axisTop} className="ghr-mark-box fill-transparent" />
-            {busyH > 0 && <rect data-kind="busy" x={x0} y={top(0) + TRACK_H - busyH} width={w} height={busyH} className="fill-primary" />}
+            {busyH > 0 && <rect data-kind="busy" x={x0} y={top(0) + TRACK_H - busyH} width={w} height={busyH} className="fill-series" />}
             {okH > 0 && <rect data-kind="succeeded" x={x0} y={top(1) + TRACK_H - okH} width={w} height={okH} className="fill-success/60" />}
             {failH > 0 && (
               <rect data-kind="failed" x={x0} y={top(1) + TRACK_H - okH - failH} width={w} height={failH} className="fill-destructive/70" />

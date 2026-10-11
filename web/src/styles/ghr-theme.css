@@ -430,4 +430,7 @@ textarea {
 
 @theme inline {
   --color-running: hsl(var(--running));
+  /* A chart series that is not a state: the accent mixed toward sunk, so it
+     cannot be read as a status colour. */
+  --color-series: color-mix(in srgb, hsl(var(--primary)) 70%, hsl(var(--muted)));
 }
