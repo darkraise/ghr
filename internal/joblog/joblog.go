@@ -45,9 +45,70 @@ func kind(text string) (string, string) {
 	return "", text
 }
 
+// Steps the runner names itself. They print no "##[group]Run " header.
+const (
+	setUpJob       = "Set up job"
+	initContainers = "Initialize containers"
+	stopContainers = "Stop containers"
+	completeJob    = "Complete job"
+)
+
+// completeRunner is the step a job-completed hook adds between the post steps
+// and "Complete job"; ghr sets that hook on every runner it manages. Unlike
+// the steps above it prints a "##[group]Run " header, as "Set up runner", the
+// job-started hook's step, does.
+const completeRunner = "Complete runner"
+
+// The lines the runner prints first for a post step and for "Complete job".
+const (
+	postHeader     = "Post job cleanup."
+	completeHeader = "Cleaning up orphan processes"
+)
+
+// runnerPosts marks the runner's post steps. They are found by position:
+// walking back from the last step past "Complete job", "Complete runner" and
+// "Stop containers", the unbroken run of steps whose name starts with "Post ".
+// A step a person named that way earlier in the job is not one.
+func runnerPosts(steps []model.Step) []bool {
+	post := make([]bool, len(steps))
+	i := len(steps) - 1
+	for i >= 0 && (steps[i].Name == completeJob || steps[i].Name == completeRunner || steps[i].Name == stopContainers) {
+		i--
+	}
+	for ; i >= 0 && strings.HasPrefix(steps[i].Name, "Post "); i-- {
+		post[i] = true
+	}
+	return post
+}
+
+// regular reports whether a step prints a "##[group]Run " header of its own;
+// post says whether it is one of the runner's post steps.
+func regular(s model.Step, post bool) bool {
+	switch s.Name {
+	case setUpJob, initContainers, stopContainers, completeJob:
+		return false
+	}
+	return !post
+}
+
 // Parse splits raw into one LogStep per step, in the order given. Steps that
-// never started get no lines. Lines without a timestamp stay with the line
-// before them.
+// never started and skipped steps get no lines. Lines without a timestamp stay
+// with the line before them.
+//
+// One pointer, the current step, moves forward through the steps. GitHub
+// rounds step times to whole seconds, so times alone cannot split steps that
+// share a second; the lines the runner prints first for a step do:
+//   - a "##[group]Run " line, when the current step already has lines, moves to
+//     the first later regular step whose window holds the line's time;
+//   - a "Post job cleanup." line moves to the first later runner's post step
+//     whose window holds the line's time, unless the current step is such a
+//     step with no lines yet;
+//   - a "Cleaning up orphan processes" line moves to "Complete job" when that
+//     is the last step with times;
+//   - any other line more than a second past the current step's end moves to
+//     the next step that has not ended.
+//
+// A line with no step to move to stays with the current step.
 func Parse(raw []byte, steps []model.Step) []model.LogStep {
 	out := make([]model.LogStep, len(steps))
 	for i, s := range steps {
@@ -56,11 +117,35 @@ func Parse(raw []byte, steps []model.Step) []model.LogStep {
 	if len(steps) == 0 {
 		return out
 	}
+	post := runnerPosts(steps)
+	// timed holds the steps a line can go to. A skipped step has times, equal
+	// ones, and prints nothing, so it is left out.
 	var timed []int
+	// complete is the place in timed of "Complete job" when that is the last
+	// step with times, and -1 otherwise.
+	complete := -1
+	// first takes every line when timed is empty.
+	first := -1
 	for i, s := range steps {
-		if s.StartedAt != nil {
-			timed = append(timed, i)
+		skipped := s.Conclusion == "skipped"
+		if first < 0 && !skipped {
+			first = i
 		}
+		if s.StartedAt == nil {
+			continue
+		}
+		complete = -1
+		if skipped {
+			continue
+		}
+		timed = append(timed, i)
+		if s.Name == completeJob {
+			complete = len(timed) - 1
+		}
+	}
+	// With every step skipped there is no step a line may go to.
+	if first < 0 {
+		return out
 	}
 	// end is a step's completion plus slack, or no bound while it has none.
 	end := func(k int) (time.Time, bool) {
@@ -81,28 +166,40 @@ func Parse(raw []byte, steps []model.Step) []model.LogStep {
 	text := strings.TrimPrefix(string(raw), "\uFEFF")
 	text = strings.TrimSuffix(text, "\n")
 	p := 0
+	// next is the first place after p that fits, or p when none does.
+	next := func(fits func(k int) bool) int {
+		for k := p + 1; k < len(timed); k++ {
+			if fits(k) {
+				return k
+			}
+		}
+		return p
+	}
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSuffix(line, "\r")
 		at, body, ok := split(line)
 		if ok && len(timed) > 0 {
-			cur := &out[timed[p]]
-			if strings.HasPrefix(body, "##[group]Run ") && len(cur.Lines) > 0 {
-				for k := p + 1; k < len(timed); k++ {
-					if contains(k, at) {
-						p = k
-						break
-					}
+			cur := timed[p]
+			hasLines := len(out[cur].Lines) > 0
+			switch {
+			case strings.HasPrefix(body, "##[group]Run ") && hasLines:
+				p = next(func(k int) bool { return regular(steps[timed[k]], post[timed[k]]) && contains(k, at) })
+			case body == postHeader:
+				if !post[cur] || hasLines {
+					p = next(func(k int) bool { return post[timed[k]] && contains(k, at) })
 				}
-			} else if e, bounded := end(p); bounded && at.After(e) {
-				for k := p + 1; k < len(timed); k++ {
-					if e2, b2 := end(k); !b2 || !e2.Before(at) {
-						p = k
-						break
-					}
+			case body == completeHeader && complete >= 0:
+				p = complete
+			default:
+				if e, bounded := end(p); bounded && at.After(e) {
+					p = next(func(k int) bool {
+						e2, b2 := end(k)
+						return !b2 || !e2.Before(at)
+					})
 				}
 			}
 		}
-		idx := 0
+		idx := first
 		if len(timed) > 0 {
 			idx = timed[p]
 		}
