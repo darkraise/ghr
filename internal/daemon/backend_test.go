@@ -505,6 +505,17 @@ func TestAddRepoStoresGitHubsName(t *testing.T) {
 		t.Fatalf("repos %+v watch_repos %v", c.Repos, c.WatchRepos)
 	}
 
+	gh.repos["oldname"] = &github.Repository{FullName: "darkraise/newname", Private: true}
+	if err := b.WatchRepo(ctx, "oldname"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "oldname"}); err != nil {
+		t.Fatal(err)
+	}
+	if c := b.Store.Config(); c.Repo("newname") == nil || len(c.WatchRepos) != 0 {
+		t.Fatalf("repos %+v watch_repos %v", c.Repos, c.WatchRepos)
+	}
+
 	err = b.AddRepo(ctx, model.AddRepoRequest{Name: "moved"})
 	if apiStatus(err) != 400 || err.Error() != "moved now lives at someone-else/moved; ghr serves only repositories of darkraise" {
 		t.Fatalf("transferred: %v", err)

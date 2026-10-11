@@ -504,7 +504,7 @@ func (b *Backend) AddRepo(ctx context.Context, req model.AddRepoRequest) error {
 		if c.Repo(name) != nil {
 			return api.Conflict("repo " + name + " is already configured")
 		}
-		c.WatchRepos = slices.DeleteFunc(c.WatchRepos, func(w string) bool { return strings.EqualFold(w, name) })
+		c.WatchRepos = slices.DeleteFunc(c.WatchRepos, func(w string) bool { return strings.EqualFold(w, name) || strings.EqualFold(w, typed) })
 		c.Repos = append(c.Repos, config.Repo{Name: name, Max: req.Max, Labels: req.Labels, AllowPublic: req.AllowPublic})
 		return nil
 	}); err != nil {
