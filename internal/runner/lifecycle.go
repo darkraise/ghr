@@ -650,13 +650,15 @@ func (m *Manager) finalizePending(ctx context.Context) {
 	}
 }
 
-// stopIdle stops idle runners chosen by sched.IdleToStop.
+// stopIdle stops idle runners chosen by sched.IdleToStop. It chooses from
+// planConfig, so every idle runner of a blocked repo is stopped. An unread
+// repo is not blocked: its runners stay.
 func (m *Manager) stopIdle(ctx context.Context, cfg *config.Config, now time.Time) {
 	byID := map[string]instance{}
 	for _, i := range m.snapshot() {
 		byID[i.ID] = i
 	}
-	for _, id := range sched.IdleToStop(cfg, m.schedInstances(cfg), now) {
+	for _, id := range sched.IdleToStop(m.planConfig(cfg), m.schedInstances(cfg), now) {
 		if m.stopIdleRunner(ctx, byID[id], now) == idleKept && !m.apiAllowed(now) {
 			return
 		}

@@ -236,20 +236,28 @@ func (m *Manager) confirm(id string, j github.Job, now time.Time) {
 }
 
 // spawnPlanned spawns what sched.Plan decides, nothing while a runner update
-// runs. Repos in an error state, or waiting after a failed start, are left
+// runs. It plans from planConfig, so a blocked repo gets nothing. Repos that
+// are unread, in an error state, or waiting after a failed start, are left
 // out of planning. Spawning stops as soon as the live config differs from the
 // one the plan used, so a pause or cap change made during polling is never
 // overridden.
 func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time.Time) {
+	plan := m.planConfig(cfg)
+	var read []config.Repo
+	for _, r := range plan.Repos {
+		if !m.unread(r) {
+			read = append(read, r)
+		}
+	}
 	m.mu.Lock()
 	if m.upd.running {
 		m.mu.Unlock()
 		return
 	}
 	demand := m.demand
-	planCfg := *cfg
+	planCfg := *plan
 	planCfg.Repos = nil
-	for _, r := range cfg.Repos {
+	for _, r := range read {
 		if m.repoErr[r.Name] == "" && !now.Before(m.retryAt[r.Name]) && !now.Before(m.spawnRetryAt[strings.ToLower(r.Name)]) {
 			planCfg.Repos = append(planCfg.Repos, r)
 		}

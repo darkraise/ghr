@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -49,6 +50,51 @@ func (m *Manager) readVisibility(ctx context.Context, repo string, now time.Time
 	m.vis[key] = nv
 	m.mu.Unlock()
 	return nil
+}
+
+// blockedLocked is blocked with m.mu held.
+func (m *Manager) blockedLocked(cfg *config.Config, repo config.Repo) bool {
+	r := cfg.Repo(repo.Name)
+	if r == nil || r.AllowPublic {
+		return false
+	}
+	public, _ := m.visibilityLocked(repo.Name)
+	return public
+}
+
+// blocked reports whether repo must get no runner: GitHub last reported it
+// public and cfg does not set allow_public for it. A job in a public
+// repository can come from anyone's pull request.
+func (m *Manager) blocked(cfg *config.Config, repo config.Repo) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.blockedLocked(cfg, repo)
+}
+
+// unread reports whether GitHub has not yet said whether repo is public.
+// Until it has, repo gets no new runner.
+func (m *Manager) unread(repo config.Repo) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, known := m.visibilityLocked(repo.Name)
+	return !known
+}
+
+// planConfig returns a copy of cfg in which every blocked repo is paused, for
+// the scheduler to plan from: a blocked repo then gets no new runner and its
+// idle ones stop, while its running jobs finish. Unlike a paused repo it is
+// still polled and keeps its error, so the copy is never saved or shown.
+func (m *Manager) planConfig(cfg *config.Config) *config.Config {
+	plan := *cfg
+	plan.Repos = slices.Clone(cfg.Repos)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, r := range plan.Repos {
+		if m.blockedLocked(cfg, r) {
+			plan.Repos[i].Paused = true
+		}
+	}
+	return &plan
 }
 
 // forgetRemoved drops the visibility kept for repos that are no longer in the
