@@ -403,12 +403,13 @@ describe("Settings sections", () => {
 
   it("guards an unsaved change when another section is opened from the list", async () => {
     mockApi(routes())
-    const { user } = renderApp("/settings")
+    const { user, router } = renderApp("/settings")
     const poll = await screen.findByLabelText("Poll interval")
     await user.clear(poll)
     await user.type(poll, "15s")
     await user.click(within(screen.getByRole("navigation", { name: "Settings" })).getByRole("link", { name: "GitHub token" }))
     expect(await screen.findByText("Unsaved changes")).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/settings")
   })
 
   it("keeps Log out out of the Account section", async () => {

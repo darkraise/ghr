@@ -160,12 +160,13 @@ describe("repository page", () => {
 
   it("asks before leaving with unsaved edits", async () => {
     mockApi(routes())
-    const { user } = renderApp("/repositories/darkmem/settings")
+    const { user, router } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
     await user.type(max, "5")
     await user.click(screen.getByRole("link", { name: /^Runners/ }))
     expect(await screen.findByText("You have 1 unsaved change on the Repositories page.")).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/repositories/darkmem/settings")
   })
 
   it("locks the form while the repo is being removed", async () => {
