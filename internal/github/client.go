@@ -189,9 +189,9 @@ func (c *Client) TokenMeta() TokenMeta {
 }
 
 // record stores the response's rate and expiry headers, unless the token
-// changed while the request was in flight. Only a success or an
-// authentication or permission failure (ErrAuth) is a verdict on the token;
-// other failures leave CheckedAt and OK as they were.
+// changed while the request was in flight. Only a success or a 401 is a
+// verdict on the token. A 403 refuses one repository or one call, so it
+// leaves CheckedAt and OK as they were, like every other failure.
 func (c *Client) record(gen uint64, h http.Header, apiErr *APIError) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -215,16 +215,10 @@ func (c *Client) record(gen uint64, h http.Header, apiErr *APIError) {
 	switch {
 	case apiErr == nil:
 		c.meta.CheckedAt, c.meta.OK = c.Now(), true
-	// Contents: read is optional (only the run graph reads files), so a 403
-	// on a contents path means that permission is missing, not a bad token.
-	case apiErr.Kind == ErrAuth && !(apiErr.Status == 403 && contentsPathRe.MatchString(apiErr.Path)):
+	case apiErr.Status == http.StatusUnauthorized:
 		c.meta.CheckedAt, c.meta.OK = c.Now(), false
 	}
 }
-
-// contentsPathRe matches the contents endpoint of any repository, not a
-// repository that happens to be named contents.
-var contentsPathRe = regexp.MustCompile(`^/repos/[^/]+/[^/]+/contents/`)
 
 // parseExpiry reads GitHub's token expiry header, "2026-12-31 23:59:59 UTC".
 func parseExpiry(v string) (time.Time, bool) {

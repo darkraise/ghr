@@ -452,9 +452,8 @@ func TestSecondaryRateLimitIsNotAuth(t *testing.T) {
 	}
 }
 
-// Only a success or an authentication or permission failure is a verdict on
-// the token; a server error, a 404 or a rate limit leaves the last verdict in
-// place.
+// Only a success or a 401 is a verdict on the token; a server error, a 404, a
+// rate limit or a 403 leaves the last verdict in place.
 func TestTokenMetaOnlyCountsTokenVerdicts(t *testing.T) {
 	status := 200
 	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -471,7 +470,7 @@ func TestTokenMetaOnlyCountsTokenVerdicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := c.TokenMeta()
-	for _, status = range []int{500, 404, 429} {
+	for _, status = range []int{500, 404, 429, 403} {
 		now = now.Add(time.Minute)
 		if _, err := c.GetRepo(context.Background(), "darkcloud"); err == nil {
 			t.Fatalf("status %d: no error", status)

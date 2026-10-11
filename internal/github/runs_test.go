@@ -132,16 +132,3 @@ func TestMissingContentsPermissionIsNotATokenVerdict(t *testing.T) {
 		t.Fatalf("a missing Contents: read gave a verdict on the token: %+v", m)
 	}
 }
-
-func TestRepositoryNamedContentsStillGivesAVerdict(t *testing.T) {
-	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprint(w, `{"message":"Resource not accessible by personal access token"}`)
-	})
-	if _, err := c.GetRun(context.Background(), "contents", 102); !IsKind(err, ErrAuth) {
-		t.Fatalf("err %v", err)
-	}
-	if m := c.TokenMeta(); m.CheckedAt.IsZero() || m.OK {
-		t.Fatalf("a 403 on the repository named contents gave no verdict: %+v", m)
-	}
-}
