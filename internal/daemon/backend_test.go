@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -1755,5 +1756,37 @@ func TestRunnerStepsPanicLeavesNoCallBehind(t *testing.T) {
 	p.jobs = false
 	if s, err := b.RunnerSteps(ctx, "aaaaaa"); err != nil || len(s) != 1 {
 		t.Fatalf("the next request: steps %+v err %v", s, err)
+	}
+}
+
+// A new token is checked on at most tokenCheckWorkers repositories at a time,
+// however many are configured.
+func TestCheckTokenOnBoundsTheChecksInFlight(t *testing.T) {
+	b, _, _ := newBackend(t)
+	repos := []string{"r1", "r2", "r3", "r4", "r5", "r6"}
+	var inFlight, peak atomic.Int32
+	release := make(chan struct{})
+	b.CheckToken = func(_ context.Context, _, _ string) error {
+		n := inFlight.Add(1)
+		for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
+		}
+		<-release
+		inFlight.Add(-1)
+		return nil
+	}
+	done := make(chan []error, 1)
+	go func() { done <- b.checkTokenOn(context.Background(), "tok", repos) }()
+	waitFor(t, "the first checks to start", func() bool { return inFlight.Load() == tokenCheckWorkers })
+	// Yielding gives a check beyond the bound every chance to start.
+	for range 200 {
+		runtime.Gosched()
+	}
+	if n := inFlight.Load(); n != tokenCheckWorkers {
+		t.Fatalf("%d checks in flight with %d held back, want %d", n, len(repos), tokenCheckWorkers)
+	}
+	close(release)
+	errs := <-done
+	if len(errs) != len(repos) || peak.Load() != tokenCheckWorkers {
+		t.Fatalf("%d results, peak %d in flight, want %d and %d", len(errs), peak.Load(), len(repos), tokenCheckWorkers)
 	}
 }
