@@ -427,6 +427,22 @@ func TestMutationStopsWaitingWhenItsContextEnds(t *testing.T) {
 			t.Fatalf("requests %v", f.requests)
 		}
 	})
+	t.Run("already ended on an idle client", func(t *testing.T) {
+		c, f := newClient(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		// select picks at random among ready cases, so one call proves little.
+		for i := 0; i < 100; i++ {
+			if err := c.DeleteRunner(ctx, "r", 1); err != context.Canceled {
+				t.Fatalf("call %d: %#v", i, err)
+			}
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if len(f.requests) != 0 {
+			t.Fatalf("requests %v", f.requests)
+		}
+	})
 	t.Run("the default wait", func(t *testing.T) {
 		c := New("darkraise", func() string { return "tok" })
 		ctx, cancel := context.WithCancel(context.Background())

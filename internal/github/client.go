@@ -445,6 +445,10 @@ func (c *Client) mutate(ctx context.Context, method, u string, body any) ([]byte
 		return nil, ctx.Err()
 	}
 	defer func() { <-c.mutSlot }()
+	// select picks at random when the slot is free and ctx has already ended.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if until := c.SuspendedUntil(); !until.IsZero() {
 		return nil, &APIError{Status: http.StatusTooManyRequests, Kind: ErrRateLimit, Message: "rate limited until " + until.Format(time.RFC3339), RetryAt: until}
 	}
