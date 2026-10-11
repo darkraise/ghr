@@ -165,8 +165,7 @@ func (m *Manager) readJobFiles() {
 		inst, ok := m.insts[i.ID]
 		if ok && inst.State != sched.Cleaning {
 			if inst.State == sched.Starting || inst.State == sched.Idle {
-				inst.State = sched.Busy
-				inst.StateSince = m.Now()
+				m.enterLocked(inst, sched.Busy, m.Now())
 			}
 			if inst.Job == nil {
 				inst.Job = jobInfo(rec, m.Now())
@@ -202,9 +201,9 @@ func (m *Manager) refreshRunners(ctx context.Context) {
 			continue // start_timeout handles runners that never appear
 		}
 		if r.Busy {
-			m.setState(i.ID, sched.Busy)
-		} else if r.Status == "online" && i.State == sched.Starting {
-			m.setState(i.ID, sched.Idle)
+			m.move(i.ID, sched.Busy, sched.Starting, sched.Idle)
+		} else if r.Status == "online" {
+			m.move(i.ID, sched.Idle, sched.Starting)
 		}
 	}
 }
@@ -600,12 +599,12 @@ func (m *Manager) deregisterIdle(ctx context.Context, i instance, now time.Time)
 		return idleKept, false
 	}
 	if r.Busy {
-		m.setState(i.ID, sched.Busy)
+		m.move(i.ID, sched.Busy, sched.Starting, sched.Idle)
 		return idleBusy, false
 	}
 	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil {
 		if github.IsKind(err, github.ErrUnprocessable) {
-			m.setState(i.ID, sched.Busy)
+			m.move(i.ID, sched.Busy, sched.Starting, sched.Idle)
 			return idleBusy, false
 		}
 		m.apiErr(i.Repo, err, now)

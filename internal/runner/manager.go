@@ -138,6 +138,7 @@ type instance struct {
 	cleanupFails int       // consecutive failed Docker cleanups
 	deregistered bool      // stopIdleRunner deleted its registration
 	stopping     bool      // Kill asked systemd to stop the unit
+	cameOnline   bool      // it has been idle or busy at least once
 }
 
 type Manager struct {
@@ -364,13 +365,27 @@ func (m *Manager) releasePrune() {
 
 func (m *Manager) instanceDir(id string) string { return filepath.Join(m.Paths.Instances, id) }
 
-func (m *Manager) setState(id string, s sched.State) {
+// enterLocked puts i in state s; m.mu must be held.
+func (m *Manager) enterLocked(i *instance, s sched.State, now time.Time) {
+	i.State = s
+	i.StateSince = now
+	if s == sched.Idle || s == sched.Busy {
+		i.cameOnline = true
+	}
+}
+
+// move puts the instance in state to when its live state is one of from, and
+// reports whether it did. Callers decide from a snapshot that a network call
+// has made old, so only the live state counts.
+func (m *Manager) move(id string, to sched.State, from ...sched.State) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if i, ok := m.insts[id]; ok && i.State != s && i.State != sched.Cleaning {
-		i.State = s
-		i.StateSince = m.Now()
+	i, ok := m.insts[id]
+	if !ok || !slices.Contains(from, i.State) {
+		return false
 	}
+	m.enterLocked(i, to, m.Now())
+	return true
 }
 
 func (m *Manager) snapshot() []instance {

@@ -41,7 +41,7 @@ func idleRunner(t *testing.T, h *harness) string {
 	}
 	id := "aaaaaa"
 	h.gh.setRunner(h.m.insts[id].RunnerID, "online", false)
-	h.m.setState(id, sched.Idle)
+	h.m.move(id, sched.Idle, sched.Starting)
 	return id
 }
 
@@ -87,7 +87,7 @@ func TestQueuedUpdateWaitsUntilFree(t *testing.T) {
 		}},
 		{"busy runner", func(t *testing.T, h *harness) {
 			id := idleRunner(t, h)
-			h.m.setState(id, sched.Busy)
+			h.m.move(id, sched.Busy, sched.Idle)
 		}},
 		{"queued job", func(t *testing.T, h *harness) {
 			queuedRun(h, "darkmem", 7, github.Job{ID: 70, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
@@ -244,7 +244,7 @@ func TestUpdateBacksOffWhenAnIdleRunnerCannotStop(t *testing.T) {
 	if err := h.m.spawn(context.Background(), h.cfg, "darkcloud"); err != nil {
 		t.Fatal(err)
 	}
-	h.m.setState("bbbbbb", sched.Idle)
+	h.m.move("bbbbbb", sched.Idle, sched.Starting)
 	h.gh.mu.Lock()
 	delete(h.gh.runners, h.m.insts["bbbbbb"].RunnerID)
 	h.gh.mu.Unlock()

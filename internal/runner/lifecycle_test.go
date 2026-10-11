@@ -1108,3 +1108,22 @@ func TestStartTimeoutSkipsARunnerThatIsGone(t *testing.T) {
 		t.Fatalf("stopped %v, want only ghr-runner-aaaaaa", h.sd.stopped)
 	}
 }
+
+// The runners API is slow. A runner that took a job while its answer was on
+// the way must not be put back to idle by that answer.
+func TestRunnerMadeBusyDuringTheCheckStaysBusy(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.gh.setRunner(101, "online", false)
+	h.gh.hook = func(method string) {
+		if method == "GetRunner" {
+			h.m.mu.Lock()
+			h.m.insts["aaaaaa"].State = sched.Busy
+			h.m.mu.Unlock()
+		}
+	}
+	h.m.refreshRunners(context.Background())
+	if h.state("aaaaaa") != "busy" {
+		t.Fatalf("state %s", h.state("aaaaaa"))
+	}
+}

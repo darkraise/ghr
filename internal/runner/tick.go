@@ -163,8 +163,7 @@ func (m *Manager) confirm(id string, j github.Job, now time.Time) {
 		return
 	}
 	if i.State != sched.Busy {
-		i.State = sched.Busy
-		i.StateSince = now
+		m.enterLocked(i, sched.Busy, now)
 	}
 	i.JobConfirmed = true
 	started := now
