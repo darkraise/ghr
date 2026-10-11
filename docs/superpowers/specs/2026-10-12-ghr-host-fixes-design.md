@@ -154,7 +154,7 @@ With `Requires=docker.service`, stopping Docker stops ghr, and starting Docker a
 
 - `[Install]` becomes `WantedBy=multi-user.target docker.service`, so a start of Docker starts ghr after it. `Requires=` stays: ghr must not start runners without Docker. `install_service` uses `systemctl reenable` so an existing install gets the new link.
 - The unit file is written, and `daemon-reload` run, only when its content differs. The restart still happens on every run, because the binary may be new.
-- The start-after-Docker behaviour is not verified (§7).
+- The start-after-Docker behaviour was checked on systemd 257 (§7).
 
 ### 5.3 The password prompt after a failed first install (row 69)
 
@@ -167,7 +167,7 @@ With `Requires=docker.service`, stopping Docker stops ghr, and starting Docker a
 
 `gc_dist` runs after the restarted daemon is ready, where a runner update queued in that moment could be installing into the directory it removes.
 
-- `gc_dist` runs right after `install_runner`, while the daemon is stopped by `stop_ghr`. Its comment is replaced. The premise that nothing reads an old version while the daemon is down is checked first (§7).
+- `gc_dist` runs right after `install_runner`, while the daemon is stopped by `stop_ghr`. Its comment is replaced. Nothing reads an old version while the daemon is down (§7).
 
 ### 5.5 Small fixes (rows 71 and 72)
 
@@ -225,9 +225,9 @@ A completed job whose log answers 404 is remembered as "produced no log" for 10 
 ## 7. Verify before fixing
 
 - **Row 48:** read from the code, not timed: runner units set no `TimeoutStopSec`. The plan times one stop of a busy runner if the owner allows a deploy; the fix does not depend on the exact figure.
-- **Row 57:** GitHub's maximum label length. If it is under 100, the rule takes GitHub's figure and the web form's limit becomes a row for sub-project 4.
-- **Row 68:** on a Debian 13 host, with two throwaway units shaped like `docker.service` and `ghr.service`: stop the first, start it again, and see the second start. If it does not, the fix becomes `Wants=` in place of `Requires=`, and the owner is asked first.
-- **Row 70:** how an instance directory gets the runner's files, read in `internal/runner/lifecycle.go` and `install.go`. If a running instance reads from an old version directory, `gc_dist` stays where it is and skips directories newer than the script's start instead.
+- **Row 57:** GitHub's maximum label length is not verified: its documentation names none, and trying one means registering a runner, which is a write to GitHub. The rule keeps the web form's 100. Should GitHub refuse a shorter label, the spawn fails with GitHub's own error, as it does today, and the limit is lowered then.
+- **Row 68:** verified on 2026-10-12 on Debian 13 with systemd 257, with two throwaway units shaped like `docker.service` and `ghr.service`. With `Requires=` and `After=` alone, the second stays inactive after the first is stopped and started. With the second also wanted by the first, it starts again, also on a restart of the first.
+- **Row 70:** verified on 2026-10-12 by reading `spawn` in `internal/runner/lifecycle.go`: an instance directory is a full copy of the version `dist/current` names (`CopyTree`), so no running runner reads a version directory, and `stop_ghr` stops the daemon before `install_runner`.
 - **Row 213:** not verifiable without a job finishing under observation; the fix is safe either way.
 
 ## 8. Testing
