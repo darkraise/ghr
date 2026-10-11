@@ -21,6 +21,7 @@ func (m *Manager) Tick(ctx context.Context) {
 	m.beginTick()
 	m.refreshUnits(ctx)
 	m.readJobFiles()
+	m.forgetPaused(cfg)
 	if m.apiAllowed(now) {
 		m.refreshRunners(ctx)
 	}
@@ -71,32 +72,52 @@ func (m *Manager) Tick(ctx context.Context) {
 // jobs. Degraded clears only after a tick in which some repo answered and none
 // rejected the token. It reports whether every unpaused repo answered, and
 // the first one, in config order, that did not.
+//
+// A repo that does not answer keeps its last known queued jobs for status;
+// spawnPlanned already leaves such a repo out. A paused repo is polled only
+// while one of its busy runners still lacks its job's details, and its queue
+// is never kept: nothing will serve it, and it must not hold an update back.
 func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time.Time) (bool, string) {
 	ours := map[string]string{}
 	for _, i := range m.snapshot() {
 		ours[i.RunnerName] = i.ID
 	}
+	m.mu.Lock()
+	last := m.demand
+	m.mu.Unlock()
 	demand := sched.Demand{}
-	anyOK, authFailed, unanswered := false, false, ""
-	missed := func(name string) {
-		if unanswered == "" {
-			unanswered = name
+	for _, r := range cfg.Repos {
+		if jobs, ok := last[r.Name]; ok && !r.Paused {
+			demand[r.Name] = jobs
 		}
 	}
+	anyOK, authFailed, unanswered := false, false, ""
+	missed := func(r config.Repo) {
+		if !r.Paused && unanswered == "" {
+			unanswered = r.Name
+		}
+	}
+	forget := func(name string) {
+		m.mu.Lock()
+		delete(m.fails, name)
+		delete(m.retryAt, name)
+		delete(m.repoErr, name)
+		m.mu.Unlock()
+	}
 	for _, r := range cfg.Repos {
-		if r.Paused {
-			continue
+		if r.Paused && !m.unconfirmedBusy(r.Name) {
+			continue // forgetPaused has dropped what its last polls left behind
 		}
 		m.mu.Lock()
 		wait := now.Before(m.retryAt[r.Name])
 		m.mu.Unlock()
 		if wait {
-			missed(r.Name)
+			missed(r)
 			continue
 		}
 		jobs, err := m.repoDemand(ctx, cfg, r, ours, now)
 		if err != nil {
-			missed(r.Name)
+			missed(r)
 			if tokenRejected(err) {
 				authFailed = true
 			}
@@ -107,12 +128,10 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 			continue
 		}
 		anyOK = true
-		demand[r.Name] = jobs
-		m.mu.Lock()
-		delete(m.fails, r.Name)
-		delete(m.retryAt, r.Name)
-		delete(m.repoErr, r.Name)
-		m.mu.Unlock()
+		if !r.Paused {
+			demand[r.Name] = jobs
+		}
+		forget(r.Name)
 	}
 	m.mu.Lock()
 	m.demand = demand
@@ -126,6 +145,23 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 		m.Events.Add("ok", "", "GitHub token accepted again")
 	}
 	return unanswered == "", unanswered
+}
+
+// forgetPaused drops what the last polls left behind for paused repos that
+// are not being polled: their error, their backoff and their queued jobs. It
+// needs no API call, so it runs on every tick, API pause or not.
+func (m *Manager) forgetPaused(cfg *config.Config) {
+	for _, r := range cfg.Repos {
+		if !r.Paused || m.unconfirmedBusy(r.Name) {
+			continue
+		}
+		m.mu.Lock()
+		delete(m.fails, r.Name)
+		delete(m.retryAt, r.Name)
+		delete(m.repoErr, r.Name)
+		delete(m.demand, r.Name)
+		m.mu.Unlock()
+	}
 }
 
 func (m *Manager) repoDemand(ctx context.Context, cfg *config.Config, r config.Repo, ours map[string]string, now time.Time) ([]sched.QueuedJob, error) {

@@ -496,6 +496,19 @@ func (m *Manager) snapshot() []instance {
 	return out
 }
 
+// unconfirmedBusy reports whether repo has a busy runner whose job the jobs
+// API has not confirmed yet.
+func (m *Manager) unconfirmedBusy(repo string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, i := range m.insts {
+		if strings.EqualFold(i.Repo, repo) && i.State == sched.Busy && !i.JobConfirmed {
+			return true
+		}
+	}
+	return false
+}
+
 // stale reports whether an instance was registered with labels other than its
 // repo's current custom labels; an unconfigured repo's instance is not stale.
 func stale(cfg *config.Config, i instance) bool {
@@ -567,7 +580,9 @@ func (m *Manager) Status() model.Status {
 	for _, r := range cfg.Repos {
 		rs := model.RepoStatus{Name: r.Name, Paused: r.Paused, Removing: r.Removing, Max: cfg.EffectiveMax(r),
 			Queued: len(m.demand[r.Name]), Error: m.repoErr[r.Name]}
-		if rs.Error == "" {
+		// A paused repo gets no spawns, so a failed start from before the
+		// pause is not its state any more.
+		if rs.Error == "" && !r.Paused {
 			rs.Error = m.spawnErr[strings.ToLower(r.Name)]
 		}
 		for _, q := range m.demand[r.Name] {

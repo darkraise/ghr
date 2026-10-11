@@ -362,3 +362,97 @@ func TestForbiddenPollIsThatRepositorysError(t *testing.T) {
 		t.Fatalf("degraded %v started %d error %q", st.Degraded, len(h.sd.started), st.Repos[0].Error)
 	}
 }
+
+// A repository whose poll fails keeps its last known queued count.
+func TestQueuedCountSurvivesAFailedPoll(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.GlobalMax = 0 // nothing spawns, so the job stays queued
+	queuedRun(h, "darkmem", 2, github.Job{ID: 3, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
+	h.m.Tick(context.Background())
+	h.gh.setErr("ListRuns darkmem", &github.APIError{Status: 502, Kind: github.ErrServer})
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background())
+	if r := h.m.Status().Repos[1]; r.Queued != 1 || r.Error == "" {
+		t.Fatalf("queued %d error %q", r.Queued, r.Error)
+	}
+}
+
+func pause(h *harness, repo string) {
+	p := h.cfg.Clone()
+	p.Repo(repo).Paused = true
+	h.cfg = p
+}
+
+// A paused repository is not polled, so an error from before the pause would
+// otherwise stay on screen for as long as the pause lasts.
+func TestPausedRepositoryDropsItsError(t *testing.T) {
+	h := newHarness(t)
+	h.gh.setErr("ListRuns darkmem", &github.APIError{Status: 404, Kind: github.ErrNotFound})
+	h.m.Tick(context.Background())
+	if h.m.Status().Repos[1].Error == "" {
+		t.Fatal("no error before the pause")
+	}
+	pause(h, "darkmem")
+	h.m.Tick(context.Background())
+	if e := h.m.Status().Repos[1].Error; e != "" {
+		t.Fatalf("error kept while paused: %q", e)
+	}
+}
+
+// A paused repository's busy runner still gets its job confirmed, so its job
+// name and link show. Its queue is not counted: nothing will serve it, and it
+// must not hold a runner update back.
+func TestPausedRepositoryStillConfirmsItsBusyRunner(t *testing.T) {
+	h := newHarness(t)
+	if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	h.writeJob(t, "aaaaaa", 55)
+	h.gh.runs["darkmem/in_progress"] = []github.Run{{ID: 55}}
+	h.gh.jobs[55] = []github.Job{
+		{ID: 13, Status: "in_progress", RunID: 55, Name: "build", WorkflowName: "CI", RunnerName: "ghr-darkmem-aaaaaa", HTMLURL: "https://x/13"},
+		{ID: 14, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now},
+	}
+	pause(h, "darkmem")
+	h.m.Tick(context.Background())
+	st := h.m.Status()
+	if j := st.Instances[0].Job; j == nil || j.Name != "build" || j.HTMLURL != "https://x/13" {
+		t.Fatalf("job %+v", st.Instances[0].Job)
+	}
+	if st.Repos[1].Queued != 0 {
+		t.Fatalf("a paused repository's queue is counted: %d", st.Repos[1].Queued)
+	}
+	polls := strings.Count(h.gh.callsText(), "ListRuns darkmem")
+	h.m.Tick(context.Background())
+	if n := strings.Count(h.gh.callsText(), "ListRuns darkmem"); n != polls {
+		t.Fatalf("polled again after the job was confirmed: %d then %d", polls, n)
+	}
+}
+
+// Pausing a repository while API calls are paused must still clear what its
+// last polls left behind; that needs no API call.
+func TestPausingDuringAnAPIPauseStillClearsTheRepository(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.GlobalMax = 0 // nothing spawns, so the job stays queued
+	queuedRun(h, "darkmem", 2, github.Job{ID: 3, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
+	h.m.Tick(context.Background())
+	h.m.apiErr("darkmem", &github.APIError{Status: 502, Kind: github.ErrServer}, h.now)
+	h.m.apiErr("darkcloud", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Hour)}, h.now)
+	if r := h.m.Status().Repos[1]; r.Queued != 1 || r.Error == "" {
+		t.Fatalf("setup: queued %d error %q", r.Queued, r.Error)
+	}
+	pause(h, "darkmem")
+	h.m.Tick(context.Background())
+	if r := h.m.Status().Repos[1]; r.Queued != 0 || r.Error != "" {
+		t.Fatalf("kept while paused: queued %d error %q", r.Queued, r.Error)
+	}
+}
+
+func TestPausedRepositoryHidesItsSpawnError(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawnFailed("darkmem", "boom", h.now)
+	pause(h, "darkmem")
+	if e := h.m.Status().Repos[1].Error; e != "" {
+		t.Fatalf("spawn error shown for a paused repository: %q", e)
+	}
+}
