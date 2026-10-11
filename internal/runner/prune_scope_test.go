@@ -129,7 +129,7 @@ func TestCheckDiskCutShortByShutdownIsInterrupted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
-		h.m.checkDisk(ctx, h.cfg)
+		h.checkDisk(ctx)
 		close(done)
 	}()
 	waitOrFail(t, entered, "the automatic prune")
@@ -159,7 +159,7 @@ func TestCheckDiskRecordsAnAutomaticPrune(t *testing.T) {
 	h := newHarness(t)
 	done := countPruneDone(h)
 	h.docker.usage = []int{99, 99, 50}
-	h.m.checkDisk(context.Background(), h.cfg)
+	h.checkDisk(context.Background())
 	lp := h.m.LastPrune()
 	if lp == nil || lp.Trigger != "auto" || lp.Scope != "auto" || lp.Outcome != "ok" || lp.FinishedAt == nil {
 		t.Fatalf("last prune %+v", lp)
@@ -181,7 +181,7 @@ func TestCheckDiskUnderTheHighWaterMarkRecordsNothing(t *testing.T) {
 	h := newHarness(t)
 	done := countPruneDone(h)
 	h.docker.usage = []int{40}
-	h.m.checkDisk(context.Background(), h.cfg)
+	h.checkDisk(context.Background())
 	if h.m.LastPrune() != nil || done.Load() != 0 {
 		t.Fatalf("last prune %+v, PruneDone %d", h.m.LastPrune(), done.Load())
 	}
@@ -190,7 +190,7 @@ func TestCheckDiskUnderTheHighWaterMarkRecordsNothing(t *testing.T) {
 func TestCheckDiskRecordsFailedReadings(t *testing.T) {
 	h := newHarness(t)
 	h.docker.usage = []int{99, -1}
-	h.m.checkDisk(context.Background(), h.cfg)
+	h.checkDisk(context.Background())
 	lp := h.m.LastPrune()
 	if lp.Outcome != "errors" || stepNames(lp) != "build cache older than 72h,disk usage,dangling images,disk usage" {
 		t.Fatalf("last prune %+v", lp)

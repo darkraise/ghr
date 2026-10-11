@@ -54,17 +54,22 @@ func (m *Manager) Tick(ctx context.Context) {
 	m.mu.Unlock()
 	// Manual and automatic pruning share one reservation, so neither runs
 	// Docker's prune commands or rewrites the history file under the other;
-	// a skipped automatic prune runs on a later tick.
+	// a skipped automatic prune runs on a later tick. The tick measures the
+	// disk and prunes history itself; Docker prunes run in the background,
+	// which then holds the reservation until they end.
 	if (diskDue || retentionDue) && m.reservePrune() {
-		func() {
-			defer m.releasePrune()
-			if diskDue {
-				m.checkDisk(ctx, cfg)
+		handedOver := false
+		if retentionDue {
+			m.prune(cfg, now)
+		}
+		if diskDue {
+			if pct, over := m.measureDisk(ctx, cfg); over {
+				handedOver = m.startDiskPrune(cfg, pct)
 			}
-			if retentionDue {
-				m.prune(cfg, now)
-			}
-		}()
+		}
+		if !handedOver {
+			m.releasePrune()
+		}
 	}
 }
 

@@ -344,7 +344,10 @@ func (f *fakeDocker) RemoveVolumesByLabel(_ context.Context, label string) error
 }
 
 // DataRootUsage returns successive f.usage values; a negative value is a failed read.
-func (f *fakeDocker) DataRootUsage(context.Context) (int, error) {
+func (f *fakeDocker) DataRootUsage(ctx context.Context) (int, error) {
+	if err := f.wait(ctx, "DataRootUsage"); err != nil {
+		return 0, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.usage) == 0 {
@@ -633,6 +636,14 @@ func (h *harness) eventText() string {
 		b.WriteString(e.Level + " " + e.Repo + " " + e.Msg + "\n")
 	}
 	return b.String()
+}
+
+// checkDisk measures the disk and, above the high-water mark, prunes in the
+// calling goroutine: what a tick does across its background prune.
+func (h *harness) checkDisk(ctx context.Context) {
+	if pct, over := h.m.measureDisk(ctx, h.cfg); over {
+		h.m.pruneDisk(ctx, h.cfg, pct)
+	}
 }
 
 func (h *harness) history(t *testing.T) []string {

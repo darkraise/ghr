@@ -383,6 +383,29 @@ func (m *Manager) releasePrune() {
 	m.mu.Unlock()
 }
 
+// startDiskPrune runs pruneDisk in the background and releases the prune
+// reservation when it ends; the caller must hold the reservation. Docker's
+// prune commands can take minutes, and a tick that waited for them would
+// spawn and reap nothing meanwhile. It reports false, starting nothing, once
+// Close has been called.
+func (m *Manager) startDiskPrune(cfg *config.Config, pct int) bool {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return false
+	}
+	ctx := m.maintCtx
+	// Counted under the lock that guards closed, so Wait cannot miss it.
+	m.wg.Add(1)
+	m.mu.Unlock()
+	go func() {
+		defer m.wg.Done()
+		defer m.releasePrune()
+		m.pruneDisk(ctx, cfg, pct)
+	}()
+	return true
+}
+
 func (m *Manager) instanceDir(id string) string { return filepath.Join(m.Paths.Instances, id) }
 
 // enterLocked puts i in state s; m.mu must be held. The first time a runner

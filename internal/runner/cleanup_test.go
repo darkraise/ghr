@@ -129,7 +129,7 @@ func TestRunnerContainersListsOnlyInstanceProjects(t *testing.T) {
 func TestCheckDiskBelowHighWaterDoesNothing(t *testing.T) {
 	h := newHarness(t)
 	h.docker.usage = []int{61}
-	h.m.checkDisk(context.Background(), h.cfg)
+	h.checkDisk(context.Background())
 	if len(h.docker.prunes) != 0 || h.m.Status().DiskPct != 61 {
 		t.Fatalf("prunes %v disk %d", h.docker.prunes, h.m.Status().DiskPct)
 	}
@@ -138,7 +138,7 @@ func TestCheckDiskBelowHighWaterDoesNothing(t *testing.T) {
 func TestCheckDiskPrunesInOrder(t *testing.T) {
 	h := newHarness(t)
 	h.docker.usage = []int{85, 83, 70}
-	h.m.checkDisk(context.Background(), h.cfg)
+	h.checkDisk(context.Background())
 	if !reflect.DeepEqual(h.docker.prunes, []string{"until=72h", "keep=20GB", "images"}) {
 		t.Fatalf("prunes %v", h.docker.prunes)
 	}
@@ -150,7 +150,7 @@ func TestCheckDiskPrunesInOrder(t *testing.T) {
 func TestCheckDiskSkipsKeepPruneWhenAgeFilterSuffices(t *testing.T) {
 	h := newHarness(t)
 	h.docker.usage = []int{85, 75}
-	h.m.checkDisk(context.Background(), h.cfg)
+	h.checkDisk(context.Background())
 	if !reflect.DeepEqual(h.docker.prunes, []string{"until=72h", "images"}) {
 		t.Fatalf("prunes %v", h.docker.prunes)
 	}
@@ -161,7 +161,7 @@ func TestCheckDiskReportsFailuresAndKeepsLastMeasurement(t *testing.T) {
 	h.docker.usage = []int{85, 83, -1}
 	h.docker.setErr("PruneBuildCacheTo", errors.New("unknown flag"))
 	h.docker.setErr("PruneDanglingImages", errors.New("daemon busy"))
-	h.m.checkDisk(context.Background(), h.cfg)
+	h.checkDisk(context.Background())
 	ev := h.eventText()
 	for _, want := range []string{"prune build cache to 20GB failed: unknown flag", "prune dangling images failed: daemon busy",
 		"disk usage after pruning failed", "now unknown"} {
@@ -360,13 +360,13 @@ func (b bytesDocker) DataRootBytes(ctx context.Context) (system.DiskUsage, error
 func TestStatusCarriesDiskBytes(t *testing.T) {
 	h := newHarness(t)
 	h.docker.usage = []int{61}
-	h.m.checkDisk(context.Background(), h.cfg)
+	h.checkDisk(context.Background())
 	if st := h.m.Status(); st.DiskPct != 61 || st.DiskUsedBytes != 0 || st.DiskTotalBytes != 0 || st.DiskRoot != "" {
 		t.Fatalf("percent-only docker: %d %d %d %q", st.DiskPct, st.DiskUsedBytes, st.DiskTotalBytes, st.DiskRoot)
 	}
 	h.m.Docker = bytesDocker{h.docker}
 	h.docker.usage = []int{62}
-	h.m.checkDisk(context.Background(), h.cfg)
+	h.checkDisk(context.Background())
 	if st := h.m.Status(); st.DiskPct != 62 || st.DiskUsedBytes != 62_000_000_000 || st.DiskTotalBytes != 100_000_000_000 || st.DiskRoot != "/var/lib/docker" {
 		t.Fatalf("bytes docker: %d %d %d %q", st.DiskPct, st.DiskUsedBytes, st.DiskTotalBytes, st.DiskRoot)
 	}

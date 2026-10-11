@@ -124,18 +124,27 @@ func TestTickSkipsPruningDuringManualPrune(t *testing.T) {
 	}
 }
 
-// An automatic prune holds the reservation: StartPrune is refused until the
-// tick ends, then accepted.
-func TestStartPruneRefusedDuringAutomaticPrune(t *testing.T) {
-	h := newHarness(t)
-	h.docker.usage = []int{99, 99, 50}
-	entered, release := holdOn(t, h, "PruneBuildCacheOlderThan")
-	h.m.ticks = 0
+// tickInBackground runs one tick and fails the test if it does not return:
+// a tick must never wait for a Docker prune.
+func tickInBackground(t *testing.T, h *harness) {
+	t.Helper()
 	ticked := make(chan struct{})
 	go func() {
 		h.m.Tick(context.Background())
 		close(ticked)
 	}()
+	waitOrFail(t, ticked, "the tick to return while the prune runs")
+}
+
+// An automatic prune runs in the background and holds the reservation: the
+// tick returns while it runs, StartPrune is refused until it ends, and a later
+// disk check does not start a second one.
+func TestAutomaticPruneRunsOffTheTick(t *testing.T) {
+	h := newHarness(t)
+	h.docker.usage = []int{99, 99, 50}
+	entered, release := holdOn(t, h, "PruneBuildCacheOlderThan")
+	h.m.ticks = 0 // the next tick is tick 1, a disk check
+	tickInBackground(t, h)
 	waitOrFail(t, entered, "the automatic prune")
 	if err := h.m.StartPrune(); !errors.Is(err, ErrPruneRunning) {
 		t.Fatalf("StartPrune during an automatic prune: %v", err)
@@ -143,12 +152,51 @@ func TestStartPruneRefusedDuringAutomaticPrune(t *testing.T) {
 	if ms := h.m.Maintenance(); ms.Running || ms.LastStarted != nil {
 		t.Fatalf("a refused StartPrune changed the state: %+v", ms)
 	}
+	h.m.ticks = 10 // the next tick is another disk check
+	tickInBackground(t, h)
+	if got := h.docker.pruneList(); got != "until=72h" {
+		t.Fatalf("a second automatic prune started: %s", got)
+	}
 	release()
-	waitOrFail(t, ticked, "the tick")
+	h.m.Wait()
 	if err := h.m.StartPrune(); err != nil {
-		t.Fatalf("StartPrune after the tick: %v", err)
+		t.Fatalf("StartPrune after the automatic prune: %v", err)
 	}
 	h.m.Wait()
+}
+
+// A Docker daemon that does not answer must not hold the tick for the command
+// timeout: the tick's own disk reading has a short bound. The bound is a real
+// timer, shortened here; nothing sleeps.
+func TestAHungDiskMeasurementDoesNotHoldTheTick(t *testing.T) {
+	h := newHarness(t)
+	orig := diskMeasureTimeout
+	diskMeasureTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { diskMeasureTimeout = orig })
+	holdOn(t, h, "DataRootUsage")
+	h.m.ticks = 0
+	tickInBackground(t, h)
+	if !strings.Contains(h.eventText(), "warn  disk usage: context deadline exceeded") {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+	if !h.m.reservePrune() {
+		t.Fatal("the tick kept the prune reservation")
+	}
+	h.m.releasePrune()
+}
+
+func TestCloseInterruptsABackgroundAutomaticPrune(t *testing.T) {
+	h := newHarness(t)
+	h.docker.usage = []int{99}
+	entered, _ := holdOn(t, h, "PruneBuildCacheOlderThan")
+	h.m.ticks = 0
+	tickInBackground(t, h)
+	waitOrFail(t, entered, "the automatic prune")
+	h.m.Close()
+	h.m.Wait()
+	if lp := h.m.LastPrune(); lp == nil || lp.Outcome != "interrupted" {
+		t.Fatalf("last prune %+v", lp)
+	}
 }
 
 func TestPruneErrors(t *testing.T) {

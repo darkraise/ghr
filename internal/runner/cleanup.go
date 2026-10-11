@@ -163,19 +163,28 @@ func (m *Manager) RunnerContainers(ctx context.Context, id string) ([]model.Cont
 	return out, nil
 }
 
-// checkDisk prunes Docker build cache and dangling images above disk_high_water.
-// A failed usage read keeps the last good measurement; every failure is reported.
-func (m *Manager) checkDisk(ctx context.Context, cfg *config.Config) {
+// diskMeasureTimeout bounds the tick's own disk reading (docker info and df),
+// so a Docker daemon that does not answer costs a tick seconds, not the
+// command timeout.
+var diskMeasureTimeout = 15 * time.Second
+
+// measureDisk reads the Docker data root's usage and reports whether it is
+// above disk_high_water. A failed read keeps the last good measurement.
+func (m *Manager) measureDisk(ctx context.Context, cfg *config.Config) (pct int, over bool) {
+	ctx, cancel := context.WithTimeout(ctx, diskMeasureTimeout)
+	defer cancel()
 	u, err := m.dataRoot(ctx)
 	if err != nil {
 		m.Events.Add("warn", "", "disk usage: %v", err)
-		return
+		return 0, false
 	}
 	m.setDisk(u)
-	pct := u.Pct
-	if pct <= cfg.DiskHighWater {
-		return
-	}
+	return u.Pct, u.Pct > cfg.DiskHighWater
+}
+
+// pruneDisk prunes Docker build cache and dangling images after measureDisk
+// found the disk at pct, above disk_high_water. Every failure is reported.
+func (m *Manager) pruneDisk(ctx context.Context, cfg *config.Config, pct int) {
 	started := m.Now()
 	m.mu.Lock()
 	m.lastPruneRec = &model.LastPrune{Trigger: "auto", Scope: "auto", StartedAt: started, Steps: []model.PruneStep{}}
