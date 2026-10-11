@@ -47,6 +47,8 @@ type setup struct {
 	// backend is set just before the full API replaces the setup phase's handler.
 	backend atomic.Pointer[Backend]
 	mu      sync.Mutex
+	// finishMu makes a finish check the marker and act on it as one step.
+	finishMu sync.Mutex
 }
 
 func (s *setup) routes(next http.Handler) http.Handler {
@@ -112,8 +114,9 @@ func (s *setup) github(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// configure validates owner and token against GitHub, saves them and starts
-// the manager. One request at a time, so a second one gets the 409.
+// configure validates owner and token against GitHub, marks setup pending,
+// saves them and starts the manager. One request at a time: a second one
+// waits for the first, GitHub calls included, and then gets the 409.
 func (s *setup) configure(ctx context.Context, owner, token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -138,6 +141,12 @@ func (s *setup) configure(ctx context.Context, owner, token string) error {
 	login, err := s.check(ctx, owner, token)
 	if err != nil {
 		return err
+	}
+	// Created before anything is saved, so no install is ever configured
+	// without it. One left behind by a failed save is harmless: an
+	// unconfigured daemon shows the wizard anyway.
+	if err := os.WriteFile(s.setupPending, nil, 0o600); err != nil {
+		return fmt.Errorf("mark setup pending: %w", err)
 	}
 	var mismatch *OwnerMismatchError
 	switch err := s.store.Configure(login, token); {
@@ -209,6 +218,13 @@ func (s *setup) finish(w http.ResponseWriter, r *http.Request) {
 	b := s.backend.Load()
 	if b == nil {
 		writeSocketError(w, http.StatusConflict, "ghr is not configured yet; finish GitHub setup first")
+		return
+	}
+	s.finishMu.Lock()
+	defer s.finishMu.Unlock()
+	// Setup is finished only once: without the marker there is nothing to do.
+	if !exists(s.setupPending) {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if req.Toolchains == "popular" {

@@ -148,12 +148,29 @@ func TestSetupGitHubConfigures(t *testing.T) {
 	}
 	var st model.SetupState
 	json.Unmarshal(setupRequest(h, http.MethodGet, "/setup", "").Body.Bytes(), &st)
-	if st != (model.SetupState{Starting: true, Owner: "DarkRaise", WebListen: "0.0.0.0:8080"}) {
+	if st != (model.SetupState{Starting: true, SetupPending: true, Owner: "DarkRaise", WebListen: "0.0.0.0:8080"}) {
 		t.Fatalf("state %+v", st)
 	}
 	rec := setupRequest(h, http.MethodPost, "/setup/github", `{"owner":"DarkRaise","token":"good"}`)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), ErrConfigured.Error()) || readies.Load() != 1 {
 		t.Fatalf("second configure: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Without its marker configure saves nothing: the marker is what later tells
+// an unfinished setup from a finished one.
+func TestSetupGitHubFailsWhenItCannotMarkSetupPending(t *testing.T) {
+	s, readies := newTestSetup(t, "")
+	s.setupPending = filepath.Join(t.TempDir(), "missing", "setup-pending")
+	rec := setupRequest(s.routes(s.unconfigured()), http.MethodPost, "/setup/github", `{"owner":"darkraise","token":"good"}`)
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "setup-pending") {
+		t.Fatalf("configure: %d %s", rec.Code, rec.Body.String())
+	}
+	if readies.Load() != 0 || s.store.Configured() || s.store.Config().Owner != "" {
+		t.Fatalf("readies %d configured %v owner %q", readies.Load(), s.store.Configured(), s.store.Config().Owner)
+	}
+	if _, err := os.Stat(s.store.TokenPath); !os.IsNotExist(err) {
+		t.Fatal("the token was written")
 	}
 }
 
@@ -239,20 +256,52 @@ func TestSetupFinish(t *testing.T) {
 		!strings.Contains(rec.Body.String(), "toolchains must be popular or none") {
 		t.Fatalf("bad value: %d %s", rec.Code, rec.Body.String())
 	}
+	popular := func() int {
+		return setupRequest(h, http.MethodPost, "/setup/finish", `{"toolchains":"popular"}`).Code
+	}
+	// With no marker there is no setup to finish: nothing is queued or written.
+	if code := popular(); code != http.StatusNoContent || len(space.calls) != 0 || len(s.events.After(0)) != 0 {
+		t.Fatalf("no marker: %d calls %v events %v", code, space.calls, s.events.After(0))
+	}
 	os.WriteFile(s.setupPending, nil, 0o600)
 	os.WriteFile(s.toolchainsPending, nil, 0o600)
-	if rec := setupRequest(h, http.MethodPost, "/setup/finish", `{"toolchains":"popular"}`); rec.Code != http.StatusNoContent {
-		t.Fatalf("popular: %d %s", rec.Code, rec.Body.String())
+	if code := popular(); code != http.StatusNoContent {
+		t.Fatalf("popular: %d", code)
 	}
 	if len(space.calls) != 1 || space.calls[0] != "preset popular" || exists(s.setupPending) || exists(s.toolchainsPending) {
 		t.Fatalf("calls %v", space.calls)
 	}
-	if rec := setupRequest(h, http.MethodPost, "/setup/finish", `{"toolchains":"none"}`); rec.Code != http.StatusNoContent || len(space.calls) != 1 {
-		t.Fatalf("none with the markers gone: %d calls %v", rec.Code, space.calls)
+	if code := popular(); code != http.StatusNoContent || len(space.calls) != 1 || len(s.events.After(0)) != 1 {
+		t.Fatalf("a second finish: %d calls %v events %v", code, space.calls, s.events.After(0))
 	}
 	var state model.SetupState
 	json.Unmarshal(setupRequest(h, http.MethodGet, "/setup", "").Body.Bytes(), &state)
 	if !state.Configured || state.Starting {
 		t.Fatalf("state with a backend: %+v", state)
+	}
+}
+
+func TestSetupFinishActsOnceUnderConcurrentRequests(t *testing.T) {
+	s, _ := newTestSetup(t, "DarkRaise")
+	space := &fakeStorage{}
+	s.backend.Store(&Backend{Space: space, Events: s.events})
+	h := s.routes(http.NotFoundHandler())
+	os.WriteFile(s.setupPending, nil, 0o600)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if rec := setupRequest(h, http.MethodPost, "/setup/finish", `{"toolchains":"popular"}`); rec.Code != http.StatusNoContent {
+				t.Errorf("finish: %d %s", rec.Code, rec.Body.String())
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if len(space.calls) != 1 || len(s.events.After(0)) != 1 {
+		t.Fatalf("calls %v events %v, want one of each", space.calls, s.events.After(0))
 	}
 }
