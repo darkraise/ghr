@@ -122,6 +122,18 @@ describe("Dashboard page", () => {
     expect(await screen.findByRole("heading", { name: "Add repository" })).toBeInTheDocument()
   })
 
+  it("gives Repositories the full width, with Disk and Events side by side below it", async () => {
+    mockApi(authedRoutes())
+    renderApp("/")
+    const repos = await screen.findByRole("region", { name: "Repositories" })
+    const disk = screen.getByRole("region", { name: "Disk" })
+    const events = screen.getByRole("region", { name: "Events" })
+    expect(repos.parentElement).not.toHaveClass("grid")
+    expect(repos.compareDocumentPosition(disk) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(disk.parentElement).toBe(events.parentElement)
+    expect(disk.parentElement).toHaveClass("grid", "xl:grid-cols-2")
+  })
+
   it("shows Docker's data root beside the Disk heading once it is measured", async () => {
     mockApi(authedRoutes())
     renderApp("/")
