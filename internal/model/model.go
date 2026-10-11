@@ -164,8 +164,8 @@ type Container struct {
 }
 
 type RepoPatch struct {
-	Max                 *int      `json:"max,omitempty"`
-	Warm                *int      `json:"warm,omitempty"`
+	Max                 OptInt    `json:"max,omitzero"`
+	Warm                OptInt    `json:"warm,omitzero"`
 	Labels              *[]string `json:"labels,omitempty"`
 	CleanupNamePrefixes *[]string `json:"cleanup_name_prefixes,omitempty"`
 	Paused              *bool     `json:"paused,omitempty"`

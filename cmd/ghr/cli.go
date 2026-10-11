@@ -175,9 +175,9 @@ func set(ctx context.Context, c *api.Client, args []string) error {
 		if err != nil {
 			return err
 		}
-		rp := model.RepoPatch{Max: &n}
+		rp := model.RepoPatch{Max: model.Int(n)}
 		if args[0] == "warm" {
-			rp = model.RepoPatch{Warm: &n}
+			rp = model.RepoPatch{Warm: model.Int(n)}
 		}
 		return c.PatchConfig(ctx, model.ConfigPatch{Repos: map[string]model.RepoPatch{args[1]: rp}})
 	}

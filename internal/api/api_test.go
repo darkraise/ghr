@@ -851,3 +851,34 @@ func TestRawLogRouteDeadlineCountsFromTheRouteStart(t *testing.T) {
 	}
 	waitClosed(t, b, 1)
 }
+
+// The client leaves an unset max or warm out of the body, and the server
+// tells null (clear the value) from an absent key (leave it alone).
+func TestPatchConfigMaxAndWarmOverTheWire(t *testing.T) {
+	c, b := setup(t)
+	err := c.PatchConfig(context.Background(), model.ConfigPatch{Repos: map[string]model.RepoPatch{"darkmem": {Max: model.Int(3)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{`{"repos":{"darkmem":{"max":null}}}`, `{"repos":{"darkmem":{}}}`} {
+		req, _ := http.NewRequest(http.MethodPatch, c.Base+"/config", strings.NewReader(body))
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("%s: status %d", body, resp.StatusCode)
+		}
+	}
+	sent, null, absent := b.patches[0].Repos["darkmem"], b.patches[1].Repos["darkmem"], b.patches[2].Repos["darkmem"]
+	if !reflect.DeepEqual(sent, model.RepoPatch{Max: model.Int(3)}) {
+		t.Errorf("the client's patch arrived as %+v", sent)
+	}
+	if !reflect.DeepEqual(null, model.RepoPatch{Max: model.ClearInt()}) {
+		t.Errorf("max null arrived as %+v", null)
+	}
+	if !reflect.DeepEqual(absent, model.RepoPatch{}) {
+		t.Errorf("an empty patch arrived as %+v", absent)
+	}
+}

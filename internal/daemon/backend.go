@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -369,8 +370,14 @@ func (b *Backend) KillRunner(ctx context.Context, id string) error {
 
 // update applies fn through the store (validate, save, swap) and wakes the loop.
 // fn works on a copy, so a rejected change leaves no partial state anywhere.
+// A warning is written as an event only when the change introduced it.
 func (b *Backend) update(fn func(c *config.Config) error) error {
-	warnings, err := b.Store.Update(fn)
+	var before []string
+	warnings, err := b.Store.Update(func(c *config.Config) error {
+		// Until fn runs, c is a copy of the config this update replaces.
+		before, _ = c.Validate()
+		return fn(c)
+	})
 	if err != nil {
 		var ae *api.Error
 		if errors.As(err, &ae) {
@@ -379,7 +386,9 @@ func (b *Backend) update(fn func(c *config.Config) error) error {
 		return api.BadRequest(err.Error())
 	}
 	for _, w := range warnings {
-		b.Events.Add("warn", "", "config: %s", w)
+		if !slices.Contains(before, w) {
+			b.Events.Add("warn", "", "config: %s", w)
+		}
 	}
 	if b.Wake != nil {
 		b.Wake()
@@ -435,16 +444,18 @@ func (b *Backend) PatchConfig(p model.ConfigPatch) error {
 				c.RunnerLimits.CPUQuota = *rl.CPUQuota
 			}
 		}
-		for name, rp := range p.Repos {
+		// Sorted, so the unknown repository reported is always the same one.
+		for _, name := range slices.Sorted(maps.Keys(p.Repos)) {
+			rp := p.Repos[name]
 			r := c.Repo(name)
 			if r == nil {
 				return api.NotFound("unknown repo " + name)
 			}
-			if rp.Max != nil {
-				r.Max = rp.Max
+			if rp.Max.Set {
+				r.Max = rp.Max.Value
 			}
-			if rp.Warm != nil {
-				r.Warm = rp.Warm
+			if rp.Warm.Set {
+				r.Warm = rp.Warm.Value
 			}
 			if rp.Labels != nil {
 				r.Labels = *rp.Labels

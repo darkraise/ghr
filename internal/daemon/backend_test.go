@@ -299,9 +299,9 @@ func apiStatus(err error) int {
 
 func TestPatchConfig(t *testing.T) {
 	b, _, _ := newBackend(t)
-	all, two, idle := "all", 2, "10m"
+	all, idle := "all", "10m"
 	paused := true
-	if err := b.PatchConfig(model.ConfigPatch{Mode: &all, IdleTimeout: &idle, Repos: map[string]model.RepoPatch{"darkmem": {Max: &two, Paused: &paused}}}); err != nil {
+	if err := b.PatchConfig(model.ConfigPatch{Mode: &all, IdleTimeout: &idle, Repos: map[string]model.RepoPatch{"darkmem": {Max: model.Int(2), Paused: &paused}}}); err != nil {
 		t.Fatal(err)
 	}
 	c := b.Store.Config()
@@ -312,7 +312,7 @@ func TestPatchConfig(t *testing.T) {
 	if err := b.PatchConfig(model.ConfigPatch{Mode: &bad}); apiStatus(err) != 400 {
 		t.Fatalf("bad mode err %v", err)
 	}
-	if err := b.PatchConfig(model.ConfigPatch{Repos: map[string]model.RepoPatch{"nope": {Max: &two}}}); apiStatus(err) != 404 {
+	if err := b.PatchConfig(model.ConfigPatch{Repos: map[string]model.RepoPatch{"nope": {Max: model.Int(2)}}}); apiStatus(err) != 404 {
 		t.Fatalf("unknown repo err %v", err)
 	}
 }
@@ -1429,5 +1429,98 @@ func TestTokenAndStorageFromOneStatus(t *testing.T) {
 	b.Token()
 	if n := m.statusCalls.Load(); n != 2 {
 		t.Fatalf("Storage and Token read the status %d times, want 2", n)
+	}
+}
+
+// null clears a repository's max or warm, so the value is inherited again; an
+// absent key leaves it alone.
+func TestPatchConfigClearsMaxAndWarmOnNull(t *testing.T) {
+	b, _, _ := newBackend(t)
+	patch := func(body string) *config.Repo {
+		t.Helper()
+		var p model.ConfigPatch
+		if err := json.Unmarshal([]byte(body), &p); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.PatchConfig(p); err != nil {
+			t.Fatalf("%s: %v", body, err)
+		}
+		return b.Store.Config().Repo("darkcloud")
+	}
+	patch(`{"repos":{"darkcloud":{"max":3,"warm":2}}}`)
+	if r := patch(`{"repos":{"darkcloud":{"paused":true}}}`); r.Max == nil || *r.Max != 3 || r.Warm == nil || *r.Warm != 2 {
+		t.Fatalf("absent keys changed max or warm: %+v", r)
+	}
+	if r := patch(`{"repos":{"darkcloud":{"max":null}}}`); r.Max != nil || r.Warm == nil || *r.Warm != 2 {
+		t.Fatalf("max null: max %v warm %v", r.Max, r.Warm)
+	}
+	if r := patch(`{"repos":{"darkcloud":{"warm":null}}}`); r.Max != nil || r.Warm != nil {
+		t.Fatalf("warm null: max %v warm %v", r.Max, r.Warm)
+	}
+	saved, _, err := config.Load(b.Store.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := saved.Repo("darkcloud"); r.Max != nil || r.Warm != nil {
+		t.Fatalf("not persisted: max %v warm %v", r.Max, r.Warm)
+	}
+}
+
+// With several unknown repositories in one patch, the one reported is the
+// first in sorted order, whatever order the map yields them in.
+func TestPatchConfigReportsUnknownReposInSortedOrder(t *testing.T) {
+	b, _, _ := newBackend(t)
+	paused := true
+	repos := map[string]model.RepoPatch{}
+	for _, name := range []string{"zeta", "nope", "alpha", "omega", "beta", "gamma", "delta", "kappa"} {
+		repos[name] = model.RepoPatch{Paused: &paused}
+	}
+	for range 20 {
+		err := b.PatchConfig(model.ConfigPatch{Repos: repos})
+		if apiStatus(err) != 404 || err.Error() != "unknown repo alpha" {
+			t.Fatalf("err %v, want 404 unknown repo alpha", err)
+		}
+	}
+}
+
+// A warning the config already carried is not written as an event again by a
+// later change; a warning the change introduces is.
+func TestUpdateWritesOnlyNewConfigWarnings(t *testing.T) {
+	b, _, _ := newBackend(t)
+	warnings := func() []string {
+		var out []string
+		for _, e := range b.Events.After(0) {
+			if e.Level == "warn" && strings.HasPrefix(e.Msg, "config: ") {
+				out = append(out, e.Msg)
+			}
+		}
+		return out
+	}
+	all, prefixes := "all", []string{"proj-"}
+	// In all mode darkmem, which sets no max, is unlimited.
+	if err := b.PatchConfig(model.ConfigPatch{Mode: &all, Repos: map[string]model.RepoPatch{"darkmem": {CleanupNamePrefixes: &prefixes}}}); err != nil {
+		t.Fatal(err)
+	}
+	first := "config: darkmem: cleanup_name_prefixes can remove a concurrent job's containers when max is not 1"
+	if got := warnings(); !reflect.DeepEqual(got, []string{first}) {
+		t.Fatalf("after the change that introduced it: %q", got)
+	}
+	three := 3
+	if err := b.PatchConfig(model.ConfigPatch{GlobalMax: &three}); err != nil {
+		t.Fatal(err)
+	}
+	if got := warnings(); len(got) != 1 {
+		t.Fatalf("an unchanged warning was written again: %q", got)
+	}
+	var p model.ConfigPatch
+	if err := json.Unmarshal([]byte(`{"repos":{"darkcloud":{"max":4,"cleanup_name_prefixes":["proj-"]}}}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.PatchConfig(p); err != nil {
+		t.Fatal(err)
+	}
+	second := "config: darkcloud: cleanup_name_prefixes can remove a concurrent job's containers when max is not 1"
+	if got := warnings(); !reflect.DeepEqual(got, []string{first, second}) {
+		t.Fatalf("after a change that added a second warning: %q", got)
 	}
 }
