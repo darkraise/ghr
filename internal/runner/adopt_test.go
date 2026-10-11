@@ -3,11 +3,13 @@ package runner
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -214,5 +216,104 @@ func TestReconcileLeavesAnotherHostsRunners(t *testing.T) {
 	h.m.Reconcile(context.Background(), h.cfg)
 	if !reflect.DeepEqual(h.gh.deleted, []int64{23}) {
 		t.Fatalf("deleted %v, want only the leftover", h.gh.deleted)
+	}
+}
+
+func adoptedMeta(h *harness, id string) Meta {
+	h.m.mu.Lock()
+	defer h.m.mu.Unlock()
+	return h.m.insts[id].Meta
+}
+
+// A job can replace ghr.json in its own directory. After a restart the
+// repository and runner ID must still be the ones root recorded at spawn:
+// they choose whose containers cleanup removes and which registration is deleted.
+func TestAdoptTrustsTheRootOwnedRecordOverTheInstanceCopy(t *testing.T) {
+	h := newHarness(t)
+	if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	forged := Meta{ID: "aaaaaa", Repo: "darkcloud", RunnerID: 999, RunnerName: "ghr-darkcloud-aaaaaa"}
+	if err := writeJSON(filepath.Join(h.m.instanceDir("aaaaaa"), MetaFile), forged); err != nil {
+		t.Fatal(err)
+	}
+	h.restart(t)
+	if err := h.m.Adopt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := adoptedMeta(h, "aaaaaa"); got.Repo != "darkmem" || got.RunnerID != 101 {
+		t.Fatalf("adopted %+v", got)
+	}
+}
+
+// An instance an older ghr spawned has only the copy in its own directory.
+// It is adopted from that copy once, and recorded.
+func TestAdoptRecordsAnOlderInstancesMetadataOnce(t *testing.T) {
+	h := newHarness(t)
+	makeInstance(t, h, "aaaaaa", "darkmem", 1, false)
+	h.sd.active["ghr-runner-aaaaaa"] = true
+	if err := h.m.Adopt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var rec Meta
+	if err := readJSON(filepath.Join(h.m.Paths.Private, "aaaaaa.json"), &rec); err != nil || rec.Repo != "darkmem" || rec.RunnerID != 1 {
+		t.Fatalf("recorded %+v: %v", rec, err)
+	}
+	forged := Meta{ID: "aaaaaa", Repo: "darkcloud", RunnerID: 999, RunnerName: "ghr-darkcloud-aaaaaa"}
+	if err := writeJSON(filepath.Join(h.m.instanceDir("aaaaaa"), MetaFile), forged); err != nil {
+		t.Fatal(err)
+	}
+	h.restart(t)
+	if err := h.m.Adopt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := adoptedMeta(h, "aaaaaa"); got.Repo != "darkmem" || got.RunnerID != 1 {
+		t.Fatalf("adopted %+v", got)
+	}
+}
+
+// When the record cannot be written, adopting from the instance's own copy
+// would mean trusting that copy again at every later start. Adoption fails
+// instead, and nothing is stopped or removed.
+func TestAdoptFailsRatherThanTrustAnUnrecordedCopy(t *testing.T) {
+	h := newHarness(t)
+	makeInstance(t, h, "aaaaaa", "darkmem", 1, false)
+	h.sd.active["ghr-runner-aaaaaa"] = true
+	orig := writeFile
+	t.Cleanup(func() { writeFile = orig })
+	writeFile = func(name string, data []byte, perm os.FileMode) error {
+		if strings.HasPrefix(name, h.m.Paths.Private) {
+			return &fs.PathError{Op: "write", Path: name, Err: syscall.EIO}
+		}
+		return orig(name, data, perm)
+	}
+	if err := h.m.Adopt(context.Background()); err == nil {
+		t.Fatal("adopted an instance whose metadata could not be recorded")
+	}
+	if len(h.sd.stopped) != 0 {
+		t.Fatalf("stopped %v", h.sd.stopped)
+	}
+	if _, err := os.Stat(h.m.instanceDir("aaaaaa")); err != nil {
+		t.Fatalf("instance dir removed: %v", err)
+	}
+}
+
+func TestPrivateRecordsGoWithTheirInstance(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	if _, err := os.Stat(filepath.Join(h.m.Paths.Private, "aaaaaa.json")); err != nil {
+		t.Fatalf("spawn recorded nothing: %v", err)
+	}
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	// Records of an instance whose directory is gone are swept at the next start.
+	os.WriteFile(filepath.Join(h.m.Paths.Private, "eeeeee.json"), []byte("{}"), 0o600)
+	os.WriteFile(filepath.Join(h.m.Paths.Private, "eeeeee.projects"), []byte("x\n"), 0o600)
+	if err := h.m.Adopt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(h.m.Paths.Private); len(entries) != 0 {
+		t.Fatalf("left behind: %v", entries)
 	}
 }

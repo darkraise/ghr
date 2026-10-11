@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,14 +44,27 @@ func (m *Manager) Adopt(ctx context.Context) error {
 	now := m.Now()
 	adopted, exited := 0, 0
 	var toFinish []string
+	// Recording comes first, for every instance: when it fails, the runners
+	// keep running and the daemon does not start until the directory can be
+	// written.
+	for _, e := range entries {
+		if e.IsDir() && idRe.MatchString(e.Name()) {
+			if _, err := m.readMeta(e.Name()); errors.Is(err, errRecordMeta) {
+				return err
+			}
+		}
+	}
 	for _, e := range entries {
 		id := e.Name()
 		if !e.IsDir() || !idRe.MatchString(id) {
 			continue
 		}
 		dir := m.instanceDir(id)
-		var meta Meta
-		if err := readJSON(filepath.Join(dir, MetaFile), &meta); err != nil || meta.ID != id {
+		meta, err := m.readMeta(id)
+		if errors.Is(err, errRecordMeta) {
+			return err
+		}
+		if err != nil {
 			if active[id] {
 				if err := m.SD.Stop(ctx, UnitPrefix+id); err != nil {
 					m.Events.Add("warn", "", "instance %s has no readable %s and its unit did not stop (%v); reconciliation retries", id, MetaFile, err)
@@ -61,6 +75,7 @@ func (m *Manager) Adopt(ctx context.Context) error {
 			if err := os.RemoveAll(dir); err != nil {
 				m.Events.Add("warn", "", "instance %s had no readable %s; its dir could not be removed (%v); reconciliation retries", id, MetaFile, err)
 			} else {
+				m.removePrivate(id)
 				m.Events.Add("warn", "", "instance %s had no readable %s; stopped and removed", id, MetaFile)
 			}
 			delete(active, id)
@@ -98,6 +113,7 @@ func (m *Manager) Adopt(ctx context.Context) error {
 	for _, id := range toFinish {
 		m.beginFinish(id)
 	}
+	m.sweepPrivate()
 	m.Events.Add("info", "", "adopted %d running runners; cleaning up %d that exited while ghr was down", adopted, exited)
 	return nil
 }
@@ -191,4 +207,5 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 			}
 		}
 	}
+	m.sweepPrivate()
 }

@@ -107,7 +107,8 @@ type Paths struct {
 	UpdateState string
 }
 
-// Meta is written to <instance>/ghr.json at spawn and read back on re-adoption.
+// Meta is recorded in Paths.Private at spawn and read back on re-adoption;
+// <instance>/ghr.json holds a copy.
 type Meta struct {
 	ID          string    `json:"id"`
 	Repo        string    `json:"repo"`

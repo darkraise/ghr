@@ -85,6 +85,7 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 	dir := m.instanceDir(id)
 	fail := func(err error) error {
 		os.RemoveAll(dir)
+		m.removePrivate(id)
 		if derr := m.GH.DeleteRunner(ctx, r.Name, jit.Runner.ID); derr != nil {
 			m.Events.Add("warn", r.Name, "spawn %s: delete registration: %v", id, derr)
 		}
@@ -99,6 +100,11 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 	}
 	meta := Meta{ID: id, Repo: r.Name, RunnerID: jit.Runner.ID, RunnerName: name, Labels: labels,
 		DistVersion: filepath.Base(dist), SpawnedAt: m.Now()}
+	if err := m.writePrivateMeta(meta); err != nil {
+		return fail(err)
+	}
+	// A copy for a person reading the directory; nothing trusts it while the
+	// private record exists.
 	if err := writeJSON(filepath.Join(dir, MetaFile), meta); err != nil {
 		return fail(err)
 	}
