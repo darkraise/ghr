@@ -285,10 +285,18 @@ describe("Settings page layout", () => {
 
   it("counts only config fields in the save bar", async () => {
     mockApi(routes())
-    const { user } = renderApp("/settings/account")
+    const { user, router } = renderApp("/settings/account")
     await user.type(await screen.findByLabelText("Current password"), "old password 1")
     expect(screen.queryByText(/unsaved change/)).toBeNull()
     expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull()
+    await user.click(within(screen.getByRole("navigation", { name: "Settings" })).getByRole("link", { name: "General" }))
+    const poll = await screen.findByLabelText("Poll interval")
+    expect(router.state.location.pathname).toBe("/settings")
+    expect(screen.queryByText("Unsaved changes")).toBeNull()
+    await user.clear(poll)
+    await user.type(poll, "15s")
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument()
   })
 })
 
