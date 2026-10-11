@@ -229,6 +229,12 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 			c.BaseURL = gh.BaseURL
 			return checkToken(ctx, c, repo)
 		},
+		CheckTokenOwner: func(ctx context.Context, token string) error {
+			c := github.New(owner, func() string { return token })
+			c.BaseURL = gh.BaseURL
+			_, err := ownerRepos(ctx, c, owner)
+			return err
+		},
 		Sampler:          sampler,
 		WebApplied:       webCfg,
 		WebSetupRequired: webSetupRequired,

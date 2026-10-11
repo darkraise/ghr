@@ -168,9 +168,24 @@ func (s *setup) check(ctx context.Context, owner, token string) (string, error) 
 	if s.githubURL != "" {
 		c.BaseURL = s.githubURL
 	}
+	mine, err := ownerRepos(ctx, c, owner)
+	if err != nil {
+		return "", err
+	}
+	first := mine[0]
+	if err := checkToken(ctx, c, first.Name); err != nil {
+		return "", setupGitHubError(err, owner+"/"+first.Name)
+	}
+	return first.Owner.Login, nil
+}
+
+// ownerRepos lists the repositories of owner that c's token can see, sorted
+// by name, and fails when there is none. Its errors are ready to answer a
+// request with.
+func ownerRepos(ctx context.Context, c *github.Client, owner string) ([]github.UserRepo, error) {
 	repos, err := c.ListUserRepos(ctx)
 	if err != nil {
-		return "", setupGitHubError(err, "")
+		return nil, setupGitHubError(err, "")
 	}
 	var mine []github.UserRepo
 	for _, r := range repos {
@@ -179,14 +194,10 @@ func (s *setup) check(ctx context.Context, owner, token string) (string, error) 
 		}
 	}
 	if len(mine) == 0 {
-		return "", api.BadRequest(fmt.Sprintf("the token cannot see any repository of %s; grant it access to at least one", owner))
+		return nil, api.BadRequest(fmt.Sprintf("the token cannot see any repository of %s; grant it access to at least one", owner))
 	}
 	sort.Slice(mine, func(i, j int) bool { return strings.ToLower(mine[i].Name) < strings.ToLower(mine[j].Name) })
-	first := mine[0]
-	if err := checkToken(ctx, c, first.Name); err != nil {
-		return "", setupGitHubError(err, owner+"/"+first.Name)
-	}
-	return first.Owner.Login, nil
+	return mine, nil
 }
 
 // setupGitHubError maps a GitHub failure during setup. repo names the

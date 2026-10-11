@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -281,7 +282,7 @@ func newBackend(t *testing.T) (*Backend, *fakeManager, *fakeGH) {
 		Space: &fakeStorage{},
 		CheckToken: func(ctx context.Context, token, repo string) error {
 			if token == "bad" {
-				return errors.New("401 Bad credentials")
+				return &github.APIError{Status: 401, Kind: github.ErrAuth, Message: "Bad credentials"}
 			}
 			return nil
 		},
@@ -1522,5 +1523,133 @@ func TestUpdateWritesOnlyNewConfigWarnings(t *testing.T) {
 	second := "config: darkcloud: cleanup_name_prefixes can remove a concurrent job's containers when max is not 1"
 	if got := warnings(); !reflect.DeepEqual(got, []string{first, second}) {
 		t.Fatalf("after a change that added a second warning: %q", got)
+	}
+}
+
+// A new token is checked against every runner repository, and the results
+// are judged in a fixed order: a 401, then a rate limit, then every
+// repository failing; anything else saves the token with a warning per
+// failing repository.
+func TestSetTokenJudgesEveryRepository(t *testing.T) {
+	const hint = "listing runners failed; the token needs Administration: read/write: "
+	unauthorized := fmt.Errorf(hint+"%w", &github.APIError{Status: 401, Kind: github.ErrAuth, Message: "Bad credentials"})
+	forbidden := fmt.Errorf(hint+"%w", &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible by personal access token"})
+	retry := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
+	limited := fmt.Errorf(hint+"%w", &github.APIError{Status: 403, Kind: github.ErrRateLimit, Message: "API rate limit exceeded", RetryAt: retry})
+	const denied = hint + "github: 403 Resource not accessible by personal access token"
+	for _, tc := range []struct {
+		name     string
+		results  map[string]error // by repository; one not named passes
+		status   int              // 0 means the token is saved
+		msg      string
+		warnings []string // warning events of a saved token
+	}{
+		{"every repository passes", nil, 0, "", nil},
+		{"a 401 from one", map[string]error{"darkmem": unauthorized}, 400, "new token rejected: github: 401 Bad credentials", nil},
+		{"a 401 before a rate limit", map[string]error{"darkcloud": limited, "darkmem": unauthorized}, 400, "new token rejected: github: 401 Bad credentials", nil},
+		{"a rate limit from one", map[string]error{"darkmem": limited}, 429, "github: 403 API rate limit exceeded", nil},
+		{"a rate limit before every repository failing", map[string]error{"darkcloud": forbidden, "darkmem": limited}, 429, "github: 403 API rate limit exceeded", nil},
+		{"every repository fails", map[string]error{"darkcloud": forbidden, "darkmem": errors.New("no route to host")}, 400, "new token rejected: darkcloud: " + denied, nil},
+		{"one of two fails", map[string]error{"darkmem": forbidden}, 0, "", []string{"new token: darkmem: " + denied}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, m, gh := newBackend(t)
+			woke := 0
+			b.Wake = func() { woke++ }
+			var mu sync.Mutex
+			var checked []string
+			b.CheckToken = func(ctx context.Context, token, repo string) error {
+				mu.Lock()
+				checked = append(checked, repo)
+				mu.Unlock()
+				return tc.results[repo]
+			}
+			err := b.SetToken(context.Background(), "tok2")
+			slices.Sort(checked)
+			if !reflect.DeepEqual(checked, []string{"darkcloud", "darkmem"}) {
+				t.Fatalf("checked %v", checked)
+			}
+			var warnings []string
+			for _, e := range b.Events.After(0) {
+				if e.Level == "warn" {
+					warnings = append(warnings, e.Msg)
+				}
+			}
+			if tc.status != 0 {
+				var ae *api.Error
+				if !errors.As(err, &ae) || ae.Status != tc.status || ae.Msg != tc.msg || (tc.status == 429) != ae.RetryAt.Equal(retry) {
+					t.Fatalf("err %#v", err)
+				}
+				if b.Store.Token() != "tok1" || gh.forgot || m.cleared || woke != 0 || len(b.Events.After(0)) != 0 {
+					t.Fatalf("a refused token changed something: token %q forgot %v cleared %v woke %d", b.Store.Token(), gh.forgot, m.cleared, woke)
+				}
+				return
+			}
+			if err != nil || b.Store.Token() != "tok2" || !gh.forgot || !m.cleared || woke != 1 {
+				t.Fatalf("err %v token %q forgot %v cleared %v woke %d", err, b.Store.Token(), gh.forgot, m.cleared, woke)
+			}
+			if !reflect.DeepEqual(warnings, tc.warnings) {
+				t.Fatalf("warnings %q, want %q", warnings, tc.warnings)
+			}
+		})
+	}
+}
+
+// A paused repository is checked like any other: a token rotated while
+// everything is paused still needs the runners' permissions. A repository
+// being removed is not checked.
+func TestSetTokenChecksPausedButNotRemovingRepos(t *testing.T) {
+	b, _, _ := newBackend(t)
+	paused := true
+	if err := b.PatchConfig(model.ConfigPatch{Repos: map[string]model.RepoPatch{"darkmem": {Paused: &paused}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RemoveRepo("darkcloud"); err != nil {
+		t.Fatal(err)
+	}
+	var checked []string
+	b.CheckToken = func(ctx context.Context, token, repo string) error {
+		checked = append(checked, repo)
+		return nil
+	}
+	if err := b.SetToken(context.Background(), "tok2"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(checked, []string{"darkmem"}) {
+		t.Fatalf("checked %v", checked)
+	}
+}
+
+// With no runner repository to check against, the token must pass the owner
+// check, and its refusal is returned as it is.
+func TestSetTokenWithoutRunnerReposUsesTheOwnerCheck(t *testing.T) {
+	b, _, _ := newBackend(t)
+	for _, name := range []string{"darkcloud", "darkmem"} {
+		if err := b.RemoveRepo(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b.FinalizeRemovals()
+	if n := len(b.Store.Config().Repos); n != 0 {
+		t.Fatalf("%d repositories left", n)
+	}
+	woke := 0
+	b.Wake = func() { woke++ }
+	b.CheckToken = func(ctx context.Context, token, repo string) error {
+		t.Errorf("checked against %s", repo)
+		return nil
+	}
+	refusal := api.BadRequest("the token cannot see any repository of darkraise; grant it access to at least one")
+	b.CheckTokenOwner = func(ctx context.Context, token string) error {
+		if token == "blind" {
+			return refusal
+		}
+		return nil
+	}
+	if err := b.SetToken(context.Background(), "blind"); err != refusal || b.Store.Token() != "tok1" || woke != 0 {
+		t.Fatalf("err %v token %q woke %d", err, b.Store.Token(), woke)
+	}
+	if err := b.SetToken(context.Background(), "tok2"); err != nil || b.Store.Token() != "tok2" || woke != 1 {
+		t.Fatalf("err %v token %q woke %d", err, b.Store.Token(), woke)
 	}
 }

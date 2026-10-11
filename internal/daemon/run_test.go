@@ -1036,3 +1036,26 @@ func TestDefaultOptionsHaveARootOnlyRecordDir(t *testing.T) {
 		t.Fatalf("private dir %q", got)
 	}
 }
+
+// With no runner repository configured, the running daemon checks a
+// replacement token by listing the owner's repositories with it.
+func TestRunChecksANewTokenWithoutRunnerRepos(t *testing.T) {
+	o := testOptions(t, "owner: DarkRaise\nlabels: [homelab]\n")
+	o.GitHubURL = fakeSetupGitHub(t).URL
+	startRun(t, o)
+	waitFor(t, "the full API", func() bool { st, ok := setupStateOver(o.Socket); return ok && st.Configured })
+	code, body, err := socketCall(o.Socket, http.MethodPut, "/token", "other")
+	if err != nil || code != http.StatusBadRequest ||
+		!strings.Contains(body, "the token cannot see any repository of DarkRaise; grant it access to at least one") {
+		t.Fatalf("a token that sees no repository of the owner: %d %s %v", code, body, err)
+	}
+	if data, _ := os.ReadFile(o.TokenPath); string(data) != "tok\n" {
+		t.Fatalf("the refused token was saved: %q", data)
+	}
+	if code, body, err := socketCall(o.Socket, http.MethodPut, "/token", "good"); err != nil || code != http.StatusNoContent {
+		t.Fatalf("a token that sees one: %d %s %v", code, body, err)
+	}
+	if data, _ := os.ReadFile(o.TokenPath); string(data) != "good\n" {
+		t.Fatalf("token file %q", data)
+	}
+}

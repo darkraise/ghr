@@ -89,6 +89,9 @@ type Backend struct {
 	Space StorageService
 	// CheckToken validates a candidate token by reading repo, its runners and its runs with it.
 	CheckToken func(ctx context.Context, token, repo string) error
+	// CheckTokenOwner validates a candidate token when there is no runner
+	// repository to read: the token must list at least one repository of the owner.
+	CheckTokenOwner func(ctx context.Context, token string) error
 	// Wake asks the run loop for an immediate tick after a config change or a
 	// runner stop, so a pause stops idle runners at once, and a stopped
 	// runner's replacement starts without waiting for the poll interval; nil
@@ -669,11 +672,35 @@ func (b *Backend) SetPausedAll(paused bool) error {
 	return nil
 }
 
+// tokenCheckWorkers bounds how many repositories a new token is checked
+// against at once.
+const tokenCheckWorkers = 4
+
+// SetToken replaces the token after checking it against every runner
+// repository that is not being removed. Paused repositories are included: a
+// token rotated while everything is paused still needs the permissions the
+// runners use. The first rule that applies decides: a 401 from any repository
+// refuses the token; a rate limit from any refuses with 429 and its retry
+// time; every repository failing refuses with the first one's failure;
+// otherwise the token is saved and each failing repository gets a warning
+// event. With no repository to check against, the token must pass the owner
+// check. A refused token changes nothing.
 func (b *Backend) SetToken(ctx context.Context, token string) error {
-	cfg := b.Store.Config()
-	if len(cfg.Repos) > 0 {
-		if err := b.CheckToken(ctx, token, cfg.Repos[0].Name); err != nil {
-			return api.BadRequest("new token rejected: " + err.Error())
+	var repos []string
+	for _, r := range b.Store.Config().Repos {
+		if !r.Removing {
+			repos = append(repos, r.Name)
+		}
+	}
+	var errs []error
+	if len(repos) == 0 {
+		if err := b.CheckTokenOwner(ctx, token); err != nil {
+			return err
+		}
+	} else {
+		errs = b.checkTokenOn(ctx, token, repos)
+		if err := judgeToken(repos, errs); err != nil {
+			return err
 		}
 	}
 	if err := b.Store.SetToken(token); err != nil {
@@ -683,6 +710,58 @@ func (b *Backend) SetToken(ctx context.Context, token string) error {
 	b.dropLabelChecks()
 	b.M.ClearDegraded()
 	b.Events.Add("ok", "", "GitHub token replaced")
+	for i, err := range errs {
+		if err != nil {
+			b.Events.Add("warn", "", "new token: %s: %v", repos[i], err)
+		}
+	}
+	if b.Wake != nil {
+		b.Wake()
+	}
+	return nil
+}
+
+// checkTokenOn runs CheckToken for every repository, tokenCheckWorkers at a
+// time, and returns the results in the order of repos.
+func (b *Backend) checkTokenOn(ctx context.Context, token string, repos []string) []error {
+	errs := make([]error, len(repos))
+	sem := make(chan struct{}, tokenCheckWorkers)
+	var wg sync.WaitGroup
+	for i, repo := range repos {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			errs[i] = b.CheckToken(ctx, token, repo)
+		}()
+	}
+	wg.Wait()
+	return errs
+}
+
+// judgeToken returns the refusal for a new token given each repository's
+// check result, or nil when the token is to be saved. errors.As is needed
+// because checkToken wraps GitHub's error with the permission it names.
+func judgeToken(repos []string, errs []error) error {
+	var ae *github.APIError
+	for _, err := range errs {
+		if errors.As(err, &ae) && ae.Status == http.StatusUnauthorized {
+			return api.BadRequest("new token rejected: " + ae.Error())
+		}
+	}
+	failed := 0
+	for _, err := range errs {
+		if errors.As(err, &ae) && ae.Kind == github.ErrRateLimit {
+			return &api.Error{Status: http.StatusTooManyRequests, Msg: ae.Error(), RetryAt: ae.RetryAt}
+		}
+		if err != nil {
+			failed++
+		}
+	}
+	if failed == len(repos) {
+		return api.BadRequest("new token rejected: " + repos[0] + ": " + errs[0].Error())
+	}
 	return nil
 }
 
