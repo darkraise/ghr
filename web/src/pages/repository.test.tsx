@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest"
 import type { Config } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
-import { setViewport } from "@/test/media"
 import { renderApp } from "@/test/render"
 
 function routes(over: Record<string, unknown> = {}) {
@@ -229,8 +228,7 @@ describe("repository page", () => {
     expect(await screen.findByRole("menuitem", { name: "Remove" })).toHaveAttribute("aria-disabled", "true")
   })
 
-  it("marks a changed field at 1280px", async () => {
-    setViewport(1280)
+  it("marks a changed field", async () => {
     mockApi(routes())
     const { user } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
