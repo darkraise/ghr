@@ -190,12 +190,6 @@
   --tab-line: 10.9 97.2% 72.2%;
 }
 
-.sidebar-gradient-overlay::before,
-.header-gradient-overlay::before,
-main[data-content]::before {
-  background: none !important;
-}
-
 /* The log panel is dark in both modes. Kit controls inside it read the page tokens, so in light mode the panel rebinds them to the dark palette. */
 :root[data-mode="light"] .ghr-log-panel {
   --background: 216.0 27.8% 7.1%;
