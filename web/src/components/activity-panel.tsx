@@ -69,27 +69,30 @@ function ActivityTable({ activity, now }: { activity: Activity; now: number }) {
     : activity.buckets.map((b) => ({ key: b.start, cells: [bucketAria(b, activity)] }))
   const headers = lanes ? ["Lane", "Run"] : ["Bucket"]
   return (
-    <table className="sr-only">
-      <caption>Activity data</caption>
-      <thead>
-        <tr>
-          {headers.map((h) => (
-            <th key={h} scope="col">
-              {h}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <tr key={r.key}>
-            {r.cells.map((c, i) => (
-              <td key={i}>{c}</td>
+    // A table ignores sr-only's 1px box and widens the page, so a wrapper carries it.
+    <div className="sr-only">
+      <table>
+        <caption>Activity data</caption>
+        <thead>
+          <tr>
+            {headers.map((h) => (
+              <th key={h} scope="col">
+                {h}
+              </th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.key}>
+              {r.cells.map((c, i) => (
+                <td key={i}>{c}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 

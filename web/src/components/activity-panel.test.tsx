@@ -66,6 +66,8 @@ describe("ActivityPanel", () => {
     expect(screen.getByText("3 jobs in the last hour, 1 failed, 1 running.")).toHaveClass("sr-only")
     const table = screen.getByRole("table", { name: "Activity data" })
     expect(within(table).getAllByRole("row")).toHaveLength(5)
+    expect(table).not.toHaveClass("sr-only")
+    expect(table.parentElement).toHaveClass("sr-only")
   })
 
   it("keeps the last data when a refresh fails, and offers to retry", async () => {
