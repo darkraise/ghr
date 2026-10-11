@@ -150,6 +150,7 @@ func TestDownloadErrors(t *testing.T) {
 		call    func(c *Client) error
 		kind    ErrKind
 		plain   string
+		store   int // when set, GitHub redirects to a log store that answers this status
 	}{
 		{name: "expired log", status: 410, kind: ErrGone,
 			call: func(c *Client) error { _, err := c.JobLog(ctx, "darkmem", 1, 10); return err }},
@@ -162,9 +163,24 @@ func TestDownloadErrors(t *testing.T) {
 		{name: "no redirect", status: 200,
 			call:  func(c *Client) error { _, err := c.ArtifactURL(ctx, "darkmem", 11); return err },
 			plain: "github: /repos/darkraise/darkmem/actions/artifacts/11/zip answered 200 without a download address"},
+		{name: "no log", store: 404, kind: ErrNotFound,
+			call: func(c *Client) error { _, err := c.JobLog(ctx, "darkmem", 1, 10); return err }},
+		{name: "no log, opened", store: 404, kind: ErrNotFound,
+			call: func(c *Client) error { _, _, err := c.OpenJobLog(ctx, "darkmem", 1); return err }},
+		{name: "log store error", store: 500,
+			call:  func(c *Client) error { _, err := c.JobLog(ctx, "darkmem", 1, 10); return err },
+			plain: "github: log download answered 500"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			store := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.store)
+			}))
+			t.Cleanup(store.Close)
 			c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if tc.store != 0 {
+					http.Redirect(w, r, store.URL+"/log?sig=1", http.StatusFound)
+					return
+				}
 				for k, v := range tc.headers {
 					w.Header().Set(k, v)
 				}

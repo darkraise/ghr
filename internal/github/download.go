@@ -72,7 +72,7 @@ func (c *Client) redirectURL(ctx context.Context, u string) (string, error) {
 
 // OpenJobLog starts a job log download and returns the body unread with its
 // Content-Length, -1 when GitHub sends none. The body stays bound to ctx; the
-// caller closes it.
+// caller closes it. A job that has no log is an *APIError of kind ErrNotFound.
 func (c *Client) OpenJobLog(ctx context.Context, repo string, jobID int64) (io.ReadCloser, int64, error) {
 	loc, err := c.redirectURL(ctx, c.repoURL(repo, fmt.Sprintf("/actions/jobs/%d/logs", jobID)))
 	if err != nil {
@@ -88,6 +88,11 @@ func (c *Client) OpenJobLog(ctx context.Context, repo string, jobID int64) (io.R
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			// GitHub redirects for a job that never ran as for any other; only
+			// the store it redirects to knows that the job has no log.
+			return nil, 0, &APIError{Status: http.StatusNotFound, Kind: ErrNotFound, Message: "this job has no log"}
+		}
 		return nil, 0, fmt.Errorf("github: log download answered %d", resp.StatusCode)
 	}
 	return resp.Body, resp.ContentLength, nil
