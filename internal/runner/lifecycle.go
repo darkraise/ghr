@@ -278,11 +278,32 @@ func (m *Manager) refreshUnits(ctx context.Context) {
 		}
 		active, err := m.SD.Active(ctx, UnitPrefix+i.ID)
 		if err == nil && !active {
+			// Recorded here, not in the cleanup that runs in the background:
+			// this tick plans its spawns before that cleanup ends.
+			if repo, yes := m.neverOnline(i.ID); yes {
+				d := m.spawnFailed(repo, "runner exited before coming online", now)
+				m.Events.Add("warn", repo, "runner %s exited before coming online; next spawn in %s", i.ID, d)
+			}
 			// The snapshot can be out of date by now: a stop may have started
 			// the cleanup, and one that failed waits for its retry time.
 			m.startFinish(i.ID, true)
 		}
 	}
+}
+
+// neverOnline reports whether a runner this process spawned is gone without
+// ever having come online: not one a person stopped, not one already in
+// cleanup, and not one that ran a whole job between two ticks.
+func (m *Manager) neverOnline(id string) (repo string, yes bool) {
+	m.mu.Lock()
+	i, ok := m.insts[id]
+	if !ok || i.State == sched.Cleaning || i.cameOnline || i.adopted || i.stopping {
+		m.mu.Unlock()
+		return "", false
+	}
+	repo = i.Repo
+	m.mu.Unlock()
+	return repo, !exists(filepath.Join(m.instanceDir(id), JobFile))
 }
 
 // beginFinish moves an instance to cleaning and runs finish in the background.

@@ -67,7 +67,7 @@ func (m *Manager) Adopt(ctx context.Context) error {
 			continue
 		}
 		// start_timeout counts from the spawn, so restarts cannot extend it.
-		inst := &instance{Meta: meta, State: sched.Starting, StateSince: meta.SpawnedAt}
+		inst := &instance{Meta: meta, State: sched.Starting, StateSince: meta.SpawnedAt, adopted: true}
 		if inst.StateSince.IsZero() {
 			inst.StateSince = now
 		}

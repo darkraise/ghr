@@ -183,10 +183,10 @@ func (m *Manager) confirm(id string, j github.Job, now time.Time) {
 }
 
 // spawnPlanned spawns what sched.Plan decides, nothing while a runner update
-// runs. Repos in an error state are left out of planning (no warm spawns into
-// a failing repo) until a demand poll succeeds. Spawning stops as soon as the
-// live config differs from the one the plan used, so a pause or cap change
-// made during polling is never overridden.
+// runs. Repos in an error state, or waiting after a failed start, are left
+// out of planning. Spawning stops as soon as the live config differs from the
+// one the plan used, so a pause or cap change made during polling is never
+// overridden.
 func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time.Time) {
 	m.mu.Lock()
 	if m.upd.running {
@@ -197,7 +197,7 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 	planCfg := *cfg
 	planCfg.Repos = nil
 	for _, r := range cfg.Repos {
-		if m.repoErr[r.Name] == "" && !now.Before(m.retryAt[r.Name]) {
+		if m.repoErr[r.Name] == "" && !now.Before(m.retryAt[r.Name]) && !now.Before(m.spawnRetryAt[strings.ToLower(r.Name)]) {
 			planCfg.Repos = append(planCfg.Repos, r)
 		}
 	}
@@ -210,13 +210,18 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 		if failed[strings.ToLower(s.Repo)] {
 			continue
 		}
-		if err := m.spawn(ctx, cfg, s.Repo); err != nil {
-			m.Events.Add("error", s.Repo, "spawn failed: %v", err)
-			failed[strings.ToLower(s.Repo)] = true
-			if tokenRejected(err) || github.IsKind(err, github.ErrRateLimit) {
-				m.apiErr(s.Repo, err, now)
-				return
-			}
+		err := m.spawn(ctx, cfg, s.Repo)
+		if err == nil {
+			continue
 		}
+		failed[strings.ToLower(s.Repo)] = true
+		if tokenRejected(err) || github.IsKind(err, github.ErrRateLimit) {
+			m.Events.Add("error", s.Repo, "spawn failed: %v", err)
+			m.apiErr(s.Repo, err, now)
+			return
+		}
+		msg := spawnText(err)
+		d := m.spawnFailed(s.Repo, msg, now)
+		m.Events.Add("error", s.Repo, "spawn failed: %s; next attempt in %s", msg, d)
 	}
 }

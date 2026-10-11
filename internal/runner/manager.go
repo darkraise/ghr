@@ -33,8 +33,9 @@ const (
 )
 
 const (
-	authRecheck = 60 * time.Second
-	maxBackoff  = 2 * time.Minute
+	authRecheck     = 60 * time.Second
+	maxBackoff      = 2 * time.Minute
+	maxSpawnBackoff = 10 * time.Minute
 )
 
 var idRe = regexp.MustCompile(`^[0-9a-f]{6}$`)
@@ -139,6 +140,7 @@ type instance struct {
 	deregistered bool      // its registration was deleted by ghr or confirmed missing
 	lost         bool      // the registration was confirmed missing, not deleted by ghr
 	offlineSince time.Time // when an idle runner was first seen offline; zero while online
+	adopted      bool      // rebuilt by Adopt, not spawned by this process
 	stopping     bool      // Kill asked systemd to stop the unit
 	cameOnline   bool      // it has been idle or busy at least once
 	answered     bool      // the runners API answered for it in the current tick
@@ -179,6 +181,9 @@ type Manager struct {
 	fails          map[string]int
 	retryAt        map[string]time.Time
 	lists          map[string]runnerList // by lower-cased repo; reset every tick
+	spawnFails     map[string]int        // failed starts in a row, by lower-cased repo
+	spawnRetryAt   map[string]time.Time  // no spawn for the repo before this
+	spawnErr       map[string]string     // the last failed start's message
 	degraded       bool
 	degradedReason string
 	authCheckAt    time.Time
@@ -210,6 +215,9 @@ func (m *Manager) Init() error {
 	m.fails = map[string]int{}
 	m.retryAt = map[string]time.Time{}
 	m.lists = map[string]runnerList{}
+	m.spawnFails = map[string]int{}
+	m.spawnRetryAt = map[string]time.Time{}
+	m.spawnErr = map[string]string{}
 	m.lastJob = map[string]model.HistoryEntry{}
 	m.lastPrune = m.Now()
 	m.maintCtx, m.maintCancel = context.WithCancel(context.Background())
@@ -377,11 +385,15 @@ func (m *Manager) releasePrune() {
 
 func (m *Manager) instanceDir(id string) string { return filepath.Join(m.Paths.Instances, id) }
 
-// enterLocked puts i in state s; m.mu must be held.
+// enterLocked puts i in state s; m.mu must be held. The first time a runner
+// comes online its repository's failed starts are forgotten.
 func (m *Manager) enterLocked(i *instance, s sched.State, now time.Time) {
 	i.State = s
 	i.StateSince = now
 	if s == sched.Idle || s == sched.Busy {
+		if !i.cameOnline {
+			m.clearSpawnBackoffLocked(i.Repo)
+		}
 		i.cameOnline = true
 	}
 }
@@ -398,6 +410,46 @@ func (m *Manager) move(id string, to sched.State, from ...sched.State) bool {
 	}
 	m.enterLocked(i, to, m.Now())
 	return true
+}
+
+// backoff is the wait after n failures in a row: 10 s, doubling up to limit.
+func backoff(n int, limit time.Duration) time.Duration {
+	d := 10 * time.Second << (n - 1)
+	if d > limit || d <= 0 {
+		return limit
+	}
+	return d
+}
+
+// spawnFailed records a failed start for repo and returns the wait before the
+// next attempt: 10 s, doubling to maxSpawnBackoff. A successful poll does not
+// reset it, because a poll that works says nothing about a spawn that does not.
+func (m *Manager) spawnFailed(repo, msg string, now time.Time) time.Duration {
+	key := strings.ToLower(repo)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.spawnFails[key]++
+	d := backoff(m.spawnFails[key], maxSpawnBackoff)
+	m.spawnRetryAt[key] = now.Add(d)
+	m.spawnErr[key] = msg
+	return d
+}
+
+// clearSpawnBackoffLocked forgets repo's failed starts; m.mu must be held.
+func (m *Manager) clearSpawnBackoffLocked(repo string) {
+	key := strings.ToLower(repo)
+	delete(m.spawnFails, key)
+	delete(m.spawnRetryAt, key)
+	delete(m.spawnErr, key)
+}
+
+// spawnText words a failed start for the repository's status line.
+func spawnText(err error) string {
+	var ae *github.APIError
+	if errors.As(err, &ae) && ae.Kind == github.ErrAuth {
+		return permissionText(ae)
+	}
+	return err.Error()
 }
 
 // beginTick forgets what the last tick learned from the runners API.
@@ -515,6 +567,9 @@ func (m *Manager) Status() model.Status {
 	for _, r := range cfg.Repos {
 		rs := model.RepoStatus{Name: r.Name, Paused: r.Paused, Removing: r.Removing, Max: cfg.EffectiveMax(r),
 			Queued: len(m.demand[r.Name]), Error: m.repoErr[r.Name]}
+		if rs.Error == "" {
+			rs.Error = m.spawnErr[strings.ToLower(r.Name)]
+		}
 		for _, q := range m.demand[r.Name] {
 			if rs.OldestQueuedAt == nil || q.CreatedAt.Before(*rs.OldestQueuedAt) {
 				at := q.CreatedAt
@@ -621,11 +676,13 @@ func (m *Manager) PausedUntil() time.Time {
 	return m.pauseUntil
 }
 
-// ClearDegraded is called after the token is replaced or reloaded.
+// ClearDegraded is called after the token is replaced or reloaded. A new
+// token may also be what a failing spawn was waiting for.
 func (m *Manager) ClearDegraded() {
 	m.mu.Lock()
 	m.degraded = false
 	m.degradedReason = ""
+	m.spawnFails, m.spawnRetryAt, m.spawnErr = map[string]int{}, map[string]time.Time{}, map[string]string{}
 	m.mu.Unlock()
 }
 
@@ -699,10 +756,7 @@ func (m *Manager) apiErr(repo string, err error, now time.Time) {
 		return
 	}
 	m.fails[repo]++
-	d := 10 * time.Second << (m.fails[repo] - 1)
-	if d > maxBackoff || d <= 0 {
-		d = maxBackoff
-	}
+	d := backoff(m.fails[repo], maxBackoff)
 	m.retryAt[repo] = now.Add(d)
 	m.repoErr[repo] = msg
 	m.mu.Unlock()
