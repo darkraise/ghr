@@ -82,17 +82,22 @@ func (s *Store) append(e model.HistoryEntry) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	f, err := os.OpenFile(s.Path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(s.Path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o600)
 	if err != nil {
 		return false, err
 	}
 	defer f.Close()
-	// A crash mid-write can leave a fragment with no trailing newline; start a
-	// new line so this record is not merged into the fragment and lost.
 	st, err := f.Stat()
 	if err != nil {
 		return false, err
 	}
+	if st.Mode().Perm()&^0o600 != 0 {
+		if err := f.Chmod(0o600); err != nil {
+			return false, err
+		}
+	}
+	// A crash mid-write can leave a fragment with no trailing newline; start a
+	// new line so this record is not merged into the fragment and lost.
 	if st.Size() > 0 {
 		last := make([]byte, 1)
 		if _, err := f.ReadAt(last, st.Size()-1); err != nil {
@@ -104,6 +109,9 @@ func (s *Store) append(e model.HistoryEntry) (bool, error) {
 	}
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return false, err
+	}
+	if err := f.Sync(); err != nil {
+		return true, err
 	}
 	return true, f.Close()
 }
@@ -238,6 +246,10 @@ func (s *Store) prune(cutoff time.Time) (bool, error) {
 		w.Write(append(line, '\n'))
 	}
 	if err := w.Flush(); err != nil {
+		tmp.Close()
+		return false, err
+	}
+	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return false, err
 	}

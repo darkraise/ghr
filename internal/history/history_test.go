@@ -358,3 +358,29 @@ func TestSkippedLineIsLoggedAgainAfterTheFileWasMissing(t *testing.T) {
 		}
 	}
 }
+
+// A prune leaves the file 0600 because it replaces it, but a prune with
+// nothing to drop writes nothing, so an append sets the mode itself.
+func TestAppendLeavesTheFile0600(t *testing.T) {
+	for name, before := range map[string]func(path string) error{
+		"a file it creates": func(string) error { return nil },
+		"a file it finds 0644": func(path string) error {
+			if err := os.WriteFile(path, nil, 0o644); err != nil {
+				return err
+			}
+			return os.Chmod(path, 0o644)
+		},
+	} {
+		s := &Store{Path: filepath.Join(t.TempDir(), "history.jsonl")}
+		if err := before(s.Path); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Append(model.HistoryEntry{ID: "a", Repo: "a", RunID: 1}); err != nil {
+			t.Fatal(err)
+		}
+		st, err := os.Stat(s.Path)
+		if err != nil || st.Mode().Perm() != 0o600 {
+			t.Errorf("%s: mode %v, err %v; want -rw-------", name, st.Mode().Perm(), err)
+		}
+	}
+}
