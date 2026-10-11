@@ -731,13 +731,24 @@ func TestReloadAppliesWakesAndRejects(t *testing.T) {
 	woke := 0
 	b.Wake = func() { woke++ }
 	ws, err := b.Reload()
-	if err != nil || ws == nil || woke != 1 || !gh.forgot || !m.cleared {
-		t.Fatalf("reload: %v %v woke=%d forgot=%v cleared=%v", ws, err, woke, gh.forgot, m.cleared)
+	if err != nil || ws == nil || woke != 1 || !m.cleared {
+		t.Fatalf("reload: %v %v woke=%d cleared=%v", ws, err, woke, m.cleared)
+	}
+	// The token did not change, so what the client holds for it stays.
+	if gh.forgot {
+		t.Fatal("a reload with the same token dropped the GitHub client's cache")
+	}
+	m.cleared = false
+	if err := os.WriteFile(b.Store.TokenPath, []byte("tok2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Reload(); err != nil || woke != 2 || !gh.forgot || !m.cleared {
+		t.Fatalf("reload with a new token: %v woke=%d forgot=%v cleared=%v", err, woke, gh.forgot, m.cleared)
 	}
 	if err := os.WriteFile(b.Store.TokenPath, []byte("  \n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Reload(); apiStatus(err) != 400 || woke != 1 {
+	if _, err := b.Reload(); apiStatus(err) != 400 || woke != 2 {
 		t.Fatalf("empty token: %v woke=%d", err, woke)
 	}
 	var txt strings.Builder

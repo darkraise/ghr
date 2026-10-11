@@ -767,9 +767,12 @@ func judgeToken(repos []string, errs []error) error {
 
 // Reload re-reads config.yaml and the token file, as SIGHUP does. On any
 // error the previous values stay active. It wakes the run loop, which ticks;
-// it never ticks itself.
+// it never ticks itself. What the GitHub client holds for the token (its
+// response cache, the token's metadata, a rate-limit suspension) is dropped
+// only when the token changed. The degraded state is cleared every time, so
+// a reload remains the way to say "try the token again now".
 func (b *Backend) Reload() ([]string, error) {
-	warnings, err := b.Store.Reload()
+	warnings, tokenChanged, err := b.Store.Reload()
 	if err != nil {
 		b.Events.Add("error", "", "reload rejected, keeping previous config: %v", err)
 		return nil, api.BadRequest(err.Error())
@@ -780,7 +783,9 @@ func (b *Backend) Reload() ([]string, error) {
 	for _, w := range warnings {
 		b.Events.Add("warn", "", "config: %s", w)
 	}
-	b.GH.ForgetCache()
+	if tokenChanged {
+		b.GH.ForgetCache()
+	}
 	b.dropLabelChecks()
 	b.M.ClearDegraded()
 	b.Events.Add("info", "", "config and token reloaded")

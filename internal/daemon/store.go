@@ -36,7 +36,7 @@ type Store struct {
 
 func OpenStore(configPath, tokenPath string) (*Store, []string, error) {
 	s := &Store{ConfigPath: configPath, TokenPath: tokenPath}
-	warnings, err := s.Reload()
+	warnings, _, err := s.Reload()
 	return s, warnings, err
 }
 
@@ -58,25 +58,28 @@ func (s *Store) Configured() bool {
 // Reload re-reads config and token; on any error the previous values stay active.
 // The owner cannot change while the daemon runs: the GitHub client and every
 // live runner belong to the owner it started with. A first owner may be set.
-func (s *Store) Reload() ([]string, error) {
+// tokenChanged reports whether the token now in use differs from the one
+// before the call, so a caller can keep what it fetched with an unchanged one.
+func (s *Store) Reload() (warnings []string, tokenChanged bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cfg, warnings, err := config.Load(s.ConfigPath)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if cur := s.cfg.Load(); cur != nil && cur.Owner != "" && cur.Owner != cfg.Owner {
-		return nil, fmt.Errorf("owner changed from %s to %s: restart ghr to switch owners", cur.Owner, cfg.Owner)
+		return nil, false, fmt.Errorf("owner changed from %s to %s: restart ghr to switch owners", cur.Owner, cfg.Owner)
 	}
 	tok, err := s.readToken()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	s.cfg.Store(cfg)
-	if tok != "" {
+	if tok != "" && tok != s.Token() {
 		s.token.Store(&tok)
+		tokenChanged = true
 	}
-	return warnings, nil
+	return warnings, tokenChanged, nil
 }
 
 // readToken returns the token file's trimmed content. Until a token has been

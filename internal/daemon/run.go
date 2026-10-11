@@ -409,7 +409,7 @@ func Run(ctx context.Context, o Options) error {
 			case <-ready:
 				break wait
 			case <-reload:
-				ws, err := store.Reload()
+				ws, _, err := store.Reload()
 				if err != nil {
 					ev.Add("error", "", "reload rejected, keeping previous config: %v", err)
 					continue

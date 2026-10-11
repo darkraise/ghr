@@ -56,11 +56,11 @@ func TestStoreUpdateReloadToken(t *testing.T) {
 		t.Fatal("update mutated the old config or did not apply")
 	}
 	os.WriteFile(s.ConfigPath, []byte("owner: \"\"\n"), 0o600)
-	if _, err := s.Reload(); err == nil || s.Config().GlobalMax != 3 {
+	if _, _, err := s.Reload(); err == nil || s.Config().GlobalMax != 3 {
 		t.Fatalf("bad reload: err %v cfg %+v", err, s.Config())
 	}
 	os.WriteFile(s.ConfigPath, []byte(strings.Replace(cfgYAML, "owner: darkraise", "owner: someone-else", 1)), 0o600)
-	if _, err := s.Reload(); err == nil || !strings.Contains(err.Error(), "restart ghr") || s.Config().Owner != "darkraise" {
+	if _, _, err := s.Reload(); err == nil || !strings.Contains(err.Error(), "restart ghr") || s.Config().Owner != "darkraise" {
 		t.Fatalf("owner change accepted: err %v owner %s", err, s.Config().Owner)
 	}
 	if err := s.SetToken("tok2"); err != nil {
@@ -108,20 +108,52 @@ func TestStoreOpensUnconfigured(t *testing.T) {
 func TestStoreReloadSetsTheFirstOwnerAndToken(t *testing.T) {
 	s := unconfiguredStore(t, "", nil)
 	os.WriteFile(s.ConfigPath, []byte(cfgYAML), 0o600)
-	if _, err := s.Reload(); err != nil || s.Configured() || s.Config().Owner != "darkraise" {
+	if _, _, err := s.Reload(); err != nil || s.Configured() || s.Config().Owner != "darkraise" {
 		t.Fatalf("owner without a token: err %v configured %v", err, s.Configured())
 	}
 	os.WriteFile(s.TokenPath, []byte("tok1\n"), 0o600)
-	if _, err := s.Reload(); err != nil || !s.Configured() || s.Token() != "tok1" {
+	if _, _, err := s.Reload(); err != nil || !s.Configured() || s.Token() != "tok1" {
 		t.Fatalf("owner and token: err %v token %q", err, s.Token())
 	}
 	os.WriteFile(s.TokenPath, []byte("\n"), 0o600)
-	if _, err := s.Reload(); err == nil || s.Token() != "tok1" {
+	if _, _, err := s.Reload(); err == nil || s.Token() != "tok1" {
 		t.Fatalf("emptied token after a token: err %v token %q", err, s.Token())
 	}
 	os.Remove(s.TokenPath)
-	if _, err := s.Reload(); err == nil || s.Token() != "tok1" {
+	if _, _, err := s.Reload(); err == nil || s.Token() != "tok1" {
 		t.Fatalf("removed token after a token: err %v token %q", err, s.Token())
+	}
+}
+
+// Reload reports a token change only when the token file holds another token
+// than the one in use, and never for a reload it rejects.
+func TestStoreReloadReportsATokenChange(t *testing.T) {
+	s := newStore(t)
+	reload := func(want bool, what string) {
+		t.Helper()
+		if _, changed, err := s.Reload(); err != nil || changed != want {
+			t.Fatalf("%s: changed %v err %v", what, changed, err)
+		}
+	}
+	reload(false, "the same token")
+	os.WriteFile(s.TokenPath, []byte("  tok1\n\n"), 0o600)
+	reload(false, "the same token with other whitespace")
+	os.WriteFile(s.TokenPath, []byte("tok2\n"), 0o600)
+	reload(true, "a new token")
+	reload(false, "the new token again")
+	os.WriteFile(s.TokenPath, []byte("tok3\n"), 0o600)
+	os.WriteFile(s.ConfigPath, []byte("mode: fast\n"), 0o600)
+	if _, changed, err := s.Reload(); err == nil || changed || s.Token() != "tok2" {
+		t.Fatalf("a rejected reload: changed %v err %v token %q", changed, err, s.Token())
+	}
+
+	first := unconfiguredStore(t, "darkraise", nil)
+	if _, changed, err := first.Reload(); err != nil || changed {
+		t.Fatalf("no token yet: changed %v err %v", changed, err)
+	}
+	os.WriteFile(first.TokenPath, []byte("tok1\n"), 0o600)
+	if _, changed, err := first.Reload(); err != nil || !changed {
+		t.Fatalf("the first token: changed %v err %v", changed, err)
 	}
 }
 

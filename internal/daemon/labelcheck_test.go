@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -183,6 +184,9 @@ func TestLabelCheckCancelledEagerlyOnTokenChange(t *testing.T) {
 			if change == "set" {
 				err = b.SetToken(context.Background(), "tok2")
 			} else {
+				if err := os.WriteFile(b.Store.TokenPath, []byte("tok2\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
 				_, err = b.Reload()
 			}
 			if err != nil {
@@ -191,6 +195,27 @@ func TestLabelCheckCancelledEagerlyOnTokenChange(t *testing.T) {
 			gh.scanCounts(t, func(in, c int) bool { return in == 0 && c == 1 })
 		})
 	}
+}
+
+// A reload that keeps the token keeps a running scan: what it reads is read
+// with the token still in use.
+func TestLabelCheckSurvivesAReloadWithTheSameToken(t *testing.T) {
+	b, _, gh := newBackend(t)
+	labelGH(gh)
+	gh.block = true
+	if err := b.StartLabelCheck("darkcloud"); err != nil {
+		t.Fatal(err)
+	}
+	gh.scanCounts(t, func(in, _ int) bool { return in == 1 })
+	if _, err := b.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if lc, _ := b.LabelCheck("darkcloud"); lc.State != "checking" {
+		t.Fatalf("the scan was dropped: %+v", lc)
+	}
+	gh.scanCounts(t, func(in, c int) bool { return in == 1 && c == 0 })
+	b.Close()
+	gh.scanCounts(t, func(in, c int) bool { return in == 0 && c == 1 })
 }
 
 // A group names at most three distinct jobs and counts the rest in More;
