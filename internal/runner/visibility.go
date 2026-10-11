@@ -97,15 +97,54 @@ func (m *Manager) planConfig(cfg *config.Config) *config.Config {
 	return &plan
 }
 
-// forgetRemoved drops the visibility kept for repos that are no longer in the
-// config, so one that is removed and added again starts unread. It needs no
-// API call, so it runs on every tick.
+// blockedText tells the owner why a blocked repo gets no runner and what
+// lifts the block.
+func blockedText(repo string) string {
+	return repo + " is public; ghr serves only private repositories. Set allow_public: true for it in config.yaml and reload to serve it"
+}
+
+// noteBlocked writes one event when a repo becomes blocked and one when it
+// stops being blocked, whether GitHub's answer or the config changed. It
+// needs no API call, so it runs on every tick.
+func (m *Manager) noteBlocked(cfg *config.Config) {
+	var became, lifted []string
+	m.mu.Lock()
+	for _, r := range cfg.Repos {
+		key := strings.ToLower(r.Name)
+		is := m.blockedLocked(cfg, r)
+		switch {
+		case is && !m.wasBlocked[key]:
+			m.wasBlocked[key] = true
+			became = append(became, r.Name)
+		case !is && m.wasBlocked[key]:
+			delete(m.wasBlocked, key)
+			lifted = append(lifted, r.Name)
+		}
+	}
+	m.mu.Unlock()
+	for _, name := range became {
+		m.Events.Add("warn", name, "%s", blockedText(name))
+	}
+	for _, name := range lifted {
+		m.Events.Add("ok", name, "no longer blocked")
+	}
+}
+
+// forgetRemoved drops what is kept about visibility for repos that are no
+// longer in the config, so one that is removed and added again starts unread
+// and its removal is not reported as a block being lifted. It needs no API
+// call, so it runs on every tick.
 func (m *Manager) forgetRemoved(cfg *config.Config) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for key := range m.vis {
 		if cfg.Repo(key) == nil {
 			delete(m.vis, key)
+		}
+	}
+	for key := range m.wasBlocked {
+		if cfg.Repo(key) == nil {
+			delete(m.wasBlocked, key)
 		}
 	}
 }

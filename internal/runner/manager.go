@@ -192,6 +192,7 @@ type Manager struct {
 	spawnRetryAt   map[string]time.Time  // no spawn for the repo before this
 	spawnErr       map[string]string     // the last failed start's message
 	vis            map[string]visibility // by lower-cased repo; a repo without an entry is unread
+	wasBlocked     map[string]bool       // lower-cased repos whose block has been reported
 	visGen         uint64                // bumped by ClearDegraded; guarded by mu
 	degraded       bool
 	degradedReason string
@@ -229,6 +230,7 @@ func (m *Manager) Init() error {
 	m.spawnRetryAt = map[string]time.Time{}
 	m.spawnErr = map[string]string{}
 	m.vis = map[string]visibility{}
+	m.wasBlocked = map[string]bool{}
 	m.lastJob = map[string]model.HistoryEntry{}
 	m.lastPrune = m.Now()
 	m.maintCtx, m.maintCancel = context.WithCancel(context.Background())
@@ -618,6 +620,12 @@ func (m *Manager) Status() model.Status {
 		// pause is not its state any more.
 		if rs.Error == "" && !r.Paused {
 			rs.Error = m.spawnErr[strings.ToLower(r.Name)]
+		}
+		// Why a blocked repo gets nothing comes before what its poll or its
+		// last start said. It is worked out here and not stored with them,
+		// so a poll that succeeds does not clear it.
+		if m.blockedLocked(cfg, r) {
+			rs.Error = blockedText(r.Name)
 		}
 		for _, q := range m.demand[r.Name] {
 			if rs.OldestQueuedAt == nil || q.CreatedAt.Before(*rs.OldestQueuedAt) {

@@ -30,6 +30,7 @@ func (m *Manager) Tick(ctx context.Context) {
 	if m.apiAllowed(now) {
 		demandOK, unanswered = m.gatherDemand(ctx, cfg, now)
 	}
+	m.noteBlocked(cfg)
 	if m.apiAllowed(now) && !m.isDegraded() && m.releaseCheckDue(now) {
 		m.checkRelease(ctx)
 	}
@@ -76,13 +77,15 @@ func (m *Manager) Tick(ctx context.Context) {
 
 // gatherDemand lists matching queued jobs per repo and confirms our in-progress
 // jobs. Degraded clears only after a tick in which some repo answered and none
-// rejected the token. It reports whether every unpaused repo answered, and
-// the first one, in config order, that did not.
+// rejected the token. It reports whether every served repo answered, and the
+// first one, in config order, that did not. A served repo is one that is
+// neither paused nor blocked.
 //
 // A repo that does not answer keeps its last known queued jobs for status;
 // spawnPlanned already leaves such a repo out. A paused repo is polled only
-// while one of its busy runners still lacks its job's details, and its queue
-// is never kept: nothing will serve it, and it must not hold an update back.
+// while one of its busy runners still lacks its job's details, and a blocked
+// repo is polled like any other. The queue of either is never kept: nothing
+// will serve it, and it must not hold an update back.
 func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time.Time) (bool, string) {
 	ours := map[string]string{}
 	for _, i := range m.snapshot() {
@@ -91,15 +94,17 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 	m.mu.Lock()
 	last := m.demand
 	m.mu.Unlock()
+	// Asked per use, not once: a repo's own read, below, can change the answer.
+	served := func(r config.Repo) bool { return !r.Paused && !m.blocked(cfg, r) }
 	demand := sched.Demand{}
 	for _, r := range cfg.Repos {
-		if jobs, ok := last[r.Name]; ok && !r.Paused {
+		if jobs, ok := last[r.Name]; ok && served(r) {
 			demand[r.Name] = jobs
 		}
 	}
 	anyOK, authFailed, unanswered := false, false, ""
 	missed := func(r config.Repo) {
-		if !r.Paused && unanswered == "" {
+		if served(r) && unanswered == "" {
 			unanswered = r.Name
 		}
 	}
@@ -139,8 +144,12 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 			continue
 		}
 		anyOK = true
-		if !r.Paused {
+		if served(r) {
 			demand[r.Name] = jobs
+		} else {
+			// The read above may have just found the repo public; what an
+			// earlier poll left for it goes too.
+			delete(demand, r.Name)
 		}
 		forget(r.Name)
 	}

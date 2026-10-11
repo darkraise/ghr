@@ -304,8 +304,9 @@ const (
 
 // startUpdateIfFree starts a queued runner update when ghr is free: no
 // instance starting or busy, this tick's demand poll (made with cfg, still the
-// live config) answered for every unpaused repo with no queued job, the API
-// allowed and not degraded, and the maintenance reservation free. Every idle
+// live config) answered for every repo that is neither paused nor blocked
+// with no queued job, the API allowed and not degraded, and the maintenance
+// reservation free. gatherDemand decides which repos count. Every idle
 // runner is stopped first and comes back on the new version; one that took a
 // job, or could not be checked or stopped, means ghr is not free after all.
 // Spawning waits until the update ends. A shutdown during the stops leaves the
