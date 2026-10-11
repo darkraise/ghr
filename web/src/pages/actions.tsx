@@ -31,7 +31,7 @@ import { errorText } from "@/query"
 
 const ALL = "__all__"
 
-const BRANCH = "rounded-full bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary"
+const BRANCH = "rounded-full bg-branch px-2 py-0.5 font-mono text-xs text-primary"
 const GHR = "rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-foreground"
 
 function ActionRow({ run, now, wide }: { run: ActionsRun; now: number; wide: boolean }) {

@@ -433,4 +433,7 @@ textarea {
   /* A chart series that is not a state: the accent mixed toward sunk, so it
      cannot be read as a status colour. */
   --color-series: color-mix(in srgb, hsl(var(--primary)) 70%, hsl(var(--muted)));
+  /* The branch label's fill under its accent text. It is opaque: a hovered
+     row's wash under a translucent fill takes the text below 4.5:1. */
+  --color-branch: color-mix(in srgb, hsl(var(--primary)) 10%, hsl(var(--card)));
 }

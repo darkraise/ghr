@@ -54,7 +54,7 @@ describe("Actions page", () => {
     expect(row.getByText(`${run.workflow} #${run.run_number}`)).toBeInTheDocument()
     expect(row.getByText(run.repo)).toBeInTheDocument()
     expect(row.getByText(`${run.event} by ${run.actor}`)).toBeInTheDocument()
-    expect(row.getByText(run.branch)).toHaveClass("font-mono", "text-primary", "rounded-full")
+    expect(row.getByText(run.branch)).toHaveClass("font-mono", "text-primary", "rounded-full", "bg-branch")
     expect(row.queryAllByText("ghr")).toHaveLength(run.ghr ? 1 : 0)
     expect(row.getAllByRole("cell")).toHaveLength(3)
   })
