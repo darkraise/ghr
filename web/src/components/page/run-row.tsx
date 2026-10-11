@@ -21,6 +21,9 @@ export function RunGroup({ label, cols }: { label: string; cols: number }) {
   )
 }
 
+// React draws a 0, so truthiness is the wrong test for an optional slot.
+const blank = (node: ReactNode) => node === undefined || node === null || typeof node === "boolean" || node === ""
+
 export function RunRow({
   icon,
   title,
@@ -43,15 +46,15 @@ export function RunRow({
       </td>
       <td className="px-3 py-2.5 align-top">
         <span className="block text-sm font-semibold">{title}</span>
-        {facts && <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">{facts}</span>}
-        {!wide && values && <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">{values}</span>}
+        {!blank(facts) && <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">{facts}</span>}
+        {!wide && !blank(values) && <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">{values}</span>}
       </td>
-      {wide && (
+      {wide && !blank(values) && (
         <td className="w-44 py-2.5 pr-4 text-right align-top">
           <span className="flex flex-col items-end gap-1">{values}</span>
         </td>
       )}
-      {actions && <td className="w-20 py-2.5 pr-3 text-right align-top">{actions}</td>}
+      {!blank(actions) && <td className="w-20 py-2.5 pr-3 text-right align-top">{actions}</td>}
     </tr>
   )
 }

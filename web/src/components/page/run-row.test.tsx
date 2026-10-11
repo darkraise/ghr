@@ -50,6 +50,34 @@ describe("RunRow", () => {
     expect(screen.getByRole("button", { name: "Open" })).toBeInTheDocument()
   })
 
+  it("leaves out the values cell when no values are given", () => {
+    render(
+      <table>
+        <tbody>
+          <RunRow wide icon={<span>icon</span>} title="build" />
+        </tbody>
+      </table>,
+    )
+    expect(screen.getAllByRole("cell")).toHaveLength(2)
+  })
+
+  it.each([true, false])("keeps a zero inside its own wrapper (wide: %s)", (wide) => {
+    render(
+      <table>
+        <tbody>
+          <RunRow wide={wide} icon={<span>icon</span>} title="build" facts={0} values={0} actions={0} />
+        </tbody>
+      </table>,
+    )
+    const row = screen.getByRole("row")
+    const found = within(row).getAllByRole("cell")
+    expect([...row.childNodes].every((n) => n.nodeName === "TD")).toBe(true)
+    expect(found).toHaveLength(wide ? 4 : 3)
+    expect([...(found[1] as HTMLElement).childNodes].every((n) => n.nodeName === "SPAN")).toBe(true)
+    expect(found[1]).toHaveTextContent(wide ? "build0" : "build00")
+    expect(found.at(-1)).toHaveTextContent("0")
+  })
+
   it("spans the group heading across the row", () => {
     table(true, true)
     const heading = screen.getByRole("rowheader", { name: "Today" })
