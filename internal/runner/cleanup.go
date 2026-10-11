@@ -29,11 +29,6 @@ func within(path, dir string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// projectsFile remembers the compose projects cleanup has seen: custom projects
-// are found only through their containers, so a retry after those are removed
-// must still reach the project's networks and volumes.
-const projectsFile = "ghr-projects"
-
 // errListProjects marks a cleanup that could not even list Docker containers,
 // usually because the daemon is down; it must not count toward the give-up.
 var errListProjects = errors.New("list compose containers")
@@ -52,7 +47,11 @@ func (m *Manager) projects(ctx context.Context, id string) ([]string, error) {
 			set[c.Project] = true
 		}
 	}
-	if b, err := os.ReadFile(filepath.Join(dir, projectsFile)); err == nil {
+	// Cleanup remembers the projects it has seen: custom projects are found
+	// only through their containers, so a retry after those are removed must
+	// still reach the project's networks and volumes. The list is kept where
+	// the job cannot write, or a job could name any project on the host.
+	if b, err := os.ReadFile(m.privateProjects(id)); err == nil {
 		for _, p := range strings.Fields(string(b)) {
 			set[p] = true
 		}
@@ -73,9 +72,12 @@ func (m *Manager) cleanupDocker(ctx context.Context, cfg *config.Config, id, rep
 	if err != nil {
 		return 0, err
 	}
-	known := filepath.Join(m.instanceDir(id), projectsFile)
 	record := func() error {
-		if err := writeFile(known, []byte(strings.Join(names, "\n")+"\n"), 0o644); err != nil && !errors.Is(err, os.ErrNotExist) {
+		err := os.MkdirAll(m.Paths.Private, 0o700)
+		if err == nil {
+			err = writeFile(m.privateProjects(id), []byte(strings.Join(names, "\n")+"\n"), 0o600)
+		}
+		if err != nil {
 			return fmt.Errorf("record compose projects: %w", err)
 		}
 		return nil

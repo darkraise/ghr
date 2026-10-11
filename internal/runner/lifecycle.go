@@ -503,6 +503,7 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("remove %s: %w", dir, err)
 	}
+	m.removePrivate(id)
 	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil && !github.IsKind(err, github.ErrUnprocessable) {
 		m.Events.Add("warn", i.Repo, "delete registration %s: %v (reconciliation retries)", i.RunnerName, err)
 	}

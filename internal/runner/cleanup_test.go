@@ -371,3 +371,43 @@ func TestStatusCarriesDiskBytes(t *testing.T) {
 		t.Fatalf("bytes docker: %d %d %d %q", st.DiskPct, st.DiskUsedBytes, st.DiskTotalBytes, st.DiskRoot)
 	}
 }
+
+// The instance directory is the job's to write. A project list found there
+// must not make root remove someone else's compose project.
+func TestCleanupIgnoresAProjectListTheJobWrote(t *testing.T) {
+	h := newHarness(t)
+	dir := h.m.instanceDir("aaaaaa")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ghr-projects"), []byte("immich\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.m.cleanupDocker(context.Background(), h.cfg, "aaaaaa", "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"com.docker.compose.project=ghr-aaaaaa"}; !reflect.DeepEqual(h.docker.netLabels, want) {
+		t.Fatalf("networks removed for %v", h.docker.netLabels)
+	}
+}
+
+// The remembered list lives in the root-only directory while a cleanup is
+// being retried, and goes when the instance does.
+func TestRememberedProjectsLiveInThePrivateDir(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.docker.setErr("RemoveNetworksByLabel", errors.New("network busy"))
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if _, err := os.Stat(h.m.privateProjects("aaaaaa")); err != nil {
+		t.Fatalf("no remembered list while the cleanup is retried: %v", err)
+	}
+	h.docker.setErr("RemoveNetworksByLabel", nil)
+	h.now = h.now.Add(finishRetry)
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if _, err := os.Stat(h.m.privateProjects("aaaaaa")); !os.IsNotExist(err) || h.state("aaaaaa") != "gone" {
+		t.Fatalf("state %s, remembered list: %v", h.state("aaaaaa"), err)
+	}
+}

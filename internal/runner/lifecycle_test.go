@@ -362,7 +362,7 @@ func TestDockerUnreachableKeepsCleaning(t *testing.T) {
 	}
 }
 
-// diskFullUntilCleanup fails the pending-history and ghr-projects writes with
+// diskFullUntilCleanup fails the pending-history and project-list writes with
 // fail until Docker cleanup has removed a volume, like a disk only that frees.
 func diskFullUntilCleanup(t *testing.T, h *harness, fail error) {
 	t.Helper()
@@ -372,7 +372,7 @@ func diskFullUntilCleanup(t *testing.T, h *harness, fail error) {
 		h.docker.mu.Lock()
 		full := len(h.docker.volLabels) == 0
 		h.docker.mu.Unlock()
-		if full && (strings.HasPrefix(name, h.m.Paths.Pending) || filepath.Base(name) == projectsFile) {
+		if full && (strings.HasPrefix(name, h.m.Paths.Pending) || strings.HasSuffix(name, ".projects")) {
 			return &fs.PathError{Op: "write", Path: name, Err: fail}
 		}
 		return orig(name, data, perm)
