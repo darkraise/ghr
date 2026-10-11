@@ -169,3 +169,27 @@ func TestFinishAfterCrashAppendsHistoryOnce(t *testing.T) {
 		t.Fatalf("state %s history %v", h.state("aaaaaa"), h.history(t))
 	}
 }
+
+// An adopted runner starts as "starting" from its spawn time. When the first
+// check after the restart fails, an online runner must survive until a check
+// succeeds.
+func TestAdoptedOnlineRunnerSurvivesAFailedFirstCheck(t *testing.T) {
+	h := newHarness(t)
+	makeInstance(t, h, "aaaaaa", "darkmem", 1, false)
+	h.sd.active["ghr-runner-aaaaaa"] = true
+	h.gh.setRunner(1, "online", false)
+	h.now = h.now.Add(3 * time.Minute) // spawned 3m ago; start_timeout is 2m
+	if err := h.m.Adopt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.gh.setErr("GetRunner darkmem", &github.APIError{Status: 502, Kind: github.ErrServer})
+	h.m.Tick(context.Background())
+	if len(h.sd.stopped) != 0 || h.state("aaaaaa") != "starting" {
+		t.Fatalf("stopped %v state %s", h.sd.stopped, h.state("aaaaaa"))
+	}
+	h.gh.setErr("GetRunner darkmem", nil)
+	h.m.Tick(context.Background())
+	if len(h.sd.stopped) != 0 || h.state("aaaaaa") != "idle" {
+		t.Fatalf("stopped %v state %s", h.sd.stopped, h.state("aaaaaa"))
+	}
+}

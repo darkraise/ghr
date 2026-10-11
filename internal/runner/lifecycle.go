@@ -200,6 +200,7 @@ func (m *Manager) refreshRunners(ctx context.Context) {
 			}
 			continue // start_timeout handles runners that never appear
 		}
+		m.markAnswered(i.ID)
 		if r.Busy {
 			m.move(i.ID, sched.Busy, sched.Starting, sched.Idle)
 		} else if r.Status == "online" {
@@ -623,14 +624,16 @@ func (m *Manager) stopStartTimedOut(ctx context.Context, cfg *config.Config, now
 	for _, id := range sched.StartTimedOut(cfg, m.schedInstances(cfg), now) {
 		m.mu.Lock()
 		i, ok := m.insts[id]
-		repo := ""
+		repo, answered := "", false
 		if ok {
-			repo = i.Repo
+			repo, answered = i.Repo, i.answered
 		}
 		m.mu.Unlock()
 		// A stop a person asked for can finish and remove a runner while this
-		// loop is stopping another one.
-		if !ok {
+		// loop is stopping another one. A runner the runners API did not answer
+		// for in this tick is left alone: an API pause or a failed call says
+		// nothing about whether it came online.
+		if !ok || !answered {
 			continue
 		}
 		if err := m.SD.Stop(ctx, UnitPrefix+id); err != nil {

@@ -614,6 +614,7 @@ func TestUnitQueryErrorIsNotAnExit(t *testing.T) {
 func TestStartTimeoutStopsUnit(t *testing.T) {
 	h := newHarness(t)
 	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.refreshRunners(context.Background()) // the runners API answers: still offline
 	h.now = h.now.Add(3 * time.Minute)
 	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
 	if len(h.sd.stopped) != 1 || !strings.Contains(h.eventText(), "did not come online within 2m0s") {
@@ -1089,6 +1090,7 @@ func TestStartTimeoutSkipsARunnerThatIsGone(t *testing.T) {
 	h := newHarness(t)
 	h.m.spawn(context.Background(), h.cfg, "darkmem")
 	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.refreshRunners(context.Background()) // the runners API answers: still offline
 	h.now = h.now.Add(3 * time.Minute)
 	h.sd.stopGate, h.sd.stopEntered = make(chan struct{}), make(chan struct{}, 2)
 	go func() {
@@ -1125,5 +1127,39 @@ func TestRunnerMadeBusyDuringTheCheckStaysBusy(t *testing.T) {
 	h.m.refreshRunners(context.Background())
 	if h.state("aaaaaa") != "busy" {
 		t.Fatalf("state %s", h.state("aaaaaa"))
+	}
+}
+
+// A runner that could not be checked may be online. Only an answer from the
+// runners API in this tick lets the start timeout stop it.
+func TestStartTimeoutWaitsForAnAnswerFromTheRunnersAPI(t *testing.T) {
+	for name, block := range map[string]func(h *harness) (unblock func()){
+		"API pause": func(h *harness) func() {
+			h.m.apiErr("darkmem", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(10 * time.Minute)}, h.now)
+			return func() { h.now = h.now.Add(10 * time.Minute) }
+		},
+		"failed call": func(h *harness) func() {
+			h.gh.setErr("GetRunner darkmem", &github.APIError{Status: 502, Kind: github.ErrServer})
+			return func() { h.gh.setErr("GetRunner darkmem", nil) }
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+				t.Fatal(err)
+			}
+			unblock := block(h)
+			h.now = h.now.Add(3 * time.Minute) // past start_timeout
+			h.m.Tick(context.Background())
+			if len(h.sd.stopped) != 0 {
+				t.Fatalf("stopped without an answer: %v\n%s", h.sd.stopped, h.eventText())
+			}
+			unblock()
+			h.m.Tick(context.Background())
+			if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) ||
+				!strings.Contains(h.eventText(), "did not come online within 2m0s") {
+				t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
+			}
+		})
 	}
 }

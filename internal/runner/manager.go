@@ -139,6 +139,7 @@ type instance struct {
 	deregistered bool      // stopIdleRunner deleted its registration
 	stopping     bool      // Kill asked systemd to stop the unit
 	cameOnline   bool      // it has been idle or busy at least once
+	answered     bool      // the runners API answered for it in the current tick
 }
 
 type Manager struct {
@@ -386,6 +387,23 @@ func (m *Manager) move(id string, to sched.State, from ...sched.State) bool {
 	}
 	m.enterLocked(i, to, m.Now())
 	return true
+}
+
+// beginTick forgets what the last tick learned from the runners API.
+func (m *Manager) beginTick() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, i := range m.insts {
+		i.answered = false
+	}
+}
+
+func (m *Manager) markAnswered(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if i, ok := m.insts[id]; ok {
+		i.answered = true
+	}
 }
 
 func (m *Manager) snapshot() []instance {

@@ -19,6 +19,7 @@ func (m *Manager) Tick(ctx context.Context) {
 	cfg := m.Config()
 	now := m.Now()
 	m.ticks++
+	m.beginTick()
 	m.refreshUnits(ctx)
 	m.readJobFiles()
 	if m.apiAllowed(now) {
