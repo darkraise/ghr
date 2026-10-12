@@ -3,7 +3,7 @@ import { Link, SearchParamError, useNavigate, useParams, useSearch, type ErrorCo
 import { Button } from "darkraise-ui/components/button"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
-import { useId, type ReactNode } from "react"
+import { memo, useId, type ReactNode } from "react"
 import { ApiError, api } from "@/api/client"
 import { logSettling, useConfig, useJobLog, useRunAnnotations, useRunDetail } from "@/api/hooks"
 import type { RunDetail, RunJob } from "@/api/types"
@@ -251,8 +251,24 @@ function saveBlob(blob: Blob, fileName: string) {
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-function JobLogs({ repo, job, search, ms, now }: { repo: string; job: RunJob; search: JobSearch; ms: number | undefined; now: number }) {
-  const log = useJobLog(repo, job.id, true, job.completed_at, now)
+// Memoised, and given the step, the line and whether the log may still come
+// as plain values, so the page's one-second clock does not render the log again.
+const JobLogs = memo(function JobLogs({
+  repo,
+  job,
+  step,
+  line,
+  ms,
+  settling,
+}: {
+  repo: string
+  job: RunJob
+  step: number | undefined
+  line: number | undefined
+  ms: number | undefined
+  settling: boolean
+}) {
+  const log = useJobLog(repo, job.id, true, settling)
   const raw = useMutation({
     mutationFn: () => api.rawJobLog(repo, job.id),
     onSuccess: (blob) => saveBlob(blob, rawLogFileName(repo, job.id)),
@@ -270,7 +286,7 @@ function JobLogs({ repo, job, search, ms, now }: { repo: string; job: RunJob; se
     return (
       <div className="flex flex-col items-start gap-2">
         <p className="text-sm text-muted-foreground">
-          {logSettling(job.completed_at, now) ? "GitHub has not stored this job's log yet; checking again." : "This job produced no log."}
+          {settling ? "GitHub has not stored this job's log yet; checking again." : "This job produced no log."}
         </p>
         <Button size="sm" variant="outline" loading={log.isFetching} onClick={() => void log.refetch()}>
           Check again
@@ -290,11 +306,11 @@ function JobLogs({ repo, job, search, ms, now }: { repo: string; job: RunJob; se
   // link on the same job page must mount it again.
   return (
     <LogViewer
-      key={`${job.id}:${search.step ?? ""}:${search.line ?? ""}`}
+      key={`${job.id}:${step ?? ""}:${line ?? ""}`}
       log={log.data}
       steps={job.steps}
-      step={search.step}
-      line={search.line}
+      step={step}
+      line={line}
       toolbar={rawButton}
       heading={
         <>
@@ -305,7 +321,7 @@ function JobLogs({ repo, job, search, ms, now }: { repo: string; job: RunJob; se
       }
     />
   )
-}
+})
 
 function JobView({ run, owner, jobId, search }: { run: RunDetail; owner: string; jobId: number; search: JobSearch }) {
   const now = useNow()
@@ -337,7 +353,8 @@ function JobView({ run, owner, jobId, search }: { run: RunDetail; owner: string;
         <JobMeta job={job} />
         <div className="mt-4">
           {job.status === "completed" ? (
-            <JobLogs repo={run.repo} job={job} search={search} ms={ms} now={now} />
+            <JobLogs repo={run.repo} job={job} step={search.step} line={search.line} ms={ms} settling={logSettling(job.completed_at, now)} />
+
           ) : (
             <div className="ghr-log-panel flex flex-col gap-2 overflow-hidden rounded-md border border-border p-3">
               <p className="text-sm text-muted-foreground">Logs appear when the job finishes.</p>

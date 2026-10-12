@@ -133,14 +133,14 @@ export function logSettling(completedAt: string | undefined, now: number): boole
   return age >= 0 && age < LOG_SETTLE
 }
 
-// now is the page's clock, so the polling and the page's message agree on
-// whether the log is still settling.
-export function useJobLog(repo: string, jobId: number, enabled: boolean, completedAt: string | undefined, now: number) {
+// settling comes from the page's clock through logSettling, so the polling
+// and the page's message agree on whether the log may still come.
+export function useJobLog(repo: string, jobId: number, enabled: boolean, settling: boolean) {
   return useQuery({
     queryKey: keys.jobLog(repo, jobId),
     queryFn: ({ signal }) => api.jobLog(repo, jobId, signal),
     enabled,
-    refetchInterval: (q) => (q.state.data?.no_log && logSettling(completedAt, now) ? 15_000 : false),
+    refetchInterval: (q) => (q.state.data?.no_log && settling ? 15_000 : false),
   })
 }
 

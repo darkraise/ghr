@@ -1,10 +1,26 @@
 import { act, screen, waitFor, within } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { renderAnsi } from "@/lib/ansi"
 import { json, mockApi, type Call } from "@/test/api"
 import { fixtures, runRoutes } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
+// Every log line and every group header draws its text through renderAnsi,
+// so its calls count how many of them rendered.
+vi.mock("@/lib/ansi", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/lib/ansi")>()
+  return { ...mod, renderAnsi: vi.fn(mod.renderAnsi) }
+})
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 const runCalls = (calls: Call[]) => calls.filter((c) => c.path.startsWith("/api/actions/"))
+
+// The page's clock follows the daemon's, so under fake timers the daemon's
+// time has to move with them.
+const daemonClock = () => ({ ...fixtures.status, now: new Date().toISOString() })
 
 describe("Run page", () => {
   it("shows the run's header and summary facts", async () => {
@@ -169,7 +185,7 @@ describe("Job page", () => {
     expect(job.getByText("homelab")).toBeInTheDocument()
     expect(job.getByText("ghr")).toHaveClass("font-mono")
     expect(job.getByText("2026-10-03 13:55:25")).toHaveClass("font-mono")
-    expect(job.getAllByText("Lint (ruff)").length).toBeGreaterThan(0)
+    expect((await job.findAllByText("Lint (ruff)")).length).toBeGreaterThan(0)
     const rail = within(screen.getByRole("navigation", { name: "Run" }))
     expect(rail.getByRole("link", { name: /Backend tests/ })).toHaveAttribute("aria-current", "page")
     expect(rail.getByRole("link", { name: "Summary" })).not.toHaveAttribute("aria-current")
@@ -200,6 +216,42 @@ describe("Job page", () => {
       search: { attempt: 2, step: 2, line: 2 },
     })
     await waitFor(() => expect(document.querySelector('[data-target="true"]')).toHaveTextContent("Successfully installed ruff-0.6.9"))
+  })
+
+  it("renders no log line again on a clock tick or on a refetch that brings equal data", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date("2026-10-03T14:05:00Z") })
+    const run = {
+      ...fixtures.runDetail,
+      status: "in_progress",
+      conclusion: "",
+      jobs: fixtures.runDetail.jobs.map((j) => (j.id === 1005 ? { ...j, status: "in_progress", conclusion: "", completed_at: undefined } : j)),
+    }
+    const { calls } = mockApi(runRoutes({ "GET /api/status": daemonClock, "GET /api/actions/darkmem/runs/102": run }))
+    const start = vi.mocked(renderAnsi).mock.calls.length
+    const { queryClient } = renderApp("/actions/darkmem/runs/102/jobs/1002")
+    await screen.findByLabelText("Search logs")
+    const rail = within(screen.getByRole("navigation", { name: "Run" }))
+    const runningFor = () => rail.getByRole("link", { name: /E2E/ }).textContent
+    const draws = vi.mocked(renderAnsi)
+    const drawn = draws.mock.calls.length
+    expect(drawn).toBeGreaterThan(start)
+
+    const before = runningFor()
+    await act(() => vi.advanceTimersByTimeAsync(2000))
+    expect(runningFor()).not.toBe(before)
+    expect(draws.mock.calls.length).toBe(drawn)
+
+    const reads = (path: string) => calls.filter((c) => c.path === path).length
+    const runReads = reads("/api/actions/darkmem/runs/102")
+    const logReads = reads("/api/actions/darkmem/jobs/1002/log")
+    // The query library tells its observers on a zero-delay timer.
+    await act(async () => {
+      await queryClient.refetchQueries()
+      await vi.advanceTimersByTimeAsync(50)
+    })
+    expect(reads("/api/actions/darkmem/runs/102")).toBe(runReads + 1)
+    expect(reads("/api/actions/darkmem/jobs/1002/log")).toBe(logReads + 1)
+    expect(draws.mock.calls.length).toBe(drawn)
   })
 
   it("shows why the log could not be read and reads it again on Try again", async () => {

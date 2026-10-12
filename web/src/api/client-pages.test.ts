@@ -148,7 +148,7 @@ describe("api for the run pages", () => {
     const { wrapper } = withQuery()
     renderHook(() => useRunDetail("darkmem", 102, undefined, false), { wrapper })
     renderHook(() => useRunAnnotations("darkmem", 102, undefined, true, false), { wrapper })
-    renderHook(() => useJobLog("darkmem", 1002, false, undefined, 0), { wrapper })
+    renderHook(() => useJobLog("darkmem", 1002, false, false), { wrapper })
     await new Promise((r) => setTimeout(r, 100))
     expect(calls).toHaveLength(0)
   })
@@ -170,19 +170,18 @@ describe("logSettling", () => {
 })
 
 describe("useJobLog", () => {
-  it("asks again by the clock it is given", async () => {
+  it("asks again only while it is told the log is settling", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
     try {
       const { calls } = mockApi({ "GET /api/actions/darkmem/jobs/1002/log": { ...fixtures.jobLog, no_log: true, steps: [] } })
       const { wrapper } = withQuery()
-      const completedAt = "2026-10-03T14:00:00Z"
-      const { rerender } = renderHook(({ now }: { now: number }) => useJobLog("darkmem", 1002, true, completedAt, now), {
+      const { rerender } = renderHook(({ settling }: { settling: boolean }) => useJobLog("darkmem", 1002, true, settling), {
         wrapper,
-        initialProps: { now: Date.parse(completedAt) + 30_000 },
+        initialProps: { settling: true },
       })
       await act(() => vi.advanceTimersByTimeAsync(15_000))
       expect(calls).toHaveLength(2)
-      rerender({ now: Date.parse(completedAt) - 60_000 })
+      rerender({ settling: false })
       await act(() => vi.advanceTimersByTimeAsync(30_000))
       expect(calls).toHaveLength(2)
     } finally {
