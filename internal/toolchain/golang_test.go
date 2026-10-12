@@ -51,6 +51,39 @@ func TestGoResolvesFromTheManifestAndGoDev(t *testing.T) {
 	}
 }
 
+// The go-versions manifest writes every release with three parts; go.dev
+// names the first release of a minor before 1.21 without its ".0".
+func TestGoResolvesADotZeroReleaseUnderGoDevsName(t *testing.T) {
+	f := newFixture(t)
+	f.serve("/go.json", []byte(`[
+ {"version":"1.21.0","stable":true,"files":[{"filename":"go-1.21.0-linux-x64.tar.gz","arch":"x64","platform":"linux","download_url":"https://example.invalid/a"}]},
+ {"version":"1.20.0","stable":true,"files":[{"filename":"go-1.20.0-linux-x64.tar.gz","arch":"x64","platform":"linux","download_url":"https://example.invalid/b"}]},
+ {"version":"1.19.0","stable":true,"files":[{"filename":"go-1.19.0-linux-x64.tar.gz","arch":"x64","platform":"linux","download_url":"https://example.invalid/c"}]},
+ {"version":"1.18.10","stable":true,"files":[{"filename":"go-1.18.10-linux-x64.tar.gz","arch":"x64","platform":"linux","download_url":"https://example.invalid/d"}]}
+]`))
+	f.serve("/godl.json", goReleases(map[string]string{
+		"go1.21.0.linux-amd64.tar.gz": "210",
+		"go1.21.linux-amd64.tar.gz":   "21",
+		"go1.20.linux-amd64.tar.gz":   "20",
+		"go1.18.1.linux-amd64.tar.gz": "181",
+	}))
+	g := newGo(f.Env)
+	rel, err := g.Resolve(context.Background(), "1.20.0")
+	if want := (Release{Tool: "go", Version: "1.20.0", Folder: "1.20.0", URL: f.url + "/dl/go1.20.linux-amd64.tar.gz", SHA256: "20"}); err != nil || rel != want {
+		t.Fatalf("1.20.0 resolved %+v, %v", rel, err)
+	}
+	rel, err = g.Resolve(context.Background(), "1.21.0")
+	if want := (Release{Tool: "go", Version: "1.21.0", Folder: "1.21.0", URL: f.url + "/dl/go1.21.0.linux-amd64.tar.gz", SHA256: "210"}); err != nil || rel != want {
+		t.Fatalf("1.21.0 resolved %+v, %v; the manifest's spelling comes first", rel, err)
+	}
+	if _, err := g.Resolve(context.Background(), "1.19.0"); err == nil || !strings.Contains(err.Error(), "go.dev lists no SHA-256 for go1.19.0.linux-amd64.tar.gz") {
+		t.Fatalf("a release go.dev lists under neither name: %v", err)
+	}
+	if _, err := g.Resolve(context.Background(), "1.18.10"); err == nil {
+		t.Fatal("1.18.10 is not a first release, so it has no shorter name")
+	}
+}
+
 func TestGoInstallIsFoundBySetupGo(t *testing.T) {
 	f := newFixture(t)
 	archive := tarGz(map[string]string{"go/bin/go": "go"})
