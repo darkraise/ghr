@@ -41,23 +41,64 @@ describe("ConfirmDialog", () => {
   })
 })
 
-function Tags({ initial = [] as string[] }) {
+function Tags({ initial = [] as string[], exact = false }) {
   const [value, setValue] = useState(initial)
-  return <TagField label="Labels" value={value} onChange={setValue} />
+  return <TagField label="Labels" value={value} onChange={setValue} exact={exact} />
+}
+
+const tags = () => screen.getAllByRole("button", { name: /^Remove / }).map((b) => b.getAttribute("aria-label"))
+
+async function enter(user: ReturnType<typeof userEvent.setup>, text: string) {
+  await user.click(screen.getByRole("textbox", { name: "Labels" }))
+  await user.paste(text)
+  await user.keyboard("{Enter}")
 }
 
 describe("TagField", () => {
-  it("adds trimmed tags by Enter and by the button, skipping duplicates", async () => {
+  it("adds trimmed tags by Enter and by the button", async () => {
     const user = userEvent.setup()
     render(<Tags initial={["gpu"]} />)
     await user.type(screen.getByRole("textbox", { name: "Labels" }), "  big {Enter}")
-    await user.type(screen.getByRole("textbox", { name: "Labels" }), "gpu")
+    await user.type(screen.getByRole("textbox", { name: "Labels" }), "fast")
     await user.click(screen.getByRole("button", { name: "Add to Labels" }))
-    expect(screen.getAllByRole("button", { name: /^Remove / }).map((b) => b.getAttribute("aria-label"))).toEqual([
-      "Remove gpu",
-      "Remove big",
-    ])
+    expect(tags()).toEqual(["Remove gpu", "Remove big", "Remove fast"])
     expect(screen.getByRole("textbox", { name: "Labels" })).toHaveValue("")
+  })
+
+  it.each([
+    ["a duplicate", "gpu", "Already listed as gpu"],
+    ["a duplicate in another case", "GPU", "Already listed as gpu"],
+  ])("refuses %s, keeps the text and says why", async (_what, typed, reason) => {
+    const user = userEvent.setup()
+    render(<Tags initial={["gpu"]} />)
+    await enter(user, typed)
+    const box = screen.getByRole("textbox", { name: "Labels" })
+    expect(box).toHaveValue(typed)
+    expect(screen.getByText(reason)).toBeInTheDocument()
+    expect(tags()).toEqual(["Remove gpu"])
+    await user.type(box, "x")
+    expect(screen.queryByText(reason)).toBeNull()
+  })
+
+  it("drops the reason once the tag is added", async () => {
+    const user = userEvent.setup()
+    render(<Tags initial={["gpu"]} />)
+    await enter(user, "GPU")
+    expect(screen.getByText("Already listed as gpu")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Remove gpu" }))
+    await user.click(screen.getByRole("button", { name: "Add to Labels" }))
+    expect(tags()).toEqual(["Remove GPU"])
+    expect(screen.queryByText("Already listed as gpu")).toBeNull()
+  })
+
+  it("compares exactly when asked to", async () => {
+    const user = userEvent.setup()
+    render(<Tags initial={["test_"]} exact />)
+    await enter(user, "Test_")
+    expect(tags()).toEqual(["Remove test_", "Remove Test_"])
+    await enter(user, "test_")
+    expect(screen.getByText("Already listed as test_")).toBeInTheDocument()
+    expect(tags()).toEqual(["Remove test_", "Remove Test_"])
   })
 
   it("removes a tag", async () => {

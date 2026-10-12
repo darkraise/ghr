@@ -13,6 +13,7 @@ export function TagField({
   disabled,
   maxLength = MAX_TAG,
   className = "",
+  exact,
 }: {
   label: string
   value: string[]
@@ -20,20 +21,23 @@ export function TagField({
   disabled?: boolean
   maxLength?: number
   className?: string
+  // The daemon refuses labels that differ only in case, so a duplicate is
+  // found ignoring case unless the list is one it compares exactly.
+  exact?: boolean
 }) {
   const [text, setText] = useState("")
-  const [tooLong, setTooLong] = useState(false)
+  const [refused, setRefused] = useState("")
   const fieldAria = useFieldAria()
   const errorId = useId()
 
   function add() {
     const tag = text.trim()
-    if ([...tag].length > maxLength) {
-      setTooLong(true)
-      return
-    }
-    if (tag !== "" && !value.includes(tag)) onChange([...value, tag])
+    if ([...tag].length > maxLength) return setRefused(`At most ${maxLength} characters`)
+    const listed = value.find((t) => (exact ? t === tag : t.toLowerCase() === tag.toLowerCase()))
+    if (listed !== undefined) return setRefused(`Already listed as ${listed}`)
+    if (tag !== "") onChange([...value, tag])
     setText("")
+    setRefused("")
   }
 
   return (
@@ -60,8 +64,8 @@ export function TagField({
       <div className="flex gap-2">
         <Input
           {...fieldAria}
-          aria-describedby={[fieldAria["aria-describedby"], tooLong ? errorId : ""].filter(Boolean).join(" ") || undefined}
-          aria-invalid={fieldAria["aria-invalid"] || tooLong || undefined}
+          aria-describedby={[fieldAria["aria-describedby"], refused ? errorId : ""].filter(Boolean).join(" ") || undefined}
+          aria-invalid={fieldAria["aria-invalid"] || Boolean(refused) || undefined}
           aria-label={label}
           placeholder="+ add"
           className="min-w-0 flex-1"
@@ -69,7 +73,7 @@ export function TagField({
           disabled={disabled}
           onChange={(e) => {
             setText(e.target.value)
-            setTooLong(false)
+            setRefused("")
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -82,9 +86,9 @@ export function TagField({
           Add
         </Button>
       </div>
-      {tooLong && (
+      {refused && (
         <p id={errorId} role="alert" className="text-xs text-destructive">
-          At most {maxLength} characters
+          {refused}
         </p>
       )}
     </div>
