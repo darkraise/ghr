@@ -76,6 +76,24 @@ describe("api client", () => {
     await expect(api.status()).rejects.toMatchObject({ status: 404, message: "404 page not found" })
   })
 
+  it.each<[string, string, string, string]>([
+    ["an HTML body", "<html><body><h1>502 Bad Gateway</h1><p>nginx</p></body></html>", "text/html", "502 Bad Gateway"],
+    ["JSON with no error field", '{"detail":"upstream timed out"}', "application/json", "502 Bad Gateway"],
+    ["an empty plain-text body", "", "text/plain", "502 Bad Gateway"],
+    ["a long plain-text body", "x".repeat(300), "text/plain; charset=utf-8", "x".repeat(200)],
+    ["JSON with an error field and the wrong type", '{"error":"upstream is down"}', "text/html", "upstream is down"],
+  ])("reads the error message from %s", async (_name, body, contentType, want) => {
+    mockApi({
+      "GET /api/status": () => new Response(body, { status: 502, statusText: "Bad Gateway", headers: { "Content-Type": contentType } }),
+    })
+    await expect(api.status()).rejects.toMatchObject({ status: 502, message: want })
+  })
+
+  it("accepts an empty body on a 200", async () => {
+    mockApi({ "POST /api/pause-all": () => new Response(null, { status: 200 }) })
+    await expect(api.pauseAll()).resolves.toBeUndefined()
+  })
+
   it("sends JSON bodies and builds query strings", async () => {
     const { calls } = mockApi({ "POST /auth/setup": () => noContent(), "GET /api/history": [] })
     await api.setup("ABCDE-FGHJK-MNPQR-STVWX", "correct horse battery")

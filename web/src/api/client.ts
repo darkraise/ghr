@@ -63,8 +63,8 @@ export async function request<T>(method: string, path: string, body?: unknown, s
   }
   const res = await fetch(path, { method, headers, credentials: "same-origin", body: payload, signal })
   if (res.ok) {
-    if (res.status === 202 || res.status === 204) return undefined as T
-    return (await res.json()) as T
+    const text = await res.text()
+    return (text === "" ? undefined : JSON.parse(text)) as T
   }
   const err = await toError(res)
   // A 401 from the API or /auth/password means "log in again"; one from
@@ -83,16 +83,21 @@ async function requestBlob(path: string): Promise<Blob> {
   throw err
 }
 
+const PLAIN_ERROR_MAX = 200
+
+// A body that is neither the daemon's JSON nor plain text is a page from
+// something in between, a proxy's HTML for example, and is not shown.
 async function toError(res: Response): Promise<ApiError> {
   const text = await res.text()
-  let message = text.trim() || `${res.status} ${res.statusText}`.trim()
+  const plain = (res.headers.get("Content-Type") ?? "").toLowerCase().startsWith("text/plain")
+  let message = (plain && text.trim().slice(0, PLAIN_ERROR_MAX)) || `${res.status} ${res.statusText}`.trim()
   let retryAt: Date | undefined
   try {
     const parsed = JSON.parse(text) as { error?: unknown; retry_at?: unknown }
     if (typeof parsed.error === "string") message = parsed.error
     if (typeof parsed.retry_at === "string") retryAt = new Date(parsed.retry_at)
   } catch {
-    // a plain-text body keeps its text as the message
+    // not JSON: the message above stands
   }
   return new ApiError(res.status, message, retryAt)
 }
