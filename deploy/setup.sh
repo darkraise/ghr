@@ -26,6 +26,8 @@ HOOKS_DIR="$OPT_DIR/hooks"
 STATE_DIR=/var/lib/ghr
 ETC_DIR=/etc/ghr
 APT_SOURCES_DIR=/etc/apt/sources.list.d
+KEYRING_DIR=/etc/apt/keyrings
+DOCKER_KEY_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 READY_TIMEOUT=60
 FIRST_INSTALL=0
 
@@ -50,18 +52,48 @@ URIs: https://download.docker.com/linux/debian
 Suites: ${VERSION_CODENAME}
 Components: stable
 Architectures: $(dpkg --print-architecture)
-Signed-By: /etc/apt/keyrings/docker.asc
+Signed-By: $KEYRING_DIR/docker.asc
 EOF
   rm -f "$APT_SOURCES_DIR/docker.list"
+}
+
+# Downloads Docker's apt key into $1, imports it into a throwaway keyring and
+# writes gpg's export of the pinned key to $1/docker.asc. Every step is in one
+# && chain, because errexit does not apply inside a function called from `if`.
+export_docker_key() {
+  local work="$1" home="$1/gnupg" records fpr
+  mkdir -m 0700 "$home" &&
+    curl -fsSL https://download.docker.com/linux/debian/gpg -o "$work/download.asc" &&
+    gpg --homedir "$home" --batch --no-tty --quiet --import "$work/download.asc" &&
+    records=$(gpg --homedir "$home" --batch --no-tty --with-colons --list-keys "$DOCKER_KEY_FINGERPRINT") &&
+    fpr=$(awk -F: 'prev == "pub" && $1 == "fpr" { print $10; exit } { prev = $1 }' <<<"$records") &&
+    [ "$fpr" = "$DOCKER_KEY_FINGERPRINT" ] &&
+    gpg --homedir "$home" --batch --no-tty --armor --export "$DOCKER_KEY_FINGERPRINT" > "$work/docker.asc" &&
+    [ "$(head -n 1 "$work/docker.asc")" = "-----BEGIN PGP PUBLIC KEY BLOCK-----" ]
+}
+
+# apt trusts every key in a Signed-By file and may read a crafted file differently
+# from gpg, so the downloaded bytes are never installed: the key is re-exported by
+# gpg, which writes exactly the pinned key and nothing else.
+install_docker_key() {
+  local work status=0
+  work=$(mktemp -d)
+  export_docker_key "$work" || status=1
+  # gpg --import starts a gpg-agent for the throwaway keyring.
+  gpgconf --homedir "$work/gnupg" --kill all >/dev/null 2>&1 || true
+  if [ "$status" = 0 ]; then
+    install -m 0755 -d "$KEYRING_DIR" && install -m 0644 "$work/docker.asc" "$KEYRING_DIR/docker.asc" || status=2
+  fi
+  rm -rf "$work"
+  [ "$status" != 1 ] || die "Docker apt key has an unexpected fingerprint"
+  [ "$status" != 2 ] || die "could not install Docker's apt key"
 }
 
 install_docker() {
   log "installing or upgrading Docker Engine and base packages"
   apt-get update -qq
-  apt-get install -y -qq ca-certificates curl
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-  chmod a+r /etc/apt/keyrings/docker.asc
+  apt-get install -y -qq ca-certificates curl gnupg
+  install_docker_key
   write_docker_source
   apt-get update -qq
   # Re-runs upgrade installed packages; keep locally edited conffiles (e.g.

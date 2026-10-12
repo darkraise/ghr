@@ -13,6 +13,11 @@ set +e
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 
+# setup.sh installs Docker's key under /etc. The directory is redirected into $T
+# before any case runs; run refuses to start a function while it points elsewhere.
+DEFAULT_KEYRING_DIR=$KEYRING_DIR
+KEYRING_DIR="$T/keyrings"
+
 FAILS=0
 check() {
   local name="$1"
@@ -30,7 +35,14 @@ absent() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
 count() { cat "$MARK_DIR/$1"; }
 bump() { echo $(($(count "$1") + 1)) > "$MARK_DIR/$1"; }
 # Runs a setup.sh function the way main runs: errexit on, die exits a subshell.
-run() { (set -e; "$@"); }
+# It refuses to run while a redirected directory points outside the temporary tree.
+run() {
+  case "$KEYRING_DIR" in
+    "$T"/*) ;;
+    *) echo "refusing to run: KEYRING_DIR=$KEYRING_DIR is outside $T" >&2; return 99 ;;
+  esac
+  (set -e; "$@")
+}
 
 # Git Bash without Windows symlink rights silently copies on `ln -s`; there the
 # `current` link is emulated with a pointer file so the same assertions apply.
@@ -112,6 +124,7 @@ new_case() {
   MARK_DIR="$T/$1/mark"
   STATE_DIR="$T/$1/state"
   OPT_DIR="$T/$1/opt"
+  KEYRING_DIR="$T/$1/keyrings"
   mkdir -p "$DIST_DIR" "$MARK_DIR" "$STATE_DIR" "$OPT_DIR"
   cp "$HERE/../config.example.yaml" "$OPT_DIR/"
   echo 0 > "$MARK_DIR/fetches"
@@ -280,24 +293,129 @@ else
   echo "note: skipping the piped-run test as root, where it would install for real"
 fi
 
-# (f) The apt step installs the libraries the python-versions builds link.
-new_case f-apt
-out=$( (
+# (f) The apt step installs the libraries the python-versions builds link, and
+# Docker's apt key only as gpg's own export of the pinned key. The downloaded
+# bytes are never installed.
+# fake_docker_key makes curl save $1 as the download. The fake gpg reads it as
+# lines of "KEY <primary fpr> [<subkey fpr> ...]" and ignores any other line, then
+# imports, lists and exports those keys the way gpg does: a key it does not hold
+# fails to list but exports nothing with status 0. It refuses to run without a
+# private, empty-at-start --homedir, so a run can never touch the real keyring.
+# CURL_RC, GPG_IMPORT_RC and GPG_EXPORT (empty or noheader) inject failures.
+DOCKER_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+OTHER_FPR=D3306A018370199E527AE7997EA0A9C3F273FCD8
+ZERO_FPR=0000000000000000000000000000000000000000
+fake_docker_key() {
+  KEY_DOWNLOAD="$1"
+  curl() {
+    local out=""
+    while [ $# -gt 0 ]; do
+      [ "$1" != -o ] || out="$2"
+      shift
+    done
+    echo download >> "$MARK_DIR/curls"
+    dirname "$out" > "$MARK_DIR/workdir"
+    [ "${CURL_RC:-0}" = 0 ] || return "$CURL_RC"
+    printf '%s\n' "$KEY_DOWNLOAD" > "$out"
+  }
+  gpg() {
+    local home="" cmd="" want="" line
+    echo "$*" >> "$MARK_DIR/gpg-calls"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --homedir) home="$2"; shift ;;
+        --import | --list-keys | --export) cmd="$1"; want="$2"; shift ;;
+      esac
+      shift
+    done
+    [ -d "$home" ] && [ "$(stat -c %a "$home")" = 700 ] || return 99
+    case "$cmd" in
+      --import)
+        [ "${GPG_IMPORT_RC:-0}" = 0 ] || return "$GPG_IMPORT_RC"
+        cp "$want" "$home/keyring"
+        ;;
+      --list-keys | --export)
+        line=$(awk -v f="$want" '$1 == "KEY" { for (i = 2; i <= NF; i++) if ($i == f) { print; exit } }' "$home/keyring")
+        if [ "$cmd" = --list-keys ]; then
+          [ -n "$line" ] || return 2
+          read -ra k <<<"$line"
+          printf 'pub:-:4096:1:8D81803C0EBFCD88:1487788586:::-:::scESCA::::::23::0:\nfpr:::::::::%s:\n' "${k[1]}"
+          for sub in "${k[@]:2}"; do printf 'sub:-:4096:1:7EA0A9C3F273FCD8:1487788586::::::s::::::23:\nfpr:::::::::%s:\n' "$sub"; done
+        elif [ -n "$line" ] && [ "${GPG_EXPORT:-}" != empty ]; then
+          read -ra k <<<"$line"
+          [ "${GPG_EXPORT:-}" = noheader ] || echo "-----BEGIN PGP PUBLIC KEY BLOCK-----"
+          echo "EXPORT ${k[1]}"
+        fi
+        ;;
+    esac
+  }
+  gpgconf() { echo "$*" >> "$MARK_DIR/gpgconf-calls"; }
+}
+install_docker_stubs() {
   apt-get() { echo "apt-get $*" >> "$MARK_DIR/apt"; }
-  curl() { :; }
-  install() { :; }
-  chmod() { :; }
   write_docker_source() { :; }
   systemctl() { :; }
   docker() { :; }
-  run install_docker
-) 2>&1)
-rc=$?
+}
+key_install() {
+  out=$( (install_docker_stubs; fake_docker_key "$1"; run install_docker) 2>&1)
+  rc=$?
+}
+refuses() {
+  new_case "f-key-$1"
+  key_install "$2"
+  check "f: $1 stops the install" [ "$rc" -ne 0 ]
+  check "f: $1 says the fingerprint is unexpected" contains "$out" "Docker apt key has an unexpected fingerprint"
+  check "f: $1 writes nothing to the keyring directory" absent "$KEYRING_DIR"
+  check "f: $1 stops before the Docker packages" lacks "$(cat "$MARK_DIR/apt")" "docker-ce"
+  check "f: $1 removes its working directory" absent "$(cat "$MARK_DIR/workdir")"
+}
+
+new_case f-apt
+key_install "KEY $DOCKER_FPR $OTHER_FPR"
 check "f: install_docker succeeds with stubs" [ "$rc" -eq 0 ]
 apt=$(cat "$MARK_DIR/apt" 2>/dev/null)
 for lib in libssl3t64 libffi8 libsqlite3-0 liblzma5 libbz2-1.0 libgdbm6t64 libncursesw6 libreadline8t64 libtcl8.6 libtk8.6; do
   check "f: apt installs $lib" contains "$apt" " $lib"
 done
+check "f: apt installs gnupg with ca-certificates and curl" contains "$apt" "ca-certificates curl gnupg"
+check "f: the key is downloaded once" [ "$(wc -l < "$MARK_DIR/curls")" -eq 1 ]
+check "f: the installed key is gpg's export of the pinned key" [ "$(cat "$KEYRING_DIR/docker.asc")" = "$(printf '%s\n' '-----BEGIN PGP PUBLIC KEY BLOCK-----' "EXPORT $DOCKER_FPR")" ]
+check "f: docker.asc is world-readable" [ "$(stat -c %a "$KEYRING_DIR/docker.asc")" = 644 ]
+check "f: gpg ran three times: import, list, export" [ "$(wc -l < "$MARK_DIR/gpg-calls")" -eq 3 ]
+check "f: every gpg call used a throwaway --homedir" [ "$(grep -vc '^--homedir /' "$MARK_DIR/gpg-calls")" -eq 0 ]
+check "f: every gpg call ran in batch mode without a terminal" [ "$(grep -vc -e '--batch --no-tty' "$MARK_DIR/gpg-calls")" -eq 0 ]
+check "f: the throwaway gpg-agent is stopped" contains "$(cat "$MARK_DIR/gpgconf-calls")" "--kill all"
+check "f: and the working directory is removed" absent "$(cat "$MARK_DIR/workdir")"
+
+new_case f-key-extra
+key_install "KEY $DOCKER_FPR
+KEY $ZERO_FPR $OTHER_FPR
+TRAILING-DATA-AFTER-THE-KEY"
+check "f: a download holding a second key installs" [ "$rc" -eq 0 ]
+check "f: only the pinned key's export reaches the keyring" [ "$(cat "$KEYRING_DIR/docker.asc")" = "$(printf '%s\n' '-----BEGIN PGP PUBLIC KEY BLOCK-----' "EXPORT $DOCKER_FPR")" ]
+check "f: the second key is not in docker.asc" lacks "$(cat "$KEYRING_DIR/docker.asc")" "$ZERO_FPR"
+check "f: trailing data is not in docker.asc" lacks "$(cat "$KEYRING_DIR/docker.asc")" "TRAILING"
+check "f: nothing else is in the keyring directory" [ "$(ls "$KEYRING_DIR")" = docker.asc ]
+
+refuses missing-pinned-key "KEY $ZERO_FPR"
+refuses empty-download ""
+refuses pinned-only-as-subkey "KEY $ZERO_FPR $DOCKER_FPR"
+refuses lowercase-primary "KEY ${DOCKER_FPR,,} $DOCKER_FPR"
+refuses short-primary "KEY ${DOCKER_FPR:0:39} $DOCKER_FPR"
+refuses long-primary "KEY ${DOCKER_FPR}0 $DOCKER_FPR"
+CURL_RC=22 refuses failed-download "KEY $DOCKER_FPR"
+GPG_IMPORT_RC=2 refuses failed-import "KEY $DOCKER_FPR"
+GPG_EXPORT=empty refuses empty-export "KEY $DOCKER_FPR"
+GPG_EXPORT=noheader refuses export-without-armor "KEY $DOCKER_FPR"
+
+new_case f-key-existing
+mkdir -p "$KEYRING_DIR"
+echo "key from an earlier run" > "$KEYRING_DIR/docker.asc"
+GPG_EXPORT=empty key_install "KEY $DOCKER_FPR"
+check "f: a failed run stops the install over an existing docker.asc" [ "$rc" -ne 0 ]
+check "f: and leaves the earlier docker.asc as it was" [ "$(cat "$KEYRING_DIR/docker.asc")" = "key from an earlier run" ]
+check "f: and adds nothing next to it" [ "$(ls "$KEYRING_DIR")" = docker.asc ]
 
 # (g) A first install queues the popular toolchains; an upgrade does not.
 new_case g-first-install
@@ -584,9 +702,10 @@ for pass in first second; do
 done
 src=$(cat "$APT_SOURCES_DIR/docker.sources" 2>/dev/null)
 for line in "Types: deb" "URIs: https://download.docker.com/linux/debian" "Suites: trixie" "Components: stable" \
-  "Architectures: amd64" "Signed-By: /etc/apt/keyrings/docker.asc"; do
+  "Architectures: amd64" "Signed-By: $KEYRING_DIR/docker.asc"; do
   check "e: docker.sources has $line" contains "$src" "$line"
 done
+check "e: Docker's key goes to /etc/apt/keyrings by default" [ "$DEFAULT_KEYRING_DIR" = /etc/apt/keyrings ]
 
 echo
 if [ "$FAILS" -gt 0 ]; then
