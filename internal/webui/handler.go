@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/darkraise/ghr/internal/api"
 )
 
 const (
@@ -160,7 +162,7 @@ func (h *handler) session(r *http.Request) (string, bool) {
 
 // requireSession serves next only for a logged-in session, and cancels the
 // request's context once that session ends: logout, a password change or
-// reset, or expiry.
+// reset, or expiry. The context it hands on carries the browser mark.
 func (h *handler) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id, ok := h.session(r)
@@ -169,7 +171,7 @@ func (h *handler) requireSession(next http.Handler) http.Handler {
 			return
 		}
 		every, after := sessionRecheck, afterFunc
-		ctx, cancel := context.WithCancel(r.Context())
+		ctx, cancel := context.WithCancel(api.WithBrowser(r.Context(), r.Host))
 		defer cancel()
 		var mu sync.Mutex
 		done := false

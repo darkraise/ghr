@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/darkraise/ghr/internal/api"
 )
 
 type fakeAPI struct{ paths []string }
@@ -182,6 +184,44 @@ func TestLoginEndsWithTheRequest(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the login handler ignored the request context")
+	}
+}
+
+// Every /api/ request a session lets through reaches the API marked as the
+// browser's, with the Host it sent, past the /api prefix strip. A request
+// the session check refuses never reaches it.
+func TestAPIRequestsCarryTheBrowserMark(t *testing.T) {
+	a, _ := newTestAuth(t)
+	var seen []string
+	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, ok := api.Browser(r.Context())
+		if !ok {
+			host = "(no mark)"
+		}
+		seen = append(seen, r.Method+" "+r.URL.Path+" "+host)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	h := Handler(a, backend, testFS(), []string{"ghr.lan"})
+	id, err := a.Setup(pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := do(h, http.MethodGet, "/api/status", "", withCookie(id)); rec.Code != http.StatusNoContent {
+		t.Fatalf("status: %d %s", rec.Code, rec.Body.String())
+	}
+	byIP := func(r *http.Request) {
+		withCookie(id)(r)
+		r.Host = "192.168.0.99:8080"
+	}
+	if rec := do(h, http.MethodPatch, "/api/config", `{}`, byIP); rec.Code != http.StatusNoContent {
+		t.Fatalf("patch: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(h, http.MethodPatch, "/api/config", `{}`, nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("without a session: %d", rec.Code)
+	}
+	want := []string{"GET /status ghr.lan:8080", "PATCH /config 192.168.0.99:8080"}
+	if strings.Join(seen, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("the API saw %q, want %q", seen, want)
 	}
 }
 
