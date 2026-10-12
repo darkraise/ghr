@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/iotest"
+	"testing/synctest"
 	"time"
 
 	"github.com/darkraise/ghr/internal/changes"
@@ -355,9 +356,132 @@ func TestMutations(t *testing.T) {
 
 func TestUnreachableDaemon(t *testing.T) {
 	c := NewUnixClient("/nonexistent/ghr.sock")
-	if _, err := c.Status(context.Background()); err == nil {
-		t.Fatal("expected error")
+	if _, err := c.Status(context.Background()); err == nil || !strings.HasPrefix(err.Error(), "ghr daemon unreachable: ") {
+		t.Fatalf("err %v", err)
 	}
+	if c.HTTP.Timeout != 0 {
+		t.Fatalf("the client cuts every call after %v, also the ones with a longer limit of their own", c.HTTP.Timeout)
+	}
+}
+
+// slowDaemon answers every request with 204 after its delay, or gives up when
+// the request's context ends first, as a transport does.
+type slowDaemon time.Duration
+
+func (d slowDaemon) RoundTrip(r *http.Request) (*http.Response, error) {
+	select {
+	case <-time.After(time.Duration(d)):
+		return &http.Response{StatusCode: http.StatusNoContent, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
+	case <-r.Context().Done():
+		return nil, r.Context().Err()
+	}
+}
+
+// The bubble's clock is fake, so the limits under test are the real ones.
+func TestCallTimeLimits(t *testing.T) {
+	status := func(ctx context.Context, c *Client) error {
+		_, err := c.Status(ctx)
+		return err
+	}
+	kill := func(ctx context.Context, c *Client) error { return c.Kill(ctx, "a3f9c1") }
+	for _, tc := range []struct {
+		name    string
+		answer  time.Duration
+		call    func(context.Context, *Client) error
+		want    string
+		elapsed time.Duration
+	}{
+		{"a call answered in time", 29 * time.Second, status, "", 29 * time.Second},
+		{"a call not answered", time.Hour, status, "ghr daemon did not answer within 30s; the request may still be running", 30 * time.Second},
+		{"a stop that takes systemd's 90 seconds", 95 * time.Second, kill, "", 95 * time.Second},
+		{"a stop not answered", time.Hour, kill, "ghr daemon did not answer within 100s; the request may still be running", 100 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				c := &Client{Base: "http://ghr", HTTP: &http.Client{Transport: slowDaemon(tc.answer)}}
+				start := time.Now()
+				err := tc.call(context.Background(), c)
+				if got := time.Since(start); got != tc.elapsed {
+					t.Errorf("returned after %v, want %v", got, tc.elapsed)
+				}
+				switch {
+				case tc.want == "" && err != nil:
+					t.Fatalf("err %v", err)
+				case tc.want != "" && (err == nil || err.Error() != tc.want):
+					t.Fatalf("err %v, want %s", err, tc.want)
+				}
+			})
+		})
+	}
+}
+
+// stalledBody is a response body that never arrives; the read gives up when
+// the request's context ends.
+type stalledBody struct{ ctx context.Context }
+
+func (b stalledBody) Read([]byte) (int, error) {
+	select {
+	case <-time.After(time.Hour):
+		return 0, io.EOF
+	case <-b.ctx.Done():
+		return 0, b.ctx.Err()
+	}
+}
+
+func (stalledBody) Close() error { return nil }
+
+// stalledDaemon answers at once with its status and then never sends the body.
+type stalledDaemon int
+
+func (d stalledDaemon) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: int(d), Status: fmt.Sprintf("%d %s", int(d), http.StatusText(int(d))),
+		Header: http.Header{}, Body: stalledBody{r.Context()}, Request: r,
+	}, nil
+}
+
+// A call cut short while it reads the response is reported like one cut
+// short before it: by its limit, or by its caller. That holds for an error
+// response too. Its unread body must not become an API error, nor the advice
+// to restart an older daemon that a 404 or 405 without JSON gets.
+func TestCallCutShortWhileReadingTheResponse(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusInternalServerError} {
+		for _, cancelled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("status %d, cancelled %v", status, cancelled), func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					c := &Client{Base: "http://ghr", HTTP: &http.Client{Transport: stalledDaemon(status)}}
+					ctx, cancel := context.WithCancel(context.Background())
+					defer cancel()
+					if cancelled {
+						time.AfterFunc(10*time.Second, cancel)
+					}
+					_, err := c.Status(ctx)
+					const limit = "ghr daemon did not answer within 30s; the request may still be running"
+					switch {
+					case cancelled && err != context.Canceled:
+						t.Fatalf("err %v, want the caller's own context error", err)
+					case !cancelled && (err == nil || err.Error() != limit):
+						t.Fatalf("err %v, want %s", err, limit)
+					}
+				})
+			})
+		}
+	}
+}
+
+// A caller that gives up (Ctrl-C in the CLI) gets its own context's error
+// back, not a report that the daemon cannot be reached.
+func TestCallEndedByItsCaller(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := &Client{Base: "http://ghr", HTTP: &http.Client{Transport: slowDaemon(time.Hour)}}
+		ctx, cancel := context.WithCancel(context.Background())
+		time.AfterFunc(10*time.Second, cancel)
+		start := time.Now()
+		err := c.Kill(ctx, "a3f9c1")
+		if err != context.Canceled || time.Since(start) != 10*time.Second {
+			t.Fatalf("err %v after %v", err, time.Since(start))
+		}
+	})
 }
 
 func TestGitHubErrorsMapToStatuses(t *testing.T) {

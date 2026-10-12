@@ -22,17 +22,43 @@ type Client struct {
 	HTTP *http.Client
 }
 
-// NewUnixClient talks to the daemon over its Unix socket.
+const (
+	callLimit = 30 * time.Second
+	// killLimit is above systemd's default stop timeout of 90 seconds: the
+	// daemon answers a kill once the runner's unit has stopped.
+	killLimit = 100 * time.Second
+)
+
+// NewUnixClient talks to the daemon over its Unix socket. The HTTP client
+// has no timeout of its own: every call sets its limit.
 func NewUnixClient(socket string) *Client {
 	tr := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		var d net.Dialer
 		return d.DialContext(ctx, "unix", socket)
 	}}
-	return &Client{Base: "http://ghr", HTTP: &http.Client{Transport: tr, Timeout: 30 * time.Second}}
+	return &Client{Base: "http://ghr", HTTP: &http.Client{Transport: tr}}
 }
 
 func (c *Client) call(ctx context.Context, method, path string, body io.Reader, out any) error {
-	req, err := http.NewRequestWithContext(ctx, method, c.Base+path, body)
+	return c.callWithin(ctx, callLimit, method, path, body, out)
+}
+
+// callWithin gives the daemon limit to answer, response body included.
+func (c *Client) callWithin(ctx context.Context, limit time.Duration, method, path string, body io.Reader, out any) error {
+	callCtx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	// early names the reason when the call was cut short rather than failed:
+	// the caller's context, returned as it is, or the call's own limit.
+	early := func() error {
+		switch {
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case callCtx.Err() != nil:
+			return fmt.Errorf("ghr daemon did not answer within %ds; the request may still be running", int(limit/time.Second))
+		}
+		return nil
+	}
+	req, err := http.NewRequestWithContext(callCtx, method, c.Base+path, body)
 	if err != nil {
 		return err
 	}
@@ -41,6 +67,9 @@ func (c *Client) call(ctx context.Context, method, path string, body io.Reader, 
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
+		if e := early(); e != nil {
+			return e
+		}
 		return fmt.Errorf("ghr daemon unreachable: %w", err)
 	}
 	defer resp.Body.Close()
@@ -50,6 +79,12 @@ func (c *Client) call(ctx context.Context, method, path string, body io.Reader, 
 			RetryAt time.Time `json:"retry_at"`
 		}
 		derr := json.NewDecoder(resp.Body).Decode(&e)
+		if derr != nil {
+			// An error body cut short says nothing about the daemon.
+			if cut := early(); cut != nil {
+				return cut
+			}
+		}
 		// The daemon's handlers always answer JSON; a plain-text 404 or 405
 		// is the router of a daemon that predates this route.
 		if derr != nil && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
@@ -64,7 +99,13 @@ func (c *Client) call(ctx context.Context, method, path string, body io.Reader, 
 	if out == nil || resp.StatusCode == http.StatusNoContent {
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		if e := early(); e != nil {
+			return e
+		}
+		return err
+	}
+	return nil
 }
 
 func jsonBody(v any) io.Reader {
@@ -157,7 +198,7 @@ func (c *Client) SetToken(ctx context.Context, token string) error {
 }
 
 func (c *Client) Kill(ctx context.Context, id string) error {
-	return c.call(ctx, http.MethodDelete, "/runners/"+url.PathEscape(id), nil, nil)
+	return c.callWithin(ctx, killLimit, http.MethodDelete, "/runners/"+url.PathEscape(id), nil, nil)
 }
 
 // Reload makes the daemon re-read config.yaml and its token; it returns the config warnings.

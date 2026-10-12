@@ -598,13 +598,16 @@ func unconfiguredOptions(t *testing.T, extra string) (Options, chan os.Signal) {
 	return o, reload
 }
 
-// socketCall is a raw request over the Unix socket.
+// socketCall is a raw request over the Unix socket. The client's HTTP client
+// has no timeout, so the request carries its own.
 func socketCall(socket, method, path, body string) (int, string, error) {
 	var rd io.Reader
 	if body != "" {
 		rd = strings.NewReader(body)
 	}
-	req, _ := http.NewRequest(method, "http://ghr"+path, rd)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, method, "http://ghr"+path, rd)
 	resp, err := api.NewUnixClient(socket).HTTP.Do(req)
 	if err != nil {
 		return 0, "", err
