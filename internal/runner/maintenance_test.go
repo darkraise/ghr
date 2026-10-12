@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/darkraise/ghr/internal/model"
 )
 
 // holdOn blocks the named fake Docker method until release is called or the
@@ -57,6 +59,8 @@ func TestStartPruneRefusedAfterClose(t *testing.T) {
 func TestStartPruneRunsForcedSequence(t *testing.T) {
 	h := newHarness(t)
 	h.docker.usage = []int{40} // below the high-water mark: a forced prune runs anyway
+	// One entry past retention, so the retention step has something to report.
+	h.m.History.Append(model.HistoryEntry{ID: "old", Repo: "darkmem", FinishedAt: h.now.Add(-40 * 24 * time.Hour)})
 	if err := h.m.StartPrune(); err != nil {
 		t.Fatal(err)
 	}

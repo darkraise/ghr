@@ -3,10 +3,13 @@ package runner
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/sched"
@@ -86,6 +89,44 @@ func TestAFailedPruneStepKeepsItsError(t *testing.T) {
 	lp := h.m.LastPrune()
 	if lp.Outcome != "errors" || !reflect.DeepEqual(lp.Steps, []model.PruneStep{{Name: "unused volumes", Error: "boom"}}) {
 		t.Fatalf("last prune %+v", lp)
+	}
+}
+
+// The retention event says something was removed, so it is written only when
+// a history entry or a log archive was. The step is in the prune's record
+// either way.
+func TestRetentionEventOnlyWhenSomethingWasRemoved(t *testing.T) {
+	const event = "prune: history and logs past retention removed"
+	for _, tc := range []struct {
+		name   string
+		setup  func(h *harness, old time.Time)
+		events int
+	}{
+		{"nothing past retention", func(h *harness, _ time.Time) {
+			h.m.History.Append(model.HistoryEntry{ID: "new", Repo: "darkmem", FinishedAt: h.now})
+			os.MkdirAll(filepath.Join(h.m.Paths.Logs, "bbbbbb"), 0o755)
+		}, 0},
+		{"an old history entry", func(h *harness, old time.Time) {
+			h.m.History.Append(model.HistoryEntry{ID: "old", Repo: "darkmem", FinishedAt: old})
+		}, 1},
+		{"an old log archive", func(h *harness, old time.Time) {
+			dir := filepath.Join(h.m.Paths.Logs, "aaaaaa")
+			os.MkdirAll(dir, 0o755)
+			os.Chtimes(dir, old, old)
+		}, 1},
+	} {
+		h := newHarness(t)
+		tc.setup(h, h.now.Add(-40*24*time.Hour))
+		if err := h.m.StartPruneScope(ScopeStandard); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		h.m.Wait()
+		if n := strings.Count(h.eventText(), event); n != tc.events {
+			t.Errorf("%s: %d retention events, want %d\n%s", tc.name, n, tc.events, h.eventText())
+		}
+		if lp := h.m.LastPrune(); lp.Outcome != "ok" || !strings.HasSuffix(stepNames(lp), ",history and logs past retention") {
+			t.Errorf("%s: outcome %s, steps %s", tc.name, lp.Outcome, stepNames(lp))
+		}
 	}
 }
 

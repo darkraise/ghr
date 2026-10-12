@@ -296,15 +296,21 @@ func (m *Manager) dataRoot(ctx context.Context) (system.DiskUsage, error) {
 	return system.DiskUsage{Pct: pct}, err
 }
 
-// prune drops history lines and archived logs older than history_retention,
-// reporting whether every step succeeded.
-func (m *Manager) prune(cfg *config.Config, now time.Time) bool {
-	ok := true
+// prune drops history lines and archived logs older than history_retention.
+// It reports whether it removed anything and whether every step succeeded.
+func (m *Manager) prune(cfg *config.Config, now time.Time) (removed, ok bool) {
+	ok = true
 	cutoff := now.Add(-cfg.HistoryRetention.D())
+	// The store counts a prune only when it rewrote the file, which it does
+	// only when a line went. An entry appended meanwhile is counted as well,
+	// so removed can be true when nothing went; it is never false when
+	// something did.
+	writes := m.History.Writes()
 	if err := m.History.Prune(cutoff); err != nil {
 		ok = false
 		m.Events.Add("warn", "", "history prune: %v", err)
 	}
+	removed = m.History.Writes() != writes
 	entries, err := os.ReadDir(m.Paths.Logs)
 	if err != nil && !os.IsNotExist(err) {
 		ok = false
@@ -316,13 +322,15 @@ func (m *Manager) prune(cfg *config.Config, now time.Time) bool {
 			if err := os.RemoveAll(filepath.Join(m.Paths.Logs, e.Name())); err != nil {
 				ok = false
 				m.Events.Add("warn", "", "log archive prune: %v", err)
+			} else {
+				removed = true
 			}
 		}
 	}
 	m.mu.Lock()
 	m.lastPrune = now
 	m.mu.Unlock()
-	return ok
+	return removed, ok
 }
 
 // forcedPrune is a manual prune of one scope. standard prunes build cache
@@ -361,9 +369,11 @@ func (m *Manager) forcedPrune(ctx context.Context, scope string) {
 		step("unused volumes", func() (string, error) { return m.Disk.PruneUnusedVolumes(ctx) })
 	}
 	if scope == ScopeStandard && ctx.Err() == nil {
-		if m.prune(cfg, m.Now()) {
+		if removed, ok := m.prune(cfg, m.Now()); ok {
 			m.recordStep("history and logs past retention", "0B", nil)
-			m.Events.Add("info", "", "prune: history and logs past retention removed")
+			if removed {
+				m.Events.Add("info", "", "prune: history and logs past retention removed")
+			}
 		} else {
 			failed = true
 			m.recordStep("history and logs past retention", "", errors.New("failed; see the warnings before this event"))
