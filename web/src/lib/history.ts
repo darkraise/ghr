@@ -109,6 +109,8 @@ export function inBucket(rows: HistoryEntry[], bucket: { start: string; end: str
 export function pickText(bucket: { start: string; end: string }): string {
   const start = new Date(bucket.start)
   const end = new Date(bucket.end)
-  if (end.getTime() - start.getTime() >= 24 * 3_600_000) return `Showing ${monthDay(start)}`
+  // A day bucket runs 23 or 25 hours across a daylight-saving change; the
+  // next size down, six hours, runs 7 at most.
+  if (end.getTime() - start.getTime() >= 12 * 3_600_000) return `Showing ${monthDay(start)}`
   return `Showing ${hhmm(start)} to ${hhmm(end)}, ${monthDay(start)}`
 }

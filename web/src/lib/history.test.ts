@@ -122,6 +122,11 @@ describe("inBucket and pickText", () => {
     expect(pickText({ start: "2026-10-03T13:00:00Z", end: "2026-10-03T14:00:00Z" })).toBe("Showing 13:00 to 14:00, Oct 3")
     expect(pickText({ start: "2026-10-03T00:00:00Z", end: "2026-10-04T00:00:00Z" })).toBe("Showing Oct 3")
   })
+
+  it("reads a bucket of 12 hours or more as a day", () => {
+    expect(pickText({ start: "2026-10-03T00:00:00Z", end: "2026-10-03T12:00:00Z" })).toBe("Showing Oct 3")
+    expect(pickText({ start: "2026-10-03T00:00:00Z", end: "2026-10-03T11:59:00Z" })).toBe("Showing 00:00 to 11:59, Oct 3")
+  })
 })
 
 describe("resultWord", () => {
