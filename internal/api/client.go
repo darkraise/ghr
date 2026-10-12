@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -103,7 +104,12 @@ func (c *Client) callWithin(ctx context.Context, limit time.Duration, method, pa
 		if e := early(); e != nil {
 			return e
 		}
-		return err
+		var se *json.SyntaxError
+		var te *json.UnmarshalTypeError
+		if errors.As(err, &se) || errors.As(err, &te) {
+			return err
+		}
+		return fmt.Errorf("ghr daemon unreachable: %w", err)
 	}
 	return nil
 }

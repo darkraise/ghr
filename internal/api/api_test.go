@@ -484,6 +484,42 @@ func TestCallEndedByItsCaller(t *testing.T) {
 	})
 }
 
+// okBody answers every request with 200 and a body made by newBody.
+type okBody func() io.Reader
+
+func (b okBody) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK, Status: "200 OK",
+		Header: http.Header{}, Body: io.NopCloser(b()), Request: r,
+	}, nil
+}
+
+// A transport failure while the response is read, with neither context
+// ended, is the daemon being unreachable, and keeps its cause.
+func TestResponseReadFailureIsUnreachable(t *testing.T) {
+	errReset := errors.New("connection reset by peer")
+	c := &Client{Base: "http://ghr", HTTP: &http.Client{Transport: okBody(func() io.Reader {
+		return io.MultiReader(strings.NewReader(`{"`), iotest.ErrReader(errReset))
+	})}}
+	_, err := c.Status(context.Background())
+	if err == nil || !strings.HasPrefix(err.Error(), "ghr daemon unreachable: ") || !errors.Is(err, errReset) {
+		t.Fatalf("err %v", err)
+	}
+}
+
+// A body that is not the JSON the route promises is a content error, not a
+// failure of the connection.
+func TestResponseThatIsNotJSONIsNotUnreachable(t *testing.T) {
+	c := &Client{Base: "http://ghr", HTTP: &http.Client{Transport: okBody(func() io.Reader {
+		return strings.NewReader("not json")
+	})}}
+	_, err := c.Status(context.Background())
+	var se *json.SyntaxError
+	if !errors.As(err, &se) || strings.HasPrefix(err.Error(), "ghr daemon unreachable") {
+		t.Fatalf("err %v", err)
+	}
+}
+
 func TestGitHubErrorsMapToStatuses(t *testing.T) {
 	c, b := setup(t)
 	retry := time.Date(2026, 10, 5, 12, 1, 0, 0, time.UTC)
