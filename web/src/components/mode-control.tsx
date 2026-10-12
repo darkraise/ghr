@@ -1,38 +1,22 @@
-import { ToggleGroup, ToggleGroupItem } from "darkraise-ui/components/toggle-group"
+import { Button } from "darkraise-ui/components/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "darkraise-ui/components/tooltip"
 import { useTheme } from "darkraise-ui/theme"
-import { Monitor, Moon, Sun } from "lucide-react"
+import { Moon, Sun } from "lucide-react"
 
-const MODES = [
-  { value: "dark", label: "Dark", Icon: Moon },
-  { value: "light", label: "Light", Icon: Sun },
-  { value: "system", label: "System", Icon: Monitor },
-] as const
-
+// The icon shows the mode in use. Until the first click that is the system's
+// mode; a click saves the other one.
 export function ModeControl() {
-  const { mode, setMode } = useTheme()
+  const { resolvedMode, setMode } = useTheme()
+  const dark = resolvedMode === "dark"
+  const Icon = dark ? Moon : Sun
   return (
-    <ToggleGroup
-      type="single"
-      size="sm"
-      variant="outline"
-      value={mode}
-      aria-label="Colour mode"
-      onValueChange={(value) => {
-        const next = MODES.find((m) => m.value === value)
-        if (next) setMode(next.value)
-      }}
-    >
-      {MODES.map(({ value, label, Icon }) => (
-        <Tooltip key={value}>
-          <TooltipTrigger asChild>
-            <ToggleGroupItem value={value} aria-label={label}>
-              <Icon size={15} aria-hidden="true" />
-            </ToggleGroupItem>
-          </TooltipTrigger>
-          <TooltipContent>{label}</TooltipContent>
-        </Tooltip>
-      ))}
-    </ToggleGroup>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button size="icon" variant="ghost" aria-label="Dark mode" aria-pressed={dark} onClick={() => setMode(dark ? "light" : "dark")}>
+          <Icon size={15} aria-hidden="true" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{dark ? "Dark mode. Switch to light" : "Light mode. Switch to dark"}</TooltipContent>
+    </Tooltip>
   )
 }

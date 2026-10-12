@@ -21,19 +21,24 @@ function draw() {
 describe("ModeControl", () => {
   beforeEach(() => localStorage.clear())
 
-  it("starts on system and saves the chosen mode", async () => {
+  it("shows the system's mode, then toggles between light and dark", async () => {
     const user = draw()
-    expect(screen.getByRole("radiogroup", { name: "Colour mode" })).toBeInTheDocument()
-    expect(screen.getByRole("radio", { name: "System" })).toBeChecked()
-    await user.click(screen.getByRole("radio", { name: "Light" }))
-    expect(screen.getByRole("radio", { name: "Light" })).toBeChecked()
+    const toggle = screen.getByRole("button", { name: "Dark mode" })
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+    expect(localStorage.getItem("mode")).toBeNull()
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute("aria-pressed", "true")
+    expect(localStorage.getItem("mode")).toBe("dark")
+    expect(document.documentElement.getAttribute("data-mode")).toBe("dark")
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
     expect(localStorage.getItem("mode")).toBe("light")
     expect(document.documentElement.getAttribute("data-mode")).toBe("light")
   })
 
-  it("names each mode in a tooltip", async () => {
+  it("names the mode in use and the one a click switches to", async () => {
     const user = draw()
-    await user.hover(screen.getByRole("radio", { name: "System" }))
-    expect(await screen.findByRole("tooltip", {}, { timeout: 3000 })).toHaveTextContent("System")
+    await user.hover(screen.getByRole("button", { name: "Dark mode" }))
+    expect(await screen.findByRole("tooltip", {}, { timeout: 3000 })).toHaveTextContent("Light mode. Switch to dark")
   })
 })

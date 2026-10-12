@@ -161,15 +161,9 @@ describe("shell", () => {
     await waitFor(() => expect(within(bar).getByText("1 of 2 busy")).toBeInTheDocument())
     expect(within(bar).getByRole("img", { name: "1 of 2 busy, 1 warm" })).toBeInTheDocument()
     expect(within(bar).getByText("localhost")).toBeInTheDocument()
-    expect(within(bar).getByRole("radiogroup", { name: "Colour mode" })).toBeInTheDocument()
+    expect(within(bar).getByRole("button", { name: "Dark mode" })).toBeInTheDocument()
     expect(within(bar).getByRole("button", { name: "Log out" })).toBeInTheDocument()
     expect(within(bar).queryByRole("searchbox")).not.toBeInTheDocument()
-  })
-
-  it("offers dark, light and system in place of the theme switcher", async () => {
-    mockApi(authedRoutes())
-    renderApp("/")
-    expect(await screen.findByRole("radiogroup", { name: "Colour mode" })).toBeInTheDocument()
   })
 
   it("does not double the period of a degraded reason", async () => {
