@@ -13,18 +13,24 @@ import (
 // is used before it is read again.
 const visibilityTTL = 6 * time.Hour
 
-// visibility is GitHub's last answer on whether a repository is public. A
-// zero readAt makes the next poll read it again whatever its age.
+// visibility is what GitHub last said about whether a repository is public.
+// public and readAt are GetRepo's answer and its time; a zero readAt makes
+// the next poll ask GetRepo again whatever the answer's age. listedAt is the
+// time of the tick in which a runs listing last said public, zero when none
+// has since GetRepo cleared it. The two are kept apart so that a listing
+// blocks without making GetRepo's answer look fresh.
 type visibility struct {
-	public bool
-	readAt time.Time
+	public   bool
+	readAt   time.Time
+	listedAt time.Time
 }
 
-// visibilityLocked reports whether GitHub last said repo is public, and
-// whether it has answered for repo at all; m.mu must be held.
+// visibilityLocked reports whether GitHub last said repo is public, through
+// GetRepo or through a runs listing, and whether it has said anything for
+// repo at all; m.mu must be held.
 func (m *Manager) visibilityLocked(repo string) (public, known bool) {
 	v, known := m.vis[strings.ToLower(repo)]
-	return v.public, known
+	return v.public || !v.listedAt.IsZero(), known
 }
 
 // readVisibility asks GitHub whether repo is public when the last answer is
@@ -47,9 +53,29 @@ func (m *Manager) readVisibility(ctx context.Context, repo string, now time.Time
 	if m.visGen != gen {
 		nv.readAt = time.Time{} // ClearDegraded ran during the read; the next poll reads again
 	}
+	// A listing of this same poll said public: the block holds for this tick
+	// whatever GetRepo says. An older one is what this answer replaces.
+	if at := m.vis[key].listedAt; at.Equal(now) {
+		nv.listedAt = at
+	}
 	m.vis[key] = nv
 	m.mu.Unlock()
 	return nil
+}
+
+// sawPublic records that a run GitHub just listed for repo says its
+// repository is public: the repository is blocked from this tick on, without
+// waiting for readVisibility's next turn. GetRepo's answer and its time are
+// left as they are, so that read still comes when it is due. A listing only
+// ever blocks. One that says private is no answer, because a listing can come
+// from the client's cache; lifting a block stays with readVisibility.
+func (m *Manager) sawPublic(repo string, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := strings.ToLower(repo)
+	v := m.vis[key]
+	v.listedAt = now
+	m.vis[key] = v
 }
 
 // blockedLocked is blocked with m.mu held.

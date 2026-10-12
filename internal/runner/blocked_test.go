@@ -355,3 +355,146 @@ func TestBlockedRepositoryDoesNotHoldAnUpdateBack(t *testing.T) {
 		}
 	}
 }
+
+// listedRun gives repo one queued run with jobs, as GitHub's runs listing
+// names it: every run there says whether its repository is private.
+func listedRun(h *harness, repo string, runID int64, private bool, jobs ...github.Job) {
+	h.gh.mu.Lock()
+	defer h.gh.mu.Unlock()
+	h.gh.runs[repo+"/queued"] = []github.Run{{ID: runID, Status: "queued", Repository: github.RunRepository{Private: &private}}}
+	h.gh.jobs[runID] = jobs
+}
+
+// The poll's own runs listing shows a repository that turned public, hours
+// before the next read of the repository is due. It is blocked in that tick:
+// no runner starts for the job the listing shows and the job is not counted.
+// A later listing that says private lifts nothing; the repository's own read
+// does, six hours after its last answer.
+func TestRunListingBlocksAPublicRepositoryInTheSameTick(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.m.Tick(ctx) // darkmem is read: private
+	tick := func(after time.Duration) {
+		h.now = h.now.Add(after)
+		h.m.Tick(ctx)
+		h.m.Wait()
+	}
+
+	listedRun(h, "darkmem", 7, false, homelabJob(h, 71))
+	queuedRun(h, "darkcloud", 8, homelabJob(h, 81))
+	tick(10 * time.Second)
+	if spawnsFor(h, "darkmem") != 0 || spawnsFor(h, "darkcloud") != 1 {
+		t.Fatalf("spawns: darkmem %d, darkcloud %d\n%s", spawnsFor(h, "darkmem"), spawnsFor(h, "darkcloud"), h.eventText())
+	}
+	if r := h.m.Status().Repos[1]; r.Error != darkmemBlocked || r.Queued != 0 {
+		t.Fatalf("status: error %q queued %d", r.Error, r.Queued)
+	}
+	if eventCount(h, "warn darkmem "+darkmemBlocked) != 1 || h.repoReads("darkmem") != 1 {
+		t.Fatalf("%d reads of darkmem\n%s", h.repoReads("darkmem"), h.eventText())
+	}
+
+	listedRun(h, "darkmem", 7, true, homelabJob(h, 71))
+	tick(10 * time.Second)
+	if !h.m.blocked(h.cfg, h.cfg.Repos[1]) || spawnsFor(h, "darkmem") != 0 || h.repoReads("darkmem") != 1 {
+		t.Fatalf("a listing that says private: blocked %v, %d spawns, %d reads",
+			h.m.blocked(h.cfg, h.cfg.Repos[1]), spawnsFor(h, "darkmem"), h.repoReads("darkmem"))
+	}
+
+	tick(visibilityTTL - 20*time.Second)
+	if h.m.blocked(h.cfg, h.cfg.Repos[1]) || spawnsFor(h, "darkmem") != 1 || h.repoReads("darkmem") != 2 {
+		t.Fatalf("six hours after the repository's last read: blocked %v, %d spawns, %d reads\n%s",
+			h.m.blocked(h.cfg, h.cfg.Repos[1]), spawnsFor(h, "darkmem"), h.repoReads("darkmem"), h.eventText())
+	}
+}
+
+// A listing can come from the client's cache, so one that says private is
+// not an answer: a repository GitHub has not been read for stays unread.
+func TestRunListingThatSaysPrivateLeavesARepositoryUnread(t *testing.T) {
+	h := newHarness(t)
+	h.gh.setErr("GetRepo darkmem", &github.APIError{Status: 502, Kind: github.ErrServer})
+	listedRun(h, "darkmem", 7, true, homelabJob(h, 71))
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if _, known := h.visibility("darkmem"); known || spawnsFor(h, "darkmem") != 0 {
+		t.Fatalf("known %v, %d spawns", known, spawnsFor(h, "darkmem"))
+	}
+}
+
+// A listing that keeps saying public is not the repository's own read. That
+// read is still made six hours after its last answer, and once.
+func TestPublicListingsDoNotPostponeTheRepositoryRead(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	start := h.now
+	h.m.Tick(ctx) // darkmem is read: private
+	h.gh.setPublic("darkmem", true)
+	listedRun(h, "darkmem", 7, false, homelabJob(h, 71))
+	for _, step := range []struct {
+		at    time.Duration
+		reads int
+	}{{10 * time.Second, 1}, {3 * time.Hour, 1}, {visibilityTTL - time.Second, 1}, {visibilityTTL, 2}, {visibilityTTL + 10*time.Second, 2}} {
+		h.now = start.Add(step.at)
+		h.m.Tick(ctx)
+		h.m.Wait()
+		if h.repoReads("darkmem") != step.reads || !h.m.blocked(h.cfg, h.cfg.Repos[1]) || spawnsFor(h, "darkmem") != 0 {
+			t.Fatalf("at %v: %d reads, want %d; blocked %v, %d spawns", step.at, h.repoReads("darkmem"), step.reads,
+				h.m.blocked(h.cfg, h.cfg.Repos[1]), spawnsFor(h, "darkmem"))
+		}
+	}
+}
+
+// A reload asks for every repository to be read again, and a listing that
+// says public in the next poll does not cancel that. The read's answer does
+// not lift the block in a poll whose own listing says public; it does in one
+// whose listing does not.
+func TestPublicListingKeepsTheReadAReloadAskedFor(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.m.Tick(ctx) // darkmem is read: private
+	tick := func() {
+		h.now = h.now.Add(10 * time.Second)
+		h.m.Tick(ctx)
+		h.m.Wait()
+	}
+	check := func(when string, reads int, blocked bool, spawns int) {
+		t.Helper()
+		if h.repoReads("darkmem") != reads || h.m.blocked(h.cfg, h.cfg.Repos[1]) != blocked || spawnsFor(h, "darkmem") != spawns {
+			t.Fatalf("%s: %d reads, blocked %v, %d spawns; want %d, %v, %d\n%s", when, h.repoReads("darkmem"),
+				h.m.blocked(h.cfg, h.cfg.Repos[1]), spawnsFor(h, "darkmem"), reads, blocked, spawns, h.eventText())
+		}
+	}
+	listedRun(h, "darkmem", 7, false, homelabJob(h, 71))
+	tick()
+	check("a public listing", 1, true, 0)
+
+	h.m.ClearDegraded()
+	tick()
+	check("a reload, then another public listing", 2, true, 0)
+
+	listedRun(h, "darkmem", 7, true, homelabJob(h, 71))
+	tick()
+	check("a private listing without a read", 2, true, 0)
+
+	h.m.ClearDegraded()
+	tick()
+	check("a reload, then a private listing", 3, false, 1)
+}
+
+// The listing blocks before the runs' jobs are read. When that read then
+// fails, the jobs an earlier poll counted for the repository go all the same.
+func TestRunListingBlockDropsTheQueueWhenThePollThenFails(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.GlobalMax = 0 // nothing spawns, so the job stays queued
+	queuedRun(h, "darkmem", 7, homelabJob(h, 71))
+	h.m.Tick(context.Background())
+	if r := h.m.Status().Repos[1]; r.Queued != 1 {
+		t.Fatalf("setup: queued %d", r.Queued)
+	}
+	listedRun(h, "darkmem", 7, false, homelabJob(h, 71))
+	h.gh.setErr("ListJobs darkmem", &github.APIError{Status: 502, Kind: github.ErrServer, Message: "Bad Gateway"})
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background())
+	if r := h.m.Status().Repos[1]; r.Queued != 0 || r.OldestQueuedAt != nil || r.Error != darkmemBlocked {
+		t.Fatalf("queued %d, oldest %v, error %q", r.Queued, r.OldestQueuedAt, r.Error)
+	}
+}

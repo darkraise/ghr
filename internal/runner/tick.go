@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -134,6 +135,11 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 		}
 		if err != nil {
 			missed(r)
+			if !served(r) {
+				// The listing blocked the repo before a later call of its poll
+				// failed; what an earlier poll left for it goes all the same.
+				delete(demand, r.Name)
+			}
 			if tokenRejected(err) {
 				authFailed = true
 			}
@@ -192,6 +198,11 @@ func (m *Manager) repoDemand(ctx context.Context, cfg *config.Config, r config.R
 		runs, err := m.GH.ListRuns(ctx, r.Name, status)
 		if err != nil {
 			return nil, err
+		}
+		// Recorded before the runs' jobs are read, so a failure there does
+		// not lose the answer.
+		if slices.ContainsFunc(runs, github.Run.RepoPublic) {
+			m.sawPublic(r.Name, now)
 		}
 		for _, run := range runs {
 			if seen[run.ID] {
