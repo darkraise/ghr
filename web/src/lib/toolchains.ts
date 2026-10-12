@@ -1,6 +1,32 @@
 import type { Operations, Storage, Toolchain } from "@/api/types"
 import { humanBytes } from "./format"
 
+export const TOOLS = [
+  ["node", "Node.js"],
+  ["python", "Python"],
+  ["go", "Go"],
+  ["java", "Java (Temurin)"],
+  ["dotnet", ".NET SDK"],
+] as const
+
+export function toolName(tool: string): string {
+  return TOOLS.find(([id]) => id === tool)?.[1] ?? tool
+}
+
+// The daemon's popular preset (internal/toolchain/set.go). Each entry is a
+// release line the daemon resolves to its newest release when it runs.
+export const POPULAR = [
+  { tool: "node", spec: "22" },
+  { tool: "node", spec: "24" },
+  { tool: "dotnet", spec: "8.0" },
+  { tool: "dotnet", spec: "10.0" },
+  { tool: "python", spec: "3.13" },
+  { tool: "python", spec: "3.14" },
+  { tool: "go", spec: "latest" },
+  { tool: "java", spec: "21" },
+  { tool: "java", spec: "25" },
+] as const
+
 const VERBS: Record<string, string> = { install: "Installing", remove: "Removing", clear: "Clearing" }
 
 const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)

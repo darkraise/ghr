@@ -105,6 +105,8 @@ describe("Toolchains page", () => {
     await user.click(await screen.findByRole("button", { name: "Install popular set" }))
     const ask = within(await screen.findByRole("alertdialog"))
     expect(ask.getByText("Install the popular set?")).toBeInTheDocument()
+    const items = within(ask.getByRole("list", { name: "Popular set" })).getAllByRole("listitem")
+    expect(items.map((li) => li.textContent)).toEqual(["Node.js22, 24", ".NET SDK8.0, 10.0", "Python3.13, 3.14", "Golatest", "Java (Temurin)21, 25"])
     await user.click(ask.getByRole("button", { name: "Install popular set" }))
     await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ preset: "popular" }))
   })

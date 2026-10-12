@@ -9,15 +9,8 @@ import { useState } from "react"
 import { api } from "@/api/client"
 import { keys, useToolchainChoices } from "@/api/hooks"
 import { ErrorLine } from "@/components/page/error-line"
+import { TOOLS } from "@/lib/toolchains"
 import { errorText } from "@/query"
-
-const TOOLS = [
-  ["node", "Node.js"],
-  ["python", "Python"],
-  ["go", "Go"],
-  ["java", "Java (Temurin)"],
-  ["dotnet", ".NET SDK"],
-] as const
 
 export function InstallDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (

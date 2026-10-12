@@ -8,11 +8,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "darkraise-ui/components/alert-dialog"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 
 export interface Confirm {
   title: string
   body?: string
+  // Shown under the body; the description is a paragraph, so a list goes here.
+  details?: ReactNode
   action: string
   destructive?: boolean
   run: () => void
@@ -35,6 +37,7 @@ export function ConfirmDialog({ confirm, onClose }: { confirm: Confirm | null; o
           <AlertDialogTitle>{held?.title}</AlertDialogTitle>
           {held?.body && <AlertDialogDescription>{held.body}</AlertDialogDescription>}
         </AlertDialogHeader>
+        {held?.details}
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction data-variant={held?.destructive ? "destructive" : "default"} onClick={() => held?.run()}>
