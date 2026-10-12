@@ -1,5 +1,5 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate, useSearch } from "@tanstack/react-router"
+import { useQuery } from "@tanstack/react-query"
+import { useSearch } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "darkraise-ui/components/card"
 import { Input } from "darkraise-ui/components/input"
@@ -22,8 +22,6 @@ function loginError(err: unknown): string {
 
 export function LoginPage() {
   const auth = useQuery({ queryKey: keys.auth, queryFn: ({ signal }) => api.authState(signal) })
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
   const { redirect } = useSearch({ from: "/login" })
   const [password, setPassword] = useState("")
   const [confirm, setConfirm] = useState("")
@@ -50,11 +48,12 @@ export function LoginPage() {
     setBusy(true)
     try {
       await (setup ? api.setup(password) : api.login(password))
-      await queryClient.invalidateQueries({ queryKey: keys.auth })
-      await navigate({ href: safeRedirect(redirect) })
+      // A full load rather than a route change: a daemon restart for a deploy
+      // ends every session, and this way the tab sent here picks up the web
+      // build that came with it. The button stays busy until the page goes.
+      window.location.assign(safeRedirect(redirect))
     } catch (err) {
       setError(loginError(err))
-    } finally {
       setBusy(false)
     }
   }

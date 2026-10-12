@@ -1,5 +1,5 @@
 import { screen, waitFor } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
@@ -18,7 +18,9 @@ describe("login page", () => {
         },
       }),
     )
-    const { user, router } = renderApp("/login")
+    const assign = vi.fn()
+    vi.stubGlobal("location", { assign })
+    const { user } = renderApp("/login")
     const password = await screen.findByLabelText("Password")
     const confirm = screen.getByLabelText("Confirm password")
     const submit = screen.getByRole("button", { name: "Set password" })
@@ -40,7 +42,7 @@ describe("login page", () => {
     await user.clear(confirm)
     await user.type(confirm, "correct horse battery")
     await user.click(submit)
-    await waitFor(() => expect(router.state.location.pathname).toBe("/"))
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/"))
     expect(calls.find((c) => c.path === "/auth/setup")?.body).toEqual({ password: "correct horse battery" })
   })
 
@@ -55,10 +57,13 @@ describe("login page", () => {
         },
       }),
     )
-    const { user, router } = renderApp("/login")
+    const assign = vi.fn()
+    vi.stubGlobal("location", { assign })
+    const { user } = renderApp("/login")
     await user.type(await screen.findByLabelText("Password"), "correct horse battery")
     await user.click(screen.getByRole("button", { name: "Log in" }))
-    await waitFor(() => expect(router.state.location.pathname).toBe("/"))
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/"))
+    expect(screen.getByRole("button", { name: "Log in" })).toBeDisabled()
   })
 
   it("shows a wrong password inline", async () => {
@@ -99,8 +104,10 @@ describe("login page", () => {
     await user.type(await screen.findByLabelText("Password"), "correct horse battery")
     expect(router.state.location.pathname).toBe("/login")
     expect(router.state.location.search).toEqual({ redirect: "/history" })
+    const assign = vi.fn()
+    vi.stubGlobal("location", { assign })
     await user.click(screen.getByRole("button", { name: "Log in" }))
-    await waitFor(() => expect(router.state.location.pathname).toBe("/history"))
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/history"))
   })
 
   it.each(["//evil.example/x", "https://evil.example/x", "/\\evil.example/x"])("ignores the redirect %s that leaves the site", async (target) => {
@@ -114,9 +121,11 @@ describe("login page", () => {
         },
       }),
     )
-    const { user, router } = renderApp(`/login?redirect=${encodeURIComponent(target)}`)
+    const assign = vi.fn()
+    vi.stubGlobal("location", { assign })
+    const { user } = renderApp(`/login?redirect=${encodeURIComponent(target)}`)
     await user.type(await screen.findByLabelText("Password"), "correct horse battery")
     await user.click(screen.getByRole("button", { name: "Log in" }))
-    await waitFor(() => expect(router.state.location.pathname).toBe("/"))
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/"))
   })
 })
