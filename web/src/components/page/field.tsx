@@ -6,12 +6,14 @@ import type { ReactNode } from "react"
 // tabIndex -1 and an id the index can find.
 export function FieldGroup({ id, title, note, children }: { id: string; title: string; note?: string; children: ReactNode }) {
   return (
-    <section id={id} aria-labelledby={`${id}-title`} className="scroll-mt-4">
-      <h2 id={`${id}-title`} tabIndex={-1} className="text-base font-semibold">
-        {title}
-      </h2>
-      {note && <p className="mt-1 text-sm text-muted-foreground">{note}</p>}
-      <div className="mt-2 divide-y divide-border border-y border-border">{children}</div>
+    <section id={id} aria-labelledby={`${id}-title`} className="min-w-0 scroll-mt-4 overflow-hidden rounded-md border border-border bg-card">
+      <div className="border-b border-border bg-background px-4 py-2.5">
+        <h2 id={`${id}-title`} tabIndex={-1} className="text-sm font-semibold">
+          {title}
+        </h2>
+        {note && <p className="mt-0.5 text-xs text-muted-foreground">{note}</p>}
+      </div>
+      <div className="divide-y divide-border px-4">{children}</div>
     </section>
   )
 }
@@ -32,13 +34,11 @@ export function Field({
   children: ReactNode
 }) {
   return (
-    <div className="grid gap-1 py-3 sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-start sm:gap-4">
+    <div className="grid gap-1 py-3 sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-baseline sm:gap-4">
       {htmlFor ? (
-        <Label htmlFor={htmlFor} className="sm:pt-2">
-          {label}
-        </Label>
+        <Label htmlFor={htmlFor}>{label}</Label>
       ) : (
-        <span className="text-sm font-semibold sm:pt-2">{label}</span>
+        <span className="text-sm font-semibold">{label}</span>
       )}
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">

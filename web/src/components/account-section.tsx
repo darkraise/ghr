@@ -39,7 +39,7 @@ export function AccountSection() {
   }
 
   return (
-    <FieldGroup id="account" title="Account" note="Changing the password takes effect at once, outside the save bar.">
+    <FieldGroup id="account" title="Password" note="Changing the password takes effect at once, outside the save bar.">
       <form className="divide-y divide-border" onSubmit={(e) => void change(e)}>
         <Field label="Current password" htmlFor="current-password">
           <Input

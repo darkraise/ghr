@@ -16,7 +16,7 @@ function withUpdate(runner_update: RunnerUpdate, over: Record<string, unknown> =
 
 // The shell's update card repeats Queue and Cancel update outside the page.
 async function section() {
-  return within(await screen.findByRole("region", { name: "Runner software" }))
+  return within(await screen.findByRole("region", { name: "Version and config" }))
 }
 
 describe("Runner software section", () => {

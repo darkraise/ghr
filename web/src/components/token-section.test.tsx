@@ -24,7 +24,7 @@ describe("GitHub token section", () => {
     mockApi(authedRoutes({ "GET /api/token": token() }))
     renderApp("/settings/token")
     expect(await screen.findByText("Expires Dec 2, in 60 days")).toBeInTheDocument()
-    const section = within(screen.getByRole("region", { name: "GitHub token" }))
+    const section = within(screen.getByRole("region", { name: "Current token" }))
     expectPill(section.getByText("Valid"), "bg-success/15", "text-success")
     expect(section.getByText("1m ago")).toBeInTheDocument()
     expect(section.getByText("4,980 of 5,000, resets 14:45")).toHaveClass("font-mono")
@@ -115,7 +115,7 @@ describe("GitHub token section", () => {
   it("leaves the rate limit blank until it is known, and says when nothing is read yet", async () => {
     mockApi(authedRoutes({ "GET /api/token": () => new Promise(() => {}) }))
     renderApp("/settings/token")
-    const section = within(await screen.findByRole("region", { name: "GitHub token" }))
+    const section = within(await screen.findByRole("region", { name: "Current token" }))
     expect(section.getByText("Not read yet")).toBeInTheDocument()
     expect(section.queryByText("–")).toBeNull()
   })

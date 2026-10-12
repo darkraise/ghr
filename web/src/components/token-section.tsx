@@ -35,7 +35,7 @@ export function TokenSection() {
   const t = token.data
 
   return (
-    <FieldGroup id="token" title="GitHub token" note={NOTE}>
+    <FieldGroup id="token" title="Current token" note={NOTE}>
       {token.isError && (
         <div className="py-3">
           <ErrorLine onRetry={() => void token.refetch()}>{errorText(token.error)}</ErrorLine>

@@ -28,7 +28,7 @@ export function SettingsSections({ form }: { form: SettingsForm }) {
   return (
     <div className="flex flex-col gap-6">
       {form.rejection && <RejectedAlert message={form.rejection} />}
-      <FieldGroup id="general" title="General">
+      <FieldGroup id="scheduling" title="Scheduling">
         <Field label="Mode" help={MODES[text("mode")]} changed={is("mode")}>
           <Select value={text("mode")} onValueChange={set("mode")} disabled={offline}>
             <SelectTrigger aria-label="Mode" className="w-40">
@@ -74,7 +74,8 @@ export function SettingsSections({ form }: { form: SettingsForm }) {
             max={100}
             step={5}
             suffix="%"
-            className="w-24"
+            groupClassName="w-40"
+            className="min-w-0"
             value={num("disk_high_water")}
             disabled={offline}
             onChange={(e) => set("disk_high_water")(toNum(e.target.value))}

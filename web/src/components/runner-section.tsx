@@ -109,7 +109,7 @@ export function RunnerSection() {
 
   const canQueue = u?.deadline !== undefined && !u.running && !u.queued
   return (
-    <FieldGroup id="runner" title="Runner software" note="These act at once, outside the save bar.">
+    <FieldGroup id="runner" title="Version and config" note="These act at once, outside the save bar.">
       <Field label="Runner version" help={u?.queued ? "Runs when no job is running or queued" : undefined}>
         {u ? <VersionLine u={u} now={now} /> : <Spinner label="Loading" />}
       </Field>

@@ -261,7 +261,7 @@ describe("Settings page", () => {
     mockApi(routes())
     const { user } = renderApp("/settings")
     const poll = await screen.findByLabelText("Poll interval")
-    for (const name of ["General", "Timing", "Disk and retention", "Runner defaults"]) {
+    for (const name of ["Scheduling", "Timing", "Disk and retention", "Runner defaults"]) {
       expect(screen.getByRole("region", { name })).toBeInTheDocument()
     }
     expect(screen.getByText("How often GitHub is checked (at least 5s)")).toHaveClass("text-muted-foreground")
@@ -363,6 +363,7 @@ describe("Settings sections", () => {
     expect(within(nav).getByRole("link", { name: "General" })).toHaveAttribute("aria-current", "page")
     expect(await screen.findByRole("heading", { level: 1, name: "General" })).toBeInTheDocument()
     expect(await screen.findByLabelText("Poll interval")).toBeInTheDocument()
+    expect(screen.getAllByRole("heading", { name: "General" })).toHaveLength(1)
     expect(screen.queryByRole("heading", { name: "GitHub token" })).not.toBeInTheDocument()
   })
 
@@ -379,6 +380,7 @@ describe("Settings sections", () => {
     expect(within(nav).getByRole("link", { name: title })).toHaveAttribute("aria-current", "page")
     expect(within(nav).getByRole("link", { name: "General" })).not.toHaveAttribute("aria-current")
     expect(await screen.findByRole("heading", { level: 1, name: title })).toBeInTheDocument()
+    expect(screen.getAllByRole("heading", { name: title })).toHaveLength(1)
     expect(screen.queryByLabelText("Poll interval")).not.toBeInTheDocument()
   })
 
@@ -402,7 +404,7 @@ describe("Settings sections", () => {
   it("keeps Log out out of the Account section", async () => {
     mockApi(routes())
     renderApp("/settings/account")
-    const account = within(await screen.findByRole("region", { name: "Account" }))
+    const account = within(await screen.findByRole("region", { name: "Password" }))
     expect(account.queryByRole("button", { name: "Log out" })).toBeNull()
   })
 })
