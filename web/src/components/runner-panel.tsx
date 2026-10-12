@@ -24,9 +24,15 @@ import { errorText } from "@/query"
 
 export type DetailTab = "steps" | "log" | "containers"
 
+// A failed poll keeps what the last good one showed; its error goes above.
+function PollError({ query }: { query: UseQueryResult<unknown> }) {
+  if (!query.isError) return null
+  return <ErrorLine onRetry={() => void query.refetch()}>{errorText(query.error)}</ErrorLine>
+}
+
 function Steps({ steps, live, finished, now }: { steps: UseQueryResult<Step[]>; live: boolean; finished: boolean; now: number }) {
-  if (steps.isError) return <ErrorLine>{errorText(steps.error)}</ErrorLine>
   if (!steps.data) {
+    if (steps.isError) return null
     // Steps are polled only while the runner is live.
     if (finished) return <p className="text-sm text-muted-foreground">Steps are not kept after a runner finishes.</p>
     return <Spinner label="Loading" />
@@ -36,7 +42,7 @@ function Steps({ steps, live, finished, now }: { steps: UseQueryResult<Step[]>; 
 }
 
 function Containers({ containers }: { containers: UseQueryResult<Container[]> }) {
-  if (containers.isError) return <ErrorLine>{errorText(containers.error)}</ErrorLine>
+  if (!containers.data && containers.isError) return null
   if (!containers.data || containers.data.length === 0) {
     return <p className="text-sm text-muted-foreground">No containers in this runner's compose projects.</p>
   }
@@ -180,7 +186,10 @@ export function RunnerPanel({ id, tab, backLink }: { id: string; tab: DetailTab;
           <TabsTrigger value="containers">Containers</TabsTrigger>
         </TabsList>
         <TabsContent value="steps">
-          <Steps steps={steps} live={live} finished={finished} now={end} />
+          <div className="flex flex-col gap-3">
+            <PollError query={steps} />
+            <Steps steps={steps} live={live} finished={finished} now={end} />
+          </div>
         </TabsContent>
         <TabsContent value="log">
           <div className="mb-2 flex items-center gap-2">
@@ -195,7 +204,10 @@ export function RunnerPanel({ id, tab, backLink }: { id: string; tab: DetailTab;
           )}
         </TabsContent>
         <TabsContent value="containers">
-          <Containers containers={containers} />
+          <div className="flex flex-col gap-3">
+            <PollError query={containers} />
+            <Containers containers={containers} />
+          </div>
         </TabsContent>
       </Tabs>
       <StopRunnerDialog instance={stopping && inst ? inst : null} onClose={() => setStopping(false)} />

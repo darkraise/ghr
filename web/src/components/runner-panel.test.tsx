@@ -1,5 +1,5 @@
 import { useParams, useSearch } from "@tanstack/react-router"
-import { fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { json, mockApi, noContent } from "@/test/api"
@@ -228,6 +228,24 @@ describe("RunnerPanel", () => {
     down = true
     await waitFor(() => expect(screen.getByRole("button", { name: "Stop runner" })).toBeDisabled())
     expect(screen.getAllByText("Running").length).toBeGreaterThan(0)
+  })
+
+  it.each<[string, string, string, string]>([
+    ["steps", "/runners/aaaaaa?tab=steps", "GET /api/runners/aaaaaa/steps", "Run tests"],
+    ["containers", "/runners/aaaaaa?tab=containers", "GET /api/runners/aaaaaa/containers", "ghr-aaaaaa-db-1"],
+  ])("keeps the %s on screen when a poll fails, with a way to retry", async (tab, path, route, shown) => {
+    let down = false
+    mockApi(routes({ [route]: () => (down ? json({ error: "GitHub is not answering" }, 502) : fixtures[tab as "steps" | "containers"]) }))
+    const { queryClient, user } = draw(path)
+    expect(await screen.findByText(shown)).toBeInTheDocument()
+    down = true
+    await act(() => queryClient.refetchQueries({ queryKey: [tab, "aaaaaa"] }))
+    expect(await screen.findByText("GitHub is not answering")).toBeInTheDocument()
+    expect(screen.getByText(shown)).toBeInTheDocument()
+    down = false
+    await user.click(screen.getByRole("button", { name: "Try again" }))
+    await waitFor(() => expect(screen.queryByText("GitHub is not answering")).toBeNull())
+    expect(screen.getByText(shown)).toBeInTheDocument()
   })
 
   it("says when no step is reported yet", async () => {
