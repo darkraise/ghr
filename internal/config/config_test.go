@@ -441,6 +441,42 @@ func TestSaveThroughDanglingSymlinkCreatesTheTarget(t *testing.T) {
 	}
 }
 
+// The kernel resolves a ".." after a symlinked directory against the real
+// directory, so Save must not clean it away lexically.
+func TestSaveFollowsDotDotAfterASymlinkedDirectory(t *testing.T) {
+	dir := t.TempDir()
+	v1 := filepath.Join(dir, "releases", "v1")
+	if err := os.MkdirAll(v1, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "releases", "settings.yaml")
+	if err := os.WriteFile(target, []byte("owner: before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("releases", "v1"), filepath.Join(dir, "current")); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink("current/../settings.yaml", link); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ owner, path string }{
+		{"vialink", link},
+		{"viapath", dir + "/current/../settings.yaml"},
+	} {
+		if err := saveOwner(t, c.path, c.owner); err != nil {
+			t.Fatal(err)
+		}
+		back, _, err := Load(link)
+		if err != nil || back.Owner != c.owner {
+			t.Fatalf("%s: Load(link) gives owner %q, err %v", c.owner, back.Owner, err)
+		}
+		if _, err := os.Lstat(filepath.Join(dir, "settings.yaml")); !os.IsNotExist(err) {
+			t.Fatalf("%s: a file was written beside the link (err %v)", c.owner, err)
+		}
+	}
+}
+
 func TestSaveThroughLinkChain(t *testing.T) {
 	dir := t.TempDir()
 	realDir := filepath.Join(dir, "real")

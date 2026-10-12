@@ -306,14 +306,22 @@ const maxLinkHops = 8
 // end of the symbolic links that start there. That file may not exist yet.
 // Anything else that stops the resolution is an error, so Save never writes
 // over a link.
+//
+// The path is split by hand and never cleaned: the kernel resolves a ".." after
+// a symlinked directory against the real directory, and filepath.Clean (which
+// Dir and Join apply) would drop it lexically and name another file.
 func saveTarget(path string) (string, error) {
 	orig := path
 	for hops := 0; ; hops++ {
-		dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+		dir, base := ".", path
+		if i := strings.LastIndexAny(path, `/`+string(os.PathSeparator)); i >= 0 {
+			dir, base = path[:i+1], path[i+1:]
+		}
+		dir, err := filepath.EvalSymlinks(dir)
 		if err != nil {
 			return "", err
 		}
-		path = filepath.Join(dir, filepath.Base(path))
+		path = filepath.Join(dir, base)
 		fi, err := os.Lstat(path)
 		if errors.Is(err, os.ErrNotExist) {
 			return path, nil
@@ -332,7 +340,7 @@ func saveTarget(path string) (string, error) {
 			return "", err
 		}
 		if !filepath.IsAbs(dest) {
-			dest = filepath.Join(dir, dest)
+			dest = dir + string(os.PathSeparator) + dest
 		}
 		path = dest
 	}
