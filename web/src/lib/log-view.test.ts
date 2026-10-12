@@ -94,4 +94,20 @@ describe("findMatches", () => {
     ])
     expect(findMatches(log, "")).toEqual([])
   })
+
+  it("reads each line's text once across searches", () => {
+    let reads = 0
+    const counted: LogLine = {
+      n: 1,
+      kind: "",
+      get text() {
+        reads++
+        return "\u001b[31mFound\u001b[0m 1 error."
+      },
+    }
+    const log: JobLog = { job_id: 1, too_large: false, expired: false, no_log: false, steps: [{ number: 1, name: "s", lines: [counted] }] }
+    expect(findMatches(log, "found")).toEqual([{ step: 1, line: 1, index: 0 }])
+    expect(findMatches(log, "error")).toEqual([{ step: 1, line: 1, index: 0 }])
+    expect(reads).toBe(1)
+  })
 })

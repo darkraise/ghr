@@ -1,5 +1,5 @@
 import type { JobLog, LogLine } from "@/api/types"
-import { matchRanges, plainText } from "@/lib/ansi"
+import { matchRanges, parsedLine } from "@/lib/ansi"
 
 // A step renders at most this many of its last lines until asked for more.
 export const LOG_WINDOW = 5000
@@ -64,7 +64,7 @@ export function findMatches(log: JobLog, query: string): LogMatch[] {
   for (const step of log.steps) {
     for (const line of step.lines) {
       if (line.kind === "endgroup") continue
-      matchRanges(plainText(line.text), query).forEach((_, index) => out.push({ step: step.number, line: line.n, index }))
+      matchRanges(parsedLine(line).text, query).forEach((_, index) => out.push({ step: step.number, line: line.n, index }))
     }
   }
   return out
