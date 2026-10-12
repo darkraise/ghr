@@ -34,8 +34,17 @@ func within(path, dir string) bool {
 // usually because the daemon is down; it must not count toward the give-up.
 var errListProjects = errors.New("list compose containers")
 
-// projects returns the compose projects of an instance: ghr-<id> plus every
-// project whose working_dir label lies inside the instance dir, sorted.
+// projects returns the compose projects of an instance, sorted: ghr-<id>,
+// every project whose working_dir label lies inside the instance dir, and
+// those an earlier cleanup recorded.
+//
+// The recorded list is read from the private directory, where the job cannot
+// write, so a job cannot forge it. The labels remain the job's word: a job
+// with Docker access can label a container with another project's name and a
+// working_dir inside its instance dir, and cleanup, as root, then removes
+// that project's containers, networks and volumes. That gives the job nothing
+// new: the runner user is in the docker group and can remove any project
+// itself.
 func (m *Manager) projects(ctx context.Context, id string) ([]string, error) {
 	dir := m.instanceDir(id)
 	set := map[string]bool{"ghr-" + id: true}
@@ -50,8 +59,7 @@ func (m *Manager) projects(ctx context.Context, id string) ([]string, error) {
 	}
 	// Cleanup remembers the projects it has seen: custom projects are found
 	// only through their containers, so a retry after those are removed must
-	// still reach the project's networks and volumes. The list is kept where
-	// the job cannot write, so it cannot edit the names already remembered.
+	// still reach the project's networks and volumes.
 	if b, err := os.ReadFile(m.privateProjects(id)); err == nil {
 		for _, p := range strings.Fields(string(b)) {
 			set[p] = true
