@@ -35,16 +35,17 @@ export function RegistrationsGroup({
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.registrations(name) }),
   })
 
+  const error = !degraded && regs.isError ? <ErrorLine onRetry={() => void regs.refetch()}>{errorText(regs.error)}</ErrorLine> : null
   let body: ReactNode
   if (degraded) body = <p className="text-sm text-destructive">{`GitHub is rejecting the token: ${degradedReason ?? ""}`}</p>
-  else if (regs.isError) body = <ErrorLine>{errorText(regs.error)}</ErrorLine>
-  else if (!regs.data) body = <Spinner label="Loading" />
+  else if (!regs.data) body = error ?? <Spinner label="Loading" />
   else if (regs.data.length === 0) {
     body = <p className="text-sm text-muted-foreground">No runners registered. ghr starts single-use runners on demand, and keeps warm ones in all mode.</p>
   }
 
   return (
     <FieldGroup id="registrations" title="GitHub registrations">
+      {error && regs.data && <div className="py-3">{error}</div>}
       {body ? (
         <div className="py-3">{body}</div>
       ) : (

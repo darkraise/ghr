@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import type { Registration } from "@/api/types"
-import { mockApi, noContent } from "@/test/api"
+import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { expectPill } from "@/test/pill"
 import { renderApp } from "@/test/render"
@@ -60,6 +60,27 @@ describe("GitHub registrations group", () => {
     ).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Refresh" }))
     await waitFor(() => expect(calls.filter((c) => c.path === "/api/repos/darkmem/registrations")).toHaveLength(2))
+  })
+
+  it("keeps the list when a read fails, with a way to retry", async () => {
+    let down = false
+    mockApi(
+      routes({
+        "GET /api/repos/darkmem/registrations": () =>
+          down ? json({ error: "GitHub is not answering" }, 502) : [...fixtures.registrations, stale],
+      }),
+    )
+    const { user } = renderApp("/repositories/darkmem/registrations")
+    expect(await screen.findByText("old-runner")).toBeInTheDocument()
+    down = true
+    await user.click(screen.getByRole("button", { name: "Refresh" }))
+    const region = within(screen.getByRole("region", { name: "GitHub registrations" }))
+    expect(await region.findByText("GitHub is not answering")).toBeInTheDocument()
+    expect(region.getByText("old-runner")).toBeInTheDocument()
+    down = false
+    await user.click(region.getByRole("button", { name: "Try again" }))
+    await waitFor(() => expect(region.queryByText("GitHub is not answering")).toBeNull())
+    expect(region.getByText("old-runner")).toBeInTheDocument()
   })
 
   it("does not read while GitHub rejects the token", async () => {
