@@ -133,14 +133,17 @@ export function logSettling(completedAt: string | undefined, now: number): boole
   return age >= 0 && age < LOG_SETTLE
 }
 
-// settling comes from the page's clock through logSettling, so the polling
-// and the page's message agree on whether the log may still come.
+// A finished job's log never changes once it has steps, so it is read once.
+// Any other answer can still become a log and stays stale. settling comes
+// from the page's clock through logSettling, so the polling and the page's
+// message agree on whether the log may still come.
 export function useJobLog(repo: string, jobId: number, enabled: boolean, settling: boolean) {
   return useQuery({
     queryKey: keys.jobLog(repo, jobId),
     queryFn: ({ signal }) => api.jobLog(repo, jobId, signal),
     enabled,
     refetchInterval: (q) => (q.state.data?.no_log && settling ? 15_000 : false),
+    staleTime: (q) => (q.state.data && q.state.data.steps.length > 0 ? Infinity : 0),
   })
 }
 

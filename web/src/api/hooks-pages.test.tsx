@@ -1,10 +1,10 @@
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import type { LabelCheck, Status, Storage } from "@/api/types"
+import type { JobLog, LabelCheck, Status, Storage } from "@/api/types"
 import { mockApi } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
-import { storageBusy, useLabelCheck } from "./hooks"
+import { storageBusy, useJobLog, useLabelCheck } from "./hooks"
 
 const idle: Storage = {
   ...fixtures.storage,
@@ -26,6 +26,25 @@ describe("storageBusy", () => {
     ["a prune runs", idle, { ...calm, maintenance: { running: true } }],
   ])("is true when %s", (_why, storage, status) => {
     expect(storageBusy(storage, status)).toBe(true)
+  })
+})
+
+describe("useJobLog", () => {
+  const noLog: JobLog = { ...fixtures.jobLog, no_log: true, steps: [] }
+
+  it.each([
+    ["does not read a log that has steps again", fixtures.jobLog, 1],
+    ["reads a 'no log' answer again", noLog, 2],
+  ])("%s when the window gets focus", async (_name, answer, reads) => {
+    const { calls } = mockApi({ "GET /api/actions/darkmem/jobs/1002/log": answer })
+    const { queryClient, wrapper } = withQuery()
+    const { result } = renderHook(() => useJobLog("darkmem", 1002, true, false), { wrapper })
+    await waitFor(() => expect(result.current.data).toBeDefined())
+    // What the query library runs when the window gets focus; a refetch it
+    // starts is counted as fetching before this returns.
+    act(() => queryClient.getQueryCache().onFocus())
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0))
+    expect(calls).toHaveLength(reads)
   })
 })
 
