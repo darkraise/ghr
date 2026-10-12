@@ -70,6 +70,11 @@ describe("LogViewer", () => {
     expect(container.querySelector(".ghr-log")).not.toBeNull()
   })
 
+  it("lets the browser skip a line row that is off screen, at one line's height", () => {
+    renderViewer()
+    expect(lineRow(5, "Lint")).toHaveClass("[content-visibility:auto]", "[contain-intrinsic-size:auto_1.25rem]")
+  })
+
   it("shows commands in the primary colour and opens steps on click", async () => {
     const { user } = renderViewer()
     await user.click(stepButton(/Install/))

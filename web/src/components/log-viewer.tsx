@@ -42,7 +42,7 @@ const Line = memo(function Line({ line, query, current, target }: { line: LogLin
     <div
       data-line={line.n}
       data-target={target ? "true" : undefined}
-      className={`flex gap-3 px-2 ${ROW_CLASS[line.kind] ?? ""} ${target ? "ghr-log-target" : ""}`}
+      className={`flex gap-3 px-2 [contain-intrinsic-size:auto_1.25rem] [content-visibility:auto] ${ROW_CLASS[line.kind] ?? ""} ${target ? "ghr-log-target" : ""}`}
     >
       <span className="ghr-log-muted w-12 shrink-0 text-right select-none">{line.n}</span>
       <span className={`min-w-0 break-all whitespace-pre-wrap ${TEXT_CLASS[line.kind] ?? ""}`}>
