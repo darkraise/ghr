@@ -178,7 +178,7 @@ func Parse(data []byte) (*Config, []string, error) {
 	c := defaults()
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
-	if err := dec.Decode(c); err != nil {
+	if err := dec.Decode(c); err != nil && !errors.Is(err, io.EOF) {
 		return nil, nil, fmt.Errorf("parse config: %w", err)
 	}
 	var extra yaml.Node

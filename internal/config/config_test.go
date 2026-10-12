@@ -383,6 +383,23 @@ func TestParseRejectsUnknownKeysAndExtraDocuments(t *testing.T) {
 	}
 }
 
+func TestParseEmptyFileLoadsDefaults(t *testing.T) {
+	for name, y := range map[string]string{
+		"empty":         "",
+		"blank":         "\n\n",
+		"comments only": "# owner: darkraise\n# mode: all\n",
+	} {
+		c, warnings, err := Parse([]byte(y))
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if len(warnings) != 0 || c.Mode != ModeQueue || c.GlobalMax != 2 || c.PollInterval.D() != 10*time.Second {
+			t.Errorf("%s: warnings %v, config %+v", name, warnings, c)
+		}
+	}
+}
+
 func TestCloneIsDeep(t *testing.T) {
 	c, _, _ := Parse([]byte(sample))
 	d := c.Clone()
