@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -104,62 +105,99 @@ func TestLoginThrottle(t *testing.T) {
 	}
 }
 
+// These figures decide how many passwords a client may try, so a change to
+// any of them must be a deliberate one.
+func TestThrottleFigures(t *testing.T) {
+	if maxFailures != 5 || maxPrefixFailures != 50 || failWindow != 15*time.Minute || lockout != 15*time.Minute {
+		t.Fatalf("limits %d per address and %d per /64, window %v, lockout %v", maxFailures, maxPrefixFailures, failWindow, lockout)
+	}
+}
+
 func TestFailuresUseARollingWindow(t *testing.T) {
-	a, c := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
-		t.Fatal(err)
-	}
-	fail := func(n int) {
-		for range n {
-			if _, err := a.Login("10.0.0.1", "wrong password!"); !errors.Is(err, ErrWrongPassword) {
-				t.Fatalf("at %v: %v", c.now(), err)
+	for _, tc := range []struct {
+		name  string
+		key   func(i int) string
+		limit int
+	}{
+		{"IPv4 address", func(int) string { return "10.0.0.1" }, maxFailures},
+		{"IPv6 address", func(int) string { return v6(1) }, maxFailures},
+		{"IPv6 /64", func(i int) string { return v6(i + 1) }, maxPrefixFailures},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, c := newTestAuth(t)
+			if _, err := a.Setup(pw); err != nil {
+				t.Fatal(err)
 			}
-		}
-	}
-	fail(1)
-	c.add(14 * time.Minute)
-	fail(3)
-	c.add(2 * time.Minute)
-	fail(2)
-	var te *ThrottledError
-	if _, err := a.Login("10.0.0.1", pw); !errors.As(err, &te) {
-		t.Fatalf("five failures within the last 15 minutes did not lock the client out: %v", err)
+			done := 0
+			fail := func(n int) {
+				t.Helper()
+				for range n {
+					if _, err := a.Login(tc.key(done), "wrong password!"); !errors.Is(err, ErrWrongPassword) {
+						t.Fatalf("failure %d at %v: %v", done+1, c.now(), err)
+					}
+					done++
+				}
+			}
+			fail(1)
+			c.add(14 * time.Minute)
+			fail(tc.limit - 2)
+			c.add(2 * time.Minute)
+			// The first failure has left the window, so the lock lands on the
+			// second of these two and not on the first.
+			fail(2)
+			var te *ThrottledError
+			if _, err := a.Login(tc.key(0), pw); !errors.As(err, &te) {
+				t.Fatalf("%d failures within the last 15 minutes did not lock the client out: %v", tc.limit, err)
+			}
+		})
 	}
 }
 
 func TestBurstCannotExceedTheLimit(t *testing.T) {
-	a, _ := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
-		t.Fatal(err)
-	}
-	start := make(chan struct{})
-	results := make(chan error, 20)
-	for range 20 {
-		go func() {
-			<-start
-			_, err := a.Login("10.0.0.1", "wrong password!")
-			results <- err
-		}()
-	}
-	close(start)
-	wrong, throttled := 0, 0
-	for range 20 {
-		var te *ThrottledError
-		switch err := <-results; {
-		case errors.Is(err, ErrWrongPassword):
-			wrong++
-		case errors.As(err, &te):
-			throttled++
-		default:
-			t.Fatalf("unexpected %v", err)
-		}
-	}
-	if wrong != maxFailures || throttled != 20-maxFailures {
-		t.Fatalf("%d wrong-password answers and %d throttled, want %d and %d", wrong, throttled, maxFailures, 20-maxFailures)
-	}
-	var te *ThrottledError
-	if _, err := a.Login("10.0.0.1", pw); !errors.As(err, &te) {
-		t.Fatalf("the right password after the burst: %v", err)
+	for _, tc := range []struct {
+		name  string
+		n     int
+		key   func(i int) string
+		wrong int
+	}{
+		{"one address", 20, func(int) string { return "10.0.0.1" }, maxFailures},
+		{"one /64", 60, func(i int) string { return v6(i + 1) }, maxPrefixFailures},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, _ := newTestAuth(t)
+			if _, err := a.Setup(pw); err != nil {
+				t.Fatal(err)
+			}
+			start := make(chan struct{})
+			results := make(chan error, tc.n)
+			for i := range tc.n {
+				go func() {
+					<-start
+					_, err := a.Login(tc.key(i), "wrong password!")
+					results <- err
+				}()
+			}
+			close(start)
+			wrong, throttled := 0, 0
+			for range tc.n {
+				var te *ThrottledError
+				switch err := <-results; {
+				case errors.Is(err, ErrWrongPassword):
+					wrong++
+				case errors.As(err, &te):
+					throttled++
+				default:
+					t.Fatalf("unexpected %v", err)
+				}
+			}
+			if wrong != tc.wrong || throttled != tc.n-tc.wrong {
+				t.Fatalf("%d wrong-password answers and %d throttled, want %d and %d", wrong, throttled, tc.wrong, tc.n-tc.wrong)
+			}
+			var te *ThrottledError
+			if _, err := a.Login(tc.key(0), pw); !errors.As(err, &te) {
+				t.Fatalf("the right password after the burst: %v", err)
+			}
+		})
 	}
 }
 
@@ -179,6 +217,321 @@ func TestSuccessClearsFailures(t *testing.T) {
 	}
 	if _, err := a.Login("10.0.0.1", pw); err != nil {
 		t.Fatalf("failures before the success still counted: %v", err)
+	}
+}
+
+// v6 is the throttle key of host n in the /64 v6Prefix, as the handler
+// derives it.
+func v6(n int) string { return ClientKey(fmt.Sprintf("[2001:db8:1:2::%x]:5555", n)) }
+
+const v6Prefix = "2001:db8:1:2::/64"
+
+func failureCounters(a *Auth) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.fails)
+}
+
+// A dual-stack listener reports an IPv4 client as ::ffff:a.b.c.d. That is
+// the client a.b.c.d: one counter, locked at maxFailures.
+func TestIPv4MappedAddressIsItsIPv4Client(t *testing.T) {
+	a, _ := newTestAuth(t)
+	if _, err := a.Setup(pw); err != nil {
+		t.Fatal(err)
+	}
+	keys := []string{ClientKey("10.0.0.1:5555"), ClientKey("[::ffff:10.0.0.1]:5555")}
+	for i := range maxFailures {
+		if _, err := a.Login(keys[i%2], "wrong password!"); !errors.Is(err, ErrWrongPassword) {
+			t.Fatalf("failure %d: %v", i+1, err)
+		}
+	}
+	for _, key := range keys {
+		var te *ThrottledError
+		if _, err := a.Login(key, pw); !errors.As(err, &te) {
+			t.Fatalf("%s after %d failures: %v", key, maxFailures, err)
+		}
+	}
+	if n := failureCounters(a); n != 1 {
+		t.Fatalf("%d failure counters, want 1", n)
+	}
+}
+
+func TestOnlyAnIPv6AddressHasAPrefixCounter(t *testing.T) {
+	for _, tc := range []struct {
+		key  string
+		want int
+	}{
+		{"10.0.0.1", 1},
+		{"::ffff:10.0.0.1", 1},
+		{"not an address", 1},
+		{v6(1), 2},
+	} {
+		a, _ := newTestAuth(t)
+		if _, err := a.Setup(pw); err != nil {
+			t.Fatal(err)
+		}
+		a.Login(tc.key, "wrong password!")
+		if n := failureCounters(a); n != tc.want {
+			t.Errorf("%s: %d failure counters after one failure, want %d", tc.key, n, tc.want)
+		}
+	}
+}
+
+// With every derivation slot taken and its context already done, a login
+// that gets as far as the password check returns the context's error. A
+// locked client must be refused before that: no derivation runs for it and
+// no failure is counted, whatever password it sends, until the lockout ends.
+func TestLockedClientIsRefusedBeforeThePasswordCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		failures int
+		key      func(i int) string
+		refused  string
+		admitted string
+	}{
+		{"IPv4 address", maxFailures, func(int) string { return "10.0.0.1" }, "10.0.0.1", "10.0.0.2"},
+		{"IPv6 address", maxFailures, func(int) string { return v6(1) }, v6(1), v6(2)},
+		{"IPv6 /64, an address never seen", maxPrefixFailures, func(i int) string { return v6(i + 1) }, v6(1000), ClientKey("[2001:db8:1:3::1]:5555")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, c := newTestAuth(t)
+			if _, err := a.Setup(pw); err != nil {
+				t.Fatal(err)
+			}
+			for i := range tc.failures {
+				if _, err := a.Login(tc.key(i), "wrong password!"); !errors.Is(err, ErrWrongPassword) {
+					t.Fatalf("failure %d: %v", i+1, err)
+				}
+			}
+			until := c.now().Add(lockout)
+			counters := failureCounters(a)
+			fillSlots(a)
+			defer func() { <-a.sem; <-a.sem }()
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			refused := func(when string) {
+				t.Helper()
+				for _, password := range []string{pw, "wrong password!"} {
+					var te *ThrottledError
+					if _, err := a.login(ctx, tc.refused, password); !errors.As(err, &te) || !te.RetryAt.Equal(until) {
+						t.Fatalf("%s %s: %v", tc.refused, when, err)
+					}
+				}
+			}
+			refused("at once")
+			if _, err := a.login(ctx, tc.admitted, pw); !errors.Is(err, context.Canceled) {
+				t.Fatalf("%s, which is not locked out: %v", tc.admitted, err)
+			}
+			if n := failureCounters(a); n != counters {
+				t.Fatalf("%d failure counters after the refusals, want %d", n, counters)
+			}
+			c.add(lockout - time.Nanosecond)
+			refused("just before the lockout ends")
+			c.add(time.Nanosecond)
+			if _, err := a.login(ctx, tc.refused, pw); !errors.Is(err, context.Canceled) {
+				t.Fatalf("%s after the lockout: %v", tc.refused, err)
+			}
+			if n := failureCounters(a); n != 0 {
+				t.Fatalf("%d failure counters left after the lockout", n)
+			}
+		})
+	}
+}
+
+// login checks the lockout three times: on arrival, after waiting for a
+// derivation slot, and after the derivation. A lock that lands before any of
+// them must refuse the login and stay in place, whichever key it is on and
+// even when the password is right. login reads the clock under a.mu right
+// before each check, which is where this test plants the lock.
+func TestALockLandingMidLoginRefusesIt(t *testing.T) {
+	for _, tc := range []struct{ name, locked string }{{"address", v6(1)}, {"prefix", v6Prefix}} {
+		for check := 1; check <= 3; check++ {
+			t.Run(fmt.Sprintf("%s before check %d", tc.name, check), func(t *testing.T) {
+				a, c := newTestAuth(t)
+				if _, err := a.Setup(pw); err != nil {
+					t.Fatal(err)
+				}
+				until := c.now().Add(lockout)
+				reads := 0
+				a.now = func() time.Time {
+					if reads++; reads == check {
+						a.fails[tc.locked] = &failures{times: []time.Time{c.now()}, lockedUntil: until}
+					}
+					return c.now()
+				}
+				var te *ThrottledError
+				if id, err := a.Login(v6(1), pw); !errors.As(err, &te) || !te.RetryAt.Equal(until) || id != "" {
+					t.Fatalf("login: id %q err %v", id, err)
+				}
+				if reads != check {
+					t.Fatalf("login went on to clock read %d after the lock landed before check %d", reads, check)
+				}
+				if f := a.fails[tc.locked]; f == nil || !f.lockedUntil.Equal(until) || len(a.sessions) != 1 {
+					t.Fatalf("the refused login changed the lock or started a session: %+v, %d sessions", f, len(a.sessions))
+				}
+			})
+		}
+	}
+}
+
+func TestRefusalNamesTheLaterRetryTime(t *testing.T) {
+	a, c := newTestAuth(t)
+	now := c.now()
+	for _, tc := range []struct {
+		name            string
+		address, prefix time.Duration // how long after now each lock ends; 0 is no counter
+		want            time.Duration // 0 is admitted
+	}{
+		{"no counter", 0, 0, 0},
+		{"address locked", 3 * time.Minute, 0, 3 * time.Minute},
+		{"/64 locked", 0, 4 * time.Minute, 4 * time.Minute},
+		{"both locked, /64 for longer", 3 * time.Minute, 4 * time.Minute, 4 * time.Minute},
+		{"both locked, address for longer", 4 * time.Minute, 3 * time.Minute, 4 * time.Minute},
+		{"address lock ended, /64 locked", -time.Minute, 4 * time.Minute, 4 * time.Minute},
+		{"/64 lock ended, address locked", 3 * time.Minute, -time.Minute, 3 * time.Minute},
+		{"both locks ended", -time.Minute, -time.Second, 0},
+	} {
+		a.mu.Lock()
+		clear(a.fails)
+		for key, d := range map[string]time.Duration{v6(1): tc.address, v6Prefix: tc.prefix} {
+			if d != 0 {
+				a.fails[key] = &failures{times: []time.Time{now}, lockedUntil: now.Add(d)}
+			}
+		}
+		err := a.admitLocked(v6(1), now)
+		a.mu.Unlock()
+		var te *ThrottledError
+		switch {
+		case tc.want == 0 && err != nil:
+			t.Errorf("%s: refused: %v", tc.name, err)
+		case tc.want != 0 && (!errors.As(err, &te) || !te.RetryAt.Equal(now.Add(tc.want))):
+			t.Errorf("%s: %v, want a retry at %v", tc.name, err, now.Add(tc.want))
+		}
+	}
+}
+
+// On a LAN every IPv6 host shares one /64, so one host's wrong passwords
+// must lock that host's address and nobody else's.
+func TestIPv6AddressLocksAlone(t *testing.T) {
+	a, c := newTestAuth(t)
+	if _, err := a.Setup(pw); err != nil {
+		t.Fatal(err)
+	}
+	for i := range maxFailures {
+		if _, err := a.Login(v6(1), "wrong password!"); !errors.Is(err, ErrWrongPassword) {
+			t.Fatalf("failure %d: %v", i+1, err)
+		}
+	}
+	var te *ThrottledError
+	if _, err := a.Login(v6(1), pw); !errors.As(err, &te) || !te.RetryAt.Equal(c.now().Add(lockout)) {
+		t.Fatalf("sixth attempt: %v", err)
+	}
+	if _, err := a.Login(v6(2), pw); err != nil {
+		t.Fatalf("another address in the /64 was throttled: %v", err)
+	}
+	a.Login("10.0.0.1", "wrong password!")
+	// The IPv6 address, its /64, and the IPv4 address, which has no second key.
+	if n := failureCounters(a); n != 3 {
+		t.Fatalf("%d failure counters, want 3", n)
+	}
+}
+
+// A host that takes a new address inside its /64 for every attempt is held to
+// maxPrefixFailures a window, and adds nothing to the table once the /64 is
+// locked.
+func TestIPv6PrefixLocksAtFifty(t *testing.T) {
+	a, c := newTestAuth(t)
+	if _, err := a.Setup(pw); err != nil {
+		t.Fatal(err)
+	}
+	fail := func(key string) {
+		t.Helper()
+		if _, err := a.Login(key, "wrong password!"); !errors.Is(err, ErrWrongPassword) {
+			t.Fatalf("%s: %v", key, err)
+		}
+	}
+	retryAt := func(key, password string) time.Time {
+		t.Helper()
+		var te *ThrottledError
+		if _, err := a.Login(key, password); !errors.As(err, &te) {
+			t.Fatalf("%s was not refused: %v", key, err)
+		}
+		return te.RetryAt
+	}
+	start := c.now()
+	for range maxFailures {
+		fail(v6(1))
+	}
+	c.add(5 * time.Minute)
+	others := maxPrefixFailures - maxFailures
+	for n := range others {
+		fail(v6(n + 2))
+	}
+	// v6(1) is locked on its own until start+lockout; the /64's lock ends later.
+	prefixUntil := start.Add(5*time.Minute + lockout)
+	if got := retryAt(v6(1), pw); !got.Equal(prefixUntil) {
+		t.Fatalf("an address locked before its /64: retry at %v, want %v", got, prefixUntil)
+	}
+	for n := range 10 {
+		if got := retryAt(v6(1000+n), "wrong password!"); !got.Equal(prefixUntil) {
+			t.Fatalf("a fresh address in a locked /64: retry at %v, want %v", got, prefixUntil)
+		}
+	}
+	if n, want := failureCounters(a), others+2; n != want {
+		t.Fatalf("%d failure counters while the /64 is locked, want %d", n, want)
+	}
+	if _, err := a.Login(ClientKey("[2001:db8:1:3::1]:5555"), pw); err != nil {
+		t.Fatalf("another /64 was throttled: %v", err)
+	}
+	if _, err := a.Login("10.0.0.1", pw); err != nil {
+		t.Fatalf("an IPv4 client was throttled: %v", err)
+	}
+	c.add(10 * time.Minute)
+	if got := retryAt(v6(1), pw); !got.Equal(prefixUntil) {
+		t.Fatalf("after the address's own lockout: retry at %v, want %v", got, prefixUntil)
+	}
+	c.add(5 * time.Minute)
+	if _, err := a.Login(v6(1000), pw); err != nil {
+		t.Fatalf("after the /64's lockout: %v", err)
+	}
+	if n := failureCounters(a); n != 0 {
+		t.Fatalf("%d failure counters left after the lockout", n)
+	}
+}
+
+// The owner logging in from one address must not hand a guesser beside it a
+// fresh count for the /64.
+func TestSuccessClearsTheAddressNotThePrefix(t *testing.T) {
+	a, _ := newTestAuth(t)
+	if _, err := a.Setup(pw); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		for range maxFailures - 1 {
+			a.Login(v6(1), "wrong password!")
+		}
+		if _, err := a.Login(v6(1), pw); err != nil {
+			t.Fatalf("failures before a success still counted for the address: %v", err)
+		}
+	}
+	a.mu.Lock()
+	_, address := a.fails[v6(1)]
+	counted := 0
+	if f := a.fails[v6Prefix]; f != nil {
+		counted = len(f.times)
+	}
+	a.mu.Unlock()
+	if want := 2 * (maxFailures - 1); address || counted != want {
+		t.Fatalf("after two successes: address counter kept %v, %d failures counted for the /64, want %d", address, counted, want)
+	}
+	for n := range maxPrefixFailures - 2*(maxFailures-1) {
+		if _, err := a.Login(v6(n+2), "wrong password!"); !errors.Is(err, ErrWrongPassword) {
+			t.Fatalf("address %d: %v", n+2, err)
+		}
+	}
+	var te *ThrottledError
+	if _, err := a.Login(v6(1), pw); !errors.As(err, &te) {
+		t.Fatalf("the successes cleared the /64's failures: %v", err)
 	}
 }
 
@@ -447,10 +800,10 @@ func TestLoginStopsWaitingWhenTheClientLeaves(t *testing.T) {
 func TestClientKey(t *testing.T) {
 	for in, want := range map[string]string{
 		"192.168.0.10:5555":           "192.168.0.10",
-		"[2001:db8:1:2:aaaa::1]:5555": "2001:db8:1:2::/64",
-		"[2001:db8:1:2:bbbb::9]:6000": "2001:db8:1:2::/64",
+		"[2001:db8:1:2:aaaa::1]:5555": "2001:db8:1:2:aaaa::1",
+		"[2001:db8:1:2:bbbb::9]:6000": "2001:db8:1:2:bbbb::9",
 		"[::ffff:10.0.0.1]:80":        "10.0.0.1",
-		"[fe80::1%eth0]:80":           "fe80::/64",
+		"[fe80::1%eth0]:80":           "fe80::1",
 		"not an address":              "not an address",
 	} {
 		if got := ClientKey(in); got != want {

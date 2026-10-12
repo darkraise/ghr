@@ -16,8 +16,11 @@ import (
 const (
 	sessionTTL  = 30 * 24 * time.Hour
 	maxFailures = 5
-	failWindow  = 15 * time.Minute
-	lockout     = 15 * time.Minute
+	// maxPrefixFailures is the limit for a whole IPv6 /64. It is higher than
+	// maxFailures because on a LAN every host shares one /64.
+	maxPrefixFailures = 50
+	failWindow        = 15 * time.Minute
+	lockout           = 15 * time.Minute
 	// maxDerivations bounds concurrent PBKDF2 runs: each costs about half a
 	// second of CPU, and the daemon's tick loop shares the machine.
 	maxDerivations = 2
@@ -165,14 +168,9 @@ func (a *Auth) login(ctx context.Context, key, password string) (string, error) 
 		return "", err
 	}
 	if !match {
-		f := a.fails[key]
-		if f == nil {
-			f = &failures{}
-			a.fails[key] = f
-		}
-		f.times = append(f.times, now)
-		if len(f.times) >= maxFailures {
-			f.lockedUntil = now.Add(lockout)
+		a.failLocked(key, maxFailures, now)
+		if p, ok := prefixKey(key); ok {
+			a.failLocked(p, maxPrefixFailures, now)
 		}
 		return "", ErrWrongPassword
 	}
@@ -186,11 +184,38 @@ func (a *Auth) login(ctx context.Context, key, password string) (string, error) 
 	return a.newSessionLocked(now)
 }
 
-// admitLocked sweeps, then refuses a client that is locked out. a.mu is held.
+// failLocked counts one failure under key and locks key out once it has
+// limit of them within failWindow. a.mu is held.
+func (a *Auth) failLocked(key string, limit int, now time.Time) {
+	f := a.fails[key]
+	if f == nil {
+		f = &failures{}
+		a.fails[key] = f
+	}
+	f.times = append(f.times, now)
+	if len(f.times) >= limit {
+		f.lockedUntil = now.Add(lockout)
+	}
+}
+
+// admitLocked sweeps, then refuses a client whose address or IPv6 /64 is
+// locked out, with the later of the two retry times. Every login passes here
+// again just before a failure is counted, so nothing is counted for a locked
+// /64 and one /64 never holds more than maxPrefixFailures address counters.
+// a.mu is held.
 func (a *Auth) admitLocked(key string, now time.Time) error {
 	a.sweepLocked(now)
-	if f := a.fails[key]; f != nil && now.Before(f.lockedUntil) {
-		return &ThrottledError{RetryAt: f.lockedUntil}
+	var until time.Time
+	if f := a.fails[key]; f != nil {
+		until = f.lockedUntil
+	}
+	if p, ok := prefixKey(key); ok {
+		if f := a.fails[p]; f != nil && f.lockedUntil.After(until) {
+			until = f.lockedUntil
+		}
+	}
+	if now.Before(until) {
+		return &ThrottledError{RetryAt: until}
 	}
 	return nil
 }
@@ -338,8 +363,8 @@ func remoteAddr(s string) (netip.Addr, bool) {
 	return ip.Unmap().WithZone(""), true
 }
 
-// ClientKey is the throttle key for a request's remote address: the IPv4
-// address, or the IPv6 /64, since one IPv6 host can use a whole /64.
+// ClientKey is the throttle key for a request's remote address: the address
+// without its port. Login also counts an IPv6 address under its /64.
 func ClientKey(addr string) string {
 	ip, ok := remoteAddr(addr)
 	if !ok {
@@ -348,9 +373,17 @@ func ClientKey(addr string) string {
 		}
 		return addr
 	}
-	if ip.Is6() {
-		p, _ := ip.Prefix(64)
-		return p.String()
-	}
 	return ip.String()
+}
+
+// prefixKey is the second throttle key of an IPv6 client, its /64: one host
+// can use every address in it. An IPv4 client has none, however its address
+// is written: every IPv4-mapped address lies in the one /64 ::ffff:0:0/64.
+func prefixKey(key string) (string, bool) {
+	ip, err := netip.ParseAddr(key)
+	if err != nil || !ip.Is6() || ip.Is4In6() {
+		return "", false
+	}
+	p, _ := ip.Prefix(64)
+	return p.String(), true
 }
