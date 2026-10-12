@@ -2,9 +2,11 @@ package storage
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -72,6 +74,41 @@ func TestWalkDoesNotFollowSymlinks(t *testing.T) {
 	u, _, err := walk(dir)
 	if err != nil || u.Files != 0 {
 		t.Fatalf("usage %+v, err %v", u, err)
+	}
+}
+
+// A package store keeps one file under several names. It takes its space
+// once, as du reports it, while each name still counts as a file.
+func TestWalkCountsAHardLinkedFileOnce(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("links are told apart by device and inode")
+	}
+	const size = 256 << 10
+	// Random, so a compressing filesystem cannot shrink it.
+	body := make([]byte, size)
+	rand.Read(body)
+	dir := t.TempDir()
+	stored := filepath.Join(dir, "store", "a")
+	writeFile(t, stored, string(body))
+	if err := os.Mkdir(filepath.Join(dir, "links"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(stored, filepath.Join(dir, "links", "b")); err != nil {
+		t.Skip("no hard links here:", err)
+	}
+	written := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(stored, written, written); err != nil {
+		t.Fatal(err)
+	}
+	u, ok, err := walk(dir)
+	if err != nil || !ok {
+		t.Fatalf("ok %v, err %v", ok, err)
+	}
+	if u.Files != 2 || !u.Last.Equal(written) {
+		t.Fatalf("usage %+v, want both names counted as files", u)
+	}
+	if u.Bytes < size || u.Bytes >= 2*size {
+		t.Fatalf("%d bytes for one %d-byte file with two names", u.Bytes, size)
 	}
 }
 

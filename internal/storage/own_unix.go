@@ -44,3 +44,13 @@ func allocated(fi os.FileInfo) int64 {
 	}
 	return fi.Size()
 }
+
+// hardLink identifies fi when it is a file with more than one name. A
+// directory's link count is its subdirectories, not other names.
+func hardLink(fi os.FileInfo) (inode, bool) {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok || fi.IsDir() || st.Nlink < 2 {
+		return inode{}, false
+	}
+	return inode{uint64(st.Dev), uint64(st.Ino)}, true
+}

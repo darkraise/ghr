@@ -11,3 +11,5 @@ func lookupOwner(string) (*owner, error) { return nil, nil }
 func chownTo(*os.Root, string, *owner) error { return nil }
 
 func allocated(fi os.FileInfo) int64 { return fi.Size() }
+
+func hardLink(os.FileInfo) (inode, bool) { return inode{}, false }

@@ -36,12 +36,15 @@ type usage struct {
 	Last  time.Time
 }
 
-// walk sums the space taken under path (st_blocks × 512, as du counts),
-// counts regular files and finds the newest file modification time. It
-// never follows a symlink: WalkDir reports entries with Lstat. ok is false
-// when path does not exist. Entries that vanish mid-walk, as a running job
-// deletes them, are skipped; the first other error is returned with the
-// partial sums.
+// inode names one file on one filesystem.
+type inode struct{ dev, ino uint64 }
+
+// walk sums the space taken under path as du counts it (st_blocks × 512, a
+// file with several names once), counts regular files, every name as one,
+// and finds the newest file modification time. It never follows a symlink:
+// WalkDir reports entries with Lstat. ok is false when path does not exist.
+// Entries that vanish mid-walk, as a running job deletes them, are skipped;
+// the first other error is returned with the partial sums.
 func walk(path string) (usage, bool, error) { return walkCtx(context.Background(), path) }
 
 // walkCtx stops with ctx's error when ctx ends, so a daemon shutting down is
@@ -54,6 +57,7 @@ func walkCtx(ctx context.Context, path string) (usage, bool, error) {
 		return u, false, err
 	}
 	var first error
+	seen := map[inode]bool{}
 	walkErr := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
 		if cerr := ctx.Err(); cerr != nil {
 			return cerr
@@ -61,7 +65,12 @@ func walkCtx(ctx context.Context, path string) (usage, bool, error) {
 		if err == nil {
 			var fi fs.FileInfo
 			if fi, err = d.Info(); err == nil {
-				u.Bytes += allocated(fi)
+				if id, linked := hardLink(fi); !linked {
+					u.Bytes += allocated(fi)
+				} else if !seen[id] {
+					seen[id] = true
+					u.Bytes += allocated(fi)
+				}
 				if fi.Mode().IsRegular() {
 					u.Files++
 					if fi.ModTime().After(u.Last) {
