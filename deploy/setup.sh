@@ -129,8 +129,8 @@ fetch_runner() {
 # not run while this script installs one. Runner units outlive it, and
 # install_service starts it again; on a first install there is no unit yet.
 # If a later step fails, the exit trap starts the old daemon again.
-# A queued update is dropped while the daemon is down: once it is back up it
-# could start installing into dist while gc_dist is still removing from it.
+# A queued update is dropped while the daemon is down, so the restarted daemon
+# does not install a runner version over the one this script just installed.
 stop_ghr() {
   systemctl stop ghr.service 2>/dev/null || true
   rm -f "$STATE_DIR/runner-update.json"
@@ -145,7 +145,7 @@ tree_is_root_owned() {
 }
 
 install_runner() {
-  local version="$RUNNER_VERSION"
+  local version="${RUNNER_VERSION#v}"
   if [ "$version" = latest ]; then
     version=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name)
     version="${version#v}"
@@ -331,7 +331,13 @@ print_next() {
   web=$(setup_field web)
   [ "$configured" != yes ] || [ "$wizard" = pending ] || return 0
   if [ -n "$web" ] && [ "$web" != - ]; then
-    host=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+    host=${web%:*}
+    case "$host" in
+      "" | 0.0.0.0 | :: | "[::]")
+        host=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+        [[ "$host" != *:* ]] || host="[$host]"
+        ;;
+    esac
     log "finish setup in the browser: http://${host:-<this host>}:${web##*:}/setup"
   elif [ "$configured" != yes ]; then
     log "finish setup with: ghr setup github --owner <owner>"
@@ -340,9 +346,10 @@ print_next() {
   fi
 }
 
-# Must run only after the restarted daemon is ready: the old daemon may have been
-# copying a non-current dist dir into a new instance until it stopped, and the new
-# one only reads `current`.
+# Runs while the daemon is stopped, after install_runner has switched `current`.
+# An instance directory is a full copy of the runner files, so nothing reads an
+# old version directory in the meantime, and no update can install into dist
+# while it is removing from it.
 gc_dist() {
   local keep old
   keep=$(readlink -e "$DIST_DIR/current") || return 0
@@ -398,6 +405,7 @@ main() {
   create_user_and_dirs
   stop_ghr
   install_runner
+  gc_dist
   install_ghr
   install_config
   install_service
@@ -405,7 +413,6 @@ main() {
   wait_ready
   configure_github
   set_web_password
-  gc_dist
   preinstall_toolchains
   print_next
 }

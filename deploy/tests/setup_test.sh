@@ -81,6 +81,7 @@ tar -czf "$T/runner.tar.gz" -C "$FIX" .
 
 fetch_runner() {
   bump fetches
+  echo "$1" >> "$MARK_DIR/fetched-versions"
   [ ! -f "$MARK_DIR/stopped" ] || touch "$MARK_DIR/fetched-after-stop"
   cp "$T/runner.tar.gz" "$2"
 }
@@ -181,6 +182,17 @@ check "a: an installed version with foreign-owned files is fetched again" [ "$(c
 check "a: the foreign-owned files are gone" absent "$DIST_DIR/$FIXTURE_VERSION/planted-by-a-job"
 check "a: the fetched-again version is published" [ -x "$DIST_DIR/$FIXTURE_VERSION/run.sh" ]
 check "a: the fetched-again version is made unwritable for group and others" [ -z "$(find "$DIST_DIR/$FIXTURE_VERSION" -perm /022 ! -type l -print -quit)" ]
+
+# A leading v on RUNNER_VERSION is dropped: the download and the dist dir use the bare number.
+new_case a-version-prefix
+RUNNER_VERSION=v$FIXTURE_VERSION
+out=$(run install_runner 2>&1)
+rc=$?
+check "a: a leading v in RUNNER_VERSION is accepted" [ "$rc" -eq 0 ]
+check "a: the version is installed under its bare number" [ -x "$DIST_DIR/$FIXTURE_VERSION/run.sh" ]
+check "a: no dist dir carries the v" absent "$DIST_DIR/v$FIXTURE_VERSION"
+check "a: the runner is fetched by its bare number" [ "$(cat "$MARK_DIR/fetched-versions")" = "$FIXTURE_VERSION" ]
+check "a: current points at the bare number" [ "$(target_of_current)" = "$FIXTURE_VERSION" ]
 
 # (b) Readiness loop.
 new_case b-ready-after-polls
@@ -644,6 +656,28 @@ check "k: a pending wizard without the web UI names ghr setup finish" contains "
 setup_marks yes "done" DarkRaise 0.0.0.0:8080
 out=$( (setup_ghr; run print_next) 2>&1)
 check "k: a finished setup prints nothing" [ -z "$out" ]
+# A specific listen address is printed as it is; only a wildcard or an empty host
+# is replaced by the host's first address.
+for listen_url in "192.168.0.5:8080 http://192.168.0.5:8080/setup" \
+  "127.0.0.1:9090 http://127.0.0.1:9090/setup" \
+  "localhost:8080 http://localhost:8080/setup" \
+  "[fd00::5]:8080 http://[fd00::5]:8080/setup" \
+  "[::1]:8080 http://[::1]:8080/setup" \
+  "0.0.0.0:8080 http://192.168.0.99:8080/setup" \
+  "[::]:8080 http://192.168.0.99:8080/setup" \
+  ":8080 http://192.168.0.99:8080/setup" \
+  ":9090 http://192.168.0.99:9090/setup"; do
+  setup_marks no pending - "${listen_url%% *}"
+  out=$( (setup_ghr; run print_next) 2>&1)
+  check "k: web ${listen_url%% *} gives ${listen_url##* }" contains "$out" "finish setup in the browser: ${listen_url##* }"
+done
+hostname() { echo "fd00::99 192.168.0.99"; }
+setup_marks no pending - 0.0.0.0:8080
+out=$( (setup_ghr; run print_next) 2>&1)
+check "k: a wildcard with an IPv6 first address brackets it" contains "$out" "http://[fd00::99]:8080/setup"
+hostname() { :; }
+out=$( (setup_ghr; run print_next) 2>&1)
+check "k: a wildcard with no host address says this host" contains "$out" "http://<this host>:8080/setup"
 unset -f hostname
 
 # (n) The unit comes back with Docker. It is rewritten only when its content
@@ -699,7 +733,7 @@ install_ghr() { :; }
 install_config() { :; }
 install_service() {
   bump restarts
-  [ -d "$DIST_DIR/2.300.0" ] && [ -d "$DIST_DIR/2.336.0" ] && touch "$MARK_DIR/old-present-at-restart"
+  [ ! -e "$DIST_DIR/2.300.0" ] && [ ! -e "$DIST_DIR/2.336.0" ] && touch "$MARK_DIR/old-gone-at-restart"
   [ "$(target_of_current)" = "$FIXTURE_VERSION" ] && touch "$MARK_DIR/current-new-at-restart"
 }
 
@@ -712,10 +746,10 @@ out=$(run main 2>&1)
 rc=$?
 check "c: upgrade via main succeeds" [ "$rc" -eq 0 ]
 check "c: service restarted once" [ "$(count restarts)" -eq 1 ]
-check "c: old versions still present at restart" [ -f "$MARK_DIR/old-present-at-restart" ]
+check "c: old versions already removed at restart" [ -f "$MARK_DIR/old-gone-at-restart" ]
 check "c: current already switched at restart" [ -f "$MARK_DIR/current-new-at-restart" ]
-check "c: old version 2.300.0 removed after ready" absent "$DIST_DIR/2.300.0"
-check "c: old version 2.336.0 removed after ready" absent "$DIST_DIR/2.336.0"
+check "c: old version 2.300.0 removed" absent "$DIST_DIR/2.300.0"
+check "c: old version 2.336.0 removed" absent "$DIST_DIR/2.336.0"
 check "c: new version kept" [ -x "$DIST_DIR/$FIXTURE_VERSION/run.sh" ]
 check "c: current kept and points at the new version" [ "$(target_of_current)" = "$FIXTURE_VERSION" ]
 check "c: ghr stopped before the runner download" [ -f "$MARK_DIR/fetched-after-stop" ]
@@ -733,6 +767,7 @@ out=$( (fetch_runner() { return 1; }; run main) 2>&1)
 rc=$?
 check "c: main fails when the runner download fails" [ "$rc" -ne 0 ]
 check "c: ghr started again after the failure" [ "$(cat "$MARK_DIR/started" 2>/dev/null)" = ghr.service ]
+check "c: no old version is removed when the download fails" [ -d "$DIST_DIR/2.336.0" ]
 
 new_case c-queued-update-dropped
 mkdir -p "$STATE_DIR"
@@ -752,7 +787,7 @@ out=$(run main 2>&1)
 rc=$?
 check "c: main fails when the service is not ready" [ "$rc" -ne 0 ]
 check "c: no ghr start after the service restarted" [ ! -f "$MARK_DIR/started" ]
-check "c: no GC when the service is not ready" [ -d "$DIST_DIR/2.336.0" ]
+check "c: gc already ran before the restart" absent "$DIST_DIR/2.336.0"
 
 new_case c-gc-direct
 old_version 2.300.0
