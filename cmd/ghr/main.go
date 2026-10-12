@@ -110,7 +110,7 @@ const usage = `usage: ghr [command]
   set warm <repo> <n>
   repo add <name> [--max n] [--label l]... [--allow-public]
   repo rm <name>                  removed once its runners finish
-  token set                       read a new PAT from stdin
+  token set                       set a new PAT (prompts, or reads stdin)
   kill <id>                       stop a runner
   logs <id> [-f]                  runner diagnostic log
   history [--repo r] [--conclusion c] [--limit n]

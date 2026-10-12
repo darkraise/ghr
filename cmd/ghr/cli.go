@@ -54,6 +54,9 @@ const logPollInterval = time.Second
 func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out, errOut io.Writer) error {
 	switch args[0] {
 	case "status":
+		if err := need(args, 1, "status"); err != nil {
+			return err
+		}
 		st, err := c.Status(ctx)
 		if err != nil {
 			return err
@@ -84,11 +87,11 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 		if err := need(args, 2, "token set"); err != nil || args[1] != "set" {
 			return usageError("usage: ghr token set")
 		}
-		data, err := io.ReadAll(io.LimitReader(stdin, 64*1024))
+		token, err := readToken(ctx, stdin, errOut)
 		if err != nil {
 			return err
 		}
-		return c.SetToken(ctx, strings.TrimSpace(string(data)))
+		return c.SetToken(ctx, token)
 	case "kill":
 		if err := need(args, 2, "kill <id>"); err != nil {
 			return err
@@ -201,13 +204,25 @@ func repo(ctx context.Context, c *api.Client, args []string) error {
 		allowPublic := fs.Bool("allow-public", false, "")
 		var labels stringList
 		fs.Var(&labels, "label", "")
-		if err := fs.Parse(args[2:]); err != nil {
+		// The flag package stops at the first argument that is not a flag,
+		// so the flags after the name need a second pass.
+		if err := fs.Parse(args[1:]); err != nil {
+			return flagError(err)
+		}
+		name := fs.Arg(0)
+		switch {
+		case name == "":
+			return usageError("usage: ghr repo add <name> [--max n] [--label l]... [--allow-public]")
+		case strings.HasPrefix(name, "-"):
+			return usageError("repo name must not begin with -: " + name)
+		}
+		if err := fs.Parse(fs.Args()[1:]); err != nil {
 			return flagError(err)
 		}
 		if fs.NArg() > 0 {
 			return usageError("unexpected argument " + fs.Arg(0))
 		}
-		req := model.AddRepoRequest{Name: args[1], Labels: labels, AllowPublic: *allowPublic}
+		req := model.AddRepoRequest{Name: name, Labels: labels, AllowPublic: *allowPublic}
 		fs.Visit(func(f *flag.Flag) {
 			if f.Name == "max" {
 				req.Max = max

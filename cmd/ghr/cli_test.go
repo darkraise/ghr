@@ -170,28 +170,54 @@ func TestRepoAddMaxFlag(t *testing.T) {
 		`{"name":"r1","allow_public":false}`,
 		`{"name":"r2","max":0,"allow_public":false}`,
 		`{"name":"r3","max":3,"allow_public":false}`,
+		`{"name":"r4","max":4,"labels":["a"],"allow_public":false}`,
+		`{"name":"r5","max":5,"allow_public":true}`,
+	}
+	for _, args := range [][]string{
+		{"repo", "add", "--max", "4", "--label", "a", "r4"},
+		{"repo", "add", "--allow-public", "r5", "--max", "5"},
+	} {
+		if code, _, errOut := runCLI(t, "", args...); code != 0 {
+			t.Fatalf("%v: exit %d: %s", args, code, errOut)
+		}
+	}
+	if len(*reqs) != len(want) {
+		t.Fatalf("%d requests, want %d: %v", len(*reqs), len(want), *reqs)
 	}
 	for i, w := range want {
 		if got := strings.TrimSpace((*reqs)[i].body); got != w {
 			t.Errorf("request %d: got %s want %s", i, got, w)
 		}
 	}
-	for _, args := range [][]string{
-		{"repo", "add", "r4", "--max", "-2"},
-		{"repo", "add", "r5", "--max", "-1"},
-		{"repo", "add", "r6", "extra"},
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"repo", "add", "r6", "--max", "-2"}, "--max must be >= 0"},
+		{[]string{"repo", "add", "r7", "--max", "-1"}, "--max must be >= 0"},
+		{[]string{"repo", "add", "r8", "extra"}, "unexpected argument extra"},
+		{[]string{"repo", "add", "--max", "2"}, "usage: ghr repo add <name>"},
+		{[]string{"repo", "add", "--", "-r9"}, "repo name must not begin with -: -r9"},
+		{[]string{"repo", "add", "-"}, "repo name must not begin with -: -"},
+		{[]string{"repo", "add", "--bogus"}, "flag provided but not defined: -bogus"},
 	} {
-		if code, _, _ := runCLI(t, "", args...); code != 2 {
-			t.Errorf("%v: exit %d, want 2", args, code)
+		if code, _, errOut := runCLI(t, "", tc.args...); code != 2 || !strings.Contains(errOut, "ghr: "+tc.want) {
+			first, _, _ := strings.Cut(errOut, "\n")
+			t.Errorf("%v: exit %d stderr %q, want exit 2 and %q", tc.args, code, first, tc.want)
 		}
 	}
-	if len(*reqs) != 3 {
+	if len(*reqs) != len(want) {
 		t.Fatalf("rejected adds reached the daemon: %v", *reqs)
+	}
+	code, out, errOut := runCLI(t, "", "repo", "add", "-h")
+	if code != 0 || !strings.Contains(out, "usage: ghr") || errOut != "" || len(*reqs) != len(want) {
+		t.Fatalf("repo add -h: exit %d stdout %d bytes stderr %q requests %v", code, len(out), errOut, *reqs)
 	}
 }
 
 func TestTokenSetReadsStdin(t *testing.T) {
 	reqs := fakeDaemon(t)
+	stubPasswordInput(t, false)
 	if code, _, _ := runCLI(t, "github_pat_new\n", "token", "set"); code != 0 {
 		t.Fatal("token set failed")
 	}
@@ -200,9 +226,23 @@ func TestTokenSetReadsStdin(t *testing.T) {
 	}
 }
 
+// At a terminal the token is asked for without echo, so it stays out of the
+// screen and the scrollback.
+func TestTokenSetPromptsAtATerminal(t *testing.T) {
+	reqs := fakeDaemon(t)
+	stubPasswordInput(t, true, " github_pat_typed ")
+	code, out, errOut := runCLI(t, "not read\n", "token", "set")
+	if code != 0 || out != "" || errOut != "GitHub token: \n" {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+	if r := (*reqs)[0]; r.method != "PUT" || r.path != "/token" || r.body != "github_pat_typed" {
+		t.Fatalf("request %+v", r)
+	}
+}
+
 func TestDrainAndResumeAllTakeNoArguments(t *testing.T) {
 	reqs := fakeDaemon(t)
-	for _, args := range [][]string{{"drain", "darkcloud"}, {"resume-all", "darkcloud"}} {
+	for _, args := range [][]string{{"drain", "darkcloud"}, {"resume-all", "darkcloud"}, {"status", "darkcloud"}} {
 		if code, _, _ := runCLI(t, "", args...); code != 2 {
 			t.Errorf("%v: exit %d, want 2", args, code)
 		}
