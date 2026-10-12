@@ -26,7 +26,7 @@ import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
 const NOTE =
-  "Replacing the token takes effect at once, outside the save bar. It checks read access to the first repository only; registration permissions are checked when a runner next starts."
+  "Replacing the token takes effect at once, outside the save bar. It checks read access to every configured repository; registration permissions are checked when a runner next starts."
 
 export function TokenSection() {
   const token = useToken()

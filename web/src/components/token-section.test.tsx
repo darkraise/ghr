@@ -36,6 +36,26 @@ describe("GitHub token section", () => {
     expect(await screen.findByText("Expires soon")).toBeInTheDocument()
   })
 
+  it("shows a token past its expiry as expired, in the failure tone", async () => {
+    mockApi(authedRoutes({ "GET /api/token": token({ expires_at: new Date(DAEMON_NOW - DAY).toISOString() }) }))
+    renderApp("/settings/token")
+    const section = within(await screen.findByRole("region", { name: "Current token" }))
+    expectPill(await section.findByText("Expired"), "bg-destructive/15", "text-destructive")
+    expect(section.getByText("Expired Oct 2")).toBeInTheDocument()
+    expect(section.queryByText("Expires soon")).toBeNull()
+  })
+
+  it("says that replacing the token checks every configured repository", async () => {
+    mockApi(authedRoutes({ "GET /api/token": token() }))
+    renderApp("/settings/token")
+    const section = within(await screen.findByRole("region", { name: "Current token" }))
+    expect(
+      section.getByText(
+        "Replacing the token takes effect at once, outside the save bar. It checks read access to every configured repository; registration permissions are checked when a runner next starts.",
+      ),
+    ).toBeInTheDocument()
+  })
+
   it("shows a rejected token's reason", async () => {
     mockApi(authedRoutes({ "GET /api/token": { state: "rejected", reason: "Bad credentials" } }))
     renderApp("/settings/token")
