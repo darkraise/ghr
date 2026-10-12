@@ -31,6 +31,7 @@ type fakeBackend struct {
 	token         string
 	killed        []string
 	killErr       error
+	onKill        func() // runs inside KillRunner
 	pruneErr      error
 	reloadErr     error
 	tokenStatus   model.TokenStatus
@@ -242,6 +243,9 @@ func (f *fakeBackend) SetToken(ctx context.Context, t string) error {
 }
 func (f *fakeBackend) KillRunner(ctx context.Context, id string) error {
 	f.killed = append(f.killed, id)
+	if f.onKill != nil {
+		f.onKill()
+	}
 	return f.killErr
 }
 
@@ -352,6 +356,77 @@ func TestMutations(t *testing.T) {
 	if b.added[0].Name != "newrepo" || b.removed[0] != "old" || len(b.pauseAll) != 2 || b.token != "github_pat_x" || b.killed[0] != "aaaaaa" {
 		t.Fatalf("backend %+v", b)
 	}
+}
+
+// deadlineWriter records the write deadline a handler sets, as the web
+// listener's connection would take it.
+type deadlineWriter struct {
+	*httptest.ResponseRecorder
+	deadline time.Time
+}
+
+func (w *deadlineWriter) SetWriteDeadline(t time.Time) error {
+	w.deadline = t
+	return nil
+}
+
+// servedBy is a request as srv's connection would hand it to a handler: the
+// server is in its context. A nil srv leaves the context without one.
+func servedBy(srv *http.Server, method, path string) *http.Request {
+	r := httptest.NewRequest(method, path, nil)
+	if srv == nil {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), http.ServerContextKey, srv))
+}
+
+// A stop can take systemd's 90 seconds, longer than the web listener's
+// WriteTimeout, so the kill route sets its own write deadline before it
+// starts the stop. The Unix socket's server has no write timeout: its
+// responses had no deadline and must keep none. The bubble's clock stands
+// still, so the deadline is exact.
+func TestKillRouteExtendsOnlyAServersWriteTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		web, socket := &http.Server{WriteTimeout: 60 * time.Second}, &http.Server{}
+		const kill = "/runners/a3f9c1"
+		for _, tc := range []struct {
+			name string
+			req  *http.Request
+			want time.Duration // 0 is no deadline
+		}{
+			{"a kill on a server with a write timeout", servedBy(web, http.MethodDelete, kill), 100 * time.Second},
+			{"a kill on a server without one", servedBy(socket, http.MethodDelete, kill), 0},
+			{"a kill outside a server", servedBy(nil, http.MethodDelete, kill), 0},
+			{"another route on a server with a write timeout", servedBy(web, http.MethodDelete, "/repos/old"), 0},
+		} {
+			b := &fakeBackend{}
+			w := &deadlineWriter{ResponseRecorder: httptest.NewRecorder()}
+			atKill := w.deadline
+			b.onKill = func() { atKill = w.deadline }
+			NewServer(b).ServeHTTP(w, tc.req)
+			var want time.Time
+			if tc.want != 0 {
+				want = time.Now().Add(tc.want)
+			}
+			left := func(deadline time.Time) string {
+				if deadline.IsZero() {
+					return "none"
+				}
+				return time.Until(deadline).String()
+			}
+			if w.Code != http.StatusNoContent || !w.deadline.Equal(want) || !atKill.Equal(want) {
+				t.Errorf("%s: status %d, write deadline %s (%s when the stop began), want %s",
+					tc.name, w.Code, left(w.deadline), left(atKill), left(want))
+			}
+		}
+		// A recorder cannot take a write deadline; the stop must still run.
+		b := &fakeBackend{}
+		plain := httptest.NewRecorder()
+		NewServer(b).ServeHTTP(plain, servedBy(web, http.MethodDelete, kill))
+		if plain.Code != http.StatusNoContent || len(b.killed) != 1 {
+			t.Fatalf("a writer without deadlines: status %d, kills %v", plain.Code, b.killed)
+		}
+	})
 }
 
 func TestUnreachableDaemon(t *testing.T) {

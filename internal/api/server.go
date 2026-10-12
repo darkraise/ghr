@@ -237,6 +237,11 @@ func NewServer(b Backend) http.Handler {
 		respond(w, s, err)
 	})
 	mux.HandleFunc("DELETE /runners/{id}", func(w http.ResponseWriter, r *http.Request) {
+		// Only a server that cuts its responses needs the longer deadline. The
+		// Unix socket's server sets no WriteTimeout and keeps no deadline.
+		if srv, ok := r.Context().Value(http.ServerContextKey).(*http.Server); ok && srv.WriteTimeout > 0 {
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(killWriteWindow))
+		}
 		respond(w, nil, b.KillRunner(r.Context(), r.PathValue("id")))
 	})
 	mux.HandleFunc("GET /config", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.Config()) })
@@ -450,6 +455,12 @@ func respond(w http.ResponseWriter, v any, err error) {
 	}
 	writeJSON(w, v)
 }
+
+// killWriteWindow bounds the answer to a kill from the route's start, on a
+// server that has a WriteTimeout. The daemon waits for the runner's unit to
+// stop, which systemd allows 90 seconds by default, longer than the web
+// listener's WriteTimeout.
+const killWriteWindow = 100 * time.Second
 
 // rawWriteWindow bounds a raw log request from the route's start, the same
 // window as the daemon's logRequestWindow, which this package cannot import.
