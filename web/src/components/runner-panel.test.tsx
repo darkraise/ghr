@@ -48,6 +48,22 @@ describe("RunnerPanel", () => {
     expect(screen.getByRole("img", { name: "Pending" })).toBeInTheDocument()
   })
 
+  it("offers no run link for a job address that is not https", async () => {
+    mockApi(
+      routes({
+        "GET /api/status": {
+          ...fixtures.status,
+          instances: fixtures.status.instances.map((i) =>
+            i.id === "aaaaaa" && i.job ? { ...i, job: { ...i.job, html_url: "http://github.com/darkraise/darkmem/actions/runs/102/job/2" } } : i,
+          ),
+        },
+      }),
+    )
+    draw()
+    expect(await screen.findByText("Running for")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Open run" })).toBeNull()
+  })
+
   it("follows the log on the Log tab and pauses when scrolled up", async () => {
     let top = 0
     Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get: () => 500 })

@@ -19,6 +19,7 @@ import { StepList } from "@/components/step-list"
 import { StopRunnerDialog } from "@/components/stop-runner-dialog"
 import { copyWithToast } from "@/lib/clipboard"
 import { dateTimeSec, dur, startedAt } from "@/lib/format"
+import { httpsUrl } from "@/lib/links"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
@@ -124,7 +125,7 @@ export function RunnerPanel({ id, tab, backLink }: { id: string; tab: DetailTab;
 
   const inst = current ?? kept
   const job = inst?.job
-  const runUrl = job?.html_url
+  const runUrl = httpsUrl(job?.html_url)
   const start = inst ? startedAt(inst) : undefined
   const end = finished ? (endedAt ?? now) : now
 
