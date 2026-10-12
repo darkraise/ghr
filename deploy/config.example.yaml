@@ -11,10 +11,10 @@ labels: [homelab, docker]   # added to every runner; keeps existing workflows ma
 runner_limits:
   memory_max: 6G
   cpu_quota: 200%
-web:                          # browser UI; the first visitor sets its password (setup.sh can set it first)
+web:                          # browser UI; the first visitor sets its password (setup.sh can set it first); Settings → Web access edits it
   listen: 0.0.0.0:8080
   # hosts: [ghr.lan]          # names a proxy serves it under; IPs and localhost always work
 repos: []
 # A repository entry, as `ghr repo add` and the web UI write it:
 #   - name: my-repo
-#     allow_public: true      # required to serve a public repository; without it ghr starts no runner for one
+#     allow_public: true      # required to serve a public repository; the repository page's Serve when public switch sets it
