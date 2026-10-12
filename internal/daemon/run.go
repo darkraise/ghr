@@ -299,9 +299,11 @@ func Run(ctx context.Context, o Options) error {
 	}()
 	webCfg := store.Config().Web
 	if webCfg.Listen != "" {
-		if webLn, err = net.Listen("tcp", webCfg.Listen); err != nil {
+		tcp, err := net.Listen("tcp", webCfg.Listen)
+		if err != nil {
 			return fmt.Errorf("web listener: %w", err)
 		}
+		webLn = limitConns(tcp, maxWebConns, maxWebConnsPerClient)
 	}
 	auth := webui.NewAuth(o.WebPasswordPath, time.Now, rand.Reader)
 

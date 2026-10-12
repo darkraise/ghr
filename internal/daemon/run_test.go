@@ -437,6 +437,56 @@ func TestRunClosesTheWebListenerWhenStartFails(t *testing.T) {
 	l.Close()
 }
 
+// Run serves the web UI through the limited listener: a client that holds
+// maxWebConnsPerClient connections has its next one closed at once, and is
+// served again once it closes one.
+func TestRunBoundsAWebClientsConnections(t *testing.T) {
+	addr := freeAddr(t)
+	startRun(t, testOptions(t, cfgYAML+"web:\n  listen: "+addr+"\n"))
+	var held []net.Conn
+	t.Cleanup(func() {
+		for _, c := range held {
+			c.Close()
+		}
+	})
+	waitFor(t, "the web listener", func() bool {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			return false
+		}
+		held = append(held, c)
+		return true
+	})
+	for len(held) < maxWebConnsPerClient+1 {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, c)
+	}
+	// Connections are accepted in the order they arrived, so the last one
+	// dialled is the one over the bound. The deadline only ends a failing
+	// run, and it is shorter than the 10 s after which the server closes a
+	// connection that sent no request.
+	over := held[maxWebConnsPerClient]
+	over.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := over.Read(make([]byte, 1)); err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("connection %d of one client was not closed: %v", maxWebConnsPerClient+1, err)
+	}
+	held[0].Close()
+	waitFor(t, "an answer once a connection closed", func() bool {
+		c, err := net.Dial("tcp", addr)
+		if err != nil {
+			return false
+		}
+		defer c.Close()
+		fmt.Fprintf(c, "GET / HTTP/1.1\r\nHost: %s\r\n\r\n", addr)
+		c.SetReadDeadline(time.Now().Add(10 * time.Second))
+		_, err = c.Read(make([]byte, 1))
+		return err == nil
+	})
+}
+
 func TestRunWithoutTheWebListener(t *testing.T) {
 	o := testOptions(t, cfgYAML)
 	if err := os.WriteFile(o.WebPasswordPath, []byte("garbage\n"), 0o600); err != nil {
