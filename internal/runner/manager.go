@@ -399,6 +399,14 @@ func (m *Manager) releasePrune() {
 	m.mu.Unlock()
 }
 
+// Pruning reports whether a manual or automatic prune is running. A runner
+// update holds the same reservation and is not a prune.
+func (m *Manager) Pruning() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.pruning && !m.upd.running
+}
+
 // startDiskPrune runs pruneDisk in the background and releases the prune
 // reservation when it ends; the caller must hold the reservation. Docker's
 // prune commands can take minutes, and a tick that waited for them would
@@ -671,6 +679,9 @@ func (m *Manager) Status() model.Status {
 		// so a poll that succeeds does not clear it.
 		if m.blockedLocked(cfg, r) {
 			rs.Error = blockedText(r.Name)
+		}
+		if public, known := m.visibilityLocked(r.Name); known {
+			rs.Public = &public
 		}
 		for _, q := range m.demand[r.Name] {
 			if rs.OldestQueuedAt == nil || q.CreatedAt.Before(*rs.OldestQueuedAt) {

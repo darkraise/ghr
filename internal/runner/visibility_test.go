@@ -56,6 +56,37 @@ func TestVisibilityIsReadAfterThePollAndEverySixHours(t *testing.T) {
 	}
 }
 
+// The status carries the visibility GitHub last reported for each repository,
+// nil until it has answered, whether or not the repository is blocked.
+func TestStatusReportsVisibility(t *testing.T) {
+	h := newHarness(t)
+	h.gh.setPublic("darkmem", true)
+	public := func(i int) *bool { return h.m.Status().Repos[i].Public }
+	if public(0) != nil || public(1) != nil {
+		t.Fatalf("before any read: darkcloud %v darkmem %v", public(0), public(1))
+	}
+	h.m.Tick(context.Background())
+	if p := public(0); p == nil || *p {
+		t.Fatalf("darkcloud: %v, want false", p)
+	}
+	if p := public(1); p == nil || !*p {
+		t.Fatalf("darkmem: %v, want true", p)
+	}
+	allowed := h.cfg.Clone()
+	allowed.Repo("darkmem").AllowPublic = true
+	h.cfg = allowed
+	if r := h.m.Status().Repos[1]; r.Public == nil || !*r.Public || r.Error != "" {
+		t.Fatalf("served while public: public %v error %q", r.Public, r.Error)
+	}
+	h.gh.setPublic("darkmem", false)
+	h.m.ClearDegraded()
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background())
+	if p := public(1); p == nil || *p {
+		t.Fatalf("darkmem after it turned private: %v, want false", p)
+	}
+}
+
 // A replaced or reloaded token is the owner saying "look again": every answer
 // is read again at the next poll, and stands until that read.
 func TestClearDegradedMakesEveryVisibilityDue(t *testing.T) {

@@ -42,6 +42,7 @@ type Manager interface {
 	PausedUntil() time.Time
 	StartPruneScope(scope string) error
 	LastPrune() *model.LastPrune
+	Pruning() bool
 	QueueUpdate(ctx context.Context) error
 	CancelUpdate() error
 	Pending() []model.HistoryEntry

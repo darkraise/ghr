@@ -128,6 +128,53 @@ func TestTickSkipsPruningDuringManualPrune(t *testing.T) {
 	}
 }
 
+// Pruning is true while a manual or an automatic prune runs, and false for a
+// runner update, which holds the same reservation.
+func TestPruningReportsBothKindsOfPrune(t *testing.T) {
+	h := newHarness(t)
+	if h.m.Pruning() {
+		t.Fatal("pruning before any prune")
+	}
+	entered, release := holdOn(t, h, "PruneBuildCacheTo")
+	if err := h.m.StartPrune(); err != nil {
+		t.Fatal(err)
+	}
+	waitOrFail(t, entered, "the manual prune")
+	if !h.m.Pruning() {
+		t.Fatal("not pruning during a manual prune")
+	}
+	release()
+	h.m.Wait()
+	if h.m.Pruning() {
+		t.Fatal("pruning after the manual prune")
+	}
+
+	auto := newHarness(t)
+	auto.docker.usage = []int{99, 99, 50}
+	entered, release = holdOn(t, auto, "PruneBuildCacheOlderThan")
+	auto.m.ticks = 0 // the next tick is tick 1, a disk check
+	tickInBackground(t, auto)
+	waitOrFail(t, entered, "the automatic prune")
+	if !auto.m.Pruning() || auto.m.Maintenance().Running {
+		t.Fatalf("automatic prune: pruning %v, maintenance running %v", auto.m.Pruning(), auto.m.Maintenance().Running)
+	}
+	release()
+	auto.m.Wait()
+	if auto.m.Pruning() {
+		t.Fatal("pruning after the automatic prune")
+	}
+
+	h.m.mu.Lock()
+	h.m.pruning, h.m.upd.running = true, true // as a runner update's start sets them
+	h.m.mu.Unlock()
+	if h.m.Pruning() {
+		t.Fatal("a runner update reads as a prune")
+	}
+	h.m.mu.Lock()
+	h.m.pruning, h.m.upd.running = false, false
+	h.m.mu.Unlock()
+}
+
 // tickInBackground runs one tick and fails the test if it does not return:
 // a tick must never wait for a Docker prune.
 func tickInBackground(t *testing.T, h *harness) {

@@ -42,6 +42,7 @@ type fakeManager struct {
 	paused    time.Time        // returned by PausedUntil
 	scopes    []string         // scopes StartPruneScope was asked for
 	lastPrune *model.LastPrune // returned by LastPrune
+	pruning   bool             // returned by Pruning
 	diskPct   int              // Status().DiskPct
 	pending   []model.HistoryEntry
 	onPending func() // runs when Pending is read, before it returns
@@ -89,6 +90,8 @@ func (f *fakeManager) StartPruneScope(scope string) error {
 }
 
 func (f *fakeManager) LastPrune() *model.LastPrune { return f.lastPrune }
+
+func (f *fakeManager) Pruning() bool { return f.pruning }
 
 func (f *fakeManager) Pending() []model.HistoryEntry {
 	if f.onPending != nil {

@@ -203,7 +203,7 @@ func TestResumedPublicRepositoryIsBlockedBeforeItIsPlanned(t *testing.T) {
 	}
 }
 
-const darkmemBlocked = "darkmem is public; ghr serves only private repositories. Set allow_public: true for it in config.yaml and reload to serve it"
+const darkmemBlocked = "darkmem is public; ghr serves only private repositories. Turn on Serve when public on its repository page to serve it"
 
 // blockDarkmem makes darkmem public on GitHub and runs the tick that finds out.
 func blockDarkmem(t *testing.T, h *harness) {

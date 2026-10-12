@@ -152,7 +152,7 @@ func (m *Manager) planConfig(cfg *config.Config) *config.Config {
 // blockedText tells the owner why a blocked repo gets no runner and what
 // lifts the block.
 func blockedText(repo string) string {
-	return repo + " is public; ghr serves only private repositories. Set allow_public: true for it in config.yaml and reload to serve it"
+	return repo + " is public; ghr serves only private repositories. Turn on Serve when public on its repository page to serve it"
 }
 
 // noteBlocked writes one event when a repo becomes blocked and one when it

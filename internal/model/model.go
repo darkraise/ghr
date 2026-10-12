@@ -83,6 +83,9 @@ type RepoStatus struct {
 	OldestQueuedAt *time.Time    `json:"oldest_queued_at,omitempty"`
 	Error          string        `json:"error,omitempty"`
 	LastJob        *HistoryEntry `json:"last_job,omitempty"`
+	// Public is the visibility GitHub last reported for the repository; nil
+	// until GitHub has answered.
+	Public *bool `json:"public,omitempty"`
 }
 
 type InstanceStatus struct {
