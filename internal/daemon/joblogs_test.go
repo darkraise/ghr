@@ -202,6 +202,41 @@ func TestJobLogOutcomes(t *testing.T) {
 	}
 }
 
+// GitHub may not have stored a log yet when its job has only just completed,
+// so "no log" is kept 15 seconds when the job completed less than two minutes
+// before the answer, and logRetryTTL otherwise.
+func TestJobLogAsksAgainSoonAfterTheJobCompleted(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		since time.Duration // from the job's completion to the first request
+		kept  time.Duration
+	}{
+		{"a minute ago", time.Minute, 15 * time.Second},
+		{"two minutes ago", 2 * time.Minute, logRetryTTL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _, gh := newBackend(t)
+			j := logJobOf(gh, 1002, "Backend tests", "x")
+			gh.logErr[1002] = ghNotFound()
+			first := j.CompletedAt.Add(tc.since)
+			clock := frozenClock(b, first)
+			for _, step := range []struct {
+				after     time.Duration
+				downloads int
+			}{{0, 1}, {tc.kept - time.Second, 1}, {tc.kept, 2}} {
+				clock.Store(first.Add(step.after).UnixNano())
+				l, err := b.JobLog(context.Background(), "darkmem", 1002)
+				if err != nil || !l.NoLog {
+					t.Fatalf("after %v: log %+v err %v", step.after, l, err)
+				}
+				if n := gh.count("JobLog"); n != step.downloads {
+					t.Fatalf("after %v: %d downloads, want %d", step.after, n, step.downloads)
+				}
+			}
+		})
+	}
+}
+
 func TestJobLogParsedCacheIsBoundedByLogSize(t *testing.T) {
 	setParsedLogBytes(t, int64(len(logLines("a long enough line")))+10)
 	b, _, gh := newBackend(t)

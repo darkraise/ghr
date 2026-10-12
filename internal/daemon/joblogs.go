@@ -22,6 +22,11 @@ const (
 	logSlots          = 4
 	annotationEntries = 500
 	logRetryTTL       = 10 * time.Minute
+	// GitHub may not have stored a log yet when its job has only just
+	// completed. "No log" for a job that completed less than logSettle ago
+	// is therefore kept logSettleTTL, not logRetryTTL.
+	logSettle    = 2 * time.Minute
+	logSettleTTL = 15 * time.Second
 )
 
 var (
@@ -78,11 +83,11 @@ type logCall struct {
 	res     logResult
 }
 
-// logMiss is an expired, too large, absent or failed outcome, kept
-// logRetryTTL.
+// logMiss is an expired, too large, absent or failed outcome, kept until its
+// time.
 type logMiss struct {
-	at  time.Time
-	res logResult
+	until time.Time
+	res   logResult
 }
 
 type logCache struct {
@@ -120,6 +125,16 @@ type logJob struct {
 	id    int64
 	name  string
 	steps []model.Step
+	// completedAt is zero when GitHub gave no completion time.
+	completedAt time.Time
+}
+
+// completionTime is a job's completed_at, which GitHub can leave out.
+func completionTime(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
 }
 
 // startLogLocked joins the job's download in flight or starts one; the
@@ -156,7 +171,11 @@ func (b *Backend) downloadLog(j logJob, call *logCall, queueWait time.Duration) 
 			delete(c.misses, j.id)
 		case logBusy:
 		default:
-			c.misses[j.id] = logMiss{at: b.now(), res: res}
+			now, ttl := b.now(), logRetryTTL
+			if res.outcome == logNone && now.Sub(j.completedAt) < logSettle {
+				ttl = logSettleTTL
+			}
+			c.misses[j.id] = logMiss{until: now.Add(ttl), res: res}
 		}
 	}
 	c.mu.Unlock()
@@ -253,7 +272,7 @@ func (b *Backend) finishedJob(ctx context.Context, repo string, jobID int64) (lo
 	if job.Status != "completed" {
 		return logJob{}, api.Conflict("job has not finished")
 	}
-	return logJob{repo: name, id: jobID, name: job.Name, steps: modelSteps(job.Steps)}, nil
+	return logJob{repo: name, id: jobID, name: job.Name, steps: modelSteps(job.Steps), completedAt: completionTime(job.CompletedAt)}, nil
 }
 
 // JobLog returns a finished job's log split into steps. An expired, too large
@@ -272,7 +291,7 @@ func (b *Backend) JobLog(ctx context.Context, repo string, jobID int64) (model.J
 		c.mu.Unlock()
 		return l, nil
 	}
-	if m, ok := c.misses[jobID]; ok && m.res.outcome != logFailed && b.now().Sub(m.at) < logRetryTTL {
+	if m, ok := c.misses[jobID]; ok && m.res.outcome != logFailed && b.now().Before(m.until) {
 		c.mu.Unlock()
 		return flaggedLog(jobID, m.res.outcome), nil
 	}

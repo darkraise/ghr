@@ -146,7 +146,10 @@ func TestRunAnnotationsCountsABusyDownloadAsUnread(t *testing.T) {
 
 func TestRunAnnotationsCountsLogOutcomes(t *testing.T) {
 	b, _, gh := newBackend(t)
-	clock := frozenClock(b, actionsT0)
+	// The jobs completed an hour ago, so a log that is not found is kept
+	// logRetryTTL like the other outcomes.
+	start := actionsT0.Add(time.Hour)
+	clock := frozenClock(b, start)
 	annotatedRun(gh, logJobOf(gh, 2001, "a", "x"), logJobOf(gh, 2002, "b", "x"), logJobOf(gh, 2003, "c", "x"), logJobOf(gh, 2004, "d", "x"))
 	gh.logErr[2001] = &github.APIError{Status: 410, Kind: github.ErrGone}
 	gh.logErr[2002] = github.ErrTooLarge
@@ -158,13 +161,37 @@ func TestRunAnnotationsCountsLogOutcomes(t *testing.T) {
 		at        time.Duration
 		downloads int
 	}{{0, 4}, {logRetryTTL - time.Second, 4}, {logRetryTTL, 8}} {
-		clock.Store(actionsT0.Add(step.at).UnixNano())
+		clock.Store(start.Add(step.at).UnixNano())
 		a, err := b.RunAnnotations(ctx, "darkmem", 102, 0)
 		if err != nil || a.ExpiredLogs != 1 || a.TooLarge != 1 || a.Failed != 1 || a.Unread != 0 || len(a.Items) != 0 {
 			t.Fatalf("step %d: %+v err %v", i, a, err)
 		}
 		if n := gh.count("JobLog"); n != step.downloads {
 			t.Fatalf("step %d: %d downloads, want %d", i, n, step.downloads)
+		}
+	}
+}
+
+// The annotations route starts log downloads too, and gives them the job's
+// completion time: a log not found a minute after its job completed is asked
+// for again 15 seconds later.
+func TestRunAnnotationsAskAgainSoonAfterTheJobCompleted(t *testing.T) {
+	b, _, gh := newBackend(t)
+	j := logJobOf(gh, 2001, "a", "x")
+	annotatedRun(gh, j)
+	gh.logErr[2001] = ghNotFound()
+	first := j.CompletedAt.Add(time.Minute)
+	clock := frozenClock(b, first)
+	for _, step := range []struct {
+		after     time.Duration
+		downloads int
+	}{{0, 1}, {14 * time.Second, 1}, {15 * time.Second, 2}} {
+		clock.Store(first.Add(step.after).UnixNano())
+		if _, err := b.RunAnnotations(context.Background(), "darkmem", 102, 0); err != nil {
+			t.Fatal(err)
+		}
+		if n := gh.count("JobLog"); n != step.downloads {
+			t.Fatalf("after %v: %d downloads, want %d", step.after, n, step.downloads)
 		}
 	}
 }

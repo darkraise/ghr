@@ -42,11 +42,11 @@ func (b *Backend) RunAnnotations(ctx context.Context, repo string, id int64, att
 			notes[j.ID] = n
 			continue
 		}
-		if m, ok := c.misses[j.ID]; ok && b.now().Sub(m.at) < logRetryTTL {
+		if m, ok := c.misses[j.ID]; ok && b.now().Before(m.until) {
 			outcomes[j.ID] = m.res.outcome
 			continue
 		}
-		calls[j.ID] = b.startLogLocked(logJob{repo: d.Repo, id: j.ID, name: j.Name, steps: j.Steps})
+		calls[j.ID] = b.startLogLocked(logJob{repo: d.Repo, id: j.ID, name: j.Name, steps: j.Steps, completedAt: completionTime(j.CompletedAt)})
 	}
 	c.mu.Unlock()
 
