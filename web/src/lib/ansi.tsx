@@ -11,9 +11,10 @@ const COLORS = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "w
 
 // One alternative per thing the tokenizer acts on: a CSI sequence (SGR when
 // its final byte is "m"), an OSC sequence ended by BEL, ST or the end of the
-// line, any other escape, and the C0 controls other than tab.
+// line, any other escape, DEL, the C1 controls, and the C0 controls other
+// than tab.
 // eslint-disable-next-line no-control-regex -- log lines carry raw control bytes
-const TOKEN = /\x1b\[([0-?]*)[ -/]*([@-~])|\x1b\][\s\S]*?(?:\x07|\x1b\\|$)|\x1b[ -/]*[0-~]?|[\x00-\x08\x0a-\x1f]/g
+const TOKEN = /\x1b\[([0-?]*)[ -/]*([@-~])|\x1b\][\s\S]*?(?:\x07|\x1b\\|$)|\x1b[ -/]*[0-~]?|[\x00-\x08\x0a-\x1f\x7f-\x9f]/g
 
 // A line rewritten with carriage returns (a progress bar) shows its last
 // state; a trailing CR from a CRLF line ending is not a rewrite.

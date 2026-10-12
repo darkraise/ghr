@@ -41,6 +41,8 @@ describe("ansiSegments", () => {
     ["an unterminated OSC", "text\u001b]0;title", "text"],
     ["other escapes", "a\u001b(Bb\u001b=c", "abc"],
     ["C0 controls other than tab", "a\u0000b\tc\u0007d\u0008e\u001b", "ab\tcde"],
+    ["DEL", "a\u007fb", "ab"],
+    ["C1 controls", "a\u0080b\u0085c\u009bd\u009fe f", "abcde f"],
   ])("removes %s", (_name, raw, want) => {
     expect(plainText(raw)).toBe(want)
   })
