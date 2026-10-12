@@ -77,6 +77,12 @@ describe("RunFrame", () => {
     expect(link).toHaveAttribute("target", "_blank")
   })
 
+  it("offers no GitHub link for a run address that is not https", () => {
+    renderFrame({}, { ...fixtures.runDetail, html_url: "http://github.com/darkraise/darkmem/actions/runs/102" })
+    expect(screen.queryByRole("link", { name: "Open on GitHub" })).toBeNull()
+    expect(screen.getByRole("combobox", { name: "Attempt" })).toBeInTheDocument()
+  })
+
   it("picks an attempt, latest first", async () => {
     const { onAttempt, user } = renderFrame()
     const picker = screen.getByRole("combobox", { name: "Attempt" })

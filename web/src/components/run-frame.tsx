@@ -7,6 +7,7 @@ import { SideGroup } from "@/components/page/side-layout"
 import { StatusPill } from "@/components/page/status-pill"
 import { RunStatusIcon } from "@/components/run-status-icon"
 import { dur } from "@/lib/format"
+import { httpsUrl } from "@/lib/links"
 import { attemptLabel, githubLinks, isRunActive, jobMs, runDescription } from "@/lib/run-details"
 import { SIDE_LINK } from "@/lib/side-link"
 import { resultState } from "@/lib/status"
@@ -73,6 +74,7 @@ export function RunFrame({
   ]
   const attempts = Array.from({ length: run.attempts }, (_, i) => run.attempts - i)
   const workflowFile = githubLinks(owner, run).workflowFile
+  const runUrl = httpsUrl(run.html_url)
   const actions = (
     <div className="flex flex-wrap items-center gap-2">
       <span className="flex items-center">
@@ -92,11 +94,13 @@ export function RunFrame({
           </SelectContent>
         </Select>
       )}
-      <Button variant="outline" asChild>
-        <a href={run.html_url} target="_blank" rel="noreferrer">
-          Open on GitHub
-        </a>
-      </Button>
+      {runUrl && (
+        <Button variant="outline" asChild>
+          <a href={runUrl} target="_blank" rel="noreferrer">
+            Open on GitHub
+          </a>
+        </Button>
+      )}
     </div>
   )
 
