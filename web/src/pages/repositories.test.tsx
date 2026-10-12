@@ -80,6 +80,15 @@ describe("Repositories page", () => {
     expect(calls.filter((c) => c.method === "POST").map((c) => c.path)).toEqual(["/api/repos/darkmem/pause"])
   })
 
+  it("offers to cancel a removal from the row menu, and keeps Remove locked", async () => {
+    const { calls } = mockApi(authedRoutes({ "POST /api/repos/old-repo/resume": () => noContent() }))
+    const { user } = renderApp("/repositories")
+    await user.click(await screen.findByRole("button", { name: "More actions for old-repo" }))
+    expect(await screen.findByRole("menuitem", { name: "Remove" })).toHaveAttribute("aria-disabled", "true")
+    await user.click(screen.getByRole("menuitem", { name: "Cancel removal" }))
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST").map((c) => c.path)).toEqual(["/api/repos/old-repo/resume"]))
+  })
+
   it("removes a repository only after confirmation", async () => {
     const { calls } = mockApi(authedRoutes({ "DELETE /api/repos/darkmem": () => noContent() }))
     const { user } = renderApp("/repositories")

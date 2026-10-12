@@ -24,8 +24,8 @@ export function RepoRowMenu({ repo, offline, onEdit }: { repo: RepoStatus; offli
           <TooltipContent>More actions</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem disabled={actions.locked} onSelect={actions.togglePause}>
-            {repo.paused ? "Resume" : "Pause"}
+          <DropdownMenuItem disabled={actions.toggleLocked} onSelect={actions.togglePause}>
+            {actions.toggleLabel}
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => onEdit(repo.name)}>Edit</DropdownMenuItem>
           <DropdownMenuItem disabled={actions.locked} onSelect={actions.askRemove} className="text-destructive">
