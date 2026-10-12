@@ -3,9 +3,36 @@
 **Date:** 2026-10-12
 **Spec:** docs/superpowers/specs/2026-10-12-ghr-web-logic-fixes-design.md (approved by the owner on 2026-10-12)
 **Register:** docs/superpowers/registers/2026-10-11-ghr-comprehensive-review.md (rows 33, 75 to 109, 225, 279 to 284; sub-project 4 of 7)
-**Target plan:** docs/superpowers/plans/2026-10-12-ghr-web-logic-fixes.md (not written yet)
+**Target plan:** docs/superpowers/plans/2026-10-12-ghr-web-logic-fixes.md (written and assembled on 2026-10-12)
 
-**Status:** every task is drafted and carried out; the plan is not assembled. The session ended on its budget after the six drafter branches were merged and verified together.
+**Status:** the plan is assembled (84 tasks) and its first review round is answered in part; a second session on 2026-10-12 ended on its budget. "What is left now" below is the work list. The sections after it record how the plan was drafted; their "What is left" list is done except its item 8.
+
+## What is left now
+
+State on 2026-10-12: the plan is at `docs/superpowers/plans/2026-10-12-ghr-web-logic-fixes.md`, linted (0 errors) and committed without a Plan review line. The register rows are planned, rows 285 to 308 are added, and the spec is amended. The reference branch `plan/web-logic-order` (worktree `.claude/worktrees/order-web-logic`, HEAD `6f7f105`) holds the 83 task commits in plan order; `plan/web-logic-order-r1` is its state before the review fixes. On `plan/web-logic-order`: `npm test` 97 files and 1384 tests, `npm run test:tz` 5 tests, typecheck, lint and build clean; the Go checks (22 packages with `-race`) were run before the review fixes, which touch no Go.
+
+Review round 1 ran on the Codex seat (`codex gpt-6-astra / xhigh`): executability 17, coherence 17, coverage 18, assumptions 18, one Critical and nine Important findings, in `.superpowers/sdd/2026-10-12-ghr-web-logic-fixes/plan-review-round-1.json`. `plan-round-1.md` beside it is the plan as reviewed.
+
+Fixed, each carried out on `plan/web-logic-order` and written into its fragment:
+
+- Critical, Task 21: the settings form counts an unsaved change by the stored values (`changedKeys(draft, loaded)` and `settle(d, sent)` without `equal`), as spec section 2.3 says. Two tests from 2026-10-06 that pinned the opposite are rewritten in the task: `120s` over `2m0s`, and a space typed after a value, now count as one unsaved change.
+- Task 28: a tag that is added clears the refusal line; one test added.
+- Task 39: the stored match is reset when the deferred search text changes; one guard test added.
+- Task 76: the test also asserts that the chart is drawn.
+- Header: the one-test-file rule now reads "only the test files its commands name"; the Contracts line on `@/query` excepts test files.
+
+Still to do, in order:
+
+1. **Add a last task, a browser check gated on the owner's yes** (finding: unverified assumptions have no verifying task). Write it as Task 3 of `chain-7.md` with a `(7, 3)` entry in `scores.txt`: deploy to the runner LXC only with a yes, then the checks of spec section 8 with expected results, and "pending" in the report without a yes. The memory notes on the LXC say how to deploy and drive the browser. Point the `unverified` bullets of `header-assumptions.md` at it.
+2. **Record the four declined findings** in `header-assumptions.md`, one line each, and in the register:
+   - Task 14, a second navigation blocked while a dismissed save still runs: beyond spec section 2.2; it is register row 286.
+   - Tasks 18 and 19, incomplete numbers such as `1e` that a number input reports as empty: on `master` already, the spec keeps the meaning of an emptied box; add it to row 289's note.
+   - Task 25, an edit made while the wizard's "Save your changes?" save runs is lost on leaving: `saveAndNext` on `master` does the same; add a new row.
+   - Task 39, the urgent render still regroups the open steps: the line re-render and the matching are deferred and the parse is cached; it is row 303.
+3. **Tell the owner about the Task 21 reading**: add it to row 308 (its note) and to the "Readings" bullet of `header-assumptions.md`, and add spec section 2.3 to the amendments if its wording should say "counts as an unsaved change" outright.
+4. **Reassemble and lint**: `python3 .superpowers/plan-draft/web-logic/assemble.py docs/superpowers/plans/2026-10-12-ghr-web-logic-fixes.md 1,2,3,5,4,6,7`, then `plan-lint`. The block checker `ordercheck2.py` was in the session scratchpad and is gone; `git diff plan/web-logic-order-r1 plan/web-logic-order` shows the review fixes.
+5. **Review round 2** (cap 2): `review-route PLAN --plan-round 2` names `dr-superpowers:judge-opus`; pass it `diff -u <workspace>/plan-round-1.md PLAN` as the delta and the round 1 JSON as the prior findings. Then the `**Plan review:**` line, and commit.
+6. **Clean up**: remove the six drafter worktrees and branches and the `plan/web-logic-order-r1` branch; keep `plan/web-logic-merge` and `plan/web-logic-order`, which the plan's Assumptions cite.
 
 The plan is drafted the way the three earlier plans were: each task is carried out red-then-green in a worktree first, and its text is written from what was done. Six drafters did this, one per group of files. Their task texts are the fragments below. What is left is to check the task order, write the last two tasks, score, assemble, lint and review the plan.
 
