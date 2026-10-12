@@ -31,8 +31,14 @@ func socketPath() string {
 	return api.DefaultSocket
 }
 
-// newClient is replaced in tests.
-var newClient = func() *api.Client { return api.NewUnixClient(socketPath()) }
+// newClient and interruptContext are replaced in tests. interruptContext
+// returns the context Ctrl-C cancels.
+var (
+	newClient        = func() *api.Client { return api.NewUnixClient(socketPath()) }
+	interruptContext = func() (context.Context, context.CancelFunc) {
+		return signal.NotifyContext(context.Background(), os.Interrupt)
+	}
+)
 
 // isTerminal and fdIsTerminal are replaced in tests.
 var (
@@ -70,12 +76,16 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := interruptContext()
 	defer stop()
 	if err := cli(ctx, newClient(), args, stdin, stdout, stderr); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprint(stdout, usage)
 			return 0
+		}
+		if errors.Is(err, context.Canceled) {
+			fmt.Fprintln(stderr, "ghr: interrupted")
+			return 1
 		}
 		fmt.Fprintln(stderr, "ghr:", err)
 		if _, ok := err.(usageError); ok {

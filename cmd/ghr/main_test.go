@@ -2,10 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/darkraise/ghr/internal/api"
 )
@@ -97,6 +101,55 @@ func TestBareGhrReportsAnUnreachableDaemon(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := run(nil, strings.NewReader(""), &out, &errb); code != 1 || !strings.Contains(errb.String(), "ghr: ghr daemon unreachable") {
 		t.Fatalf("exit %d err %q", code, errb.String())
+	}
+}
+
+// hungDaemon holds every request for an hour, or until the request's context
+// ends, as a transport does. onRequest runs when a request arrives.
+type hungDaemon struct{ onRequest func() }
+
+func (d hungDaemon) RoundTrip(r *http.Request) (*http.Response, error) {
+	d.onRequest()
+	select {
+	case <-time.After(time.Hour):
+		return &http.Response{StatusCode: http.StatusNoContent, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
+	case <-r.Context().Done():
+		return nil, r.Context().Err()
+	}
+}
+
+// The bubble's clock is fake, so the daemon's hour and the client's limits
+// pass at once.
+func TestRunNamesWhyACallEndedEarly(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		ctrlC  bool
+		stderr string
+	}{
+		{"Ctrl-C", []string{"kill", "a3f9c1"}, true, "ghr: interrupted\n"},
+		{"no answer", []string{"status"}, false, "ghr: ghr daemon did not answer within 30s; the request may still be running\n"},
+		{"no answer to a kill", []string{"kill", "a3f9c1"}, false, "ghr: ghr daemon did not answer within 100s; the request may still be running\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				oldClient, oldContext := newClient, interruptContext
+				t.Cleanup(func() { newClient, interruptContext = oldClient, oldContext })
+				interruptContext = func() (context.Context, context.CancelFunc) { return ctx, cancel }
+				newClient = func() *api.Client {
+					return &api.Client{Base: "http://ghr", HTTP: &http.Client{Transport: hungDaemon{func() {
+						if tc.ctrlC {
+							cancel()
+						}
+					}}}}
+				}
+				var out, errb bytes.Buffer
+				if code := run(tc.args, strings.NewReader(""), &out, &errb); code != 1 || errb.String() != tc.stderr || out.Len() != 0 {
+					t.Fatalf("exit %d stdout %q stderr %q, want exit 1 and stderr %q", code, out.String(), errb.String(), tc.stderr)
+				}
+			})
+		})
 	}
 }
 
