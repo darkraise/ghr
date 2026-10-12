@@ -403,10 +403,10 @@ func TestRunServesTheWebUI(t *testing.T) {
 	l.Close()
 }
 
-// Two runs establish the cleanup. With the web port taken and the history
-// file unreadable, the port error wins, so the listener is bound before the
-// manager starts. With the port free, start fails in the manager, and the
-// port is free again afterwards, so that listener was closed.
+// Run closes what it bound when start fails. A taken web port no longer ends
+// Run, so with the port taken and the history unreadable the history is what
+// fails, and the control socket is closed. With the port free, or with the
+// UI served on the fallback, the port is free again after the failure.
 func TestRunClosesTheWebListenerWhenStartFails(t *testing.T) {
 	taken, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -417,8 +417,12 @@ func TestRunClosesTheWebListenerWhenStartFails(t *testing.T) {
 	if err := os.MkdirAll(o.HistoryPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := Run(context.Background(), o); err == nil || !strings.Contains(err.Error(), "web listener") {
+	if err := Run(context.Background(), o); err == nil || strings.Contains(err.Error(), "web listener") {
 		t.Fatalf("both broken: %v", err)
+	}
+	if conn, err := net.DialTimeout("unix", o.Socket, time.Second); err == nil {
+		conn.Close()
+		t.Fatal("the control socket was left serving")
 	}
 	taken.Close()
 
@@ -435,6 +439,29 @@ func TestRunClosesTheWebListenerWhenStartFails(t *testing.T) {
 		t.Fatalf("the web listener was left open: %v", err)
 	}
 	l.Close()
+
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	fallback := freeAddr(t)
+	o = testOptions(t, cfgYAML+"web:\n  listen: "+busy.Addr().String()+"\n")
+	o.WebListenPath = filepath.Join(t.TempDir(), "web-listen")
+	if err := os.WriteFile(o.WebListenPath, []byte(fallback+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(o.HistoryPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(context.Background(), o); err == nil {
+		t.Fatal("history unreadable, UI on the fallback: Run succeeded")
+	}
+	l, err = net.Listen("tcp", fallback)
+	if err != nil {
+		t.Fatalf("the fallback listener was left open: %v", err)
+	}
+	l.Close()
 }
 
 // Run serves the web UI through the limited listener: a client that holds
@@ -443,6 +470,13 @@ func TestRunClosesTheWebListenerWhenStartFails(t *testing.T) {
 func TestRunBoundsAWebClientsConnections(t *testing.T) {
 	addr := freeAddr(t)
 	startRun(t, testOptions(t, cfgYAML+"web:\n  listen: "+addr+"\n"))
+	checkConnBound(t, addr)
+}
+
+// checkConnBound checks that the web listener on addr closes one client's
+// connection over maxWebConnsPerClient, and serves it again once one closes.
+func checkConnBound(t *testing.T, addr string) {
+	t.Helper()
 	var held []net.Conn
 	t.Cleanup(func() {
 		for _, c := range held {
@@ -531,19 +565,107 @@ func TestRunWithoutTheWebListener(t *testing.T) {
 	}
 }
 
-func TestRunFailsWhenTheWebPortIsTaken(t *testing.T) {
+// statusOver waits for the socket to serve the status and returns it.
+func statusOver(t *testing.T, socket string) model.Status {
+	t.Helper()
+	c := api.NewUnixClient(socket)
+	var st model.Status
+	waitFor(t, "the socket to serve status", func() bool {
+		var err error
+		st, err = c.Status(context.Background())
+		return err == nil
+	})
+	return st
+}
+
+// With the web port taken and no address to fall back to, the daemon runs
+// without the web UI, and the status and an event say why.
+func TestRunWithoutTheWebUIWhenItsPortIsTaken(t *testing.T) {
 	taken, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer taken.Close()
-	o := testOptions(t, cfgYAML+"web:\n  listen: "+taken.Addr().String()+"\n")
-	if err := Run(context.Background(), o); err == nil || !strings.Contains(err.Error(), "web listener") {
-		t.Fatalf("Run with the web port taken: %v", err)
+	addr := taken.Addr().String()
+	o := testOptions(t, cfgYAML+"web:\n  listen: "+addr+"\n")
+	startRun(t, o)
+	st := statusOver(t, o.Socket)
+	want := model.WebListenError{Address: addr, Reason: "address already in use"}
+	if st.WebListenError == nil || *st.WebListenError != want {
+		t.Fatalf("listen error %+v, want %+v", st.WebListenError, want)
 	}
-	if conn, err := net.DialTimeout("unix", o.Socket, time.Second); err == nil {
-		conn.Close()
-		t.Fatal("the control socket was left serving")
+	if st.Restart.WebListen != "" || !slices.Equal(st.Restart.Pending, []string{"web.listen"}) || st.WebSetupRequired {
+		t.Fatalf("restart %+v, web_setup_required %v", st.Restart, st.WebSetupRequired)
+	}
+	msgs := eventMsgs(t, o.Socket)
+	if !strings.Contains(msgs, "web.listen "+addr+": address already in use; the web UI is off until it is fixed") ||
+		strings.Contains(msgs, "web UI listening") {
+		t.Fatalf("events %q", msgs)
+	}
+	if ss, ok := setupStateOver(o.Socket); !ok || ss.WebListen != "" {
+		t.Fatalf("setup state %+v", ss)
+	}
+}
+
+// A web.listen that fails to bind falls back to the address a browser last
+// used, behind the same connection bound.
+func TestRunFallsBackToTheLastWebAddress(t *testing.T) {
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer taken.Close()
+	addr, fallback := taken.Addr().String(), freeAddr(t)
+	o := testOptions(t, cfgYAML+"web:\n  listen: "+addr+"\n")
+	o.WebListenPath = filepath.Join(t.TempDir(), "web-listen")
+	if err := os.WriteFile(o.WebListenPath, []byte(fallback+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	startRun(t, o)
+	st := statusOver(t, o.Socket)
+	want := model.WebListenError{Address: addr, Reason: "address already in use", ServingOn: fallback}
+	if st.WebListenError == nil || *st.WebListenError != want {
+		t.Fatalf("listen error %+v, want %+v", st.WebListenError, want)
+	}
+	if st.Restart.WebListen != fallback || !slices.Equal(st.Restart.Pending, []string{"web.listen"}) {
+		t.Fatalf("restart %+v", st.Restart)
+	}
+	if msgs := eventMsgs(t, o.Socket); !strings.Contains(msgs, "web.listen "+addr+": address already in use; serving the web UI on "+fallback) {
+		t.Fatalf("events %q", msgs)
+	}
+	if ss, ok := setupStateOver(o.Socket); !ok || ss.WebListen != fallback {
+		t.Fatalf("setup state %+v", ss)
+	}
+	checkConnBound(t, fallback)
+}
+
+// A web address file that cannot be read, or holds no address, offers no
+// fallback. The names are short: the subtest's temporary directory holds the
+// control socket, whose path may not exceed 108 bytes.
+func TestRunIgnoresABadWebAddressFile(t *testing.T) {
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer taken.Close()
+	addr := taken.Addr().String()
+	for name, prepare := range map[string]func(path string) error{
+		"dir":     func(p string) error { return os.Mkdir(p, 0o755) },
+		"garbage": func(p string) error { return os.WriteFile(p, []byte("garbage\n"), 0o600) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			o := testOptions(t, cfgYAML+"web:\n  listen: "+addr+"\n")
+			o.WebListenPath = filepath.Join(t.TempDir(), "web-listen")
+			if err := prepare(o.WebListenPath); err != nil {
+				t.Fatal(err)
+			}
+			startRun(t, o)
+			st := statusOver(t, o.Socket)
+			want := model.WebListenError{Address: addr, Reason: "address already in use"}
+			if st.WebListenError == nil || *st.WebListenError != want {
+				t.Fatalf("listen error %+v, want %+v", st.WebListenError, want)
+			}
+		})
 	}
 }
 

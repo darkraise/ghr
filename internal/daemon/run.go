@@ -25,6 +25,7 @@ import (
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/history"
 	"github.com/darkraise/ghr/internal/metrics"
+	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/runner"
 	"github.com/darkraise/ghr/internal/storage"
 	"github.com/darkraise/ghr/internal/system"
@@ -64,6 +65,10 @@ type Options struct {
 	SelfUnit func(ctx context.Context) bool
 	// Restart restarts ghr.service without waiting for it.
 	Restart func(ctx context.Context) error
+	// WebListenPath records the last web.listen value a browser used, the
+	// fallback when web.listen fails to bind; empty records nothing and
+	// offers no fallback.
+	WebListenPath string
 
 	// Test seams: zero values use GitHub, systemd, Docker, the host, an HTTP
 	// download and SIGHUP.
@@ -94,6 +99,7 @@ func DefaultOptions() Options {
 		ShutdownWait:          30 * time.Second,
 		SelfUnit:              selfUnitCheck(system.Exec),
 		Restart:               restartUnit(system.Exec),
+		WebListenPath:         "/var/lib/ghr/web-listen",
 		Paths: runner.Paths{
 			Dist:        "/opt/ghr/dist/current",
 			Instances:   "/var/lib/ghr/instances",
@@ -168,7 +174,7 @@ type running struct {
 
 // start reads the owner once, then adopts and reconciles the runners already
 // on the host before anything serves the full API.
-func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *changes.Hub, epoch string, webCfg config.Web, webSetupRequired func() bool) (*running, error) {
+func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *changes.Hub, epoch string, webCfg config.Web, webErr *model.WebListenError, webSetupRequired func() bool) (*running, error) {
 	owner := store.Config().Owner
 	gh := github.New(owner, store.Token)
 	if o.GitHubURL != "" {
@@ -244,6 +250,7 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 		},
 		Sampler:          sampler,
 		WebApplied:       webCfg,
+		WebListenErr:     webErr,
 		RestartAvailable: o.SelfUnit != nil && o.SelfUnit(ctx),
 		Restart:          o.Restart,
 		WebSetupRequired: webSetupRequired,
@@ -306,13 +313,16 @@ func Run(ctx context.Context, o Options) error {
 			}
 		}
 	}()
+	// From here on webCfg.Listen is the address served, which a fallback
+	// changes; empty when no listener runs.
 	webCfg := store.Config().Web
+	var webErr *model.WebListenError
 	if webCfg.Listen != "" {
-		tcp, err := net.Listen("tcp", webCfg.Listen)
-		if err != nil {
-			return fmt.Errorf("web listener: %w", err)
+		var tcp net.Listener
+		tcp, webCfg.Listen, webErr = listenWeb(webCfg.Listen, o.WebListenPath)
+		if tcp != nil {
+			webLn = limitConns(tcp, maxWebConns, maxWebConnsPerClient)
 		}
-		webLn = limitConns(tcp, maxWebConns, maxWebConnsPerClient)
 	}
 	auth := webui.NewAuth(o.WebPasswordPath, time.Now, rand.Reader)
 
@@ -325,6 +335,9 @@ func Run(ctx context.Context, o Options) error {
 	webSrv.RegisterOnShutdown(hub.Close)
 	for _, w := range warnings {
 		ev.Add("warn", "", "config: %s", w)
+	}
+	if webErr != nil {
+		ev.Add("error", "", "%s", webListenEvent(webErr))
 	}
 	if err := auth.Check(); err != nil {
 		ev.Add("warn", "", "%v", err)
@@ -342,7 +355,7 @@ func Run(ctx context.Context, o Options) error {
 	var webSetupRequired func() bool
 	webListen := ""
 	if webLn != nil {
-		// A wildcard listener reports [::] on a dual-stack host; setup output uses the configured address.
+		// A wildcard listener reports [::] on a dual-stack host; setup output uses the listen string bound.
 		webListen = webCfg.Listen
 		webSetupRequired = func() bool {
 			// An unreadable file is reported by the start-up warning instead.
@@ -436,7 +449,7 @@ func Run(ctx context.Context, o Options) error {
 		}
 	}
 
-	rt, err := start(ctx, o, store, ev, hub, epoch, webCfg, webSetupRequired)
+	rt, err := start(ctx, o, store, ev, hub, epoch, webCfg, webErr, webSetupRequired)
 	if err != nil {
 		if served {
 			teardown()
