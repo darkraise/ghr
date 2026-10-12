@@ -8,7 +8,7 @@ import { ErrorLine } from "./error-line"
 import { Field, FieldGroup, FieldInput } from "./field"
 
 describe("FieldGroup", () => {
-  it("is a region named by a heading the section index can focus", () => {
+  it("is a region named by its heading, which takes no focus", () => {
     render(
       <FieldGroup id="timing" title="Timing" note="Applies at once">
         <p>rows</p>
@@ -18,7 +18,7 @@ describe("FieldGroup", () => {
     expect(region).toHaveAttribute("id", "timing")
     const heading = screen.getByRole("heading", { name: "Timing", level: 2 })
     expect(heading).toHaveAttribute("id", "timing-title")
-    expect(heading).toHaveAttribute("tabindex", "-1")
+    expect(heading).not.toHaveAttribute("tabindex")
     expect(screen.getByText("Applies at once")).toBeInTheDocument()
   })
 })

@@ -4,13 +4,11 @@ import { CircleAlert } from "lucide-react"
 import { type ComponentProps, type ReactNode, useId } from "react"
 import { FieldAriaContext, useFieldAria } from "./field-aria"
 
-// The heading takes focus when the section index jumps here, so it carries
-// tabIndex -1 and an id the index can find.
 export function FieldGroup({ id, title, note, children }: { id: string; title: string; note?: string; children: ReactNode }) {
   return (
     <section id={id} aria-labelledby={`${id}-title`} className="min-w-0 scroll-mt-4 overflow-hidden rounded-md border border-border bg-card">
       <div className="border-b border-border bg-background px-4 py-2.5">
-        <h2 id={`${id}-title`} tabIndex={-1} className="text-sm font-semibold">
+        <h2 id={`${id}-title`} className="text-sm font-semibold">
           {title}
         </h2>
         {note && <p className="mt-0.5 text-xs text-muted-foreground">{note}</p>}
