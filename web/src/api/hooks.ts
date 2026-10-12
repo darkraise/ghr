@@ -183,21 +183,23 @@ export function useHistory(repo: string, conclusion: string, since: string | und
   })
 }
 
-export function useSteps(id: string, live: boolean) {
+// Steps cost a GitHub call and containers a Docker call on every poll, so the
+// caller enables each only while it is on screen.
+export function useSteps(id: string, enabled: boolean) {
   return useQuery({
     queryKey: keys.steps(id),
     queryFn: ({ signal }) => api.steps(id, signal),
-    enabled: live,
-    refetchInterval: live ? POLL_SLOW : false,
+    enabled,
+    refetchInterval: enabled ? POLL_SLOW : false,
   })
 }
 
-export function useContainers(id: string, live: boolean) {
+export function useContainers(id: string, enabled: boolean) {
   return useQuery({
     queryKey: keys.containers(id),
     queryFn: ({ signal }) => api.containers(id, signal),
-    enabled: live,
-    refetchInterval: live ? POLL_SLOW : false,
+    enabled,
+    refetchInterval: enabled ? POLL_SLOW : false,
   })
 }
 

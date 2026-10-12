@@ -248,6 +248,28 @@ describe("RunnerPanel", () => {
     expect(screen.getByText(shown)).toBeInTheDocument()
   })
 
+  it("reads steps and containers only while their own tab is open", async () => {
+    const { calls } = mockApi(routes())
+    const { queryClient, user } = draw("/runners/aaaaaa?tab=steps")
+    const reads = (what: string) => calls.filter((c) => c.path === `/api/runners/aaaaaa/${what}`).length
+    const polled = (what: string) => queryClient.getQueryCache().find({ queryKey: [what, "aaaaaa"] })?.isActive() ?? false
+    expect(await screen.findByText("Run tests")).toBeInTheDocument()
+    expect(reads("containers")).toBe(0)
+    expect([polled("steps"), polled("containers")]).toEqual([true, false])
+
+    await user.click(screen.getByRole("tab", { name: "Containers" }))
+    expect(await screen.findByText("ghr-aaaaaa-db-1")).toBeInTheDocument()
+    expect([polled("steps"), polled("containers")]).toEqual([false, true])
+
+    await user.click(screen.getByRole("tab", { name: "Log" }))
+    expect(await screen.findByText(/Listening for Jobs/)).toBeInTheDocument()
+    expect([polled("steps"), polled("containers")]).toEqual([false, false])
+
+    const before = reads("steps")
+    await user.click(screen.getByRole("tab", { name: "Steps" }))
+    await waitFor(() => expect(reads("steps")).toBe(before + 1))
+  })
+
   it("says when no step is reported yet", async () => {
     mockApi(routes({ "GET /api/runners/aaaaaa/steps": [] }))
     draw()

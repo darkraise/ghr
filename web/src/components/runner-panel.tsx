@@ -118,8 +118,8 @@ export function RunnerPanel({ id, tab, backLink }: { id: string; tab: DetailTab;
     }
   }, [current, kept, status.data, endedAt, now])
 
-  const steps = useSteps(id, live)
-  const containers = useContainers(id, live)
+  const steps = useSteps(id, live && tab === "steps")
+  const containers = useContainers(id, live && tab === "containers")
   const log = useLogTail(id, tab === "log", live)
 
   const inst = current ?? kept
