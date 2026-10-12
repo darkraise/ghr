@@ -4,18 +4,40 @@ export interface DiskPart {
   key: string
   label: string
   bytes: number
+  docker?: string
+}
+
+// Accent and grey tints only: a category is not a status.
+const TINT: Record<string, string | undefined> = {
+  "build-cache": "bg-primary",
+  images: "bg-primary/70",
+  containers: "bg-primary/45",
+  volumes: "bg-primary/25",
+  "package-caches": "bg-muted-foreground/70",
+  toolchains: "bg-muted-foreground/45",
+  other: "bg-muted-foreground/25",
+  used: "bg-primary",
+}
+
+export function partTint(key: string): string {
+  return TINT[key] ?? "bg-muted-foreground/25"
 }
 
 const sum = (items: { bytes: number }[] | null) => (items ?? []).reduce((n, i) => n + i.bytes, 0)
 
 export function diskParts(storage: Storage | undefined, used: number): DiskPart[] {
   if (!storage) return [{ key: "used", label: "Used", bytes: used }]
-  const docker = (type: string) => storage.docker.rows?.find((r) => r.type === type)?.bytes ?? 0
+  const docker = (key: string, label: string, type: string): DiskPart => ({
+    key,
+    docker: type,
+    label,
+    bytes: storage.docker.rows?.find((r) => r.type === type)?.bytes ?? 0,
+  })
   const parts: DiskPart[] = [
-    { key: "build-cache", label: "Build cache", bytes: docker("Build Cache") },
-    { key: "images", label: "Images", bytes: docker("Images") },
-    { key: "containers", label: "Containers", bytes: docker("Containers") },
-    { key: "volumes", label: "Local volumes", bytes: docker("Local Volumes") },
+    docker("build-cache", "Build cache", "Build Cache"),
+    docker("images", "Images", "Images"),
+    docker("containers", "Containers", "Containers"),
+    docker("volumes", "Local volumes", "Local Volumes"),
     { key: "package-caches", label: "Package caches", bytes: sum(storage.package_caches) },
     { key: "toolchains", label: "Toolchains", bytes: sum(storage.toolchains) + sum(storage.other_tool_cache) },
   ]

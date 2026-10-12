@@ -2,15 +2,15 @@ import { render, screen, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { diskParts } from "@/lib/disk"
 import { fixtures } from "@/test/fixtures"
-import { DiskBreakdown } from "./disk-breakdown"
+import { DiskBar, DiskBreakdown } from "./disk-breakdown"
 
 describe("diskParts", () => {
   it("splits the used bytes into what fills the disk", () => {
     expect(diskParts(fixtures.storage, 146_000_000_000)).toEqual([
-      { key: "build-cache", label: "Build cache", bytes: 420_000_000 },
-      { key: "images", label: "Images", bytes: 8_100_000_000 },
-      { key: "containers", label: "Containers", bytes: 0 },
-      { key: "volumes", label: "Local volumes", bytes: 0 },
+      { key: "build-cache", docker: "Build Cache", label: "Build cache", bytes: 420_000_000 },
+      { key: "images", docker: "Images", label: "Images", bytes: 8_100_000_000 },
+      { key: "containers", docker: "Containers", label: "Containers", bytes: 0 },
+      { key: "volumes", docker: "Local Volumes", label: "Local volumes", bytes: 0 },
       { key: "package-caches", label: "Package caches", bytes: 3_600_000_000 },
       { key: "toolchains", label: "Toolchains", bytes: 270_000_000 },
       { key: "other", label: "Other", bytes: 133_610_000_000 },
@@ -47,5 +47,14 @@ describe("DiskBreakdown", () => {
   it("says when the disk is not measured yet", () => {
     render(<DiskBreakdown status={{ ...fixtures.status, disk_total_bytes: 0 }} storage={undefined} highWater={80} />)
     expect(screen.getByText("Not measured yet")).toBeInTheDocument()
+  })
+})
+
+describe("DiskBar", () => {
+  it("draws the bar and the prune marker without a legend", () => {
+    const { container } = render(<DiskBar status={fixtures.status} storage={fixtures.storage} highWater={85} />)
+    expect(screen.getByRole("img", { name: /^Disk use: Build cache 420\.0 MB, Images 8\.1 GB/ })).toBeInTheDocument()
+    expect(container.querySelector('[data-marker="high-water"]')).toHaveStyle({ left: "85%" })
+    expect(screen.queryByRole("list")).toBeNull()
   })
 })
