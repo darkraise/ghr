@@ -30,7 +30,6 @@ SYSTEMD_DIR=/etc/systemd/system
 KEYRING_DIR=/etc/apt/keyrings
 DOCKER_KEY_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 READY_TIMEOUT=60
-FIRST_INSTALL=0
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -201,10 +200,9 @@ install_config() {
       die "the ghr $GHR_VERSION release has no config.example.yaml; install a newer GHR_VERSION"
     install -m 0600 "$OPT_DIR/config.example.yaml" "$ETC_DIR/config.yaml"
     log "wrote $ETC_DIR/config.yaml from config.example.yaml"
-    FIRST_INSTALL=1
-    # Files, not variables: a first install that dies before preinstall_toolchains
-    # or the setup wizard must still find them when re-run.
-    touch "$STATE_DIR/toolchains-pending" "$STATE_DIR/setup-pending"
+    # Files, not variables: a first install that dies before preinstall_toolchains,
+    # the setup wizard or the web password prompt must still find them when re-run.
+    touch "$STATE_DIR/toolchains-pending" "$STATE_DIR/setup-pending" "$STATE_DIR/web-password-pending"
   fi
 }
 
@@ -261,16 +259,25 @@ wait_ready() {
 }
 
 # A first install turns the web UI on (config.example.yaml); until a password
-# is set, the first visitor to the web UI sets it.
+# is set, the first visitor to the web UI sets it. The marker stays until a
+# password is set or the owner skipped the prompt, so a re-run after a failed
+# first install, or one without a terminal, asks again.
 set_web_password() {
-  [ "$FIRST_INSTALL" = 1 ] || return 0
-  local pw="${GHR_WEB_PASSWORD:-}" out
-  if [ -z "$pw" ] && [ -t 0 ]; then
-    IFS= read -rsp "Web UI password (12 to 1024 bytes; Enter to skip): " pw || true
+  local pending="$STATE_DIR/web-password-pending" pw="${GHR_WEB_PASSWORD:-}" out
+  [ -f "$pending" ] || return 0
+  if [ -z "$pw" ] && stdin_is_tty; then
+    # Only a line that was read and is empty is a skip. End of input or a failed
+    # read keeps the marker and drops whatever it left in $pw.
+    if IFS= read -rsp "Web UI password (12 to 1024 bytes; Enter to skip): " pw; then
+      [ -n "$pw" ] || rm -f "$pending"
+    else
+      pw=
+    fi
     echo
   fi
   if [ -n "$pw" ]; then
     if out=$(printf '%s' "$pw" | ghr web set-password 2>&1); then
+      rm -f "$pending"
       log "$out"
       return 0
     fi

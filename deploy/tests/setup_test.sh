@@ -469,14 +469,17 @@ out=$( (GHR_TOOLCHAINS=none; run check_toolchains) 2>&1)
 rc=$?
 check "g: GHR_TOOLCHAINS=none is accepted" [ "$rc" -eq 0 ]
 
-# (h) A first install sets the web password; an upgrade leaves it alone.
+# (h) The web password is asked for while web-password-pending exists: after a
+# first install, and again on each re-run until it is set or skipped at a terminal.
 new_case h-web-password
 ETC_DIR="$T/h-web-password/etc"
+pending="$STATE_DIR/web-password-pending"
 mkdir -p "$ETC_DIR"
-first=$( (set -e; install_config >/dev/null 2>&1; echo "$FIRST_INSTALL") )
-check "h: writing config.yaml marks a first install" [ "$first" = 1 ]
-again=$( (set -e; install_config >/dev/null 2>&1; echo "$FIRST_INSTALL") )
-check "h: an existing config.yaml is not a first install" [ "$again" = 0 ]
+(run install_config) >/dev/null 2>&1
+check "h: writing config.yaml marks the web password pending" [ -f "$pending" ]
+rm -f "$pending"
+(run install_config) >/dev/null 2>&1
+check "h: an existing config.yaml does not" absent "$pending"
 
 web_ghr() {
   ghr() {
@@ -486,28 +489,57 @@ web_ghr() {
     echo "web password set; every browser was logged out"
   }
 }
-out=$( (web_ghr; FIRST_INSTALL=0; GHR_WEB_PASSWORD='a long secret'; run set_web_password) </dev/null 2>&1)
-check "h: an upgrade does not touch the web password" absent "$MARK_DIR/ghr-calls"
-check "h: an upgrade prints nothing" [ -z "$out" ]
+out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run set_web_password) </dev/null 2>&1)
+check "h: without the marker the web password is left alone" absent "$MARK_DIR/ghr-calls"
+check "h: and nothing is printed" [ -z "$out" ]
 
-out=$( (web_ghr; FIRST_INSTALL=1; GHR_WEB_PASSWORD='a long secret'; run set_web_password) </dev/null 2>&1)
+touch "$pending"
+out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run set_web_password) </dev/null 2>&1)
 check "h: GHR_WEB_PASSWORD goes to ghr web set-password" [ "$(cat "$MARK_DIR/ghr-calls")" = "web set-password" ]
 check "h: the password is piped without a newline" [ "$(wc -c < "$MARK_DIR/ghr-stdin")" -eq 13 ]
 check "h: success is reported" contains "$out" "web password set"
 check "h: no reminder after success" lacks "$out" "has no password"
+check "h: a password that is set clears the marker" absent "$pending"
 
 rm -f "$MARK_DIR/ghr-calls"
-touch "$MARK_DIR/fail-web"
-out=$( (web_ghr; FIRST_INSTALL=1; GHR_WEB_PASSWORD='short'; run set_web_password) </dev/null 2>&1)
+touch "$pending" "$MARK_DIR/fail-web"
+out=$( (web_ghr; GHR_WEB_PASSWORD='short'; run set_web_password) </dev/null 2>&1)
 rc=$?
 check "h: a refused password does not fail the install" [ "$rc" -eq 0 ]
 check "h: the refusal is shown" contains "$out" "password must be 12 to 1024 bytes"
 check "h: the reminder follows a refusal" contains "$out" "set it now with: ghr web set-password"
+check "h: a refused password keeps the marker" [ -f "$pending" ]
 
 rm -f "$MARK_DIR/ghr-calls" "$MARK_DIR/fail-web"
-out=$( (web_ghr; FIRST_INSTALL=1; GHR_WEB_PASSWORD=; run set_web_password) </dev/null 2>&1)
+out=$( (web_ghr; GHR_WEB_PASSWORD=; run set_web_password) </dev/null 2>&1)
 check "h: with no terminal and no GHR_WEB_PASSWORD nothing is sent" absent "$MARK_DIR/ghr-calls"
 check "h: and the reminder is printed" contains "$out" "web UI on :8080 has no password; set it now with: ghr web set-password"
+check "h: and the marker stays for the next run" [ -f "$pending" ]
+
+(web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) <<<'a long secret' >/dev/null 2>&1
+check "h: the next run at a terminal asks and sets the typed password" [ "$(cat "$MARK_DIR/ghr-stdin")" = "a long secret" ]
+check "h: and clears the marker" absent "$pending"
+
+touch "$pending"
+rm -f "$MARK_DIR/ghr-calls"
+out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) <<<'' 2>&1)
+check "h: Enter at the prompt sends nothing" absent "$MARK_DIR/ghr-calls"
+check "h: Enter at the prompt clears the marker" absent "$pending"
+check "h: Enter at the prompt still prints the reminder" contains "$out" "has no password"
+
+# End of input and a failed read are not an Enter: the marker stays.
+for ending in "end of input:/dev/null" "closed input:-" "a partial line:partial"; do
+  touch "$pending"
+  rm -f "$MARK_DIR/ghr-calls"
+  case "${ending##*:}" in
+    /dev/null) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) </dev/null 2>&1) ;;
+    -) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) <&- 2>&1) ;;
+    partial) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) < <(printf 'a long secret') 2>&1) ;;
+  esac
+  check "h: ${ending%%:*} at the prompt sends nothing" absent "$MARK_DIR/ghr-calls"
+  check "h: ${ending%%:*} at the prompt keeps the marker" [ -f "$pending" ]
+  check "h: ${ending%%:*} at the prompt still prints the reminder" contains "$out" "has no password"
+done
 
 # setup_ghr answers `ghr setup` from the mark files configured, wizard, owner
 # and web, and records `ghr setup github` and `ghr toolchain` calls.
