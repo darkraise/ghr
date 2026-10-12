@@ -252,6 +252,17 @@ describe("repository page", () => {
     expect(screen.getByLabelText("Max")).toHaveValue("2")
   })
 
+  it("finds a duplicate label ignoring case, and a duplicate prefix only when it is the same text", async () => {
+    mockApi(routes())
+    const { user } = renderApp("/repositories/darkmem/settings")
+    await user.type(await screen.findByRole("textbox", { name: "Repo labels" }), "GPU{Enter}")
+    expect(screen.getByText("Already listed as gpu")).toBeInTheDocument()
+    await user.type(screen.getByRole("textbox", { name: "Prefixes" }), "DARKMEM-{Enter}")
+    expect(screen.getByRole("button", { name: "Remove DARKMEM-" })).toBeInTheDocument()
+    await user.type(screen.getByRole("textbox", { name: "Prefixes" }), "darkmem-{Enter}")
+    expect(screen.getByText("Already listed as darkmem-")).toBeInTheDocument()
+  })
+
   it("disables the form while the daemon is unreachable", async () => {
     mockApi(routes({ "GET /api/status": () => json({ error: "connection refused" }, 502) }))
     renderApp("/repositories/darkmem/settings")

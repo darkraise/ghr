@@ -398,6 +398,7 @@ function RepositoryForm({ name: urlName, section }: { name: string; section: str
               <Field label="Prefixes" help="Container name prefixes removed after each job." changed={is("cleanup_name_prefixes")}>
                 <TagField
                   label="Prefixes"
+                  exact
                   value={values.cleanup_name_prefixes as string[]}
                   disabled={locked}
                   onChange={(next) => setDraft((d) => ({ ...d, cleanup_name_prefixes: next }))}
