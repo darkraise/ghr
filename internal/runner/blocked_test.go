@@ -105,6 +105,44 @@ func TestBlockedRepositoryGetsNoRunnerAndLosesItsIdleOne(t *testing.T) {
 	}
 }
 
+// A patch changes allow_public without a reload: only the config changes.
+// The next tick serves the public repository, and taking allow_public away
+// again stops its idle runner on the tick after.
+func TestAllowPublicFromAPatchAppliesOnTheNextTick(t *testing.T) {
+	h := newHarness(t)
+	blockDarkmem(t, h)
+	queuedRun(h, "darkmem", 7, homelabJob(h, 71))
+	tick := func() {
+		h.now = h.now.Add(10 * time.Second)
+		h.m.Tick(context.Background())
+		h.m.Wait()
+	}
+	tick()
+	if spawnsFor(h, "darkmem") != 0 {
+		t.Fatalf("setup: %d spawns for a blocked repository", spawnsFor(h, "darkmem"))
+	}
+	allowed := h.cfg.Clone()
+	allowed.Repo("darkmem").AllowPublic = true
+	h.cfg = allowed
+	tick()
+	if spawnsFor(h, "darkmem") != 1 {
+		t.Fatalf("allow_public on: %d spawns for darkmem, want 1\n%s", spawnsFor(h, "darkmem"), h.eventText())
+	}
+	h.gh.setRunner(101, "online", false)
+	h.gh.setJobs(7)
+	tick()
+	if h.state("aaaaaa") != "idle" || len(h.sd.stopped) != 0 {
+		t.Fatalf("setup: aaaaaa %s, stopped %v", h.state("aaaaaa"), h.sd.stopped)
+	}
+	denied := h.cfg.Clone()
+	denied.Repo("darkmem").AllowPublic = false
+	h.cfg = denied
+	tick()
+	if len(h.sd.stopped) != 1 || h.sd.stopped[0] != "ghr-runner-aaaaaa" {
+		t.Fatalf("allow_public off: stopped %v, want the idle runner aaaaaa", h.sd.stopped)
+	}
+}
+
 // spawnPlanned plans nothing for a repository GitHub has not answered for,
 // whatever else is known about it.
 func TestSpawnPlannedLeavesOutAnUnreadRepository(t *testing.T) {

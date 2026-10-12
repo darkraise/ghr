@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"slices"
@@ -112,7 +113,7 @@ func TestStateChangesReachTheirTopics(t *testing.T) {
 		t.Fatalf("a history row changed %v", got)
 	}
 	three := 3
-	if err := b.PatchConfig(model.ConfigPatch{GlobalMax: &three}); err != nil {
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{GlobalMax: &three}); err != nil {
 		t.Fatal(err)
 	}
 	if got := changed(cur, b.fingerprints()); !slices.Contains(got, "config") {

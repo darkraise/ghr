@@ -328,7 +328,7 @@ func TestPatchConfig(t *testing.T) {
 	b, _, _ := newBackend(t)
 	all, idle := "all", "10m"
 	paused := true
-	if err := b.PatchConfig(model.ConfigPatch{Mode: &all, IdleTimeout: &idle, Repos: map[string]model.RepoPatch{"darkmem": {Max: model.Int(2), Paused: &paused}}}); err != nil {
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{Mode: &all, IdleTimeout: &idle, Repos: map[string]model.RepoPatch{"darkmem": {Max: model.Int(2), Paused: &paused}}}); err != nil {
 		t.Fatal(err)
 	}
 	c := b.Store.Config()
@@ -336,10 +336,10 @@ func TestPatchConfig(t *testing.T) {
 		t.Fatalf("cfg %+v", c)
 	}
 	bad := "fast"
-	if err := b.PatchConfig(model.ConfigPatch{Mode: &bad}); apiStatus(err) != 400 {
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{Mode: &bad}); apiStatus(err) != 400 {
 		t.Fatalf("bad mode err %v", err)
 	}
-	if err := b.PatchConfig(model.ConfigPatch{Repos: map[string]model.RepoPatch{"nope": {Max: model.Int(2)}}}); apiStatus(err) != 404 {
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{Repos: map[string]model.RepoPatch{"nope": {Max: model.Int(2)}}}); apiStatus(err) != 404 {
 		t.Fatalf("unknown repo err %v", err)
 	}
 }
@@ -350,7 +350,7 @@ func TestPatchConfigSettings(t *testing.T) {
 	poll, retention, keep := "30s", "14d", "10GB"
 	mem, cpu, disk := "4G", "150%", 70
 	labels := []string{"homelab", "docker"}
-	if err := b.PatchConfig(model.ConfigPatch{PollInterval: &poll, HistoryRetention: &retention, DiskHighWater: &disk,
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{PollInterval: &poll, HistoryRetention: &retention, DiskHighWater: &disk,
 		BuildCacheKeep: &keep, Labels: &labels, RunnerLimits: &model.RunnerLimitsPatch{MemoryMax: &mem, CPUQuota: &cpu}}); err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestPatchConfigSettings(t *testing.T) {
 	}
 	// A partial runner_limits patch leaves the other limit alone.
 	mem = "8G"
-	if err := b.PatchConfig(model.ConfigPatch{RunnerLimits: &model.RunnerLimitsPatch{MemoryMax: &mem}}); err != nil {
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{RunnerLimits: &model.RunnerLimitsPatch{MemoryMax: &mem}}); err != nil {
 		t.Fatal(err)
 	}
 	if rl := b.Store.Config().RunnerLimits; rl != (config.RunnerLimits{MemoryMax: "8G", CPUQuota: "150%"}) {
@@ -387,13 +387,58 @@ func TestPatchConfigJSONKeys(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.PatchConfig(p); err != nil {
+	if err := b.PatchConfig(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
 	c := b.Store.Config()
 	if c.PollInterval.String() != "20s" || c.HistoryRetention.String() != "7d" || c.DiskHighWater != 75 || c.BuildCacheKeep != "5GB" ||
 		!reflect.DeepEqual(c.Labels, []string{"homelab", "x"}) || c.RunnerLimits != (config.RunnerLimits{MemoryMax: "2G", CPUQuota: "100%"}) {
 		t.Fatalf("cfg %+v", c)
+	}
+}
+
+// web.listen and web.hosts are saved for the next start, and allow_public is
+// saved and wakes the loop. The JSON keys clients send reach the fields.
+func TestPatchConfigWebAndAllowPublic(t *testing.T) {
+	b, _, _ := newBackend(t)
+	b.WebApplied = config.Web{Listen: "0.0.0.0:8080"}
+	wakes := 0
+	b.Wake = func() { wakes++ }
+	var p model.ConfigPatch
+	body := `{"web":{"listen":"[::]:8080","hosts":["ghr.lan","runner.lan"]},"repos":{"darkmem":{"allow_public":true}}}`
+	if err := json.Unmarshal([]byte(body), &p); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.PatchConfig(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	want := config.Web{Listen: "[::]:8080", Hosts: []string{"ghr.lan", "runner.lan"}}
+	c := b.Store.Config()
+	if !reflect.DeepEqual(c.Web, want) || !c.Repo("darkmem").AllowPublic || c.Repo("darkcloud").AllowPublic || wakes != 1 {
+		t.Fatalf("web %+v, allow_public darkmem %v darkcloud %v, wakes %d", c.Web, c.Repo("darkmem").AllowPublic, c.Repo("darkcloud").AllowPublic, wakes)
+	}
+	saved, _, err := config.Load(b.Store.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(saved.Web, want) || !saved.Repo("darkmem").AllowPublic {
+		t.Fatalf("not persisted: web %+v, allow_public %v", saved.Web, saved.Repo("darkmem").AllowPublic)
+	}
+	// A patch without the keys leaves them alone; a false allow_public clears it.
+	off := false
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{Repos: map[string]model.RepoPatch{"darkmem": {AllowPublic: &off}}}); err != nil {
+		t.Fatal(err)
+	}
+	c = b.Store.Config()
+	if !reflect.DeepEqual(c.Web, want) || c.Repo("darkmem").AllowPublic || wakes != 2 {
+		t.Fatalf("web %+v, allow_public %v, wakes %d", c.Web, c.Repo("darkmem").AllowPublic, wakes)
+	}
+	hosts := []string{}
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{Web: &model.WebPatch{Hosts: &hosts}}); err != nil {
+		t.Fatal(err)
+	}
+	if c := b.Store.Config(); c.Web.Listen != "[::]:8080" || len(c.Web.Hosts) != 0 {
+		t.Fatalf("web %+v, want the listen value kept and no hosts", c.Web)
 	}
 }
 
@@ -426,7 +471,7 @@ func TestPatchConfigRejectsInvalidSettings(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = b.PatchConfig(tc.p)
+			err = b.PatchConfig(context.Background(), tc.p)
 			if apiStatus(err) != 400 || !strings.Contains(err.Error(), tc.msg) {
 				t.Fatalf("err %v, want 400 containing %q", err, tc.msg)
 			}
@@ -457,7 +502,7 @@ func TestSaveFailureIsA500(t *testing.T) {
 		t.Fatal(err)
 	}
 	three := 3
-	err := b.PatchConfig(model.ConfigPatch{GlobalMax: &three})
+	err := b.PatchConfig(context.Background(), model.ConfigPatch{GlobalMax: &three})
 	if apiStatus(err) != 500 || err.Error() != "could not save config.yaml" {
 		t.Fatalf("status %d, error %v", apiStatus(err), err)
 	}
@@ -490,7 +535,7 @@ func TestPatchConfigReportsFirstBadDuration(t *testing.T) {
 	for _, tc := range cases {
 		// Repeated, because a map-ordered loop would pass a single run by luck.
 		for i := 0; i < 20; i++ {
-			err := b.PatchConfig(tc.p)
+			err := b.PatchConfig(context.Background(), tc.p)
 			if apiStatus(err) != 400 || !strings.HasPrefix(err.Error(), tc.want) {
 				t.Fatalf("err %v, want 400 starting %q", err, tc.want)
 			}
@@ -706,7 +751,7 @@ func TestResumeCancelsRemoval(t *testing.T) {
 	m.insts = []model.InstanceStatus{{ID: "aaaaaa", Repo: "darkmem"}}
 	b.RemoveRepo("darkmem")
 	resume := false
-	if err := b.PatchConfig(model.ConfigPatch{Repos: map[string]model.RepoPatch{"darkmem": {Paused: &resume}}}); err != nil {
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{Repos: map[string]model.RepoPatch{"darkmem": {Paused: &resume}}}); err != nil {
 		t.Fatal(err)
 	}
 	m.insts = nil
@@ -721,7 +766,7 @@ func TestRejectedPatchKeepsRemoval(t *testing.T) {
 	b, _, _ := newBackend(t)
 	b.RemoveRepo("darkmem")
 	resume, zero := false, 0
-	err := b.PatchConfig(model.ConfigPatch{GlobalMax: &zero, Repos: map[string]model.RepoPatch{"darkmem": {Paused: &resume}}})
+	err := b.PatchConfig(context.Background(), model.ConfigPatch{GlobalMax: &zero, Repos: map[string]model.RepoPatch{"darkmem": {Paused: &resume}}})
 	if apiStatus(err) != 400 {
 		t.Fatalf("err %v", err)
 	}
@@ -750,7 +795,7 @@ func TestConfigChangesWakeTheLoop(t *testing.T) {
 	b.RemoveRepo("darkmem")
 	b.SetPausedAll(true)
 	zero := 0
-	b.PatchConfig(model.ConfigPatch{GlobalMax: &zero}) // rejected: no wake
+	b.PatchConfig(context.Background(), model.ConfigPatch{GlobalMax: &zero}) // rejected: no wake
 	if wakes != 2 {
 		t.Fatalf("wakes = %d", wakes)
 	}
@@ -1165,7 +1210,7 @@ func TestReloadRepeatsNoWarning(t *testing.T) {
 	reload(1, "the bad edit")
 	reload(1, "the same file again")
 	all := "all"
-	if err := b.PatchConfig(model.ConfigPatch{Mode: &all}); err != nil {
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{Mode: &all}); err != nil {
 		t.Fatal(err)
 	}
 	reload(2, "the bad edit made again after a save")
@@ -1198,12 +1243,15 @@ func TestReloadsAtOnceWriteAWarningOnce(t *testing.T) {
 	}
 }
 
-func TestPatchCannotChangeWeb(t *testing.T) {
+// PATCH /config saves the web keys; they apply at the next start. The new
+// listen port is the one the listener holds, so no bind is tried.
+func TestPatchChangesWebThroughTheAPI(t *testing.T) {
 	b, _, _ := newBackend(t)
+	b.WebApplied = config.Web{Listen: "0.0.0.0:9000"}
 	srv := httptest.NewServer(api.NewServer(b))
 	defer srv.Close()
 	req, _ := http.NewRequest(http.MethodPatch, srv.URL+"/config",
-		strings.NewReader(`{"global_max":3,"web":{"listen":"0.0.0.0:9000"}}`))
+		strings.NewReader(`{"global_max":3,"web":{"listen":"[::]:9000","hosts":["ghr.lan"]}}`))
 	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -1212,7 +1260,7 @@ func TestPatchCannotChangeWeb(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("patch: %d", resp.StatusCode)
 	}
-	if c := b.Store.Config(); c.GlobalMax != 3 || c.Web.Listen != "" {
+	if c := b.Store.Config(); c.GlobalMax != 3 || c.Web.Listen != "[::]:9000" || !slices.Equal(c.Web.Hosts, []string{"ghr.lan"}) {
 		t.Fatalf("global_max %d web %+v", c.GlobalMax, c.Web)
 	}
 }
@@ -1530,7 +1578,7 @@ func TestPatchConfigKeepsWatchRepos(t *testing.T) {
 		t.Fatal(err)
 	}
 	three := 3
-	if err := b.PatchConfig(model.ConfigPatch{GlobalMax: &three}); err != nil {
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{GlobalMax: &three}); err != nil {
 		t.Fatal(err)
 	}
 	if got := b.Store.Config().WatchRepos; len(got) != 1 || got[0] != "public" {
@@ -1628,7 +1676,7 @@ func TestPatchConfigClearsMaxAndWarmOnNull(t *testing.T) {
 		if err := json.Unmarshal([]byte(body), &p); err != nil {
 			t.Fatal(err)
 		}
-		if err := b.PatchConfig(p); err != nil {
+		if err := b.PatchConfig(context.Background(), p); err != nil {
 			t.Fatalf("%s: %v", body, err)
 		}
 		return b.Store.Config().Repo("darkcloud")
@@ -1662,7 +1710,7 @@ func TestPatchConfigReportsUnknownReposInSortedOrder(t *testing.T) {
 		repos[name] = model.RepoPatch{Paused: &paused}
 	}
 	for range 20 {
-		err := b.PatchConfig(model.ConfigPatch{Repos: repos})
+		err := b.PatchConfig(context.Background(), model.ConfigPatch{Repos: repos})
 		if apiStatus(err) != 404 || err.Error() != "unknown repo alpha" {
 			t.Fatalf("err %v, want 404 unknown repo alpha", err)
 		}
@@ -1684,7 +1732,7 @@ func TestUpdateWritesOnlyNewConfigWarnings(t *testing.T) {
 	}
 	all, prefixes := "all", []string{"proj-"}
 	// In all mode darkmem, which sets no max, is unlimited.
-	if err := b.PatchConfig(model.ConfigPatch{Mode: &all, Repos: map[string]model.RepoPatch{"darkmem": {CleanupNamePrefixes: &prefixes}}}); err != nil {
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{Mode: &all, Repos: map[string]model.RepoPatch{"darkmem": {CleanupNamePrefixes: &prefixes}}}); err != nil {
 		t.Fatal(err)
 	}
 	first := "config: darkmem: cleanup_name_prefixes can remove a concurrent job's containers when max is not 1"
@@ -1692,7 +1740,7 @@ func TestUpdateWritesOnlyNewConfigWarnings(t *testing.T) {
 		t.Fatalf("after the change that introduced it: %q", got)
 	}
 	three := 3
-	if err := b.PatchConfig(model.ConfigPatch{GlobalMax: &three}); err != nil {
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{GlobalMax: &three}); err != nil {
 		t.Fatal(err)
 	}
 	if got := warnings(); len(got) != 1 {
@@ -1702,7 +1750,7 @@ func TestUpdateWritesOnlyNewConfigWarnings(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"repos":{"darkcloud":{"max":4,"cleanup_name_prefixes":["proj-"]}}}`), &p); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.PatchConfig(p); err != nil {
+	if err := b.PatchConfig(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
 	second := "config: darkcloud: cleanup_name_prefixes can remove a concurrent job's containers when max is not 1"
@@ -1791,7 +1839,7 @@ func TestSetTokenJudgesEveryRepository(t *testing.T) {
 func TestSetTokenChecksPausedButNotRemovingRepos(t *testing.T) {
 	b, _, _ := newBackend(t)
 	paused := true
-	if err := b.PatchConfig(model.ConfigPatch{Repos: map[string]model.RepoPatch{"darkmem": {Paused: &paused}}}); err != nil {
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{Repos: map[string]model.RepoPatch{"darkmem": {Paused: &paused}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.RemoveRepo("darkcloud"); err != nil {

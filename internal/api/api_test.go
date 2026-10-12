@@ -25,6 +25,7 @@ import (
 
 type fakeBackend struct {
 	patches       []model.ConfigPatch
+	patchCtxs     []context.Context // the context each PatchConfig call got
 	added         []model.AddRepoRequest
 	removed       []string
 	pauseAll      []bool
@@ -221,7 +222,8 @@ func (f *fakeBackend) RunnerSteps(ctx context.Context, id string) ([]model.Step,
 	return []model.Step{{Number: 1, Name: "checkout", Status: "completed", Conclusion: "success"}}, nil
 }
 func (f *fakeBackend) Config() any { return map[string]any{"owner": "darkraise"} }
-func (f *fakeBackend) PatchConfig(p model.ConfigPatch) error {
+func (f *fakeBackend) PatchConfig(ctx context.Context, p model.ConfigPatch) error {
+	f.patchCtxs = append(f.patchCtxs, ctx)
 	if p.GlobalMax != nil && *p.GlobalMax < 1 {
 		return BadRequest("global_max must be >= 1")
 	}
@@ -304,6 +306,36 @@ func TestLogStepsConfig(t *testing.T) {
 	var cfg map[string]any
 	if err := c.Config(ctx, &cfg); err != nil || cfg["owner"] != "darkraise" {
 		t.Fatalf("config %v err %v", cfg, err)
+	}
+}
+
+type ctxMark struct{}
+
+// The routes that patch the config hand the request's own context to the
+// backend, which reads the browser mark from it.
+func TestPatchRoutesPassTheRequestContext(t *testing.T) {
+	b := &fakeBackend{}
+	h := NewServer(b)
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodPatch, "/config", `{"global_max":3}`},
+		{http.MethodPost, "/repos/darkmem/pause", ""},
+		{http.MethodPost, "/repos/darkmem/resume", ""},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		req = req.WithContext(context.WithValue(req.Context(), ctxMark{}, "marked"))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("%s %s: %d %s", tc.method, tc.path, rec.Code, rec.Body.String())
+		}
+	}
+	if len(b.patchCtxs) != 3 {
+		t.Fatalf("%d PatchConfig calls, want 3", len(b.patchCtxs))
+	}
+	for i, ctx := range b.patchCtxs {
+		if ctx.Value(ctxMark{}) != "marked" {
+			t.Fatalf("call %d did not get the request's context", i)
+		}
 	}
 }
 

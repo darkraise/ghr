@@ -169,11 +169,18 @@ type RepoPatch struct {
 	Labels              *[]string `json:"labels,omitempty"`
 	CleanupNamePrefixes *[]string `json:"cleanup_name_prefixes,omitempty"`
 	Paused              *bool     `json:"paused,omitempty"`
+	AllowPublic         *bool     `json:"allow_public,omitempty"`
 }
 
 type RunnerLimitsPatch struct {
 	MemoryMax *string `json:"memory_max,omitempty"`
 	CPUQuota  *string `json:"cpu_quota,omitempty"`
+}
+
+// WebPatch changes the web listener's settings; they apply at the next start.
+type WebPatch struct {
+	Listen *string   `json:"listen,omitempty"`
+	Hosts  *[]string `json:"hosts,omitempty"`
 }
 
 type ConfigPatch struct {
@@ -187,6 +194,7 @@ type ConfigPatch struct {
 	BuildCacheKeep   *string              `json:"build_cache_keep,omitempty"`
 	Labels           *[]string            `json:"labels,omitempty"`
 	RunnerLimits     *RunnerLimitsPatch   `json:"runner_limits,omitempty"`
+	Web              *WebPatch            `json:"web,omitempty"`
 	Repos            map[string]RepoPatch `json:"repos,omitempty"`
 }
 

@@ -69,7 +69,7 @@ type Backend interface {
 	RunnerSteps(ctx context.Context, id string) ([]model.Step, error)
 	RunnerContainers(ctx context.Context, id string) ([]model.Container, error)
 	Config() any
-	PatchConfig(p model.ConfigPatch) error
+	PatchConfig(ctx context.Context, p model.ConfigPatch) error
 	AddRepo(ctx context.Context, req model.AddRepoRequest) error
 	RemoveRepo(name string) error
 	WatchRepo(ctx context.Context, name string) error
@@ -251,7 +251,7 @@ func NewServer(b Backend) http.Handler {
 			respond(w, nil, err)
 			return
 		}
-		respond(w, nil, b.PatchConfig(p))
+		respond(w, nil, b.PatchConfig(r.Context(), p))
 	})
 	mux.HandleFunc("POST /repos", func(w http.ResponseWriter, r *http.Request) {
 		var req model.AddRepoRequest
@@ -283,10 +283,10 @@ func NewServer(b Backend) http.Handler {
 		respond(w, nil, b.UnwatchRepo(r.PathValue("name")))
 	})
 	mux.HandleFunc("POST /repos/{name}/pause", func(w http.ResponseWriter, r *http.Request) {
-		respond(w, nil, b.PatchConfig(pausePatch(r.PathValue("name"), true)))
+		respond(w, nil, b.PatchConfig(r.Context(), pausePatch(r.PathValue("name"), true)))
 	})
 	mux.HandleFunc("POST /repos/{name}/resume", func(w http.ResponseWriter, r *http.Request) {
-		respond(w, nil, b.PatchConfig(pausePatch(r.PathValue("name"), false)))
+		respond(w, nil, b.PatchConfig(r.Context(), pausePatch(r.PathValue("name"), false)))
 	})
 	mux.HandleFunc("POST /pause-all", func(w http.ResponseWriter, r *http.Request) { respond(w, nil, b.SetPausedAll(true)) })
 	mux.HandleFunc("POST /resume-all", func(w http.ResponseWriter, r *http.Request) { respond(w, nil, b.SetPausedAll(false)) })

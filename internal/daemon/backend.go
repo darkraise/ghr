@@ -454,7 +454,7 @@ func (b *Backend) updateThen(fn func(c *config.Config) error, saved func()) erro
 
 // PatchConfig applies a partial update. Resuming a repo that is being removed
 // cancels the removal in the same write.
-func (b *Backend) PatchConfig(p model.ConfigPatch) error {
+func (b *Backend) PatchConfig(ctx context.Context, p model.ConfigPatch) error {
 	var cancelled []string
 	err := b.update(func(c *config.Config) error {
 		if p.Mode != nil {
@@ -500,6 +500,14 @@ func (b *Backend) PatchConfig(p model.ConfigPatch) error {
 				c.RunnerLimits.CPUQuota = *rl.CPUQuota
 			}
 		}
+		if w := p.Web; w != nil {
+			if w.Listen != nil {
+				c.Web.Listen = *w.Listen
+			}
+			if w.Hosts != nil {
+				c.Web.Hosts = *w.Hosts
+			}
+		}
 		// Sorted, so the unknown repository reported is always the same one.
 		for _, name := range slices.Sorted(maps.Keys(p.Repos)) {
 			rp := p.Repos[name]
@@ -518,6 +526,9 @@ func (b *Backend) PatchConfig(p model.ConfigPatch) error {
 			}
 			if rp.CleanupNamePrefixes != nil {
 				r.CleanupNamePrefixes = *rp.CleanupNamePrefixes
+			}
+			if rp.AllowPublic != nil {
+				r.AllowPublic = *rp.AllowPublic
 			}
 			if rp.Paused != nil {
 				r.Paused = *rp.Paused
