@@ -5,12 +5,8 @@ import { useState, type FormEvent } from "react"
 import { ApiError, api } from "@/api/client"
 import { ErrorLine } from "@/components/page/error-line"
 import { Field, FieldGroup } from "@/components/page/field"
+import { passwordLengthOk } from "@/lib/password"
 import { errorText } from "@/query"
-
-function lengthOk(password: string): boolean {
-  const n = new TextEncoder().encode(password).length
-  return n >= 12 && n <= 1024
-}
 
 export function AccountSection() {
   const [current, setCurrent] = useState("")
@@ -22,7 +18,7 @@ export function AccountSection() {
   async function change(e: FormEvent) {
     e.preventDefault()
     setError("")
-    if (!lengthOk(next)) return setError("Password must be 12 to 1024 bytes")
+    if (!passwordLengthOk(next)) return setError("Password must be 12 to 1024 characters")
     if (next !== again) return setError("The passwords do not match")
     setBusy(true)
     try {
@@ -51,7 +47,7 @@ export function AccountSection() {
             onChange={(e) => setCurrent(e.target.value)}
           />
         </Field>
-        <Field label="New password" htmlFor="new-password" help="12 to 1024 bytes">
+        <Field label="New password" htmlFor="new-password" help="12 to 1024 characters">
           <Input id="new-password" type="password" autoComplete="new-password" className="max-w-xs" value={next} onChange={(e) => setNext(e.target.value)} />
         </Field>
         <Field label="Confirm new password" htmlFor="confirm-password">

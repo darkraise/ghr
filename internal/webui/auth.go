@@ -11,6 +11,7 @@ import (
 	"os"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -27,7 +28,7 @@ const (
 )
 
 var (
-	ErrPasswordLength = errors.New("password must be 12 to 1024 bytes")
+	ErrPasswordLength = errors.New("password must be 12 to 1024 characters")
 	ErrPasswordSet    = errors.New("a web password is already set")
 	ErrSetupRequired  = errors.New("no web password is set yet; set one first")
 	ErrWrongPassword  = errors.New("wrong password")
@@ -93,7 +94,11 @@ func (a *Auth) SetupRequired() (bool, error) {
 	return !ok, nil
 }
 
-func validLength(p string) bool { return len(p) >= MinPasswordLen && len(p) <= MaxPasswordLen }
+// validLength counts characters, not bytes.
+func validLength(p string) bool {
+	n := utf8.RuneCountInString(p)
+	return n >= MinPasswordLen && n <= MaxPasswordLen
+}
 
 // Setup sets the first password and starts a session for the caller.
 func (a *Auth) Setup(password string) (string, error) {

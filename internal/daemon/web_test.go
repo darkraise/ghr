@@ -111,8 +111,8 @@ func TestSetPasswordRoute(t *testing.T) {
 		{"not JSON", "password", "invalid request body"},
 		{"trailing data", `{"password":"another long secret"}x`, "invalid request body"},
 		{"over 16 KiB", `{"password":"` + strings.Repeat("a", 16<<10) + `"}`, "invalid request body"},
-		{"too short", `{"password":"short"}`, "password must be 12 to 1024 bytes"},
-		{"too long", `{"password":"` + strings.Repeat("a", webui.MaxPasswordLen+1) + `"}`, "password must be 12 to 1024 bytes"},
+		{"too short", `{"password":"short"}`, "password must be 12 to 1024 characters"},
+		{"too long", `{"password":"` + strings.Repeat("a", webui.MaxPasswordLen+1) + `"}`, "password must be 12 to 1024 characters"},
 	} {
 		code, body := post(tc.body)
 		if code != http.StatusBadRequest || !strings.Contains(body, `"error":"`+tc.want+`"`) {
@@ -126,7 +126,7 @@ func TestSetPasswordRoute(t *testing.T) {
 	long := strings.Repeat("<", webui.MaxPasswordLen)
 	escaped, _ := json.Marshal(map[string]string{"password": long})
 	if code, body := post(string(escaped)); code != http.StatusNoContent {
-		t.Fatalf("1024 bytes that escape to %d: %d %s", len(escaped), code, body)
+		t.Fatalf("1024 characters that escape to %d: %d %s", len(escaped), code, body)
 	}
 	if auth.Valid(id) {
 		t.Fatal("the session survived the new password")

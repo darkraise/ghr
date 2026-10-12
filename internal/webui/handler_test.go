@@ -116,7 +116,7 @@ func TestLoginResponses(t *testing.T) {
 		t.Fatalf("login before setup: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := do(h, http.MethodPost, "/auth/setup", body("short"), local()); rec.Code != http.StatusBadRequest ||
-		!strings.Contains(rec.Body.String(), "password must be 12 to 1024 bytes") {
+		!strings.Contains(rec.Body.String(), "password must be 12 to 1024 characters") {
 		t.Fatalf("short setup: %d %s", rec.Code, rec.Body.String())
 	}
 	if _, err := a.Setup(pw); err != nil {
@@ -234,7 +234,7 @@ func TestRequestChecks(t *testing.T) {
 	if rec := do(h, http.MethodPost, "/auth/login", body(pw), otherPort); rec.Code != http.StatusNoContent {
 		t.Fatalf("same host, other port: %d %s", rec.Code, rec.Body.String())
 	}
-	big := body(strings.Repeat("x", 17<<10))
+	big := body(strings.Repeat("x", authBodyLimit+1<<10))
 	if rec := do(h, http.MethodPost, "/auth/login", big, nil); rec.Code != http.StatusRequestEntityTooLarge ||
 		!strings.Contains(rec.Body.String(), "request body too large") {
 		t.Fatalf("oversized body: %d %s", rec.Code, rec.Body.String())
@@ -305,25 +305,27 @@ func TestRoutes(t *testing.T) {
 	}
 }
 
-// A JSON encoder may write any byte as a six-byte \u escape, so the body
-// limit has to hold two passwords of the maximum length written that way.
+// A JSON encoder may write a character outside the BMP as a twelve-byte
+// surrogate-pair escape, so the body limit has to hold two passwords of the
+// maximum length written that way.
 func TestLongestPasswordsFitTheBodyLimit(t *testing.T) {
 	h, a, _ := newTestHandler(t)
-	id, err := a.Setup(strings.Repeat("x", MaxPasswordLen))
+	current, next := strings.Repeat("\U0001F600", MaxPasswordLen), strings.Repeat("\U0001F601", MaxPasswordLen)
+	id, err := a.Setup(current)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// "x" and "y" as JSON escapes. The backslash stands apart so that no
-	// editor or tool turns the escape back into the letter.
+	// U+1F600 and U+1F601 as JSON escapes. The backslash stands apart so that
+	// no editor or tool turns the escape back into the character.
 	const bs = `\`
-	req := `{"current":"` + strings.Repeat(bs+"u0078", MaxPasswordLen) + `","new":"` + strings.Repeat(bs+"u0079", MaxPasswordLen) + `"}`
-	if len(req) <= 12*MaxPasswordLen {
+	req := `{"current":"` + strings.Repeat(bs+"ud83d"+bs+"ude00", MaxPasswordLen) + `","new":"` + strings.Repeat(bs+"ud83d"+bs+"ude01", MaxPasswordLen) + `"}`
+	if len(req) <= 24*MaxPasswordLen {
 		t.Fatalf("the request is %d bytes; its passwords are not escaped", len(req))
 	}
 	if rec := do(h, http.MethodPost, "/auth/password", req, withCookie(id)); rec.Code != http.StatusNoContent {
 		t.Fatalf("a %d-byte password change: %d %s", len(req), rec.Code, rec.Body.String())
 	}
-	if _, err := a.Login("10.0.0.1", strings.Repeat("y", MaxPasswordLen)); err != nil {
+	if _, err := a.Login("10.0.0.1", next); err != nil {
 		t.Fatalf("the new password: %v", err)
 	}
 }

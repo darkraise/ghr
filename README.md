@@ -100,7 +100,7 @@ Removing the last .NET SDK of a major version also removes that major's runtimes
 
 ghr serves a browser UI with every page and action ghr offers. The example config turns it on at `0.0.0.0:8080`. Until a password is set, the first visitor to the port sets it, so set it at install (`GHR_WEB_PASSWORD` for scripts) or open the UI right after installing; the first-run wizard at `/setup` stays reachable until you finish it.
 
-1. `ghr status` warns while the UI has no password; `ghr web set-password` (12 to 1024 bytes) sets it over SSH. `ghr web reset-password` deletes the password and logs every browser out, after which the next visitor sets a new one, so set one right after running it.
+1. `ghr status` warns while the UI has no password; `ghr web set-password` (12 to 1024 characters) sets it over SSH. `ghr web reset-password` deletes the password and logs every browser out, after which the next visitor sets a new one, so set one right after running it.
 2. A config written before the web UI has no `web:` block: add one to `/etc/ghr/config.yaml` (see below), set `listen`, and run `systemctl restart ghr`. A reload does not start or move the listener; it only warns `web settings changed; restart ghr to apply`.
 3. To reach ghr through nginx-proxy-manager under a name, add that name to `web.hosts` and restart. ghr answers only IP addresses, `localhost` and the listed names, which blocks DNS rebinding. The proxy must forward the original `Host` header, as nginx-proxy-manager does by default.
 4. On the LAN the UI is plain HTTP: the password and the session cookie cross the network unencrypted. Put nginx-proxy-manager in front for TLS, and bind `listen` to a LAN-only address; change it from `0.0.0.0` if the LXC has more than one network.

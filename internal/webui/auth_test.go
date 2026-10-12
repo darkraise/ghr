@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 const pw = "correct horse battery"
@@ -814,9 +815,11 @@ func TestClientKey(t *testing.T) {
 
 func TestSetReplacesThePassword(t *testing.T) {
 	a, _ := newTestAuth(t)
-	for _, bad := range []string{strings.Repeat("x", MinPasswordLen-1), strings.Repeat("x", MaxPasswordLen+1)} {
+	// Lengths count characters: eleven two-byte characters are too short
+	// although they make 22 bytes.
+	for _, bad := range []string{strings.Repeat("\u00e9", MinPasswordLen-1), strings.Repeat("x", MaxPasswordLen+1)} {
 		if err := a.Set(bad); !errors.Is(err, ErrPasswordLength) {
-			t.Fatalf("%d bytes: %v", len(bad), err)
+			t.Fatalf("%d characters: %v", utf8.RuneCountInString(bad), err)
 		}
 	}
 	if _, err := os.Stat(a.path); !errors.Is(err, fs.ErrNotExist) {

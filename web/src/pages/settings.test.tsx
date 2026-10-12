@@ -329,7 +329,7 @@ describe("Account section", () => {
     const { calls } = mockApi(routes())
     const { user } = renderApp("/settings/account")
     await fill(user, "old password 1", "short", "short")
-    expect(await screen.findByText("Password must be 12 to 1024 bytes")).toBeInTheDocument()
+    expect(await screen.findByText("Password must be 12 to 1024 characters")).toBeInTheDocument()
     await user.clear(screen.getByLabelText("New password"))
     await user.type(screen.getByLabelText("New password"), "new password 12")
     await user.click(screen.getByRole("button", { name: "Change password" }))

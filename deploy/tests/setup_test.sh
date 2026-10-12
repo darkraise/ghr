@@ -497,7 +497,7 @@ web_ghr() {
   ghr() {
     echo "$*" >> "$MARK_DIR/ghr-calls"
     cat > "$MARK_DIR/ghr-stdin"
-    [ ! -f "$MARK_DIR/fail-web" ] || { echo "ghr: password must be 12 to 1024 bytes" >&2; return 1; }
+    [ ! -f "$MARK_DIR/fail-web" ] || { echo "ghr: password must be 12 to 1024 characters" >&2; return 1; }
     echo "web password set; every browser was logged out"
   }
 }
@@ -518,7 +518,7 @@ touch "$pending" "$MARK_DIR/fail-web"
 out=$( (web_ghr; GHR_WEB_PASSWORD='short'; run set_web_password) </dev/null 2>&1)
 rc=$?
 check "h: a refused password does not fail the install" [ "$rc" -eq 0 ]
-check "h: the refusal is shown" contains "$out" "password must be 12 to 1024 bytes"
+check "h: the refusal is shown" contains "$out" "password must be 12 to 1024 characters"
 check "h: the reminder follows a refusal" contains "$out" "set it now with: ghr web set-password"
 check "h: a refused password keeps the marker" [ -f "$pending" ]
 

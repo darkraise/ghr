@@ -18,9 +18,10 @@ import (
 
 const (
 	cookieName = "ghr_session"
-	// authBodyLimit holds two passwords of MaxPasswordLen with every byte
-	// written as a six-byte JSON escape.
-	authBodyLimit = 16 << 10
+	// authBodyLimit holds two passwords of MaxPasswordLen characters with
+	// every character outside the BMP written as a twelve-byte surrogate-pair
+	// JSON escape.
+	authBodyLimit = 32 << 10
 	csp           = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'"
 )
 

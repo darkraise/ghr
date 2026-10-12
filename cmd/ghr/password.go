@@ -48,8 +48,9 @@ func readHidden(in io.Reader) ([]byte, error) {
 	return []byte(line), err
 }
 
-// maxPipedPassword bounds a password read from a pipe; the daemon allows 1024 bytes.
-const maxPipedPassword = 4 << 10
+// maxPipedPassword bounds a password read from a pipe. The daemon allows 1024
+// characters, up to 4 KiB, and the line ending must fit after them.
+const maxPipedPassword = 8 << 10
 
 // readNewPassword asks twice without echo on a terminal, or reads one
 // password from a pipe. The daemon checks the length.

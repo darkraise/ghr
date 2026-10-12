@@ -10,15 +10,8 @@ import { ApiError, api } from "@/api/client"
 import { keys } from "@/api/hooks"
 import { Brand } from "@/components/brand"
 import { hhmm } from "@/lib/format"
+import { passwordLengthOk } from "@/lib/password"
 import { safeRedirect } from "@/lib/redirect"
-
-const MIN_BYTES = 12
-const MAX_BYTES = 1024
-
-function lengthOk(password: string): boolean {
-  const n = new TextEncoder().encode(password).length
-  return n >= MIN_BYTES && n <= MAX_BYTES
-}
 
 function loginError(err: unknown): string {
   if (err instanceof ApiError && err.status === 429 && err.retryAt) {
@@ -52,7 +45,7 @@ export function LoginPage() {
   async function submit(e: FormEvent) {
     e.preventDefault()
     setError("")
-    if (setup && !lengthOk(password)) return setError("password must be 12 to 1024 bytes")
+    if (setup && !passwordLengthOk(password)) return setError("password must be 12 to 1024 characters")
     if (setup && password !== confirm) return setError("the passwords do not match")
     setBusy(true)
     try {

@@ -27,7 +27,7 @@ describe("login page", () => {
     await user.type(password, "short")
     await user.type(confirm, "short")
     await user.click(submit)
-    expect(screen.getByText("password must be 12 to 1024 bytes")).toBeInTheDocument()
+    expect(screen.getByText("password must be 12 to 1024 characters")).toBeInTheDocument()
 
     await user.clear(password)
     await user.clear(confirm)

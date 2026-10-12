@@ -10,8 +10,9 @@ import (
 	"github.com/darkraise/ghr/internal/webui"
 )
 
-// maxPasswordBody caps the set-password body. JSON escapes <, > and & as six
-// bytes each, so a 1024-byte password can encode to over 6 KiB.
+// maxPasswordBody caps the set-password body. The client's encoder writes <, >
+// and & as six bytes each and other characters raw, so a 1024-character
+// password can encode to over 6 KiB.
 const maxPasswordBody = 16 << 10
 
 // socketHandler serves the Unix socket: the control API plus routes that must

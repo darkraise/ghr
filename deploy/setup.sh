@@ -268,7 +268,7 @@ set_web_password() {
   if [ -z "$pw" ] && stdin_is_tty; then
     # Only a line that was read and is empty is a skip. End of input or a failed
     # read keeps the marker and drops whatever it left in $pw.
-    if IFS= read -rsp "Web UI password (12 to 1024 bytes; Enter to skip): " pw; then
+    if IFS= read -rsp "Web UI password (12 to 1024 characters; Enter to skip): " pw; then
       [ -n "$pw" ] || rm -f "$pending"
     else
       pw=
