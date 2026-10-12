@@ -1,7 +1,7 @@
 # ghr: web logic fixes
 
 **Date:** 2026-10-12
-**Status:** design presented in chat and approved by the owner on 2026-10-12, with the rulings on job results (row 78), the unscheduled backend rows (sub-project 7) and the execution strategy made the same day. Amended the same day while the plan was drafted (§2.3, §2.5, §3.1, §3.2, §3.3, §3.4, §3.6, §4.1, §4.2 and §5.1): each amendment records what the code had to decide, and is reported to the owner with the plan.
+**Status:** design presented in chat and approved by the owner on 2026-10-12, with the rulings on job results (row 78), the unscheduled backend rows (sub-project 7) and the execution strategy made the same day. Amended the same day while the plan was drafted (§2.1, §2.3, §2.5, §3.1, §3.2, §3.3, §3.4, §3.6, §4.1, §4.2 and §5.1): each amendment records what the code had to decide, and is reported to the owner with the plan.
 **Execution strategy:** sequential — the fixes are small, but many share `api/hooks.ts`, `api/client.ts`, `pages/run.tsx`, `pages/repository.tsx` and `lib/settings-form.ts`, and the dev host is the limit: concurrent vitest runs are what makes the web suite time out (register rows 109 and 225) and `/tmp` is a nearly full tmpfs (row 224).
 **Register:** docs/superpowers/registers/2026-10-11-ghr-comprehensive-review.md (rows 33, 75 to 109, 225 and 279 to 284). This is sub-project 4 of 7.
 **Code:** `web/` (sources, tests, `vite.config.ts`, `tsconfig.json`, `package.json`), `.github/workflows/ci.yml` (one test step), and `internal/model` with the tests of `internal/history` and `internal/activity` (row 78). No other daemon change.
@@ -50,13 +50,14 @@ A login then makes two `/auth/state` calls.
 
 ## 2. Forms and drafts
 
-### 2.1 Max and Warm (rows 76 and 279)
+### 2.1 Max and Warm (rows 76, 279 and 289)
 
 The Add repository dialog clamps Max, and the repository page clamps Max and Warm: a negative number becomes 0, which the daemon reads as unlimited for Max, 150 becomes 99 and 1.9 becomes 1, all without a message. The daemon refuses a value below 0 or above 99 with a message of its own.
 
 - Neither form changes what was typed. The field shows the typed text.
 - A value that is not a whole number from 0 to 99 shows an inline error with the rule the settings form already uses, and blocks Add or Save.
 - An emptied Max or Warm keeps today's meaning. The "Warm must be <= max" rule stays.
+- Text the box cannot read as a number, such as `1e` or a lone `-`, is not an emptied box, although the browser reports it as an empty value: it shows the same error and blocks Add or Save (row 289, added by plan review on 2026-10-12).
 - The unreachable "Pick a repository first" message in the dialog goes with row 101.
 
 ### 2.2 The unsaved-changes guard (row 79)
@@ -69,7 +70,7 @@ A draft entry is written on every edit and removed only for keys a save sent. An
 
 - An edit whose value equals the loaded value removes the key from the draft. One helper in `lib/draft.ts` serves the settings form and the repository page.
 - When a config read brings a value equal to a draft entry, that entry is removed.
-- Equality is of the stored values: `60s` typed over `1m` is a change.
+- Equality is of the stored values, for pruning and for the count of unsaved changes alike: `60s` typed over `1m` stays in the draft and counts as one unsaved change, and so does a space typed after a value. The looser comparison of durations is kept only for checking that the daemon applied a save, because the daemon answers a duration in its own form.
 - Pruning pauses while a save is in flight. The loaded value is then the one being replaced, and an edit back to it is a real edit that must survive the save.
 
 ### 2.4 The read after a save (row 97)
@@ -268,7 +269,7 @@ Every fix starts from a failing test, in the test file that already covers the c
 |---|---|
 | 33, 86 | §3.4 |
 | 75 | §1.1 |
-| 76, 279 | §2.1 |
+| 76, 279, 289 | §2.1 |
 | 77 | §4.1 |
 | 78 | §4.2 |
 | 79 | §2.2 |

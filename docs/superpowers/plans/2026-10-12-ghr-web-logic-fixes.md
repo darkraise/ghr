@@ -10,7 +10,8 @@
 
 **Spec:** docs/superpowers/specs/2026-10-12-ghr-web-logic-fixes-design.md
 
-**Execution:** inline — `claude --model sonnet --effort high` — 5 of 84 tasks are heavy (9, 23, 28, 52, 63) and are delegated; the other 79 run in the session
+**Execution:** inline — `claude --model sonnet --effort high` — 5 of 86 tasks are heavy (9, 23, 28, 52, 63) and are delegated; the other 81 run in the session
+**Plan review:** 2026-10-12 — dr-superpowers:judge-opus — executability 16 / coherence 18 / coverage 16 / assumptions 15 (round 2)
 
 **Parallelism:** sequential — many tasks share `api/hooks.ts`, `pages/run.tsx`, `pages/repository.tsx` and `lib/settings-form.ts`, and the dev host is the limit: concurrent vitest runs are what makes the web suite time out, and `/tmp` is a nearly full tmpfs
 
@@ -18,7 +19,7 @@
 
 - Web commands run from the repository root in the form the task gives (`cd web && npx vitest run src/...`). `/tmp` is a small tmpfs that is nearly full: before the first command of a session run `mkdir -p /root/.cache/ghr-plan-tmp`, and put `TMPDIR=/root/.cache/ghr-plan-tmp` in front of every `npm`, `npx` and Go command. Give every command a `timeout` (300 seconds for one test file, 900 for the whole suite).
 - A fresh worktree has no `web/node_modules`. Once, before the first web command: `cd web && TMPDIR=/root/.cache/ghr-plan-tmp timeout 600 npm ci --prefer-offline --no-audit --no-fund`. `web/package-lock.json` must not change in any task.
-- While working on a task run only the test files its commands name, one `vitest run` at a time; only the last task runs the whole suite. A test that only times out is the loaded host, not a failure: run it once more, alone, before believing it. Never start a dev server, a watcher (`vitest` without `run`, `--watch`) or any background process.
+- While working on a task run only the test files its commands name, one `vitest run` at a time; only Task 85 runs the whole suite. A test that only times out is the loaded host, not a failure: run it once more, alone, before believing it. Never start a dev server, a watcher (`vitest` without `run`, `--watch`) or any background process.
 - A time-zone test file (`*.tz.test.ts`) runs only through `cd web && npm run test:tz -- src/path/to/file.tz.test.ts`; a plain `npx vitest run` on such a file finds no tests. This holds from the task that adds the `test:tz` script onward.
 - Before each commit run the test command the task names, then `cd web && npx tsc --noEmit` and `cd web && npx eslint src --max-warnings 0`; both must print nothing.
 - No new npm dependency and no new Go module dependency.
@@ -32,7 +33,7 @@
 - Code comments: only where the reason is not obvious from the code. No comment mentions a task, a register row or a fix.
 - Styling goes in the component as Tailwind classes. Only the task that names `web/src/styles/ghr-theme.css` edits it.
 - Commits: `<type>(<scope>): <subject>`, subject at most 50 characters, imperative, no trailing period, no attribution or co-author lines.
-- No write to GitHub, no host change, and never deploy to the runner LXC (192.168.0.99).
+- No write to GitHub, no host change, and never deploy to the runner LXC (192.168.0.99). The one exception is Task 86: it deploys, restarts the daemon and dispatches one workflow, each only after the owner's yes in its Step 1.
 - English only.
 
 ## Contracts
@@ -132,12 +133,16 @@ User-visible texts of the results, links, History, token and Actions tasks. The 
 
 - **Base.** The quoted blocks were written against local `master` at `d95cb45`. `master` stands at `197654c` when this plan is saved, and the one commit between them adds a note under `docs/` only: `git diff --stat d95cb45 master` on 2026-10-12. Local `master` is 129 commits ahead of `origin/master` and nothing is pushed: cut the execution worktree from local `master`. A worktree made by the Agent tool's own isolation started at `f5cd90d`, 128 commits behind, on 2026-10-12, and has to be rebased onto `master` before any task.
 - **Every task was carried out before its text was written.** Six groups of tasks (Tasks 1 to 8, 9 to 17, 18 to 34, 35 to 47, 48 to 58 and 59 to 82) were each done red-then-green on a branch of their own on top of `d95cb45`, one commit per task, on 2026-10-12. Each group's whole web suite, `tsc --noEmit` and `eslint src --max-warnings 0` were green at its end, with one exception that the plan's order removes: with Tasks 48 to 58 alone, Task 58 (one shared clock) makes `shows the job's heading, runner, labels and steps` in `web/src/pages/run.test.tsx` fail, and Task 36 corrects that test first. That is why Tasks 35 to 47 come before Tasks 48 to 58.
-- **Plan order was replayed.** On 2026-10-12 the 82 task commits were cherry-picked onto `master` in plan order (branch `plan/web-logic-order`), and a script checked, for each task, that every quoted "replace" block stands in one of the task's files before its commit and every quoted "with" block after it. One task did not apply as written: Task 57's edit of the import lines of `web/src/api/hooks-pages.test.tsx`, which Tasks 41 and 42 change first. Its text was corrected and its failing and passing runs were repeated at its place in plan order (`Tests  1 failed | 11 skipped (12)`, then `Tests  12 passed (12)`). No other block was missing.
-- **The end state was run; the states between tasks were not.** In plan order only Tasks 21, 28, 39, 57, 76 and 83 and the finished tree were run (Task 84's numbers, below). The other tasks' "Expected" lines were taken with only their own group's earlier tasks applied, which is why a count can be higher at execution (Global Constraints). The tree after Task 82 is the tree of the earlier merge check, branch `plan/web-logic-merge` at `81c1da8`: `git diff plan/web-logic-merge plan/web-logic-order~1 -- web internal .github` printed nothing on 2026-10-12.
+- **Plan order was replayed.** On 2026-10-12 the 82 task commits were cherry-picked onto `master` in plan order (branch `plan/web-logic-order`), and a script checked, for each task, that every quoted "replace" block stands in one of the task's files before its commit and every quoted "with" block after it. One task did not apply as written: Task 57's edit of the import lines of `web/src/api/hooks-pages.test.tsx`, which Tasks 41 and 42 change first. Its text was corrected and its failing and passing runs were repeated at its place in plan order (`Tests  1 failed | 11 skipped (12)`, then `Tests  12 passed (12)`). No other block was missing. Task 84 was added after plan review round 2 and carried out on top of that branch, red then green, at its place in plan order.
+- **The end state was run; the states between tasks were not.** In plan order only Tasks 21, 28, 39, 57, 76, 83 and 84 and the finished tree were run (Task 85's numbers, below). The other tasks' "Expected" lines were taken with only their own group's earlier tasks applied, which is why a count can be higher at execution (Global Constraints). The tree after Task 82 is the tree of the earlier merge check, branch `plan/web-logic-merge` at `81c1da8`, plus the round-1 review fixes to Tasks 21, 28, 39 and 76: `git diff --stat plan/web-logic-merge plan/web-logic-order~2 -- web internal .github` listed only their seven files (`web/src/lib/settings-form.ts`, `web/src/pages/settings.test.tsx`, `web/src/components/tag-field.tsx`, `web/src/components/shared.test.tsx`, `web/src/components/log-viewer.tsx`, `web/src/components/log-viewer.test.tsx`, `web/src/components/buckets-chart.test.tsx`) on 2026-10-12.
 - **The plan is sequential and Claude-only.** Sequential is the spec's execution strategy. The external executor question was asked on 2026-10-12 and not answered within 15 minutes, so no task carries an Executor line, although the Codex gate printed `usable=true lane=true`.
 - **Row 94 is not in this plan.** The spec defers it as a known limit (section 6) and the register holds it as `deferred`. Rows 204 and 224 are the owner's.
-- **Assumptions marked `unverified` below that need a browser** (a typed `1.0` staying on screen, the wizard scrolling, `content-visibility` on a long log, the raw-log download in Safari or Firefox, the log colours after the tokens move) are settled by the browser check of the spec's section 8. It needs a deploy to the runner LXC and the owner's yes, so no task makes it; each task they belong to is correct either way, as its bullet says. The CI step of Task 4 is verified by the first push, which this plan does not make.
-- **Readings the owner has not ruled on** (register row 308). None blocks a task; each is what the task implements, and each is a small change if the owner prefers the other reading. Row 96 (Task 74): the History rows stay only when the chart's start slides to its next bucket; after a click on 24h, 7d or 30d the old rows are hidden while loading, as today. Row 76 (Task 18): `1.9` in Max reads `Max must be >= 0`, the settings form's shared rule for anything that is not a whole number. Row 82 (Tasks 25 and 27): the wizard's guard also stops the browser's Back button out of the wizard, with a dialog worded "on the Settings page", and the retry button reads "Try again" where the spec says "Retry". Row 107 (Tasks 30 to 32): the toast after Cancel removal still reads "Resumed <name>". Row 89 (Task 12): when `/auth/state` cannot be read after a `401`, the Account form shows that request's own error. Rows 83 and 281 (Tasks 16 and 17): the wording `Log out and discard 1 unsaved change?`, the button `Log out`, the toast `Log out failed: <error>`. Row 78 (Tasks 63 to 65): the three new results fall into the charts' "cancelled" count, as skipped does today, while History's Cancelled filter matches `cancelled` exactly, so chart and filter can disagree.
+- **Assumptions marked `unverified` below that need a browser** (a typed `1.0` staying on screen, the wizard scrolling, `content-visibility` on a long log, the raw-log download, the log colours after the tokens move) are `unverified — Task 86 verifies it`: Task 86 deploys to the runner LXC after the owner's yes and runs the browser check of the spec's section 8 with expected results, and writes each check down as `pending` without that yes. Each task they belong to is correct either way, as its bullet says. The download is checked in Chromium only; Safari and Firefox stay `pending`. The CI step of Task 4 is verified by the first push, which this plan does not make.
+- **Readings the owner has not ruled on** (register row 308). None blocks a task; each is what the task implements, and each is a small change if the owner prefers the other reading. Row 96 (Task 74): the History rows stay only when the chart's start slides to its next bucket; after a click on 24h, 7d or 30d the old rows are hidden while loading, as today. Row 76 (Task 18): `1.9` in Max reads `Max must be >= 0`, the settings form's shared rule for anything that is not a whole number. Row 82 (Tasks 25 and 27): the wizard's guard also stops the browser's Back button out of the wizard, with a dialog worded "on the Settings page", and the retry button reads "Try again" where the spec says "Retry". Row 107 (Tasks 30 to 32): the toast after Cancel removal still reads "Resumed <name>". Row 89 (Task 12): when `/auth/state` cannot be read after a `401`, the Account form shows that request's own error. Rows 83 and 281 (Tasks 16 and 17): the wording `Log out and discard 1 unsaved change?`, the button `Log out`, the toast `Log out failed: <error>`. Row 78 (Tasks 63 to 65): the three new results fall into the charts' "cancelled" count, as skipped does today, while History's Cancelled filter matches `cancelled` exactly, so chart and filter can disagree. Row 80 (Task 21), from plan review round 1: the settings form counts an unsaved change by the stored values, so `120s` typed over a loaded `2m0s`, or a space typed after a value, now counts as one unsaved change where it counted none before; two tests from 2026-10-06 that pinned the old count are rewritten in Task 21, and spec section 2.3 now says so outright.
+- **Review findings declined** (plan review round 1, 2026-10-12), each recorded in the register. A fifth decline, an incomplete number such as `1e` in Max or Warm, was overruled by round 2 and is Task 84; register row 289 is planned by it.
+  - Task 14, a second navigation blocked while a dismissed save still runs: beyond spec section 2.2, which covers the dismissed save itself; register row 286.
+  - Task 25, an edit made while the wizard's "Save your changes?" save runs is lost when the step is left: `saveAndNext` on `master` does the same and spec section 2.5 does not ask for it; register row 309.
+  - Task 39, the urgent render still regroups the open steps: the line re-render and the matching are deferred and the parse is cached, which is what spec section 4.1 asks; register row 303.
 - **Scores.** Five tasks are heavy, each with a total of 5: Tasks 9, 23, 28, 52 and 63. Task 83 touches eleven files and scores 1 on files: the same one-line edit in ten test files is one shape, the comment a second. Task 13 (redirect targets) scores risk 2, not 3: it only makes an existing check refuse more, and the router refuses the same targets after it.
 All commands were run on 2026-10-12. The failing ("red") outputs were captured at the older commit `f5cd90d`; the work was then rebased onto local `master` (`d95cb45`) and every passing check was run again there. The files the red runs depend on (`web/vite.config.ts`, `web/tsconfig.json`, `web/package.json`, `web/src/lib/history.ts`, `web/src/lib/history.test.ts`, `web/src/styles/ghr-theme.css`, `web/src/styles/theme.test.ts`, `web/src/lib/palette*.ts`, `web/src/components/capacity-bar.test.tsx`) are identical in both commits: `git diff --stat f5cd90d master -- <those paths>` lists none of them.
 
@@ -162,7 +167,7 @@ All commands were run on 2026-10-12. The failing ("red") outputs were captured a
 - The two copies of the log tokens are byte-identical: `diff <(sed -n 77,104p ghr-theme.css) <(sed -n 160,187p ghr-theme.css)` printed nothing.
 - No other file declares a `--log-*` token: `rg -l -e '--log-[a-z-]+\s*:' src index.html` in `web/` lists only `src/styles/ghr-theme.css`, and `rg -l -e '--log-(bg|fg|ansi)' node_modules/darkraise-ui` lists nothing. So the kit cannot override the declarations once they are in `:root`.
 - The existing log-palette test keeps working after the move because its `tokens(mode)` merges the `:root` block with the mode block: `web/src/styles/theme.test.ts:19-21`.
-- The built stylesheet carries each log token once after Task 7: `npx vite build` succeeded and `grep -o -e '--log-bg:' dist/assets/*.css | wc -l` printed `1` (same for `--log-ansi-bright-white:`). Run at the `f5cd90d` base only; the build output was removed again and `web/dist/.gitkeep` restored. That the log viewer looks the same in a browser is `unverified`: it needs a deploy or a dev server, both outside the brief.
+- The built stylesheet carries each log token once after Task 7: `npx vite build` succeeded and `grep -o -e '--log-bg:' dist/assets/*.css | wc -l` printed `1` (same for `--log-ansi-bright-white:`). Run at the `f5cd90d` base only; the build output was removed again and `web/dist/.gitkeep` restored. That the log viewer looks the same in a browser is `unverified`: it needs a deploy or a dev server, both outside the brief. The browser check, the plan's last task, verifies it.
 - The new capacity tests can fail: with a scratch change in `web/src/lib/capacity.ts` that capped the free segments at 10, both new tests failed and the eight old ones passed (reverted).
 - The daemon caps `global_max` at 99: `internal/config/config.go:39` (`const MaxRunners = 99`) on `master`.
 Line numbers are from the tree on top of `master` (`d95cb45`), read on 2026-10-12.
@@ -186,7 +191,7 @@ Line numbers are from the tree on top of `master` (`d95cb45`), read on 2026-10-1
 - The daemon reads a repository Max of 0 as unlimited and refuses Max or Warm below 0 or above 99: `internal/config/config.go:420` (`EffectiveMax returns the repo's cap; 0 means unlimited`), `:513`, `:516`, `:519`, and `MaxRunners = 99` at `:39`.
 - The settings form's rule for `global_max` before Task 18: `web/src/lib/settings-form.ts:43-45` at `d95cb45` (`!Number.isInteger(max) || max < 1` gives `global_max must be >= 1`; above 99 gives `global_max must be <= 99`). Task 18 keeps both messages; `web/src/pages/settings.test.tsx` (`checks the fields before sending`) still passes.
 - The Add button is the only caller of `add()` and is disabled while nothing is picked, so `Pick a repository first` cannot be reached: `web/src/components/add-repo-dialog.tsx:55` and `:116` at `d95cb45`.
-- React leaves a controlled number input alone when its text is loosely equal to a number prop (`element.value != value`): `web/node_modules/react-dom/cjs/react-dom-client.development.js:1852` (react-dom 19.3.0). That a typed `1.0` or `007` stays on screen in a real browser is inferred from this line and `unverified`; a look at the repository page in a browser would settle it. jsdom shows the typed `-1`, `150` and `1.9` (Task 19's test).
+- React leaves a controlled number input alone when its text is loosely equal to a number prop (`element.value != value`): `web/node_modules/react-dom/cjs/react-dom-client.development.js:1852` (react-dom 19.3.0). That a typed `1.0` or `007` stays on screen in a real browser is inferred from this line and `unverified`; a look at the repository page in a browser would settle it. jsdom shows the typed `-1`, `150` and `1.9` (Task 19's test). The browser check, the plan's last task, verifies it.
 - `fetchQuery` hands back the fetch in flight instead of sending a request: `web/node_modules/@tanstack/query-core/build/modern/query.js:301-302` (react-query 5.104.1), and the failing run of Task 23's test on 2026-10-12 (`expected 2 to be 3`). `cancelQueries` reverts a cancelled query to its previous data by default: `web/node_modules/@tanstack/query-core/build/modern/queryClient.js:285`.
 - The config query polls every 5 seconds while the change stream is off, 60 while it is on: `web/src/api/hooks.ts:67`. Tests run with the stream off (`web/src/test/setup.ts:9`).
 - Only the router's browser history listens for `beforeunload`; the memory history does not: `web/node_modules/@tanstack/history/dist/esm/index.js:331` is inside `createBrowserHistory` (`:174`), and `createMemoryHistory` (`:369`) has no such listener. `UnsavedGuard` asks for the warning with `enableBeforeUnload: count > 0`: `web/src/components/unsaved-guard.tsx:33`.
@@ -197,7 +202,7 @@ Line numbers are from the tree on top of `master` (`d95cb45`), read on 2026-10-1
 - The daemon counts a label's length in characters and finds duplicate labels ignoring case: `internal/config/config.go:260` (`utf8.RuneCountInString`), `:45` (`MaxLabelLength = 100`), `:281` (`strings.ToLower(strings.TrimSpace(l))`). For cleanup prefixes it only refuses an empty one: `internal/config/config.go:529-531`.
 - Resuming a repository clears its removal: `internal/daemon/backend.go:522-526`. A removal also marks the repository paused: `internal/daemon/backend.go:657-658`.
 - The status fixture has a repository being removed (`old-repo`): `web/src/api/fixtures/status.json:42-44`. The config fixture has `global_max: 2` and `darkmem` with `max: 2`, `warm: 1`, the label `gpu` and the prefix `darkmem-`: `web/src/api/fixtures/config.json:4` and `:20-28`.
-- The document scrolls on every page, so the wizard's own scroll box is dead: `web/src/styles/ghr-theme.css:259-263` (`html, body { height: auto; overflow: visible; }`, unlayered) over the kit's `html, body { @apply h-full overflow-hidden }` at `web/node_modules/darkraise-ui/dist/styles.css:12861-12864`. That the wizard still scrolls in a real browser after Task 34 is inferred from the CSS and `unverified`; opening `/setup` on a short window would settle it.
+- The document scrolls on every page, so the wizard's own scroll box is dead: `web/src/styles/ghr-theme.css:259-263` (`html, body { height: auto; overflow: visible; }`, unlayered) over the kit's `html, body { @apply h-full overflow-hidden }` at `web/node_modules/darkraise-ui/dist/styles.css:12861-12864`. That the wizard still scrolls in a real browser after Task 34 is inferred from the CSS and `unverified`; opening `/setup` on a short window would settle it. The browser check, the plan's last task, verifies it on the Settings page, which rests on the same rule: a configured daemon sends `/setup` to `/`.
 - Nothing reads the `tabindex` or `scroll-mt-4` of `FieldGroup`: `rg -n "scroll-mt|tabindex|tabIndex" web/src --glob '*.test.*'` on 2026-10-12 finds only `web/src/components/page/field.test.tsx:19` for it, and no source file focuses a group heading.
 - Toasts of earlier tests in a file stay on screen: the comment at `web/src/pages/repository.test.tsx` in the test `sends null for an emptied box, so the value is inherited again`. Tasks 23 and 24 place their test above every test that raises a `Daemon did not apply` toast for that reason.
 - The query library keeps the identity of the run-detail data (and so of each job object) and of the job-log data across a refetch that brings equal data. Evidence: Task 36's test, run on 2026-10-12; with `structuralSharing: false` added temporarily to `useRunDetail` the test failed with `expected 33 to be 32`, and with it added to `useJobLog` it failed with `expected 37 to be 32`; both edits were reverted.
@@ -213,8 +218,8 @@ Line numbers are from the tree on top of `master` (`d95cb45`), read on 2026-10-1
 - React's `Profiler` calls `onRender` after the DOM of a commit is updated, in the React 19.3.0 development build the tests run on. Evidence: Task 39's test, which reads the counter inside `onRender` and saw `2 of 4` then `1 of 4`.
 - Tailwind 4.3.3 turns the two arbitrary-property classes into `content-visibility:auto` and `contain-intrinsic-size:auto 1.25rem`. Evidence: `npx vite build --outDir /root/.cache/ghr-plan-tmp/dist-chain5` on 2026-10-12 and a search of the built CSS; the build output was deleted afterwards.
 - vitest's fake timers work with the suite's fetch mock, with and without `shouldAdvanceTime`. Evidence: Tasks 36, 42, 43 and 45's tests on 2026-10-12.
-- `unverified`: that `content-visibility: auto` on the rows speeds up a log of several thousand lines, keeps scrolling, the jump to a line and the browser's find working, and does not clip the current match's outline. A browser check on the runner LXC, which needs the owner's yes, settles it.
-- `unverified`: that revoking the object URL on the next tick fails a download in Safari or Firefox (the spec's own open point). A download in those browsers settles it; the 40 seconds are safe either way.
+- `unverified`: that `content-visibility: auto` on the rows speeds up a log of several thousand lines, keeps scrolling, the jump to a line and the browser's find working, and does not clip the current match's outline. A browser check on the runner LXC, which needs the owner's yes, settles it. The browser check, the plan's last task, verifies it.
+- `unverified`: that revoking the object URL on the next tick fails a download in Safari or Firefox (the spec's own open point). A download in those browsers settles it; the 40 seconds are safe either way. The browser check, the plan's last task, verifies the download in Chromium only; Safari and Firefox are not verified by this plan, and the 40 seconds are safe either way.
 - The web listener cuts a response after 60 seconds: `internal/daemon/run.go:42` (`webWriteTimeout = 60 * time.Second`) and `:287`.
 - The stop route lets a stop take 100 seconds: `internal/api/server.go:463` (`killWriteWindow = 100 * time.Second`).
 - The change stream pings every 15 seconds when idle: `internal/api/server.go:506` (`heartbeat = 15 * time.Second`) and `:562` (`": ping\n\n"`).
@@ -232,9 +237,9 @@ Line numbers are from the tree on top of `master` (`d95cb45`), read on 2026-10-1
 - `useNow` is called from 13 source files: `rg -ln 'useNow\(' web/src --glob '!*.test.*' | wc -l` on 2026-10-12.
 - The retry button of `ErrorLine` reads "Try again": `web/src/components/page/error-line.tsx:12`.
 - Fixture values the tests name: a step `Run tests` and a container `ghr-aaaaaa-db-1` (already used by `web/src/components/runner-panel.test.tsx`), and three available repositories, one named `new-repo` (`web/src/api/fixtures/available-repos.json`).
-- With `gcTime: 0` the cache entry is removed on a zero-delay timer after its last observer leaves, not synchronously: Task 57's test needs one timer flush between the unmount and the second mount, and passes with it. `unverified` in the browser beyond that: a real reopen is always later than one timer tick.
+- With `gcTime: 0` the cache entry is removed on a zero-delay timer after its last observer leaves, not synchronously: Task 57's test needs one timer flush between the unmount and the second mount, and passes with it. `unverified` in the browser beyond that: a real reopen is always later than one timer tick. Not verified by this plan; the task is correct either way.
 - That a stream stalls in practice was not observed (the spec says the same); Task 50 costs one timer while the server pings.
-- `unverified`: how a real browser's `fetch` rejects when the request's signal aborts with no reason. The tests model it as an `AbortError` rejection (and an errored body stream). `withTimeout` does not depend on the error's shape: it reports a timeout whenever its own timer fired first.
+- `unverified`: how a real browser's `fetch` rejects when the request's signal aborts with no reason. The tests model it as an `AbortError` rejection (and an errored body stream). `withTimeout` does not depend on the error's shape: it reports a timeout whenever its own timer fired first. Not verified by this plan; the task is correct either way.
 Line numbers are those of local `master` at `d95cb45`, read on 2026-10-12.
 
 - `stateWord` turns a state it does not list into its name with underscores replaced and the first letter capitalised, and `stateTone` answers `muted` for a state it does not list: `web/src/lib/status.ts:45-47` and `:60-65`. So `neutral`, `stale`, `cancelled`, `skipped` and `unknown` need no entry of their own.
@@ -251,7 +256,7 @@ Line numbers are those of local `master` at `d95cb45`, read on 2026-10-12.
 - The History table's `since` is the chart's `from` (`web/src/pages/history.tsx:135`) and is part of the query key (`web/src/api/hooks.ts:141-148`), and `useHistory` keeps the previous rows as placeholder data (`hooks.ts:148`). Task 74 relies on all three.
 - The query library hands a `placeholderData` function the last query that had data, not the query of the previous key: `web/node_modules/@tanstack/query-core/build/modern/queryObserver.js:319` and `:388`, version 5.104.1. This is why the rule of Task 74 is in the page and not in `useHistory`: after a change of window the key passes through one with an empty `since`, and the hook alone cannot tell that from a slide.
 - `isZeroTime` exists and treats `0001-01-01…` and `undefined` as zero: `web/src/lib/format.ts:45-47`.
-- unverified: whether the daemon can write a zero `started_at` into the history today. `jobInfo` falls back to now for a start it cannot parse (`internal/runner/lifecycle.go:152-160`) and the entry starts from the spawn time (`:387-390`), so no path was found that does. An entry with `"started_at":"0001-01-01T00:00:00Z"` in a real `history.jsonl` would settle it. Task 75 is correct either way.
+- unverified: whether the daemon can write a zero `started_at` into the history today. `jobInfo` falls back to now for a start it cannot parse (`internal/runner/lifecycle.go:152-160`) and the entry starts from the spawn time (`:387-390`), so no path was found that does. An entry with `"started_at":"0001-01-01T00:00:00Z"` in a real `history.jsonl` would settle it. Task 75 is correct either way. Not verified by this plan; the task is correct either way.
 - `SetToken` checks the new token against every configured repository that is not being removed: `internal/daemon/backend.go:747-764`; `CheckToken` reads the repository, its runners and its runs (`internal/daemon/backend.go:92-93`). Hence "read access to every configured repository" in Task 78.
 - `count` is duplicated in exactly two places and `toLocaleString` is used nowhere else: `web/src/components/stat-card.tsx:30`, `web/src/lib/token.ts:21`. `web/src/components/shell.tsx:19` has a different function of the same name (it returns `undefined` for no number) and is left alone.
 - `clock` and `statusWord` have no caller outside their tests: `rg -n 'statusWord|clock\(' web/src` on 2026-10-12; `tsc --noEmit` is clean after both deletions.
@@ -259,7 +264,13 @@ Line numbers are those of local `master` at `d95cb45`, read on 2026-10-12.
 - The project has no formatter script (`web/package.json` has `typecheck`, `lint` and `test` only), so "do not reformat" in the task texts means hand edits only.
 - Nineteen `timeout: 10_000` options stand in eleven test files once every earlier task is applied, eighteen of them test timeouts: `rg -n 'timeout: ?10_000' web/src --glob '*.test.*'` on the branch `plan/web-logic-order` on 2026-10-12. After Task 83 the ten edited test files and `src/test/setup.test.ts` pass (`Tests  182 passed (182)`), and `tsc --noEmit` and `eslint src --max-warnings 0` exit 0.
 - `web/src/test/setup.test.ts` asserts only the 3000 of `asyncUtilTimeout`, not the comment: `web/src/test/setup.test.ts:12`.
-- The whole-tree numbers of Task 84 were taken on `plan/web-logic-order` on 2026-10-12, with every task of this plan applied in plan order: `npm test` gave `Test Files  97 passed (97)` and `Tests  1384 passed (1384)`; `npm run test:tz` 2 files and 5 tests; `npm run typecheck`, `npm run lint` and `npm run build` exit 0, and `git status --short` was empty after the build; `gofmt -l internal/ cmd/` and `go vet ./...` printed nothing; `go test -race -count=1 -timeout 480s ./...` printed 22 `ok` lines and no `FAIL`.
+- The whole-tree numbers of Task 85 were taken on `plan/web-logic-order` on 2026-10-12, with every task of this plan applied in plan order: `npm test` gave `Test Files  97 passed (97)` and `Tests  1387 passed (1387)`; `npm run test:tz` 2 files and 5 tests; `npm run typecheck`, `npm run lint` and `npm run build` exit 0, and `git status --short` was empty after the build; `gofmt -l internal/ cmd/` and `go vet ./...` printed nothing; `go test -race -count=1 -timeout 480s ./...` printed 22 `ok` lines and no `FAIL`. Those numbers were first taken without Task 84; after Task 84 was carried out the same day, `npm test` (the 1387 above), `tsc --noEmit`, `eslint src --max-warnings 0` and `npm run build` were run again and passed. The time-zone suite and the Go checks were not run again: Task 84 touches neither.
+- Task 84: jsdom 29.1.1 never reports `badInput`: `ValidityState.badInput` asks the element's `_failsConstraint("badInput")` (`web/node_modules/jsdom/lib/jsdom/living/constraint-validation/ValidityState-impl.js:11-13`) and `HTMLInputElement-impl.js` in the same package names no `badInput` check (`rg -n badInput` printed nothing on 2026-10-12). React 19.3.0 drops an `input` event as a change when the value equals the tracked one (`updateValueIfChanged`, `web/node_modules/react-dom/cjs/react-dom-client.development.js:1790`), which is why the flag is read in `onInput`. That a real browser reports `1e` with `badInput` true and an empty value is the HTML standard's value sanitization for number inputs, and `unverified` in a browser: Task 86 verifies it.
+
+- Task 86's long log: darkmem's CI run 44, job "Frontend tests (1/2)" (GitHub job `112906742358`, ghr history id `c9a92f`, on the LXC's `/var/lib/ghr/history.jsonl`): `gh api repos/darkraise/darkmem/actions/jobs/112906742358/logs | wc -l` printed `42500` on 2026-10-12, and its step 6, "Unit tests", starts at line 220 of that log (`gh api repos/darkraise/darkmem/actions/jobs/112906742358 --jq '.steps[]'`). GitHub keeps job logs for 90 days by default, so the job can be read until about 2027-01-05; after that, any job whose log has over 5000 lines in one step serves.
+- Task 86's routes: the job page reads `step` and `line` from the address (`web/src/router.tsx:145-156`); `/setup` sends a configured daemon to `/` (`web/src/router.tsx:76-83`), which is why the wizard's scrolling is checked on the Settings page. The web UI is embedded in the binary (`web/embed.go:9`). The deploy, the restart and `ghr version` follow the method used on the LXC for the stopping-state checks on 2026-10-10.
+- Task 86's other facts, read on 2026-10-12: the history entry `c9a92f` carries `run_id` `37654634607`, the run in every job address of the task; the daemon's `/status` over `/run/ghr/ghr.sock` lists `ghr-e2e` among its repositories, each with an `active` count; `gh workflow list -R darkraise/ghr-e2e` lists `cap` as active, and its file `.github/workflows/cap.yml` runs a three-job matrix of `sleep 120` on `[self-hosted, homelab]` on `workflow_dispatch`.
+- Task 86's scripts were not run: they need the deploy. The repository settings section has a field labelled `Max` (`web/src/pages/repository.tsx:279-283`), and the save bar's Discard acts with no dialog (`web/src/components/save-bar.tsx:24`). Read-only checks on 2026-10-12: `ssh root@192.168.0.99` with the daemon socket answered `/status`, with every repository's `active` at 0.
 
 ## Task index
 
@@ -346,7 +357,9 @@ Line numbers are those of local `master` at `d95cb45`, read on 2026-10-12.
 81. The stat cards and the token page share `count`
 82. Delete `statusWord` and write the History cap from its constant
 83. No test has less time than the suite's default
-84. Whole-tree verification
+84. Max and Warm refuse a number the browser cannot read
+85. Whole-tree verification
+86. Browser check on the runner LXC, with the owner's yes
 
 ---
 
@@ -11236,7 +11249,253 @@ git add web/src/api/hooks-pages.test.tsx web/src/api/hooks.test.tsx web/src/comp
 git commit -m "test(web): drop timeouts under the suite default"
 ```
 
-### Task 84: Whole-tree verification
+### Task 84: Max and Warm refuse a number the browser cannot read
+
+**Files:**
+- Modify: `web/src/components/add-repo-dialog.tsx` (`AddRepoForm`)
+- Modify: `web/src/pages/repository.tsx` (`RepositoryForm`)
+- Test: `web/src/components/add-repo-dialog.test.tsx`
+- Test: `web/src/pages/repository.test.tsx`
+
+**Interfaces:**
+- Consumes: `runnerCountError(name: string, value: unknown, min: number): string` from `web/src/lib/settings-form.ts` (Contracts)
+- Produces: nothing
+
+**Items:** 76, 279, 289
+**Implementer:** dr-superpowers:impl-sonnet-medium
+**Evaluation:** files 1 - spec 0 - coupling 1 - risk 1 = 3
+
+Max in the Add repository dialog, and Max and Warm on the repository page, are `type="number"` boxes. A browser reports text it cannot read as a number, such as `1e` on the way to `1e3`, or a lone `-`, as an empty value, the same as an emptied box. The input's `validity.badInput` is the only thing that tells the two apart. Today such text shows no error: the dialog sends no Max (the daemon's default), and on the repository page it is an emptied box, which Save sends as `null` and so clears the limit. Spec section 2.1 says a value that is not a whole number from 0 to 99 shows an inline error and blocks Add or Save.
+
+After this task each of the three boxes also remembers whether its last input was unreadable, read from `validity.badInput` on every `input` event. While it was, the box shows the same error as for `1.9` (`Max must be >= 0`, `Warm must be >= 0`) and Add or Save is blocked as for any refused value. The draft and the box's value are not changed: setting a number box's value to text it cannot read would wipe what the user is typing. Discard on the repository page clears the flags with the draft.
+
+React's `onChange` does not fire when the box's value stays empty (from an empty box, typing `-` keeps the value `""`), so the flag is set from `onInput`, which fires on every keystroke.
+
+jsdom does not compute `badInput`; it always reads `false`. The tests therefore define `validity` on the input element with `badInput: true`, fire an `input` event, and remove the definition again before typing a readable number.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `web/src/components/add-repo-dialog.test.tsx`, replace the first import line:
+
+```ts
+import { screen, waitFor, within } from "@testing-library/react"
+```
+
+with:
+
+```ts
+import { fireEvent, screen, waitFor, within } from "@testing-library/react"
+```
+
+Then add this test directly after the `it.each` test `refuses %s in Max, keeps what was typed and blocks Add`, inside the same `describe`:
+
+```ts
+  it("refuses a Max the browser cannot read, such as 1e, and blocks Add", async () => {
+    const { calls } = mockApi(routes({ "POST /api/repos": () => noContent() }))
+    const { dialog, user } = await open()
+    await user.click(dialog.getByRole("option", { name: /new-repo/ }))
+    const max = dialog.getByLabelText("Max")
+    // jsdom has no bad input; a browser holding 1e reports an empty value and validity.badInput.
+    Object.defineProperty(max, "validity", { configurable: true, value: { badInput: true } })
+    fireEvent.input(max, { target: { value: "" } })
+    expect(dialog.getByText("Max must be >= 0")).toBeInTheDocument()
+    expect(dialog.getByRole("button", { name: "Add" })).toBeDisabled()
+    Reflect.deleteProperty(max, "validity")
+    await user.type(max, "3")
+    expect(dialog.queryByText(/^Max must be/)).toBeNull()
+    await user.click(dialog.getByRole("button", { name: "Add" }))
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ name: "new-repo", max: 3, allow_public: false }))
+  })
+```
+
+In `web/src/pages/repository.test.tsx`, replace the first import line:
+
+```ts
+import { act, screen, waitFor, within } from "@testing-library/react"
+```
+
+with:
+
+```ts
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
+```
+
+Then add this test directly after the `it.each` test `refuses %s %s, keeps what was typed and blocks the save`, inside the same `describe`. The fixture's `darkmem` has Max 2 and Warm 1, so the unreadable box is one unsaved change:
+
+```ts
+  it.each(["Max", "Warm"])("refuses a %s the browser cannot read, such as 1e, and blocks the save", async (label) => {
+    const { calls } = mockApi(routes())
+    const { user } = renderApp("/repositories/darkmem/settings")
+    const box = await screen.findByLabelText(label)
+    // jsdom has no bad input; a browser holding 1e reports an empty value and validity.badInput.
+    Object.defineProperty(box, "validity", { configurable: true, value: { badInput: true } })
+    fireEvent.input(box, { target: { value: "" } })
+    expect(screen.getByText(`${label} must be >= 0`)).toBeInTheDocument()
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    expect((await screen.findAllByText("Fix the highlighted settings first")).length).toBeGreaterThan(0)
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false)
+    Reflect.deleteProperty(box, "validity")
+    await user.click(screen.getByRole("button", { name: "Discard" }))
+    expect(screen.queryByText(`${label} must be >= 0`)).toBeNull()
+    expect(screen.queryByText("1 unsaved change")).toBeNull()
+  })
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `cd web && TMPDIR=/root/.cache/ghr-plan-tmp timeout 300 npx vitest run src/components/add-repo-dialog.test.tsx`
+Expected: FAIL, `Tests  1 failed | 15 passed (16)`, with `Unable to find an element with the text: Max must be >= 0`.
+
+Run: `cd web && TMPDIR=/root/.cache/ghr-plan-tmp timeout 300 npx vitest run src/pages/repository.test.tsx`
+Expected: FAIL, `Tests  2 failed | 43 passed (45)`, with `Unable to find an element with the text: Max must be >= 0` and the same for `Warm must be >= 0`.
+
+- [ ] **Step 3: Flag an unreadable Max in the dialog**
+
+In `web/src/components/add-repo-dialog.tsx`, replace:
+
+```tsx
+  const [max, setMax] = useState("")
+```
+
+with:
+
+```tsx
+  const [max, setMax] = useState("")
+  // A number box reports text it cannot read, such as 1e or a lone minus, as
+  // an empty value; only validity tells it from an empty box.
+  const [maxUnreadable, setMaxUnreadable] = useState(false)
+```
+
+Replace:
+
+```tsx
+  const maxError = max.trim() === "" ? "" : runnerCountError("Max", max, 0)
+```
+
+with:
+
+```tsx
+  const maxError = maxUnreadable || max.trim() !== "" ? runnerCountError("Max", maxUnreadable ? NaN : max, 0) : ""
+```
+
+Replace:
+
+```tsx
+            onChange={(e) => setMax(e.target.value)}
+```
+
+with:
+
+```tsx
+            onChange={(e) => setMax(e.target.value)}
+            onInput={(e) => setMaxUnreadable(e.currentTarget.validity.badInput)}
+```
+
+- [ ] **Step 4: Flag an unreadable Max or Warm on the repository page**
+
+In `web/src/pages/repository.tsx`, replace:
+
+```tsx
+  const [rejection, setRejection] = useState("")
+```
+
+with:
+
+```tsx
+  const [rejection, setRejection] = useState("")
+  const [unreadable, setUnreadable] = useState({ max: false, warm: false })
+```
+
+Replace:
+
+```tsx
+  const maxError = values.max === undefined ? "" : runnerCountError("Max", values.max, 0)
+  const warmCountError = values.warm === undefined ? "" : runnerCountError("Warm", values.warm, 0)
+```
+
+with:
+
+```tsx
+  const maxError = unreadable.max || values.max !== undefined ? runnerCountError("Max", unreadable.max ? NaN : values.max, 0) : ""
+  const warmCountError = unreadable.warm || values.warm !== undefined ? runnerCountError("Warm", unreadable.warm ? NaN : values.warm, 0) : ""
+```
+
+Replace:
+
+```tsx
+    setDraft((d) => ({ ...d, [key]: value }))
+  }
+
+  function discard() {
+    setDraft({})
+```
+
+with:
+
+```tsx
+    setDraft((d) => ({ ...d, [key]: value }))
+  }
+
+  // A number box reports text it cannot read, such as 1e or a lone minus, as
+  // an empty value; only validity tells it from an emptied box.
+  function setUnreadableFrom(key: "max" | "warm", box: HTMLInputElement) {
+    const bad = box.validity.badInput
+    setUnreadable((u) => (u[key] === bad ? u : { ...u, [key]: bad }))
+  }
+
+  function discard() {
+    setDraft({})
+    setUnreadable({ max: false, warm: false })
+```
+
+Replace:
+
+```tsx
+                  onChange={(e) => setNumber("max", e.target.value)}
+```
+
+with:
+
+```tsx
+                  onChange={(e) => setNumber("max", e.target.value)}
+                  onInput={(e) => setUnreadableFrom("max", e.currentTarget)}
+```
+
+Replace:
+
+```tsx
+                  onChange={(e) => setNumber("warm", e.target.value)}
+```
+
+with:
+
+```tsx
+                  onChange={(e) => setNumber("warm", e.target.value)}
+                  onInput={(e) => setUnreadableFrom("warm", e.currentTarget)}
+```
+
+Change nothing else in either file.
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `cd web && TMPDIR=/root/.cache/ghr-plan-tmp timeout 300 npx vitest run src/components/add-repo-dialog.test.tsx`
+Expected: PASS (`Tests  16 passed (16)`)
+
+Run: `cd web && TMPDIR=/root/.cache/ghr-plan-tmp timeout 300 npx vitest run src/pages/repository.test.tsx`
+Expected: PASS (`Tests  45 passed (45)`)
+
+Run: `cd web && TMPDIR=/root/.cache/ghr-plan-tmp timeout 300 npx tsc --noEmit` and `cd web && TMPDIR=/root/.cache/ghr-plan-tmp timeout 300 npx eslint src --max-warnings 0`
+Expected: both print nothing.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add web/src/components/add-repo-dialog.tsx web/src/components/add-repo-dialog.test.tsx web/src/pages/repository.tsx web/src/pages/repository.test.tsx
+git commit -m "fix(web): refuse a Max the browser cannot read"
+```
+
+### Task 85: Whole-tree verification
 
 **Files:**
 - Test: the whole tree; this task changes no file and makes no commit
@@ -11254,7 +11513,7 @@ This task fixes nothing and commits nothing. When a step fails, report the faili
 - [ ] **Step 1: Run the whole web suite**
 
 Run: `cd web && TMPDIR=/root/.cache/ghr-plan-tmp timeout 900 npm test`
-Expected: `Test Files  97 passed (97)` and `Tests  1384 passed (1384)`, no `FAIL` line. A test that only times out is the loaded host: run its file once more, alone, before reporting it.
+Expected: `Test Files  97 passed (97)` and `Tests  1387 passed (1387)`, no `FAIL` line. A test that only times out is the loaded host: run its file once more, alone, before reporting it.
 
 - [ ] **Step 2: Run the time-zone suite**
 
@@ -11292,4 +11551,321 @@ Expected: one `ok` line for each of the 22 packages that have tests (`internal/m
 
 - [ ] **Step 7: Report**
 
-Report the result of each step. The browser check the spec lists (a job page with a log of several thousand lines, a Ctrl click on a Dashboard repository and on a chart mark, a daemon restart while a page is open, and the raw-log download) is not part of this task: it needs a deploy to the runner LXC, and that needs the owner's yes.
+Report the result of each step. The browser check the spec lists (a job page with a log of several thousand lines, a Ctrl click on a Dashboard repository and on a chart mark, a daemon restart while a page is open, and the raw-log download) is Task 86, because it needs a deploy to the runner LXC and that needs the owner's yes.
+
+### Task 86: Browser check on the runner LXC, with the owner's yes
+
+**Files:**
+- Create: `docs/superpowers/notes/<the day's date, YYYY-MM-DD>-ghr-web-logic-browser-check.md`
+
+**Interfaces:**
+- Consumes: the finished branch after Task 85, and the exception the Global Constraints make for this task: it alone may deploy, restart the daemon and dispatch a workflow, each only after the owner's yes
+- Produces: nothing
+
+**Items:** 76, 77, 86, 90, 91, 101, 279
+**Implementer:** dr-superpowers:impl-sonnet-low
+**Evaluation:** files 0 - spec 0 - coupling 1 - risk 1 = 2
+
+Some of this plan's assumptions need a real browser: jsdom does no layout, no painting and no downloads. This task deploys the finished branch to the runner LXC and checks them there, then writes what it saw into a note. It changes no code. A check that fails is written down as failed and reported; this task fixes nothing.
+
+Nothing here happens without the owner's yes, asked in Step 1. Without a yes to the deploy, every check is written down as `pending: no deploy approval` and the task goes straight to Step 11.
+
+The web UI is at `http://192.168.0.99:8080`; SSH as `root@192.168.0.99` works with a key. Browser steps use the Playwright tools: each code block below is the function passed to `browser_run_code_unsafe` (keep the same browser page across steps). The scripts use `domcontentloaded` and then wait for `h1`, because `networkidle` never settles: the UI holds a live connection. The long-log job is darkmem's CI run 44, job "Frontend tests (1/2)": its step 6, "Unit tests", has about 42,000 lines.
+
+- [ ] **Step 1: Ask the owner**
+
+Ask, and wait for the answer:
+
+> May I deploy this branch to the runner LXC (192.168.0.99), which replaces `/usr/local/bin/ghr` (the old binary is kept as `/usr/local/bin/ghr.bak`) and restarts the ghr daemon twice, and dispatch the `cap` workflow in `darkraise/ghr-e2e` once (three jobs of 120 seconds)? I also need the web UI's password for this session.
+
+Use the password only in the browser; never write it into a file, a note, a commit or a command line. A yes to the deploy without a yes to the dispatch leaves Step 8 `pending: no dispatch approval`.
+
+- [ ] **Step 2: Check that no job is running**
+
+Run: `timeout 30 ssh root@192.168.0.99 'curl -s --unix-socket /run/ghr/ghr.sock http://ghr/status' | python3 -c 'import json,sys; print(sum(r["active"] for r in json.load(sys.stdin)["repos"]))'`
+Expected: `0`. Any other number: a restart would stop a live job. Tell the owner and wait for their word before going on.
+
+- [ ] **Step 3: Measure the running build first**
+
+Log in on the build that runs now:
+
+```js
+async (page) => {
+  await page.goto("http://192.168.0.99:8080/login", { waitUntil: "domcontentloaded" });
+  await page.locator('input[type="password"]').fill("<the password from Step 1>");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("h1");
+  return page.url();
+}
+```
+
+Expected: `http://192.168.0.99:8080/`.
+
+Record the log colours in both colour modes:
+
+```js
+async (page) => {
+  const NAMES = ["--log-ansi-black", "--log-ansi-blue", "--log-ansi-bright-black", "--log-ansi-bright-blue", "--log-ansi-bright-cyan", "--log-ansi-bright-green", "--log-ansi-bright-magenta", "--log-ansi-bright-red", "--log-ansi-bright-white", "--log-ansi-bright-yellow", "--log-ansi-cyan", "--log-ansi-green", "--log-ansi-magenta", "--log-ansi-red", "--log-ansi-white", "--log-ansi-yellow", "--log-bg", "--log-command", "--log-current", "--log-error-bg", "--log-error-fg", "--log-fg", "--log-match-bg", "--log-muted", "--log-target-bg", "--log-warning-bg", "--log-warning-fg"];
+  const out = {};
+  for (const scheme of ["dark", "light"]) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await page.goto("http://192.168.0.99:8080/", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("h1");
+    out[scheme] = await page.evaluate((names) => ({
+      mode: document.documentElement.dataset.mode,
+      values: names.map((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()).join(" | "),
+    }), NAMES);
+  }
+  await page.emulateMedia({ colorScheme: null });
+  return out;
+}
+```
+
+Expected: `mode` is `dark` and `light` in turn, and every value is non-empty. Keep the output for Step 6.
+
+Measure typing in the log search with step 6 open:
+
+```js
+async (page) => {
+  await page.goto("http://192.168.0.99:8080/actions/darkmem/runs/37654634607/jobs/112906742358?step=6&line=40000", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h1");
+  await page.locator('[data-target="true"]').waitFor({ timeout: 60000 });
+  await page.evaluate(() => {
+    window.__long = [];
+    new PerformanceObserver((l) => window.__long.push(...l.getEntries().map((e) => e.duration))).observe({ type: "longtask" });
+  });
+  const box = page.getByRole("searchbox", { name: "Search logs" });
+  const longest = [];
+  for (let run = 0; run < 3; run++) {
+    await box.fill("");
+    await page.waitForTimeout(2000);
+    await page.evaluate(() => { window.__long = []; });
+    await box.click();
+    await box.pressSequentially("vitest", { delay: 50 });
+    await page.waitForTimeout(2000);
+    longest.push(await page.evaluate(() => Math.round(Math.max(0, ...window.__long))));
+  }
+  return {
+    longest,
+    median: [...longest].sort((a, b) => a - b)[1],
+    box: await box.inputValue(),
+  };
+}
+```
+
+Expected: `box` is `vitest`. Keep `longest` and `median` for Step 7. Three runs, and the median of them, keep one slow moment of the host from deciding the comparison.
+
+- [ ] **Step 4: Build and deploy**
+
+Run, from the repository root, as one command:
+
+```bash
+V=$(git rev-parse --short HEAD) && D=/root/.cache/ghr-plan-tmp/deploy && rm -rf "$D" && mkdir -p "$D" && git archive HEAD | tar -x -C "$D" && cd "$D/web" && TMPDIR=/root/.cache/ghr-plan-tmp timeout 600 npm ci --prefer-offline --no-audit --no-fund && TMPDIR=/root/.cache/ghr-plan-tmp timeout 600 npm run build && cd "$D" && TMPDIR=/root/.cache/ghr-plan-tmp GOTMPDIR=/root/.cache/ghr-plan-tmp PATH=/usr/local/go/bin:$PATH CGO_ENABLED=0 timeout 600 go build -buildvcs=false -trimpath -ldflags "-s -w -X main.version=web-logic-$V" -o ghr ./cmd/ghr && ls -l ghr
+```
+
+Expected: the last line lists `ghr`, a file of several megabytes. The web UI is embedded in the binary (`web/embed.go`), so the build of `web/` comes first.
+
+Run: `timeout 60 scp /root/.cache/ghr-plan-tmp/deploy/ghr root@192.168.0.99:/usr/local/bin/ghr.new && timeout 60 ssh root@192.168.0.99 'cp /usr/local/bin/ghr /usr/local/bin/ghr.bak && mv /usr/local/bin/ghr.new /usr/local/bin/ghr && systemctl restart ghr && sleep 3 && systemctl is-active ghr && /usr/local/bin/ghr version'`
+Expected: `active`, then `web-logic-` followed by the short commit of `HEAD`.
+
+Run: `rm -rf /root/.cache/ghr-plan-tmp/deploy`
+
+- [ ] **Step 5: Log in again**
+
+Run the login script of Step 3 again. Expected: `http://192.168.0.99:8080/`. If it lands on `/login`, the password was refused: ask the owner again.
+
+- [ ] **Step 6: The log colours did not change**
+
+Run the colour script of Step 3 again.
+Expected: for `dark` and for `light`, `values` is the same text as in Step 3, character for character.
+
+- [ ] **Step 7: The long log**
+
+Run the typing script of Step 3 again.
+Expected: `box` is `vitest`, and `median` is below the `median` of Step 3. Write both sets of numbers in the note. If the medians are within 20 percent of each other, write `inconclusive` rather than `fail`: the host is shared, and the typing work is also checked by the unit tests of the log viewer.
+
+Then check the rows, the jump, scrolling, the current match and the browser's find:
+
+```js
+async (page) => {
+  const url = "http://192.168.0.99:8080/actions/darkmem/runs/37654634607/jobs/112906742358?step=6&line=40000";
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h1");
+  const target = page.locator('[data-target="true"]');
+  await target.waitFor({ timeout: 60000 });
+  const jump = await target.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { inView: r.top >= 0 && r.bottom <= innerHeight, line: el.dataset.line, cv: getComputedStyle(el).contentVisibility };
+  });
+  const box = page.getByRole("searchbox", { name: "Search logs" });
+  await box.fill("vitest");
+  await box.press("Enter");
+  await page.waitForTimeout(1000);
+  const mark = page.locator('mark[data-current="true"]');
+  await mark.screenshot({ path: "/root/.cache/ghr-plan-tmp/current-match.png" });
+  const counter = await page.getByText(/^\d+ of \d+$/).textContent();
+  await box.fill("");
+  await page.mouse.move(400, 400);
+  await page.mouse.wheel(0, 200000);
+  await page.keyboard.press("End");
+  await page.waitForTimeout(1000);
+  const bottom = await page.evaluate(() => Math.ceil(scrollY + innerHeight) >= document.documentElement.scrollHeight - 2);
+  const rows = page.locator("[data-line]");
+  const far = await rows.nth((await rows.count()) - 1).locator(":scope > span").nth(1).textContent();
+  await page.evaluate(() => scrollTo(0, 0));
+  const found = await page.evaluate((text) => {
+    getSelection().removeAllRanges();
+    const ok = window.find(text.trim().slice(0, 40));
+    return ok && document.querySelector("ol[aria-label=Steps]").contains(getSelection().anchorNode);
+  }, far);
+  return { jump, counter, bottom, found };
+}
+```
+
+Expected: `jump.inView` is `true`, `jump.line` is `"40000"` and `jump.cv` is `"auto"`; `counter` reads `2 of N` with N above 1; `bottom` is `true`; `found` is `true`: the text of the last line on the page (without its line number, which sits in a box of its own), found from the top, sits in rows the browser has skipped. Then open `/root/.cache/ghr-plan-tmp/current-match.png` with the Read tool: the current match's highlight is drawn whole on all four sides, not cut off at the top or the bottom. `window.find` stands in for the browser's own find bar (Ctrl F), which Playwright cannot drive; write that in the note.
+
+- [ ] **Step 8: A Ctrl click on a Dashboard repository and on a live chart mark**
+
+The repository link:
+
+```js
+async (page) => {
+  await page.goto("http://192.168.0.99:8080/", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h1");
+  const [tab] = await Promise.all([
+    page.context().waitForEvent("page"),
+    page.locator('a[href="/repositories/ghr-e2e"]').first().click({ modifiers: ["Control"] }),
+  ]);
+  await tab.waitForLoadState("domcontentloaded");
+  const out = { tab: tab.url(), here: page.url() };
+  await tab.close();
+  return out;
+}
+```
+
+Expected: `tab` ends with `/repositories/ghr-e2e` and `here` is `http://192.168.0.99:8080/`.
+
+With a yes to the dispatch, run: `timeout 60 gh workflow run cap.yml -R darkraise/ghr-e2e`, then at once:
+
+```js
+async (page) => {
+  await page.goto("http://192.168.0.99:8080/", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h1");
+  const mark = page.locator('a.ghr-mark[href^="/runners/"]').first();
+  await mark.waitFor({ timeout: 180000 });
+  const href = await mark.getAttribute("href");
+  const [tab] = await Promise.all([page.context().waitForEvent("page"), mark.click({ modifiers: ["Control"] })]);
+  await tab.waitForLoadState("domcontentloaded");
+  const out = { href, tab: tab.url(), here: page.url() };
+  await tab.close();
+  return out;
+}
+```
+
+Expected: `tab` ends with `href`, and `here` is `http://192.168.0.99:8080/`. Do not stop the three jobs; they end on their own after 120 seconds.
+
+- [ ] **Step 9: Number fields and the scrolling document**
+
+Without saving anything, on the repository page:
+
+```js
+async (page) => {
+  page.on("dialog", (d) => d.accept());
+  const writes = [];
+  page.on("request", (r) => { if (r.method() !== "GET") writes.push(`${r.method()} ${r.url()}`); });
+  await page.goto("http://192.168.0.99:8080/repositories/ghr-e2e/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h1");
+  const max = page.getByLabel("Max", { exact: true });
+  const shown = {};
+  for (const v of ["1.0", "007", "-1", "1e"]) {
+    await max.fill("");
+    await max.pressSequentially(v);
+    await max.blur();
+    shown[v] = { box: await max.inputValue(), error: await page.getByText("Max must be >= 0").count() };
+  }
+  await page.getByRole("button", { name: "Discard" }).first().click();
+  await page.setViewportSize({ width: 1280, height: 400 });
+  await page.goto("http://192.168.0.99:8080/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h1");
+  await page.mouse.move(640, 300);
+  await page.mouse.wheel(0, 600);
+  await page.waitForTimeout(500);
+  const scrolled = await page.evaluate(() => scrollY);
+  await page.goto("http://192.168.0.99:8080/setup", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h1");
+  const setup = page.url();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  return { shown, writes, scrolled, setup };
+}
+```
+
+Expected: `shown["1.0"].box` is `1.0` and `shown["007"].box` is `007`, each with `error` 0; `shown["-1"].box` is `-1` with `error` 1; `shown["1e"].box` is the empty string (the browser cannot read `1e`) with `error` 1; `writes` is empty; `scrolled` is above 0; `setup` is `http://192.168.0.99:8080/`. The wizard cannot be opened on a configured daemon (`/setup` sends it to `/`), so the scrolling document on a 400-pixel-high window stands in for the wizard's: both rest on the same `html, body` rule in `web/src/styles/ghr-theme.css`. Write that in the note.
+
+- [ ] **Step 10: A daemon restart while a page is open, and the raw-log download**
+
+Open the Dashboard and mark the time:
+
+```js
+async (page) => {
+  await page.goto("http://192.168.0.99:8080/", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h1");
+  return page.evaluate(() => {
+    const plain = window.fetch;
+    window.__calls = [];
+    window.fetch = (input, init) => {
+      window.__calls.push({ url: String(input instanceof Request ? input.url : input), at: performance.now() });
+      return plain(input, init);
+    };
+    performance.mark("restart");
+    return location.pathname;
+  });
+}
+```
+
+Run the check of Step 2 again (expected `0`), then: `timeout 60 ssh root@192.168.0.99 'systemctl restart ghr && sleep 3 && systemctl is-active ghr'` (expected `active`). Then:
+
+```js
+async (page) => {
+  await page.waitForTimeout(30000);
+  return page.evaluate(() => {
+    const t = performance.getEntriesByName("restart")[0].startTime;
+    return {
+      path: location.pathname,
+      heading: document.querySelector("h1")?.textContent,
+      nav: document.querySelectorAll("nav a").length,
+      reconnected: window.__calls.filter((c) => c.at > t && c.url.includes("/api/changes")).length,
+      refetched: window.__calls.filter((c) => c.at > t && c.url.includes("/api/") && !c.url.includes("/api/changes")).length,
+    };
+  });
+}
+```
+
+Expected: `path` is `/`, `heading` is `Dashboard`, `nav` is above 0 (the Shell stayed: no login page and no error page), `reconnected` is above 0 (the change stream was opened again) and `refetched` is above 0 (the data was read again). The app calls the global `fetch` for both (`web/src/api/live.ts:106`, `web/src/api/client.ts:98`), so the wrapper sees them; a page reload would remove the wrapper, and `path` shows there was none.
+
+The raw log:
+
+```js
+async (page) => {
+  await page.goto("http://192.168.0.99:8080/actions/darkmem/runs/37654634607/jobs/112906742358", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h1");
+  const [d] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Raw log" }).click()]);
+  await d.saveAs("/root/.cache/ghr-plan-tmp/raw.log");
+  return { failure: await d.failure(), name: d.suggestedFilename() };
+}
+```
+
+Expected: `failure` is `null`. Run: `wc -l < /root/.cache/ghr-plan-tmp/raw.log` and `timeout 60 gh api repos/darkraise/darkmem/actions/jobs/112906742358/logs | wc -l`. Expected: the same number, about 42,500. This is Chromium; Safari and Firefox are written down as `pending: Chromium only`. Then run `rm -f /root/.cache/ghr-plan-tmp/raw.log /root/.cache/ghr-plan-tmp/current-match.png`.
+
+- [ ] **Step 11: Write the note, clean up and commit**
+
+Write `docs/superpowers/notes/<the day's date, YYYY-MM-DD>-ghr-web-logic-browser-check.md`: a title line, the date, the commit deployed, then one line per check of Steps 3 to 10 with what was expected, what was seen and `pass`, `fail` or `pending: <reason>`; the two stand-ins (`window.find` for the find bar, the Settings page for the wizard's scrolling); and the rollback command `ssh root@192.168.0.99 'mv /usr/local/bin/ghr.bak /usr/local/bin/ghr && systemctl restart ghr'`. The new build stays deployed. Never write the password.
+
+Run: `rm -rf .playwright-mcp && git status --short`
+Expected: only the new note is listed.
+
+```bash
+git add docs/superpowers/notes/*-ghr-web-logic-browser-check.md
+git commit -m "docs(notes): record the web-logic browser check"
+```
+
+Report every `fail` line to the owner.
