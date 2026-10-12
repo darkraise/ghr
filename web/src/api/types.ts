@@ -45,6 +45,8 @@ export interface RepoStatus {
   oldest_queued_at?: string
   error?: string
   last_job?: HistoryEntry
+  // GitHub's last reported visibility; absent until GitHub has answered.
+  public?: boolean
 }
 
 export interface MaintenanceStatus {
@@ -69,6 +71,19 @@ export interface RunnerUpdate {
   last_finished?: string
 }
 
+export interface RestartStatus {
+  pending?: string[]
+  blocked_by?: string[]
+  available: boolean
+  web_listen?: string
+}
+
+export interface WebListenError {
+  address: string
+  reason: string
+  serving_on?: string
+}
+
 export interface Status {
   now: string
   epoch: string
@@ -89,6 +104,8 @@ export interface Status {
   web_setup_required?: boolean
   unconfigured?: boolean
   setup_pending?: boolean
+  restart: RestartStatus
+  web_listen_error?: WebListenError
 }
 
 export interface SetupState {
@@ -164,6 +181,7 @@ export interface RepoConfig {
   cleanup_name_prefixes?: string[]
   paused?: boolean
   removing?: boolean
+  allow_public?: boolean
 }
 
 export interface Config {
@@ -332,6 +350,12 @@ export interface RepoPatch {
   labels?: string[]
   cleanup_name_prefixes?: string[]
   paused?: boolean
+  allow_public?: boolean
+}
+
+export interface WebPatch {
+  listen?: string
+  hosts?: string[]
 }
 
 export interface ConfigPatch {
@@ -346,6 +370,7 @@ export interface ConfigPatch {
   labels?: string[]
   runner_limits?: RunnerLimitsPatch
   repos?: Record<string, RepoPatch>
+  web?: WebPatch
 }
 
 export interface AddRepoRequest {

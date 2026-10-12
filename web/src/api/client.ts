@@ -141,6 +141,7 @@ export const api = {
   resumeAll: () => send("POST", "/api/resume-all"),
   patchConfig: (patch: ConfigPatch) => send("PATCH", "/api/config", patch),
   reload: () => request<string[]>("POST", "/api/reload"),
+  restart: () => send("POST", "/api/restart"),
   availableRepos: (signal?: AbortSignal) => request<AvailableRepo[]>("GET", "/api/repos/available", undefined, signal),
   addRepo: (req: AddRepoRequest) => send("POST", "/api/repos", req),
   removeRepo: (name: string) => send("DELETE", `/api/repos/${seg(name)}`),

@@ -74,4 +74,11 @@ describe("api client", () => {
     await api.log("a/b", "x;y")
     expect(calls[0]?.search).toBe("?cursor=x%3By")
   })
+
+  it("asks for a restart with an empty POST that carries X-GHR", async () => {
+    const { calls, fetchMock } = mockApi({ "POST /api/restart": () => new Response(null, { status: 202 }) })
+    await expect(api.restart()).resolves.toBeUndefined()
+    expect(calls).toEqual([{ method: "POST", path: "/api/restart", search: "", body: undefined, contentType: undefined }])
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-GHR")).toBe("1")
+  })
 })
