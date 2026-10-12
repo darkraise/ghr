@@ -37,6 +37,7 @@ const tones: Record<string, Tone> = {
   unverified: "warn",
   refused: "warn",
   interrupted: "warn",
+  action_required: "warn",
   error: "bad",
   failed: "bad",
   failure: "bad",
@@ -70,6 +71,16 @@ export function stateWord(state: string): string {
   if (known) return known
   const text = state.replace(/_/g, " ")
   return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+const RESULTS = new Set(["success", "cancelled", "skipped", "unknown", "neutral", "stale", "action_required"])
+
+// The state a finished job or run is shown as; stateWord and stateTone give
+// its word and tone. A conclusion that is not listed reads as a failure, so a
+// result GitHub adds later can never look harmless. "unknown" is ghr's own
+// conclusion for a job whose result it never learned.
+export function resultState(conclusion: string): string {
+  return RESULTS.has(conclusion) ? conclusion : "failure"
 }
 
 // A repository at its cap with jobs queued: the jobs wait on its own limit.
