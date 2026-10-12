@@ -43,7 +43,9 @@ func NewEnv(root, home, user string, run system.Runner, fetch func(ctx context.C
 		Allow:   httpsFrom,
 		Run:     run,
 		Extract: func(ctx context.Context, archive, dir string) error {
-			_, err := run(ctx, "tar", "-xzf", archive, "-C", dir)
+			// As root, tar would otherwise give each file the owner the
+			// archive names.
+			_, err := run(ctx, "tar", "--no-same-owner", "-xzf", archive, "-C", dir)
 			return err
 		},
 		OpID: newOpID,
@@ -98,6 +100,8 @@ func httpsFrom(rawURL string, from Origin) error {
 // GetTimeout bounds one read of a version list.
 var GetTimeout = time.Minute
 
+var getClient = &http.Client{CheckRedirect: system.HTTPSRedirect}
+
 // httpGet reads a public version list; go.dev's full list is several MB,
 // hence the generous cap.
 func httpGet(ctx context.Context, url string) ([]byte, error) {
@@ -107,7 +111,7 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := getClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

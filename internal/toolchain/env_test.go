@@ -48,6 +48,37 @@ func TestHTTPGet(t *testing.T) {
 	}
 }
 
+func TestHTTPGetFollowsARedirectOnlyToHTTPS(t *testing.T) {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("sent over plain http"))
+	}))
+	defer plain.Close()
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/list":
+			w.Write([]byte("body"))
+		case "/to-https":
+			http.Redirect(w, r, "/list", http.StatusFound)
+		default:
+			http.Redirect(w, r, plain.URL+"/list", http.StatusFound)
+		}
+	}))
+	defer secure.Close()
+	// The version-list client has no transport of its own, so it trusts the
+	// test server's certificate through the default one.
+	old := http.DefaultTransport
+	http.DefaultTransport = secure.Client().Transport
+	defer func() { http.DefaultTransport = old }()
+
+	if b, err := httpGet(context.Background(), secure.URL+"/to-https"); err != nil || string(b) != "body" {
+		t.Fatalf("a redirect to https: %q, %v", b, err)
+	}
+	b, err := httpGet(context.Background(), secure.URL+"/to-http")
+	if err == nil || !strings.Contains(err.Error(), "refusing a redirect to "+plain.URL) {
+		t.Fatalf("a redirect to plain http: %q, %v", b, err)
+	}
+}
+
 func TestNewEnvWiresTheRunnerAndFetch(t *testing.T) {
 	var calls []string
 	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -71,7 +102,7 @@ func TestNewEnvWiresTheRunnerAndFetch(t *testing.T) {
 	if err := e.Fetch(context.Background(), "https://example.test/a.tar.gz", "dst"); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"tar -xzf a.tar.gz -C dir", "chown x", "fetch https://example.test/a.tar.gz dst"}; !slices.Equal(calls, want) {
+	if want := []string{"tar --no-same-owner -xzf a.tar.gz -C dir", "chown x", "fetch https://example.test/a.tar.gz dst"}; !slices.Equal(calls, want) {
 		t.Fatalf("calls %q", calls)
 	}
 	if a, b := e.OpID(), e.OpID(); a == b || a == "" {
