@@ -1,12 +1,17 @@
 package daemon
 
 import (
+	"context"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/system"
 )
 
 // restartStatus is the status's restart block; st is the manager's status
@@ -91,4 +96,61 @@ func (b *Backend) warnPending() []string {
 	}
 	b.pendingWarned = pending
 	return pending
+}
+
+// selfUnit is the systemd unit a restart from the UI restarts.
+const selfUnit = "ghr.service"
+
+// selfUnitCheck is the default Options.SelfUnit: whether this process is
+// selfUnit's main process, asked through run. INVOCATION_ID alone is not
+// enough: every process a unit starts inherits it, a job's processes on a
+// runner unit among them.
+func selfUnitCheck(run system.Runner) func(ctx context.Context) bool {
+	return func(ctx context.Context) bool {
+		if os.Getenv("INVOCATION_ID") == "" {
+			return false
+		}
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		out, err := run(ctx, "systemctl", "show", "-p", "MainPID", "--value", selfUnit)
+		return err == nil && strings.TrimSpace(string(out)) == strconv.Itoa(os.Getpid())
+	}
+}
+
+// restartUnit is the default Options.Restart: it queues a restart of
+// selfUnit through run and returns without waiting for it.
+func restartUnit(run system.Runner) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		_, err := run(ctx, "systemctl", "restart", "--no-block", selfUnit)
+		return err
+	}
+}
+
+// RequestRestart refuses a restart that cannot run now. Otherwise it writes
+// the request's event and returns run, which asks systemd for the restart;
+// the caller answers its request before calling run. Work that starts in
+// between cancels the restart: nothing reserves the daemon for it.
+func (b *Backend) RequestRestart(ctx context.Context) (run func(), err error) {
+	if !b.RestartAvailable {
+		return nil, api.Conflict("ghr is not running as ghr.service; restart it by hand")
+	}
+	if blocked := b.blockedBy(b.M.Status()); len(blocked) > 0 {
+		return nil, api.Conflict("waits for: " + strings.Join(blocked, ", "))
+	}
+	if _, ok := api.Browser(ctx); ok {
+		b.Events.Add("info", "", "restart requested from the web UI")
+	} else {
+		b.Events.Add("info", "", "restart requested")
+	}
+	// The request ends once it is answered; the restart must not end with it.
+	detached := context.WithoutCancel(ctx)
+	return func() {
+		if blocked := b.blockedBy(b.M.Status()); len(blocked) > 0 {
+			b.Events.Add("warn", "", "restart cancelled: %s started", strings.Join(blocked, ", "))
+			return
+		}
+		if err := b.Restart(detached); err != nil {
+			b.Events.Add("error", "", "restart failed: %v", err)
+		}
+	}, nil
 }

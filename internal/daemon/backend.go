@@ -114,6 +114,8 @@ type Backend struct {
 	// RestartAvailable is true when this process is ghr.service's main
 	// process, so systemd can restart it.
 	RestartAvailable bool
+	// Restart asks systemd to restart ghr.service without waiting for it.
+	Restart func(ctx context.Context) error
 	// InterfaceAddrs lists this host's addresses for the web.listen check;
 	// nil means net.InterfaceAddrs.
 	InterfaceAddrs func() ([]net.Addr, error)

@@ -2,14 +2,20 @@ package daemon
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"os"
 	"slices"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/system"
 )
 
 // restartManager is fakeManager with a runner update that can be running;
@@ -213,5 +219,151 @@ func TestConcurrentWebPatchesWarnInCommitOrder(t *testing.T) {
 	}
 	if got := b.Status().Restart.Pending; len(got) != 0 {
 		t.Fatalf("pending after the revert: %v", got)
+	}
+}
+
+func TestRequestRestart(t *testing.T) {
+	b, m, _ := newBackend(t)
+	rm := &restartManager{fakeManager: m}
+	b.M = rm
+	var got []context.Context
+	b.Restart = func(ctx context.Context) error { got = append(got, ctx); return nil }
+	restartEvents := func() []string {
+		var out []string
+		for _, e := range b.Events.After(0) {
+			if strings.HasPrefix(e.Msg, "restart ") {
+				out = append(out, e.Level+" "+e.Msg)
+			}
+		}
+		return out
+	}
+
+	if _, err := b.RequestRestart(context.Background()); apiStatus(err) != http.StatusConflict ||
+		apiMsg(err) != "ghr is not running as ghr.service; restart it by hand" {
+		t.Fatalf("not the unit's main process: %v", err)
+	}
+	b.RestartAvailable = true
+	m.pruning, rm.update = true, true
+	if _, err := b.RequestRestart(context.Background()); apiStatus(err) != http.StatusConflict ||
+		apiMsg(err) != "waits for: pruning, updating the runner software" {
+		t.Fatalf("blocked: %v", err)
+	}
+	if evs := restartEvents(); len(evs) != 0 || len(got) != 0 {
+		t.Fatalf("a refused restart wrote %v and ran %d times", evs, len(got))
+	}
+	m.pruning, rm.update = false, false
+
+	ctx, cancel := context.WithCancel(api.WithBrowser(context.Background(), "ghr.lan:8080"))
+	run, err := b.RequestRestart(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatal("the restart ran before run was called")
+	}
+	cancel()
+	run()
+	if len(got) != 1 {
+		t.Fatalf("run restarted %d times", len(got))
+	}
+	if err := got[0].Err(); err != nil {
+		t.Fatalf("the restart's context ended with the request: %v", err)
+	}
+
+	run, err = b.RequestRestart(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	run()
+	b.Restart = func(context.Context) error {
+		return errors.New("systemctl restart: exit status 5: Unit ghr.service not loaded.")
+	}
+	run, err = b.RequestRestart(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	run()
+	want := []string{
+		"info restart requested from the web UI",
+		"info restart requested",
+		"info restart requested",
+		"error restart failed: systemctl restart: exit status 5: Unit ghr.service not loaded.",
+	}
+	if evs := restartEvents(); !slices.Equal(evs, want) {
+		t.Fatalf("events %q, want %q", evs, want)
+	}
+}
+
+// Work that starts after the request was accepted cancels the restart: run
+// checks again and does not call the seam.
+func TestRestartCancelledWhenWorkStarts(t *testing.T) {
+	b, m, _ := newBackend(t)
+	b.RestartAvailable = true
+	restarts := 0
+	b.Restart = func(context.Context) error { restarts++; return nil }
+	run, err := b.RequestRestart(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.pruning = true
+	b.Space = &fakeStorage{snap: model.Storage{Operations: model.Operations{Current: &model.Operation{Kind: "install", Target: "node 24"}}}}
+	run()
+	if restarts != 0 {
+		t.Fatal("the restart ran while work had started")
+	}
+	evs := b.Events.After(0)
+	last := evs[len(evs)-1]
+	if last.Level != "warn" || last.Msg != "restart cancelled: installing node 24, pruning started" {
+		t.Fatalf("last event %s %q", last.Level, last.Msg)
+	}
+}
+
+// recordRunner is a system.Runner that records each command and answers
+// with out and err.
+func recordRunner(calls *[]string, out string, err error) system.Runner {
+	return func(_ context.Context, name string, args ...string) ([]byte, error) {
+		*calls = append(*calls, name+" "+strings.Join(args, " "))
+		return []byte(out), err
+	}
+}
+
+func TestSelfUnitCheck(t *testing.T) {
+	pid := strconv.Itoa(os.Getpid())
+	var calls []string
+	t.Setenv("INVOCATION_ID", "")
+	if selfUnitCheck(recordRunner(&calls, pid+"\n", nil))(context.Background()) || len(calls) != 0 {
+		t.Fatalf("without INVOCATION_ID: ran %q", calls)
+	}
+	t.Setenv("INVOCATION_ID", "0123abcd")
+	for _, tc := range []struct {
+		name, out string
+		err       error
+		want      bool
+	}{
+		{"this process", pid + "\n", nil, true},
+		{"another process", "1\n", nil, false},
+		{"no main process", "0\n", nil, false},
+		{"a failed command", pid + "\n", errors.New("systemctl show: exit status 1: Unit ghr.service not loaded."), false},
+	} {
+		calls = nil
+		got := selfUnitCheck(recordRunner(&calls, tc.out, tc.err))(context.Background())
+		if got != tc.want || !slices.Equal(calls, []string{"systemctl show -p MainPID --value ghr.service"}) {
+			t.Errorf("%s: %v after %q, want %v", tc.name, got, calls, tc.want)
+		}
+	}
+}
+
+func TestRestartUnit(t *testing.T) {
+	var calls []string
+	if err := restartUnit(recordRunner(&calls, "", nil))(context.Background()); err != nil ||
+		!slices.Equal(calls, []string{"systemctl restart --no-block ghr.service"}) {
+		t.Fatalf("ran %q: %v", calls, err)
+	}
+	failure := errors.New("systemctl restart: exit status 5: Unit ghr.service not loaded.")
+	if err := restartUnit(recordRunner(&calls, "", failure))(context.Background()); !errors.Is(err, failure) {
+		t.Fatalf("the command's error came back as %v", err)
+	}
+	if o := DefaultOptions(); o.SelfUnit == nil || o.Restart == nil {
+		t.Fatal("the default options lack the restart seams")
 	}
 }

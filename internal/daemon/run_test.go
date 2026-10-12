@@ -547,6 +547,37 @@ func TestRunFailsWhenTheWebPortIsTaken(t *testing.T) {
 	}
 }
 
+func TestRunRestartsThroughTheSeam(t *testing.T) {
+	o := testOptions(t, cfgYAML)
+	restarted := make(chan error, 1)
+	o.SelfUnit = func(context.Context) bool { return true }
+	o.Restart = func(ctx context.Context) error {
+		restarted <- ctx.Err()
+		return nil
+	}
+	startRun(t, o)
+	c := api.NewUnixClient(o.Socket)
+	waitFor(t, "a status that allows a restart", func() bool {
+		st, err := c.Status(context.Background())
+		return err == nil && st.Restart.Available && len(st.Restart.BlockedBy) == 0
+	})
+	code, body, err := socketCall(o.Socket, http.MethodPost, "/restart", "")
+	if err != nil || code != http.StatusAccepted {
+		t.Fatalf("restart: %d %s %v", code, body, err)
+	}
+	select {
+	case err := <-restarted:
+		if err != nil {
+			t.Fatalf("the restart ran with an ended context: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the restart seam never ran")
+	}
+	if msgs := eventMsgs(t, o.Socket); !strings.Contains(msgs, "restart requested") {
+		t.Fatalf("no restart event in %q", msgs)
+	}
+}
+
 func TestRunServesStorageAndSweepsTheToolCache(t *testing.T) {
 	o := testOptions(t, cfgYAML)
 	left := filepath.Join(o.Paths.ToolCache, ".tmp", "20261006T140000-abcdef", "partial")

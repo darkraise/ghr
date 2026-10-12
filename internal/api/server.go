@@ -78,6 +78,9 @@ type Backend interface {
 	SetToken(ctx context.Context, token string) error
 	KillRunner(ctx context.Context, id string) error
 	Reload() ([]string, error)
+	// RequestRestart refuses a restart that cannot run now; otherwise run
+	// restarts ghr, and the caller answers its request first.
+	RequestRestart(ctx context.Context) (run func(), err error)
 	Prune() error
 	Metrics() model.Metrics
 	Activity(ctx context.Context, window, repo string, loc *time.Location) (model.Activity, error)
@@ -318,6 +321,18 @@ func NewServer(b Backend) http.Handler {
 	mux.HandleFunc("POST /reload", func(w http.ResponseWriter, r *http.Request) {
 		ws, err := b.Reload()
 		respond(w, ws, err)
+	})
+	mux.HandleFunc("POST /restart", func(w http.ResponseWriter, r *http.Request) {
+		run, err := b.RequestRestart(r.Context())
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		// The answer goes out before systemd is asked: the stop it queues
+		// ends this process.
+		w.WriteHeader(http.StatusAccepted)
+		http.NewResponseController(w).Flush()
+		run()
 	})
 	mux.HandleFunc("GET /repos/{name}/registrations", func(w http.ResponseWriter, r *http.Request) {
 		rs, err := b.Registrations(r.Context(), r.PathValue("name"))

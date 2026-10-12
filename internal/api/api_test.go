@@ -73,6 +73,9 @@ type fakeBackend struct {
 	hub           *changes.Hub   // Subscribe's hub; nil answers changes.ErrNotReady
 	subMu         sync.Mutex     // guards subs
 	subs          []*changes.Sub // subscriptions Subscribe opened
+	restartErr    error          // returned by RequestRestart
+	restartRun    func()         // RequestRestart's run; nil runs nothing
+	restarts      int            // RequestRestart calls
 }
 
 func (f *fakeBackend) AvailableRepos(context.Context) ([]model.AvailableRepo, error) {

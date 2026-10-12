@@ -59,6 +59,11 @@ type Options struct {
 	// ShutdownWait bounds how long shutdown waits for in-flight cleanups; an
 	// unfinished cleanup resumes at the next start.
 	ShutdownWait time.Duration
+	// SelfUnit reports whether this process is ghr.service's main process,
+	// which a restart from the UI needs; nil reports false.
+	SelfUnit func(ctx context.Context) bool
+	// Restart restarts ghr.service without waiting for it.
+	Restart func(ctx context.Context) error
 
 	// Test seams: zero values use GitHub, systemd, Docker, the host, an HTTP
 	// download and SIGHUP.
@@ -87,6 +92,8 @@ func DefaultOptions() Options {
 		SetupPendingPath:      "/var/lib/ghr/setup-pending",
 		ToolchainsPendingPath: "/var/lib/ghr/toolchains-pending",
 		ShutdownWait:          30 * time.Second,
+		SelfUnit:              selfUnitCheck(system.Exec),
+		Restart:               restartUnit(system.Exec),
 		Paths: runner.Paths{
 			Dist:        "/opt/ghr/dist/current",
 			Instances:   "/var/lib/ghr/instances",
@@ -237,6 +244,8 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 		},
 		Sampler:          sampler,
 		WebApplied:       webCfg,
+		RestartAvailable: o.SelfUnit != nil && o.SelfUnit(ctx),
+		Restart:          o.Restart,
 		WebSetupRequired: webSetupRequired,
 		SetupPending:     func() bool { return exists(o.SetupPendingPath) },
 		Changes:          hub,
