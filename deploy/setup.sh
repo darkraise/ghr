@@ -66,7 +66,7 @@ export_docker_key() {
     curl -fsSL https://download.docker.com/linux/debian/gpg -o "$work/download.asc" &&
     gpg --homedir "$home" --batch --no-tty --quiet --import "$work/download.asc" &&
     records=$(gpg --homedir "$home" --batch --no-tty --with-colons --list-keys "$DOCKER_KEY_FINGERPRINT") &&
-    fpr=$(awk -F: 'prev == "pub" && $1 == "fpr" { print $10; exit } { prev = $1 }' <<<"$records") &&
+    fpr=$(awk -F: '$1 == "pub" { n++ } prev == "pub" && $1 == "fpr" { f = $10 } { prev = $1 } END { if (n == 1) print f }' <<<"$records") &&
     [ "$fpr" = "$DOCKER_KEY_FINGERPRINT" ] &&
     gpg --homedir "$home" --batch --no-tty --armor --export "$DOCKER_KEY_FINGERPRINT" > "$work/docker.asc" &&
     [ "$(head -n 1 "$work/docker.asc")" = "-----BEGIN PGP PUBLIC KEY BLOCK-----" ]

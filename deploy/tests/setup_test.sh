@@ -319,7 +319,7 @@ fake_docker_key() {
     printf '%s\n' "$KEY_DOWNLOAD" > "$out"
   }
   gpg() {
-    local home="" cmd="" want="" line
+    local home="" cmd="" want="" lines
     echo "$*" >> "$MARK_DIR/gpg-calls"
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -335,16 +335,16 @@ fake_docker_key() {
         cp "$want" "$home/keyring"
         ;;
       --list-keys | --export)
-        line=$(awk -v f="$want" '$1 == "KEY" { for (i = 2; i <= NF; i++) if ($i == f) { print; exit } }' "$home/keyring")
+        lines=$(awk -v f="$want" '$1 == "KEY" { for (i = 2; i <= NF; i++) if ($i == f) { print; next } }' "$home/keyring")
         if [ "$cmd" = --list-keys ]; then
-          [ -n "$line" ] || return 2
-          read -ra k <<<"$line"
-          printf 'pub:-:4096:1:8D81803C0EBFCD88:1487788586:::-:::scESCA::::::23::0:\nfpr:::::::::%s:\n' "${k[1]}"
-          for sub in "${k[@]:2}"; do printf 'sub:-:4096:1:7EA0A9C3F273FCD8:1487788586::::::s::::::23:\nfpr:::::::::%s:\n' "$sub"; done
-        elif [ -n "$line" ] && [ "${GPG_EXPORT:-}" != empty ]; then
-          read -ra k <<<"$line"
+          [ -n "$lines" ] || return 2
+          while read -ra k; do
+            printf 'pub:-:4096:1:8D81803C0EBFCD88:1487788586:::-:::scESCA::::::23::0:\nfpr:::::::::%s:\n' "${k[1]}"
+            for sub in "${k[@]:2}"; do printf 'sub:-:4096:1:7EA0A9C3F273FCD8:1487788586::::::s::::::23:\nfpr:::::::::%s:\n' "$sub"; done
+          done <<<"$lines"
+        elif [ -n "$lines" ] && [ "${GPG_EXPORT:-}" != empty ]; then
           [ "${GPG_EXPORT:-}" = noheader ] || echo "-----BEGIN PGP PUBLIC KEY BLOCK-----"
-          echo "EXPORT ${k[1]}"
+          while read -ra k; do echo "EXPORT ${k[1]}"; done <<<"$lines"
         fi
         ;;
     esac
@@ -401,6 +401,8 @@ check "f: nothing else is in the keyring directory" [ "$(ls "$KEYRING_DIR")" = d
 refuses missing-pinned-key "KEY $ZERO_FPR"
 refuses empty-download ""
 refuses pinned-only-as-subkey "KEY $ZERO_FPR $DOCKER_FPR"
+refuses pinned-also-as-subkey "KEY $DOCKER_FPR
+KEY $ZERO_FPR $DOCKER_FPR"
 refuses lowercase-primary "KEY ${DOCKER_FPR,,} $DOCKER_FPR"
 refuses short-primary "KEY ${DOCKER_FPR:0:39} $DOCKER_FPR"
 refuses long-primary "KEY ${DOCKER_FPR}0 $DOCKER_FPR"
