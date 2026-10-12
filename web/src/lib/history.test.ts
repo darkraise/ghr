@@ -137,7 +137,18 @@ describe("resultWord", () => {
     ["unknown", "Unknown"],
     ["failure", "Failed"],
     ["timed_out", "Failed"],
+    ["startup_failure", "Failed"],
+    ["neutral", "Neutral"],
+    ["stale", "Stale"],
+    ["action_required", "Action required"],
   ])("reads %s as %s", (conclusion, word) => {
     expect(resultWord(conclusion)).toBe(word)
+  })
+
+  it("keeps a result that is not a failure out of the summary's failed count", () => {
+    const rows = ["neutral", "stale", "action_required", "timed_out"].map((c, i) =>
+      entry(String(i), "2026-10-03T13:35:00Z", "2026-10-03T13:40:00Z", c),
+    )
+    expect(historySummary(rows)).toBe("4 jobs, 1 failed, median 5m00s")
   })
 })

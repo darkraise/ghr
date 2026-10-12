@@ -1,6 +1,7 @@
 import type { HistoryEntry } from "@/api/types"
 import { dur, hhmm, isZeroTime, monthDay, plural } from "@/lib/format"
 import { ALL_REPOS } from "@/lib/repos"
+import { resultState, stateWord } from "@/lib/status"
 
 export const HISTORY_WINDOWS = ["24h", "7d", "30d"] as const
 export type HistoryWindow = (typeof HISTORY_WINDOWS)[number]
@@ -80,14 +81,8 @@ export function median(values: number[]): number | undefined {
   return ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2
 }
 
-// As the result icons read them: anything not a success, a cancellation, a
-// skip or unknown is a failure.
 export function resultWord(conclusion: string): string {
-  if (conclusion === "success") return "Succeeded"
-  if (conclusion === "cancelled") return "Cancelled"
-  if (conclusion === "skipped") return "Skipped"
-  if (conclusion === "unknown") return "Unknown"
-  return "Failed"
+  return stateWord(resultState(conclusion))
 }
 
 export function historySummary(rows: HistoryEntry[]): string {

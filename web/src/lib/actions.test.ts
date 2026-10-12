@@ -65,6 +65,11 @@ describe("splitRuns", () => {
     expect(splitRuns(many, undefined, undefined).recent).toHaveLength(RECENT_LIMIT)
     expect(splitRuns(many, undefined, "failed").recent).toHaveLength(30)
   })
+
+  it("keeps a result that is not a failure out of Failed", () => {
+    const mixed = ["neutral", "stale", "action_required", "timed_out"].map((conclusion, id) => run({ id, conclusion }))
+    expect(splitRuns(mixed, undefined, "failed").recent.map((r) => r.id)).toEqual([3])
+  })
 })
 
 describe("times", () => {
