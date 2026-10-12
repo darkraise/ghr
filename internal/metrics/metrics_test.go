@@ -391,6 +391,38 @@ func TestLoadDropsWhatIsDatedAfterNow(t *testing.T) {
 	}
 }
 
+// A clock set back before a restart can land inside an hour that was already
+// closed. That hour is lived again, so its rollup goes, as it does on a step
+// back while the daemon runs: an hour gets one rollup.
+func TestLoadDropsTheRollupOfTheCurrentHour(t *testing.T) {
+	h := newHost(t)
+	h.write(t, "cpu.stat", "usage_usec 0\n")
+	h.s.Path = filepath.Join(h.dir, "metrics.json")
+	noon := h.now
+	// 11:00, 12:00, 12:01 and 13:00: 11:00 and 12:00 are closed, 13:00 is open.
+	for _, at := range []time.Duration{-time.Hour, 0, time.Minute, time.Hour} {
+		h.now = noon.Add(at)
+		h.s.Sample()
+	}
+	if err := h.s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	h.now = noon.Add(30 * time.Minute) // 12:30, inside the closed 12:00
+	if err := h.s.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if hrs := h.s.Hours(); len(hrs) != 1 || hrs[0].At.Hour() != 11 {
+		t.Fatalf("hours after the load %+v", hrs)
+	}
+	h.s.Sample()                // 12:30
+	h.now = noon.Add(time.Hour) // 13:00: 12:00 closes again
+	h.s.Sample()
+	hrs := h.s.Hours()
+	if len(hrs) != 3 || hrs[1].At.Hour() != 12 || hrs[1].Samples != 1 || hrs[2].At.Hour() != 13 {
+		t.Fatalf("hours after 12:00 was lived again %+v", hrs)
+	}
+}
+
 func TestLoadMissingAndMalformed(t *testing.T) {
 	s := NewSampler(func() Snapshot { return Snapshot{} }, func() int { return 0 })
 	s.Path = filepath.Join(t.TempDir(), "metrics.json")

@@ -141,12 +141,14 @@ func (s *Sampler) Save() error {
 	return os.Rename(tmp.Name(), s.Path)
 }
 
-// Load restores what Save wrote, dropping minutes older than three hours,
-// rollups older than 30 days, and minutes and rollups dated after now (the
-// clock was set back). A saved open hour resumes when it is the current UTC
-// hour, is closed as it stands when it is an earlier one, and is dropped when
-// it is a later one. A missing file is an empty start; a malformed one
-// returns an error and changes nothing.
+// Load restores what Save wrote, dropping minutes older than three hours and
+// rollups older than 30 days. After the clock was set back it also drops the
+// minutes dated after now and the rollups of the current UTC hour and of
+// later ones: those hours will be lived again, the rule addToHour applies to
+// a step back while sampling. A saved open hour resumes when it is the
+// current UTC hour, is closed as it stands when it is an earlier one, and is
+// dropped when it is a later one. A missing file is an empty start; a
+// malformed one returns an error and changes nothing.
 func (s *Sampler) Load() error {
 	if s.Path == "" {
 		return nil
@@ -174,15 +176,15 @@ func (s *Sampler) Load() error {
 	if len(s.samples) > keepMinutes {
 		s.samples = s.samples[len(s.samples)-keepMinutes:]
 	}
+	current := now.UTC().Truncate(time.Hour)
 	s.hours = nil
 	for _, r := range st.Hours {
-		if !r.At.After(now) && now.Sub(r.At) <= keepHours*time.Hour {
+		if r.At.Before(current) && now.Sub(r.At) <= keepHours*time.Hour {
 			s.hours = append(s.hours, r)
 		}
 	}
 	s.open = nil
 	if o := st.Open; o != nil {
-		current := now.UTC().Truncate(time.Hour)
 		switch {
 		case o.At.Equal(current):
 			s.open = o
