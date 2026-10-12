@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -38,6 +40,9 @@ const MaxRunners = 99
 
 // SystemLabels are the read-only labels GitHub gives every Linux x64 runner.
 var SystemLabels = []string{"self-hosted", "linux", "x64"}
+
+// MaxLabelLength is the longest a custom label may be, in characters.
+const MaxLabelLength = 100
 
 type Config struct {
 	Owner            string       `yaml:"owner" json:"owner"`
@@ -183,12 +188,13 @@ func Parse(data []byte) (*Config, []string, error) {
 		return nil, nil, fmt.Errorf("parse config: %w", err)
 	}
 	c.Owner = strings.TrimSpace(c.Owner)
-	clamped := c.clampRunners()
+	repaired := c.clampRunners()
+	repaired = append(repaired, c.dropBadLabels()...)
 	warnings, err := c.Validate()
 	if err != nil {
 		return nil, nil, err
 	}
-	return c, append(clamped, warnings...), nil
+	return c, append(repaired, warnings...), nil
 }
 
 // clampRunners lowers global_max and every repository's max and warm to
@@ -212,6 +218,73 @@ func (c *Config) clampRunners() []string {
 		}
 	}
 	return warnings
+}
+
+// dropBadLabels removes from the global list and from each repository's list
+// every label that Validate would refuse, and returns one warning for each.
+func (c *Config) dropBadLabels() []string {
+	var warnings []string
+	drop := func(prefix string, labels []string) []string {
+		kept := make([]string, 0, len(labels))
+		seen := map[string]bool{}
+		for _, l := range labels {
+			key := strings.ToLower(strings.TrimSpace(l))
+			switch {
+			case labelFault(l) != "":
+				warnings = append(warnings, fmt.Sprintf("%slabels: %q is not a valid label; ignored", prefix, l))
+			case seen[key]:
+				warnings = append(warnings, fmt.Sprintf("%slabels: %q is listed twice; ignored", prefix, l))
+			default:
+				seen[key] = true
+				kept = append(kept, l)
+			}
+		}
+		if len(kept) == len(labels) {
+			return labels
+		}
+		return kept
+	}
+	c.Labels = drop("", c.Labels)
+	for i := range c.Repos {
+		c.Repos[i].Labels = drop(c.Repos[i].Name+": ", c.Repos[i].Labels)
+	}
+	return warnings
+}
+
+// labelFault says why one label is not valid, or returns "" for a valid one.
+func labelFault(l string) string {
+	l = strings.TrimSpace(l)
+	switch {
+	case l == "":
+		return "must not be empty"
+	case utf8.RuneCountInString(l) > MaxLabelLength:
+		return fmt.Sprintf("must be at most %d characters", MaxLabelLength)
+	case strings.ContainsFunc(l, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }):
+		return "must not contain spaces or commas"
+	}
+	for _, s := range SystemLabels {
+		if strings.EqualFold(l, s) {
+			return "is added by ghr"
+		}
+	}
+	return ""
+}
+
+// labelProblem describes the first label in the list that is not valid or
+// that repeats an earlier one ignoring case, and returns "" for a valid list.
+func labelProblem(labels []string) string {
+	seen := map[string]bool{}
+	for _, l := range labels {
+		if f := labelFault(l); f != "" {
+			return fmt.Sprintf("labels: %q %s", l, f)
+		}
+		key := strings.ToLower(strings.TrimSpace(l))
+		if seen[key] {
+			return fmt.Sprintf("labels: %q is listed twice", l)
+		}
+		seen[key] = true
+	}
+	return ""
 }
 
 func Load(path string) (*Config, []string, error) {
@@ -349,6 +422,9 @@ func (c *Config) Validate() ([]string, error) {
 	if c.HistoryRetention > 0 && c.HistoryRetention.D() < MinHistoryRetention {
 		errs = append(errs, "history_retention must be >= 1d")
 	}
+	if p := labelProblem(c.Labels); p != "" {
+		errs = append(errs, p)
+	}
 	if c.DiskHighWater < 1 || c.DiskHighWater > 100 {
 		errs = append(errs, "disk_high_water must be 1..100")
 	}
@@ -396,6 +472,9 @@ func (c *Config) Validate() ([]string, error) {
 		}
 		if r.Removing && !r.Paused {
 			errs = append(errs, r.Name+": a repo being removed must stay paused")
+		}
+		if p := labelProblem(r.Labels); p != "" {
+			errs = append(errs, r.Name+": "+p)
 		}
 		if len(c.CustomLabels(r)) == 0 {
 			errs = append(errs, r.Name+": needs at least one label in labels or repo labels")

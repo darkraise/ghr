@@ -110,6 +110,17 @@ func TestValidateErrors(t *testing.T) {
 		"watch_repos: other/docs must be a repository name":    func(c *Config) { c.WatchRepos = []string{"other/docs"} },
 		"duplicate watched repo Docs":                          func(c *Config) { c.WatchRepos = []string{"docs", "Docs"} },
 		"watch_repos: DarkMem is already a configured repo":    func(c *Config) { c.WatchRepos = []string{"DarkMem"} },
+
+		`labels: "a b" must not contain spaces or commas`:             func(c *Config) { c.Labels = []string{"a b"} },
+		`labels: "a,b" must not contain spaces or commas`:             func(c *Config) { c.Labels = []string{"a,b"} },
+		`labels: " " must not be empty`:                               func(c *Config) { c.Labels = []string{"homelab", " "} },
+		`labels: "Docker" is listed twice`:                            func(c *Config) { c.Labels = []string{"docker", "Docker"} },
+		`labels: "x64" is added by ghr`:                               func(c *Config) { c.Labels = []string{"x64"} },
+		`darkcloud: labels: "Linux" is added by ghr`:                  func(c *Config) { c.Repos[0].Labels = []string{"darkcloud-linux", "Linux"} },
+		`darkcloud: labels: "a\tb" must not contain spaces or commas`: func(c *Config) { c.Repos[0].Labels = []string{"a\tb"} },
+		"labels: \"" + strings.Repeat("a", 101) + "\" must be at most 100 characters": func(c *Config) {
+			c.Labels = []string{strings.Repeat("a", 101)}
+		},
 	}
 	for want, mutate := range cases {
 		c, _, err := Parse([]byte(sample))
@@ -160,6 +171,72 @@ repos:
 	}
 	if back.GlobalMax != MaxRunners || *back.Repo("darkcloud").Max != MaxRunners || *back.Repo("darkcloud").Warm != MaxRunners {
 		t.Fatalf("saved file: %+v", back)
+	}
+}
+
+func TestValidLabelsPass(t *testing.T) {
+	c, _, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Labels = []string{" docker ", strings.Repeat("é", 100), "Docker-2"}
+	c.Repos[0].Labels = []string{"docker-2", "darkcloud-linux"}
+	if _, err := c.Validate(); err != nil {
+		t.Fatalf("valid labels rejected: %v", err)
+	}
+}
+
+func TestValidateNamesOnlyTheFirstBadLabel(t *testing.T) {
+	c, _, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Labels = []string{"a b", "linux", "c,d"}
+	_, err = c.Validate()
+	if want := `labels: "a b" must not contain spaces or commas`; err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %s", err, want)
+	}
+}
+
+// A config.yaml written by hand with bad labels loses them on load, with one
+// warning for each, and what was loaded saves and loads again unchanged.
+func TestParseDropsInvalidLabels(t *testing.T) {
+	c, warnings, err := Parse([]byte(`
+owner: darkraise
+labels: [homelab, "a b", Docker, docker, linux, ""]
+repos:
+  - name: darkcloud
+    labels: [homelab, "x,y", self-hosted]
+  - name: darkmem
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `labels: "a b" is not a valid label; ignored|` +
+		`labels: "docker" is listed twice; ignored|` +
+		`labels: "linux" is not a valid label; ignored|` +
+		`labels: "" is not a valid label; ignored|` +
+		`darkcloud: labels: "x,y" is not a valid label; ignored|` +
+		`darkcloud: labels: "self-hosted" is not a valid label; ignored`
+	if got := strings.Join(warnings, "|"); got != want {
+		t.Fatalf("warnings\n got %s\nwant %s", got, want)
+	}
+	if got := strings.Join(c.Labels, ","); got != "homelab,Docker" {
+		t.Fatalf("labels = %s", got)
+	}
+	if got := strings.Join(c.Repo("darkcloud").Labels, ","); got != "homelab" {
+		t.Fatalf("darkcloud labels = %s", got)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(path, c); err != nil {
+		t.Fatalf("saving a repaired config: %v", err)
+	}
+	back, warnings, err := Load(path)
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("loading what was saved: warnings %v, err %v", warnings, err)
+	}
+	if got := strings.Join(back.Labels, ","); got != "homelab,Docker" {
+		t.Fatalf("saved labels = %s", got)
 	}
 }
 
