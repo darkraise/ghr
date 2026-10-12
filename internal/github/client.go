@@ -64,6 +64,19 @@ type Run struct {
 	Path         string        `json:"path"`
 	RunAttempt   int           `json:"run_attempt"`
 	PullRequests []PullRequest `json:"pull_requests"`
+	Repository   RunRepository `json:"repository"`
+}
+
+// RunRepository is the repository object GitHub puts in every run. Private is
+// nil when the answer did not carry the flag.
+type RunRepository struct {
+	Private *bool `json:"private"`
+}
+
+// RepoPublic reports whether the run says its repository is public. A run
+// that came without the flag says nothing, so it does not say public.
+func (r Run) RepoPublic() bool {
+	return r.Repository.Private != nil && !*r.Repository.Private
 }
 
 type Step struct {

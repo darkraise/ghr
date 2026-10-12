@@ -751,6 +751,32 @@ func TestRunFieldsDecode(t *testing.T) {
 	}
 }
 
+// A run says its repository is public only when it carries the private flag
+// and the flag is false. A run without the flag says nothing.
+func TestRunSaysWhetherItsRepositoryIsPublic(t *testing.T) {
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"workflow_runs":[
+			{"id":1,"repository":{"full_name":"darkraise/darkmem","private":false}},
+			{"id":2,"repository":{"full_name":"darkraise/darkmem","private":true}},
+			{"id":3,"repository":{"full_name":"darkraise/darkmem"}},
+			{"id":4,"repository":null},
+			{"id":5}]}`)
+	})
+	runs, err := c.ListRuns(context.Background(), "darkmem", "queued")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []bool{true, false, false, false, false}
+	if len(runs) != len(want) {
+		t.Fatalf("runs %+v", runs)
+	}
+	for i, r := range runs {
+		if r.RepoPublic() != want[i] {
+			t.Errorf("run %d: public %v, want %v", r.ID, r.RepoPublic(), want[i])
+		}
+	}
+}
+
 // setLimit changes one of the client's bounds for the length of a test.
 func setLimit[T any](t *testing.T, p *T, v T) {
 	t.Helper()
