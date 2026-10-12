@@ -6,8 +6,8 @@ import { Input } from "darkraise-ui/components/input"
 import { Label } from "darkraise-ui/components/label"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { useState, type FormEvent } from "react"
+import { authQuery } from "@/api/auth"
 import { ApiError, api } from "@/api/client"
-import { keys } from "@/api/hooks"
 import { Brand } from "@/components/brand"
 import { hhmm } from "@/lib/format"
 import { passwordLengthOk } from "@/lib/password"
@@ -21,7 +21,7 @@ function loginError(err: unknown): string {
 }
 
 export function LoginPage() {
-  const auth = useQuery({ queryKey: keys.auth, queryFn: ({ signal }) => api.authState(signal) })
+  const auth = useQuery(authQuery)
   const { redirect } = useSearch({ from: "/login" })
   const [code, setCode] = useState("")
   const [password, setPassword] = useState("")
