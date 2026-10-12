@@ -337,8 +337,16 @@ export function useRegistrations(name: string, enabled: boolean) {
   })
 }
 
+// The list is dropped when its dialog closes: a kept one would show for a
+// moment in the next dialog, with repositories added or watched since.
 export function useAvailableRepos(enabled: boolean) {
-  return useQuery({ queryKey: keys.availableRepos, queryFn: ({ signal }) => api.availableRepos(signal), enabled, staleTime: 0 })
+  return useQuery({
+    queryKey: keys.availableRepos,
+    queryFn: ({ signal }) => api.availableRepos(signal),
+    enabled,
+    staleTime: 0,
+    gcTime: 0,
+  })
 }
 
 export function useToolchainChoices(tool: string, enabled: boolean) {

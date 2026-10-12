@@ -1,10 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { JobLog, LabelCheck, Status, Storage } from "@/api/types"
 import { mockApi } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
-import { storageBusy, useJobLog, useLabelCheck } from "./hooks"
+import { storageBusy, useAvailableRepos, useJobLog, useLabelCheck } from "./hooks"
 
 const idle: Storage = {
   ...fixtures.storage,
@@ -71,5 +71,27 @@ describe("useLabelCheck", () => {
     renderHook(() => useLabelCheck("darkmem", false), { wrapper })
     await new Promise((r) => setTimeout(r, 300))
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe("useAvailableRepos", () => {
+  it("keeps no list from one opening to the next", async () => {
+    vi.useFakeTimers()
+    try {
+      const { calls } = mockApi({ "GET /api/repos/available": fixtures.availableRepos })
+      const { wrapper } = withQuery()
+      const first = renderHook(() => useAvailableRepos(true), { wrapper })
+      await act(() => vi.advanceTimersByTimeAsync(0))
+      expect(first.result.current.data).toHaveLength(3)
+      first.unmount()
+      await act(() => vi.advanceTimersByTimeAsync(0))
+      const second = renderHook(() => useAvailableRepos(true), { wrapper })
+      expect(second.result.current.data).toBeUndefined()
+      await act(() => vi.advanceTimersByTimeAsync(0))
+      expect(second.result.current.data).toHaveLength(3)
+      expect(calls).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
