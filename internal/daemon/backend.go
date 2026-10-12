@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"maps"
+	"net"
 	"net/http"
 	"regexp"
 	"slices"
@@ -106,6 +107,12 @@ type Backend struct {
 	// WebApplied is the web block the running listener started with. Only a
 	// restart applies a change, so a reload that changes it warns.
 	WebApplied config.Web
+	// InterfaceAddrs lists this host's addresses for the web.listen check;
+	// nil means net.InterfaceAddrs.
+	InterfaceAddrs func() ([]net.Addr, error)
+	// Bind tries addr for the web.listen check and releases it at once; nil
+	// means net.Listen and Close.
+	Bind func(addr string) error
 	// WebSetupRequired reports whether the web listener runs with no password
 	// set; nil, as without a listener, reports false.
 	WebSetupRequired func() bool
@@ -501,6 +508,9 @@ func (b *Backend) PatchConfig(ctx context.Context, p model.ConfigPatch) error {
 			}
 		}
 		if w := p.Web; w != nil {
+			if err := b.checkWeb(ctx, w); err != nil {
+				return err
+			}
 			if w.Listen != nil {
 				c.Web.Listen = *w.Listen
 			}
