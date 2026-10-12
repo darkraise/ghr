@@ -43,9 +43,10 @@ export function useChangeStream(): void {
   useEffect(() => {
     if (!liveConfig.enabled) return
     let current: AbortController | undefined
-    // Set by the first hello; a later hello follows a gap that may have
-    // missed changes.
-    let connected = false
+    // True while a change may have gone unannounced: the page loaded hidden,
+    // an attempt ended, or the stream was stopped for a hidden tab. The hello
+    // carries no snapshot, so the next one refetches everything.
+    let missed = document.visibilityState === "hidden"
     const start = () => {
       const ctrl = new AbortController()
       current = ctrl
@@ -55,15 +56,17 @@ export function useChangeStream(): void {
         {
           onHello: () => {
             if (!mine()) return
-            if (connected) invalidateAll(queryClient)
-            connected = true
+            if (missed) invalidateAll(queryClient)
+            missed = false
             setLive(true)
           },
           onChange: (topics) => {
             if (mine()) invalidateTopics(queryClient, topics)
           },
           onEnd: () => {
-            if (mine()) setLive(false)
+            if (!mine()) return
+            missed = true
+            setLive(false)
           },
         },
         ctrl.signal,
@@ -72,6 +75,7 @@ export function useChangeStream(): void {
     const stop = () => {
       current?.abort()
       current = undefined
+      missed = true
       setLive(false)
     }
     const onVisibility = () => {
