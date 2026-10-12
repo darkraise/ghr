@@ -77,3 +77,18 @@ func (b *Backend) storageOps() (ops model.Operations) {
 	defer func() { _ = recover() }()
 	return b.Space.Snapshot().Operations
 }
+
+const restartWarning = "web settings changed; restart ghr to apply"
+
+// warnPending writes the restart warning when the pending web settings
+// become non-empty or change, and returns them. An empty list resets the
+// record, so the warning returns with the next change. The caller holds
+// b.pendingMu across the change it checks.
+func (b *Backend) warnPending() []string {
+	pending := webPending(b.Store.Config().Web, b.WebApplied)
+	if len(pending) > 0 && !slices.Equal(pending, b.pendingWarned) {
+		b.Events.Add("warn", "", "config: %s", restartWarning)
+	}
+	b.pendingWarned = pending
+	return pending
+}

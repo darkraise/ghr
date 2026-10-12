@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"slices"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
@@ -132,5 +135,83 @@ func TestRestartChangesPublishStatus(t *testing.T) {
 	prev, cur = cur, b.fingerprints()
 	if got := changed(prev, cur); !slices.Equal(got, []string{"config", "status"}) {
 		t.Fatalf("a pending listen changed %v", got)
+	}
+}
+
+// restartWarnings counts the restart warning's events.
+func restartWarnings(b *Backend) int {
+	n := 0
+	for _, e := range b.Events.After(0) {
+		if e.Level == "warn" && e.Msg == "config: "+restartWarning {
+			n++
+		}
+	}
+	return n
+}
+
+func TestPatchingWebSettingsWarnsOncePerChange(t *testing.T) {
+	b, _, _ := newBackend(t)
+	b.Bind = func(string) error { return nil }
+	setWeb(t, b, config.Web{Listen: "0.0.0.0:8080"})
+	b.WebApplied = b.Store.Config().Web
+	patch := func(what string, w model.WebPatch, wantEvents int) {
+		t.Helper()
+		if err := b.PatchConfig(context.Background(), model.ConfigPatch{Web: &w}); err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+		if n := restartWarnings(b); n != wantEvents {
+			t.Fatalf("%s: %d warning events, want %d", what, n, wantEvents)
+		}
+	}
+	moved, back := "0.0.0.0:9090", "0.0.0.0:8080"
+	patch("a new listen", model.WebPatch{Listen: &moved}, 1)
+	patch("the same listen again", model.WebPatch{Listen: &moved}, 1)
+	patch("a host as well", model.WebPatch{Hosts: &[]string{"ghr.lan"}}, 2)
+	patch("both reverted", model.WebPatch{Listen: &back, Hosts: &[]string{}}, 2)
+	patch("the listen moved again", model.WebPatch{Listen: &moved}, 3)
+}
+
+// A web patch is checked for the restart warning before another web patch
+// can commit. The first patch is held in Wake, after its commit and before
+// its check; a second patch that reverts it must wait, or the first patch's
+// transition is never written.
+func TestConcurrentWebPatchesWarnInCommitOrder(t *testing.T) {
+	b, _, _ := newBackend(t)
+	b.Bind = func(string) error { return nil }
+	setWeb(t, b, config.Web{Listen: "0.0.0.0:8080"})
+	b.WebApplied = b.Store.Config().Web
+	held, release := make(chan struct{}), make(chan struct{})
+	var wakes atomic.Int32
+	b.Wake = func() {
+		if wakes.Add(1) == 1 {
+			close(held)
+			<-release
+		}
+	}
+	moved, back := "0.0.0.0:9090", "0.0.0.0:8080"
+	first, second := make(chan error, 1), make(chan error, 1)
+	go func() {
+		first <- b.PatchConfig(context.Background(), model.ConfigPatch{Web: &model.WebPatch{Listen: &moved}})
+	}()
+	<-held
+	go func() {
+		second <- b.PatchConfig(context.Background(), model.ConfigPatch{Web: &model.WebPatch{Listen: &back}})
+	}()
+	select {
+	case err := <-second:
+		t.Fatalf("the second web patch finished while the first was unchecked: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	for _, done := range []chan error{first, second} {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := restartWarnings(b); n != 1 {
+		t.Fatalf("%d warning events, want 1 for the first patch's change", n)
+	}
+	if got := b.Status().Restart.Pending; len(got) != 0 {
+		t.Fatalf("pending after the revert: %v", got)
 	}
 }

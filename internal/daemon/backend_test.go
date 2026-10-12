@@ -1152,6 +1152,9 @@ func TestRunnerStepsShareOneFetch(t *testing.T) {
 	}
 }
 
+// Every reload's answer lists the web warning while a web setting waits for
+// a restart; the event is written only when the pending list changes, and
+// again after it empties and returns.
 func TestReloadWarnsOnWebChange(t *testing.T) {
 	b, _, _ := newBackend(t)
 	write := func(extra string) {
@@ -1160,28 +1163,27 @@ func TestReloadWarnsOnWebChange(t *testing.T) {
 		}
 	}
 	const warning = "web settings changed; restart ghr to apply"
-	write("web:\n  listen: 0.0.0.0:8080\n")
-	ws, err := b.Reload()
-	if err != nil || !slices.Contains(ws, warning) {
-		t.Fatalf("changed listen: %v %v", ws, err)
-	}
-	found := false
-	for _, e := range b.Events.After(0) {
-		if e.Level == "warn" && strings.Contains(e.Msg, warning) {
-			found = true
+	reload := func(what string, wantWarning bool, wantEvents int) {
+		t.Helper()
+		ws, err := b.Reload()
+		if err != nil || slices.Contains(ws, warning) != wantWarning {
+			t.Fatalf("%s: warnings %v, err %v", what, ws, err)
+		}
+		if n := restartWarnings(b); n != wantEvents {
+			t.Fatalf("%s: %d warning events, want %d", what, n, wantEvents)
 		}
 	}
-	if !found {
-		t.Fatal("no warn event for the web change")
-	}
+	write("web:\n  listen: 0.0.0.0:8080\n")
+	reload("changed listen", true, 1)
+	reload("the same change again", true, 1)
+	write("web:\n  listen: 0.0.0.0:8080\n  hosts: [ghr.lan]\n")
+	reload("hosts changed too", true, 2)
 	write("web:\n  hosts: [ghr.lan]\n")
-	if ws, err := b.Reload(); err != nil || !slices.Contains(ws, warning) {
-		t.Fatalf("changed hosts: %v %v", ws, err)
-	}
+	reload("listen reverted, hosts still changed", true, 3)
 	write("")
-	if ws, err := b.Reload(); err != nil || len(ws) != 0 {
-		t.Fatalf("reverted web still warns: %v %v", ws, err)
-	}
+	reload("reverted", false, 3)
+	write("web:\n  listen: 0.0.0.0:8080\n")
+	reload("the change made again", true, 4)
 }
 
 // A reload writes a warning as an event when the load before did not have it,

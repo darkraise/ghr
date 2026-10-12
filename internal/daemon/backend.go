@@ -143,6 +143,13 @@ type Backend struct {
 	wfFiles wfCache
 	details detailCache
 	logs    logCache
+
+	// pendingMu is held across a change that can move the pending web
+	// settings (a reload, a web patch) and its restart warning check, so
+	// each committed list is checked in commit order. pendingWarned is the
+	// list the warning was last written for.
+	pendingMu     sync.Mutex
+	pendingWarned []string
 }
 
 var _ api.Backend = (*Backend)(nil)
@@ -471,6 +478,10 @@ func (b *Backend) updateThen(fn func(c *config.Config) error, saved func()) erro
 // PatchConfig applies a partial update. Resuming a repo that is being removed
 // cancels the removal in the same write.
 func (b *Backend) PatchConfig(ctx context.Context, p model.ConfigPatch) error {
+	if p.Web != nil {
+		b.pendingMu.Lock()
+		defer b.pendingMu.Unlock()
+	}
 	var cancelled []string
 	err := b.update(func(c *config.Config) error {
 		if p.Mode != nil {
@@ -564,6 +575,9 @@ func (b *Backend) PatchConfig(ctx context.Context, p model.ConfigPatch) error {
 	}
 	for _, name := range cancelled {
 		b.Events.Add("info", name, "repo resumed; removal cancelled")
+	}
+	if p.Web != nil {
+		b.warnPending()
 	}
 	return nil
 }
@@ -873,19 +887,20 @@ func judgeToken(repos []string, errs []error) error {
 // only when the token changed. The degraded state is cleared every time, so
 // a reload remains the way to say "try the token again now".
 func (b *Backend) Reload() ([]string, error) {
+	b.pendingMu.Lock()
+	defer b.pendingMu.Unlock()
 	warnings, added, tokenChanged, err := b.Store.Reload()
 	if err != nil {
 		b.Events.Add("error", "", "reload rejected, keeping previous config: %v", err)
 		return nil, api.BadRequest(err.Error())
 	}
-	// The web warning is not the store's, so it is written on every reload
-	// until the restart it asks for.
-	if w := b.Store.Config().Web; w.Listen != b.WebApplied.Listen || !slices.Equal(w.Hosts, b.WebApplied.Hosts) {
-		const restart = "web settings changed; restart ghr to apply"
-		warnings, added = append(warnings, restart), append(added, restart)
-	}
 	for _, w := range added {
 		b.Events.Add("warn", "", "config: %s", w)
+	}
+	// The web warning is not the store's. The answer lists it on every reload
+	// until the restart it asks for; its event is written once per change.
+	if len(b.warnPending()) > 0 {
+		warnings = append(warnings, restartWarning)
 	}
 	if tokenChanged {
 		b.GH.ForgetCache()
