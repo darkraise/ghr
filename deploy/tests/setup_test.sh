@@ -17,6 +17,8 @@ trap 'rm -rf "$T"' EXIT
 # before any case runs; run refuses to start a function while it points elsewhere.
 DEFAULT_KEYRING_DIR=$KEYRING_DIR
 KEYRING_DIR="$T/keyrings"
+DEFAULT_SYSTEMD_DIR=$SYSTEMD_DIR
+SYSTEMD_DIR="$T/systemd"
 
 FAILS=0
 check() {
@@ -37,9 +39,9 @@ bump() { echo $(($(count "$1") + 1)) > "$MARK_DIR/$1"; }
 # Runs a setup.sh function the way main runs: errexit on, die exits a subshell.
 # It refuses to run while a redirected directory points outside the temporary tree.
 run() {
-  case "$KEYRING_DIR" in
-    "$T"/*) ;;
-    *) echo "refusing to run: KEYRING_DIR=$KEYRING_DIR is outside $T" >&2; return 99 ;;
+  case "$KEYRING_DIR:$SYSTEMD_DIR" in
+    "$T"/*:"$T"/*) ;;
+    *) echo "refusing to run: KEYRING_DIR=$KEYRING_DIR or SYSTEMD_DIR=$SYSTEMD_DIR is outside $T" >&2; return 99 ;;
   esac
   (set -e; "$@")
 }
@@ -125,6 +127,7 @@ new_case() {
   STATE_DIR="$T/$1/state"
   OPT_DIR="$T/$1/opt"
   KEYRING_DIR="$T/$1/keyrings"
+  SYSTEMD_DIR="$T/$1/systemd"
   mkdir -p "$DIST_DIR" "$MARK_DIR" "$STATE_DIR" "$OPT_DIR"
   cp "$HERE/../config.example.yaml" "$OPT_DIR/"
   echo 0 > "$MARK_DIR/fetches"
@@ -610,6 +613,51 @@ setup_marks yes "done" DarkRaise 0.0.0.0:8080
 out=$( (setup_ghr; run print_next) 2>&1)
 check "k: a finished setup prints nothing" [ -z "$out" ]
 unset -f hostname
+
+# (n) The unit comes back with Docker. It is rewritten only when its content
+# changes, and systemd is reloaded once, after reenable, only when the unit or the
+# docker.service.wants link was not already in place. The restart happens on every run.
+new_case n-service
+mkdir -p "$SYSTEMD_DIR"
+unit="$SYSTEMD_DIR/ghr.service"
+link="$SYSTEMD_DIR/docker.service.wants/ghr.service"
+fake_unit_systemctl() {
+  systemctl() {
+    echo "$*" >> "$MARK_DIR/systemctl"
+    case " $* " in
+      *" reenable "*) mkdir -p "$SYSTEMD_DIR/docker.service.wants" && : > "$link" ;;
+    esac
+  }
+}
+install_unit() {
+  : > "$MARK_DIR/systemctl"
+  (fake_unit_systemctl; run install_service) >/dev/null 2>&1
+  rc=$?
+}
+reloaded=$'--no-reload reenable ghr.service\ndaemon-reload\nrestart ghr.service'
+unchanged=$'--no-reload reenable ghr.service\nrestart ghr.service'
+check "n: the unit goes to /etc/systemd/system by default" [ "$DEFAULT_SYSTEMD_DIR" = /etc/systemd/system ]
+install_unit
+check "n: install_service succeeds" [ "$rc" -eq 0 ]
+check "n: the unit starts again with Docker" contains "$(cat "$unit")" "WantedBy=multi-user.target docker.service"
+check "n: the unit still requires Docker" contains "$(cat "$unit")" "Requires=docker.service"
+check "n: a first install enables without a reload, reloads once, then starts" [ "$(cat "$MARK_DIR/systemctl")" = "$reloaded" ]
+check "n: and leaves the docker.service link" [ -e "$link" ]
+touch -d '2020-01-01 00:00:00' "$unit"
+install_unit
+check "n: an unchanged unit is not rewritten" [ "$(date -r "$unit" +%Y)" = 2020 ]
+check "n: an unchanged install reloads nothing, but still starts the unit" [ "$(cat "$MARK_DIR/systemctl")" = "$unchanged" ]
+rm -rf "$SYSTEMD_DIR/docker.service.wants"
+install_unit
+check "n: an unchanged unit with no docker.service link reloads once, after reenable" [ "$(cat "$MARK_DIR/systemctl")" = "$reloaded" ]
+printf '[Install]\nWantedBy=multi-user.target\n' > "$unit"
+install_unit
+check "n: an older unit is replaced" contains "$(cat "$unit")" "WantedBy=multi-user.target docker.service"
+check "n: and, with its link already there, reloaded once after reenable" [ "$(cat "$MARK_DIR/systemctl")" = "$reloaded" ]
+printf '[Install]\nWantedBy=multi-user.target\n' > "$unit"
+rm -rf "$SYSTEMD_DIR/docker.service.wants"
+install_unit
+check "n: an upgrade from the old unit reloads exactly once, after reenable" [ "$(cat "$MARK_DIR/systemctl")" = "$reloaded" ]
 
 # (c) Dist GC.
 check_host() { :; }

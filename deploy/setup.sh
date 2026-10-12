@@ -26,6 +26,7 @@ HOOKS_DIR="$OPT_DIR/hooks"
 STATE_DIR=/var/lib/ghr
 ETC_DIR=/etc/ghr
 APT_SOURCES_DIR=/etc/apt/sources.list.d
+SYSTEMD_DIR=/etc/systemd/system
 KEYRING_DIR=/etc/apt/keyrings
 DOCKER_KEY_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 READY_TIMEOUT=60
@@ -208,7 +209,8 @@ install_config() {
 }
 
 install_service() {
-  cat > /etc/systemd/system/ghr.service <<'EOF'
+  local unit="$SYSTEMD_DIR/ghr.service" want reload=0
+  want=$(cat <<'EOF'
 [Unit]
 Description=ghr GitHub Actions runner manager
 After=network-online.target docker.service
@@ -222,10 +224,19 @@ Restart=always
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=multi-user.target docker.service
 EOF
-  systemctl daemon-reload
-  systemctl enable ghr.service >/dev/null
+  )
+  if [ "$(cat "$unit" 2>/dev/null)" != "$want" ]; then
+    printf '%s\n' "$want" > "$unit"
+    reload=1
+  fi
+  [ -e "$SYSTEMD_DIR/docker.service.wants/ghr.service" ] || reload=1
+  # Requires= alone stops ghr with Docker and never starts it again; the
+  # docker.service.wants link made by WantedBy= does. Without --no-reload,
+  # reenable reloads systemd itself on every run.
+  systemctl --no-reload reenable ghr.service >/dev/null
+  [ "$reload" = 0 ] || systemctl daemon-reload
   systemctl restart ghr.service
 }
 
