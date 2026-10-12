@@ -24,7 +24,7 @@ import { RepoActivity } from "@/components/repo-activity"
 import { RejectedAlert, SaveBar } from "@/components/save-bar"
 import { TagField } from "@/components/tag-field"
 import { UnsavedGuard } from "@/components/unsaved-guard"
-import { changedKeys, sameValue, settle, type Values } from "@/lib/draft"
+import { changedKeys, prune, sameValue, settle, type Values } from "@/lib/draft"
 import { PUBLIC_HELP, repoDescription, servePublicConfirm } from "@/lib/repos"
 import { SIDE_LINK } from "@/lib/side-link"
 import { repoStateWord } from "@/lib/status"
@@ -178,6 +178,10 @@ function RepositoryForm({ name: urlName, section }: { name: string; section: str
 
   const repoStatus = status.data?.repos.find((r) => r.name === name)
   const loaded = repoValues(repoCfg)
+  // During a save the loaded values are the ones being replaced, so an edit
+  // back to one of them is a real edit; settle decides about it afterwards.
+  const pruned = repoCfg && !saving ? prune(draft, loaded) : draft
+  if (pruned !== draft) setDraft(pruned)
   const values: Values = { ...loaded, ...draft }
   const changed = changedKeys(draft, loaded)
   const maxValue = values.max as number | undefined

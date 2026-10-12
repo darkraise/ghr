@@ -24,6 +24,11 @@ function applyingRoutes(initial: Config = fixtures.config) {
   })
 }
 
+// The config the daemon serves once darkmem's max has become the given number.
+function withMax(max: number): Config {
+  return { ...fixtures.config, repos: (fixtures.config.repos ?? []).map((r) => (r.name === "darkmem" ? { ...r, max } : r)) }
+}
+
 describe("repository page", () => {
   it("shows the repo's state, settings and the labels its runners get", async () => {
     mockApi(routes())
@@ -181,6 +186,70 @@ describe("repository page", () => {
     expect(screen.queryByText("Warm must be <= max")).toBeNull()
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ repos: { darkmem: { max: null, warm: 3 } } }))
+  })
+
+  it("forgets an edit typed back to the loaded value, so a later change at the daemon shows", async () => {
+    let config: Config = fixtures.config
+    mockApi(routes({ "GET /api/config": () => config }))
+    const { user, queryClient } = renderApp("/repositories/darkmem/settings")
+    const max = await screen.findByLabelText("Max")
+    await user.clear(max)
+    await user.type(max, "3")
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
+    await user.clear(max)
+    await user.type(max, "2")
+    await user.tab()
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
+    config = withMax(5)
+    await queryClient.refetchQueries({ queryKey: ["config"] })
+    await waitFor(() => expect(screen.getByLabelText("Max")).toHaveValue("5"))
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
+  })
+
+  it("forgets an edit once the daemon holds the same value", async () => {
+    let config: Config = fixtures.config
+    mockApi(routes({ "GET /api/config": () => config }))
+    const { user, queryClient } = renderApp("/repositories/darkmem/settings")
+    const max = await screen.findByLabelText("Max")
+    await user.clear(max)
+    await user.type(max, "3")
+    await user.tab()
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
+    config = withMax(3)
+    await queryClient.refetchQueries({ queryKey: ["config"] })
+    await waitFor(() => expect(screen.queryByText(/unsaved change/)).toBeNull())
+    config = withMax(4)
+    await queryClient.refetchQueries({ queryKey: ["config"] })
+    await waitFor(() => expect(screen.getByLabelText("Max")).toHaveValue("4"))
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
+  })
+
+  it("keeps an edit typed back to the old value while its save is in flight", async () => {
+    let config: Config = fixtures.config
+    let answer: () => void = () => undefined
+    const { calls } = mockApi(
+      routes({
+        "GET /api/config": () => config,
+        "PATCH /api/config": () =>
+          new Promise<Response>((resolve) => {
+            answer = () => {
+              config = withMax(3)
+              resolve(noContent())
+            }
+          }),
+      }),
+    )
+    const { user } = renderApp("/repositories/darkmem/settings")
+    const max = await screen.findByLabelText("Max")
+    await user.clear(max)
+    await user.type(max, "3")
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true))
+    await user.clear(max)
+    await user.type(max, "2")
+    answer()
+    expect(await screen.findByText("1 unsaved change")).toBeInTheDocument()
+    expect(screen.getByLabelText("Max")).toHaveValue("2")
   })
 
   it("disables the form while the daemon is unreachable", async () => {
