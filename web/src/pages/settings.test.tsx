@@ -95,6 +95,24 @@ describe("Settings page", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ mode: "all" }))
   })
 
+  it("forgets an edit typed back to the loaded value, so a later change at the daemon shows", async () => {
+    let config: Config = fixtures.config
+    mockApi(routes({ "GET /api/config": () => config }))
+    const { user, queryClient } = renderApp("/settings")
+    const max = await screen.findByLabelText("Max concurrent runners")
+    await user.clear(max)
+    await user.type(max, "3")
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
+    await user.clear(max)
+    await user.type(max, "2")
+    await user.tab()
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
+    config = { ...fixtures.config, global_max: 5 }
+    await queryClient.refetchQueries({ queryKey: ["config"] })
+    await waitFor(() => expect(screen.getByLabelText("Max concurrent runners")).toHaveValue("5"))
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
+  })
+
   it("does not count a retyped value as a change", async () => {
     mockApi(routes())
     const { user } = renderApp("/settings")

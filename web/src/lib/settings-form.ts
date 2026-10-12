@@ -4,7 +4,7 @@ import { useState } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, readConfig, useConfig, useStatus } from "@/api/hooks"
 import type { Config, ConfigPatch, JobName, JobsConfig, RunnerLimitsPatch, WebPatch } from "@/api/types"
-import { changedKeys, sameValue, settle, type Equal, type Values } from "@/lib/draft"
+import { changedKeys, prune, sameValue, settle, type Equal, type Values } from "@/lib/draft"
 import { isHostname, splitListen } from "@/lib/listen"
 import { UNIT_SETTINGS, readSetting, writeSetting } from "@/lib/units"
 import { errorText } from "@/query"
@@ -196,6 +196,10 @@ export function useSettingsForm(fields: readonly string[] = GENERAL_KEYS): Setti
   const [rejection, setRejection] = useState("")
 
   const loaded = config.data ? loadedValues(config.data) : {}
+  // During a save the loaded values are the ones being replaced, so an edit
+  // back to one of them is a real edit; settle decides about it afterwards.
+  const pruned = config.data && !saving ? prune(draft, loaded) : draft
+  if (pruned !== draft) setDraft(pruned)
   const values: Values = { ...loaded, ...draft }
   const changed = config.data ? changedKeys(draft, loaded, equal).filter((k) => fields.includes(k)) : []
   const errors = config.data ? Object.fromEntries(Object.entries(fieldErrors(values, loaded)).filter(([k]) => fields.includes(k))) : {}
