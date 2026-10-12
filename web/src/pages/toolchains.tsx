@@ -3,7 +3,7 @@ import { PageHeader } from "darkraise-ui/layout"
 import { useStatus, useStorage } from "@/api/hooks"
 import { ErrorLine } from "@/components/page/error-line"
 import { ToolchainActions } from "@/components/toolchain-actions"
-import { InstalledSection, ToolCacheSection } from "@/components/toolchain-sections"
+import { InstalledSection } from "@/components/toolchain-sections"
 import { toolchainsSummary } from "@/lib/toolchains"
 import { useOperationToasts } from "@/lib/use-operation-toasts"
 import { errorText } from "@/query"
@@ -18,10 +18,7 @@ export function ToolchainsPage() {
       <PageHeader title="Toolchains" description={storage.data ? toolchainsSummary(storage.data) : undefined} actions={<ToolchainActions offline={offline} />} />
       {storage.isError && <ErrorLine onRetry={() => void storage.refetch()}>{errorText(storage.error)}</ErrorLine>}
       {storage.data ? (
-        <>
-          <ToolCacheSection storage={storage.data} />
-          <InstalledSection storage={storage.data} status={status.data} offline={offline} />
-        </>
+        <InstalledSection storage={storage.data} status={status.data} offline={offline} />
       ) : (
         !storage.isError && <Spinner label="Loading" />
       )}
