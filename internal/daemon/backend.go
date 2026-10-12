@@ -779,11 +779,23 @@ func (b *Backend) checkTokenOn(ctx context.Context, token string, repos []string
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			errs[i] = b.CheckToken(ctx, token, repo)
+			errs[i] = b.checkTokenSafely(ctx, token, repo)
 		}()
 	}
 	wg.Wait()
 	return errs
+}
+
+// checkTokenSafely turns a panic in a check into that repository's error. The
+// check runs on its own goroutine, where a panic would end the daemon.
+func (b *Backend) checkTokenSafely(ctx context.Context, token, repo string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("token check %s: panic: %v", repo, r)
+			err = errors.New("could not check the token")
+		}
+	}()
+	return b.CheckToken(ctx, token, repo)
 }
 
 // judgeToken returns the refusal for a new token given each repository's

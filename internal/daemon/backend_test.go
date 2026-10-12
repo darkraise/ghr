@@ -1676,6 +1676,7 @@ func TestSetTokenJudgesEveryRepository(t *testing.T) {
 	retry := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 	limited := fmt.Errorf(hint+"%w", &github.APIError{Status: 403, Kind: github.ErrRateLimit, Message: "API rate limit exceeded", RetryAt: retry})
 	const denied = hint + "github: 403 Resource not accessible by personal access token"
+	panics := errors.New("the check panics instead of returning")
 	for _, tc := range []struct {
 		name     string
 		results  map[string]error // by repository; one not named passes
@@ -1690,6 +1691,7 @@ func TestSetTokenJudgesEveryRepository(t *testing.T) {
 		{"a rate limit before every repository failing", map[string]error{"darkcloud": forbidden, "darkmem": limited}, 429, "github: 403 API rate limit exceeded", nil},
 		{"every repository fails", map[string]error{"darkcloud": forbidden, "darkmem": errors.New("no route to host")}, 400, "new token rejected: darkcloud: " + denied, nil},
 		{"one of two fails", map[string]error{"darkmem": forbidden}, 0, "", []string{"new token: darkmem: " + denied}},
+		{"one of two panics", map[string]error{"darkmem": panics}, 0, "", []string{"new token: darkmem: could not check the token"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b, m, gh := newBackend(t)
@@ -1701,6 +1703,9 @@ func TestSetTokenJudgesEveryRepository(t *testing.T) {
 				mu.Lock()
 				checked = append(checked, repo)
 				mu.Unlock()
+				if tc.results[repo] == panics {
+					panic("boom")
+				}
 				return tc.results[repo]
 			}
 			err := b.SetToken(context.Background(), "tok2")
