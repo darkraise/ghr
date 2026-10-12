@@ -123,6 +123,17 @@ describe("setup wizard", () => {
     expect(finished).toEqual({ toolchains: "popular" })
   })
 
+  it("leaves Web access out of the settings step", async () => {
+    mockApi(authedRoutes({ "GET /api/setup": { ...base, configured: true, owner: "DarkRaise" }, "GET /api/storage": fixtures.storage }))
+    const { user } = renderApp("/setup")
+    expect(await screen.findByRole("heading", { name: "Repositories", level: 2 })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Next" }))
+    expect(await screen.findByLabelText("Max concurrent runners")).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Runner defaults" })).toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "Web access" })).toBeNull()
+    expect(screen.queryByLabelText("Listen address")).toBeNull()
+  })
+
   it("renders without the Shell and opens the Add repository dialog", async () => {
     mockApi(
       authedRoutes({ "GET /api/setup": { ...base, configured: true }, "GET /api/repos/available": fixtures.availableRepos }),

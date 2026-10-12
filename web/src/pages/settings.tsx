@@ -52,7 +52,7 @@ function GeneralSettings() {
       ) : (
         <>
           <div className="flex min-w-0 flex-col gap-6">
-            <SettingsSections form={form} />
+            <SettingsSections form={form} webAccess />
           </div>
           <SaveBar count={form.changed.length} saving={form.saving} disabled={form.offline} onSave={() => void form.save()} onDiscard={form.discard} />
           <UnsavedGuard count={form.changed.length} page="Settings" saving={form.saving} onSave={form.save} onDiscard={form.discard} />

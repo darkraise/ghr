@@ -15,8 +15,8 @@ function applyingDaemon(initial: Config = fixtures.config) {
   return routes({
     "GET /api/config": () => config,
     "PATCH /api/config": ({ body }: { body: unknown }) => {
-      const { runner_limits, ...rest } = body as Partial<Config>
-      config = { ...config, ...rest, runner_limits: { ...config.runner_limits, ...runner_limits } }
+      const { runner_limits, web, ...rest } = body as Partial<Config>
+      config = { ...config, ...rest, runner_limits: { ...config.runner_limits, ...runner_limits }, web: { ...config.web, ...web } }
       return noContent()
     },
   })
@@ -416,5 +416,122 @@ describe("Settings sections", () => {
     renderApp("/settings/account")
     const account = within(await screen.findByRole("region", { name: "Password" }))
     expect(account.queryByRole("button", { name: "Log out" })).toBeNull()
+  })
+})
+
+describe("Web access", () => {
+  const group = () => within(screen.getByRole("region", { name: "Web access" }))
+  const reason = "you reached ghr on 192.168.0.99; listening on 172.17.0.1 would lock this browser out"
+
+  it("shows the listen address and the allowed hostnames after Runner defaults", async () => {
+    mockApi(routes())
+    renderApp("/settings")
+    const listen = await screen.findByLabelText("Listen address")
+    expect(listen).toHaveValue("0.0.0.0:8080")
+    expect(listen).toHaveClass("font-mono")
+    expect(group().getByText("Changes apply after a restart.")).toBeInTheDocument()
+    expect(group().getByRole("button", { name: "Remove ghr.lan" })).toBeInTheDocument()
+    expect(group().getByText("IP addresses and localhost always work.")).toBeInTheDocument()
+    expect(screen.queryByText("The web UI turns off at the next restart.")).toBeNull()
+    const titles = screen.getAllByRole("region").map((r) => r.querySelector("h2")?.textContent)
+    expect(titles.indexOf("Web access")).toBe(titles.indexOf("Runner defaults") + 1)
+  })
+
+  it("saves both under web", async () => {
+    const { calls } = mockApi(applyingDaemon())
+    const { user } = renderApp("/settings")
+    const listen = await screen.findByLabelText("Listen address")
+    await user.clear(listen)
+    await user.type(listen, "0.0.0.0:9090")
+    await user.type(screen.getByRole("textbox", { name: "Allowed hostnames" }), "ghr.home{Enter}")
+    expect(screen.getByText("2 unsaved changes")).toBeInTheDocument()
+    expect(group().getAllByText("Changed")).toHaveLength(2)
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ web: { listen: "0.0.0.0:9090", hosts: ["ghr.lan", "ghr.home"] } }),
+    )
+    await waitFor(() => expect(screen.queryByText(/unsaved change/)).toBeNull())
+    expect(screen.queryByText(/Daemon did not apply web\./)).toBeNull()
+  })
+
+  it("checks the address and the hostnames before sending", async () => {
+    const { calls } = mockApi(routes())
+    const { user } = renderApp("/settings")
+    const listen = await screen.findByLabelText("Listen address")
+    await user.clear(listen)
+    await user.type(listen, "0.0.0.0")
+    expect(group().getByText("Enter host:port with a port from 1 to 65535, such as 0.0.0.0:8080")).toBeInTheDocument()
+    await user.type(listen, ":70000")
+    expect(group().getByText("Enter host:port with a port from 1 to 65535, such as 0.0.0.0:8080")).toBeInTheDocument()
+    await user.clear(listen)
+    // user-event reads "[" as the start of a key name; "[[" types one.
+    await user.type(listen, "[[::]:8081")
+    expect(listen).toHaveValue("[::]:8081")
+    expect(group().queryByText("Enter host:port with a port from 1 to 65535, such as 0.0.0.0:8080")).toBeNull()
+    await user.type(screen.getByRole("textbox", { name: "Allowed hostnames" }), "https://ghr.lan{Enter}")
+    expect(group().getByText("https://ghr.lan is not a bare hostname such as ghr.lan")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    expect((await screen.findAllByText("Fix the highlighted settings first")).length).toBeGreaterThan(0)
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false)
+  })
+
+  it("does not let a saved address it would flag block saving other fields", async () => {
+    const { calls } = mockApi(applyingDaemon({ ...fixtures.config, web: { listen: "0.0.0.0:http", hosts: ["ghr.lan"] } }))
+    const { user } = renderApp("/settings")
+    const poll = await screen.findByLabelText("Poll interval")
+    expect(screen.getByLabelText("Listen address")).toHaveValue("0.0.0.0:http")
+    expect(group().queryByText("Enter host:port with a port from 1 to 65535, such as 0.0.0.0:8080")).toBeNull()
+    await user.clear(poll)
+    await user.type(poll, "15")
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ poll_interval: "15s" }))
+  })
+
+  it("does not count reordered hostnames, in any case, as a change", async () => {
+    mockApi(routes({ "GET /api/config": { ...fixtures.config, web: { listen: "0.0.0.0:8080", hosts: ["ghr.lan", "ghr.home"] } } }))
+    const { user } = renderApp("/settings")
+    await user.click(await screen.findByRole("button", { name: "Remove ghr.lan" }))
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
+    await user.type(screen.getByRole("textbox", { name: "Allowed hostnames" }), "GHR.LAN{Enter}")
+    expect(group().getByRole("button", { name: "Remove GHR.LAN" })).toBeInTheDocument()
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
+  })
+
+  it("shows a web.listen refusal under its field, without the key", async () => {
+    mockApi(routes({ "PATCH /api/config": () => json({ error: `web.listen: ${reason}` }, 400) }))
+    const { user } = renderApp("/settings")
+    const listen = await screen.findByLabelText("Listen address")
+    await user.clear(listen)
+    await user.type(listen, "172.17.0.1:8080")
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(await group().findByText(reason)).toHaveClass("text-destructive")
+    expect(screen.queryByText("Save rejected")).toBeNull()
+    expect(listen).toHaveValue("172.17.0.1:8080")
+  })
+
+  it("shows a web.hosts refusal under its field", async () => {
+    mockApi(routes({ "PATCH /api/config": () => json({ error: "web.hosts: you are using ghr.lan; removing it would lock this browser out" }, 400) }))
+    const { user } = renderApp("/settings")
+    await user.click(await screen.findByRole("button", { name: "Remove ghr.lan" }))
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(await group().findByText("you are using ghr.lan; removing it would lock this browser out")).toBeInTheDocument()
+    expect(screen.queryByText("Save rejected")).toBeNull()
+  })
+
+  it("keeps any other refusal in the form's alert", async () => {
+    mockApi(routes({ "PATCH /api/config": () => json({ error: "web.hosts entries must be bare hostnames such as ghr.lan" }, 400) }))
+    const { user } = renderApp("/settings")
+    await user.type(await screen.findByRole("textbox", { name: "Allowed hostnames" }), "ghr.home{Enter}")
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(await screen.findByText("Save rejected")).toBeInTheDocument()
+    expect(screen.getByText("web.hosts entries must be bare hostnames such as ghr.lan")).toBeInTheDocument()
+  })
+
+  it("notes that an empty saved address turns the web UI off", async () => {
+    mockApi(routes({ "GET /api/config": { ...fixtures.config, web: { hosts: ["ghr.lan"] } } }))
+    renderApp("/settings")
+    expect(await screen.findByLabelText("Listen address")).toHaveValue("")
+    expect(group().getByText("The web UI turns off at the next restart.")).toBeInTheDocument()
+    expect(screen.queryByText(/unsaved change/)).toBeNull()
   })
 })

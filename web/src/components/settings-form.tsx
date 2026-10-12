@@ -12,7 +12,9 @@ const MODES: Record<string, string> = {
   all: "Keep warm runners per repo, up to each repo's max",
 }
 
-export function SettingsSections({ form }: { form: SettingsForm }) {
+// webAccess: only Settings → General shows the web listener's settings; the
+// setup wizard leaves them out.
+export function SettingsSections({ form, webAccess = false }: { form: SettingsForm; webAccess?: boolean }) {
   const { values, changed, errors, offline, set } = form
   const text = (key: string) => String(values[key] ?? "")
   const num = (key: string) => (Number.isNaN(values[key]) ? "" : String(values[key]))
@@ -112,6 +114,33 @@ export function SettingsSections({ form }: { form: SettingsForm }) {
         {unitField("memory_max", "Memory max", "Per runner. Leave it empty for no limit.", "No limit")}
         {unitField("cpu_quota", "CPU quota", "Per runner. 100% is one CPU core.")}
       </FieldGroup>
+      {webAccess && (
+        <FieldGroup id="web-access" title="Web access" note="Changes apply after a restart.">
+          <Field
+            label="Listen address"
+            htmlFor="web_listen"
+            help={form.config?.web?.listen ? undefined : "The web UI turns off at the next restart."}
+            changed={is("web_listen")}
+            error={errors.web_listen ?? form.rejectedFields.web_listen}
+          >
+            <Input
+              id="web_listen"
+              className={`${FIELD_WIDTH} font-mono`}
+              value={text("web_listen")}
+              disabled={offline}
+              onChange={(e) => set("web_listen")(e.target.value)}
+            />
+          </Field>
+          <Field
+            label="Allowed hostnames"
+            help="IP addresses and localhost always work."
+            changed={is("web_hosts")}
+            error={errors.web_hosts ?? form.rejectedFields.web_hosts}
+          >
+            <TagField label="Allowed hostnames" value={values.web_hosts as string[]} onChange={set("web_hosts")} disabled={offline} className={FIELD_WIDTH} />
+          </Field>
+        </FieldGroup>
+      )}
     </div>
   )
 }
