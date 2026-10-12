@@ -234,19 +234,23 @@ func TestRequestChecks(t *testing.T) {
 	if rec := do(h, http.MethodPost, "/auth/login", body(pw), otherPort); rec.Code != http.StatusNoContent {
 		t.Fatalf("same host, other port: %d %s", rec.Code, rec.Body.String())
 	}
-	big := body(strings.Repeat("x", authBodyLimit+1))
-	if rec := do(h, http.MethodPost, "/auth/login", big, nil); rec.Code != http.StatusBadRequest ||
-		!strings.Contains(rec.Body.String(), "invalid request body") {
+	big := body(strings.Repeat("x", 17<<10))
+	if rec := do(h, http.MethodPost, "/auth/login", big, nil); rec.Code != http.StatusRequestEntityTooLarge ||
+		!strings.Contains(rec.Body.String(), "request body too large") {
 		t.Fatalf("oversized body: %d %s", rec.Code, rec.Body.String())
 	}
-	padded := body(pw) + strings.Repeat(" ", authBodyLimit)
-	if rec := do(h, http.MethodPost, "/auth/login", padded, nil); rec.Code != http.StatusBadRequest {
+	atCap := body(pw) + strings.Repeat(" ", authBodyLimit-len(body(pw)))
+	if rec := do(h, http.MethodPost, "/auth/login", atCap, nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("valid JSON padded to the cap: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(h, http.MethodPost, "/auth/login", atCap+" ", nil); rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("valid JSON padded past the cap: %d", rec.Code)
 	}
-	if rec := do(h, http.MethodPost, "/auth/login", body(pw)+` {"password":"x"}`, nil); rec.Code != http.StatusBadRequest {
-		t.Fatalf("trailing JSON: %d", rec.Code)
+	if rec := do(h, http.MethodPost, "/auth/login", body(pw)+` {"password":"x"}`, nil); rec.Code != http.StatusBadRequest ||
+		!strings.Contains(rec.Body.String(), "invalid request body") {
+		t.Fatalf("trailing JSON: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(h, http.MethodPost, "/auth/logout", strings.Repeat("x", authBodyLimit+1), withCookie(id)); rec.Code != http.StatusBadRequest || !a.Valid(id) {
+	if rec := do(h, http.MethodPost, "/auth/logout", strings.Repeat("x", authBodyLimit+1), withCookie(id)); rec.Code != http.StatusRequestEntityTooLarge || !a.Valid(id) {
 		t.Fatalf("oversized logout: %d, session valid %v", rec.Code, a.Valid(id))
 	}
 	rec = do(h, http.MethodGet, "/", "", withCookie(id))
@@ -268,6 +272,25 @@ func TestRoutes(t *testing.T) {
 			t.Errorf("%s /auth/nope: %d %q", m, rec.Code, rec.Header().Get("Content-Type"))
 		}
 	}
+	for _, tc := range []struct{ method, path, allow string }{
+		{http.MethodPost, "/auth/state", "GET, HEAD"},
+		{http.MethodGet, "/auth/setup", "POST"},
+		{http.MethodGet, "/auth/login", "POST"},
+		{http.MethodPut, "/auth/logout", "POST"},
+		{http.MethodDelete, "/auth/password", "POST"},
+	} {
+		rec := do(h, tc.method, tc.path, "", withCookie(id))
+		if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") != tc.allow ||
+			!strings.Contains(rec.Body.String(), `"error":"method not allowed"`) {
+			t.Errorf("%s %s: %d Allow %q %s", tc.method, tc.path, rec.Code, rec.Header().Get("Allow"), rec.Body.String())
+		}
+	}
+	if rec := do(h, http.MethodHead, "/auth/state", "", nil); rec.Code != http.StatusOK {
+		t.Fatalf("HEAD /auth/state: %d", rec.Code)
+	}
+	if !a.Valid(id) {
+		t.Fatal("a refused method ended the session")
+	}
 	if rec := do(h, http.MethodPost, "/", "", nil); rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST /: %d", rec.Code)
 	}
@@ -279,6 +302,29 @@ func TestRoutes(t *testing.T) {
 	}
 	if api.paths[len(api.paths)-1] != "GET /nope" {
 		t.Fatalf("api saw %v", api.paths)
+	}
+}
+
+// A JSON encoder may write any byte as a six-byte \u escape, so the body
+// limit has to hold two passwords of the maximum length written that way.
+func TestLongestPasswordsFitTheBodyLimit(t *testing.T) {
+	h, a, _ := newTestHandler(t)
+	id, err := a.Setup(strings.Repeat("x", MaxPasswordLen))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "x" and "y" as JSON escapes. The backslash stands apart so that no
+	// editor or tool turns the escape back into the letter.
+	const bs = `\`
+	req := `{"current":"` + strings.Repeat(bs+"u0078", MaxPasswordLen) + `","new":"` + strings.Repeat(bs+"u0079", MaxPasswordLen) + `"}`
+	if len(req) <= 12*MaxPasswordLen {
+		t.Fatalf("the request is %d bytes; its passwords are not escaped", len(req))
+	}
+	if rec := do(h, http.MethodPost, "/auth/password", req, withCookie(id)); rec.Code != http.StatusNoContent {
+		t.Fatalf("a %d-byte password change: %d %s", len(req), rec.Code, rec.Body.String())
+	}
+	if _, err := a.Login("10.0.0.1", strings.Repeat("y", MaxPasswordLen)); err != nil {
+		t.Fatalf("the new password: %v", err)
 	}
 }
 

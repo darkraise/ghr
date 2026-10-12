@@ -17,8 +17,10 @@ import (
 )
 
 const (
-	cookieName    = "ghr_session"
-	authBodyLimit = 4 << 10
+	cookieName = "ghr_session"
+	// authBodyLimit holds two passwords of MaxPasswordLen with every byte
+	// written as a six-byte JSON escape.
+	authBodyLimit = 16 << 10
 	csp           = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; object-src 'none'; form-action 'self'; frame-ancestors 'none'"
 )
 
@@ -39,12 +41,28 @@ type handler struct {
 func Handler(a *Auth, api http.Handler, static fs.FS, hosts []string) http.Handler {
 	h := &handler{auth: a, hosts: hosts}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /auth/state", h.state)
-	mux.HandleFunc("POST /auth/setup", h.setup)
-	mux.HandleFunc("POST /auth/login", h.login)
-	mux.HandleFunc("POST /auth/logout", h.logout)
-	mux.HandleFunc("POST /auth/password", h.password)
+	allow := map[string]string{}
+	route := func(method, path string, fn http.HandlerFunc) {
+		mux.HandleFunc(method+" "+path, fn)
+		allow[path] = method
+		if method == http.MethodGet {
+			// The mux serves HEAD from a GET pattern.
+			allow[path] = "GET, HEAD"
+		}
+	}
+	route(http.MethodGet, "/auth/state", h.state)
+	route(http.MethodPost, "/auth/setup", h.setup)
+	route(http.MethodPost, "/auth/login", h.login)
+	route(http.MethodPost, "/auth/logout", h.logout)
+	route(http.MethodPost, "/auth/password", h.password)
+	// Without this catch-all the mux would hand a wrong method or an unknown
+	// /auth path to the static handler, which answers with the app's page.
 	mux.HandleFunc("/auth/", func(w http.ResponseWriter, r *http.Request) {
+		if methods, ok := allow[r.URL.Path]; ok {
+			w.Header().Set("Allow", methods)
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
 		writeError(w, http.StatusNotFound, "not found")
 	})
 	mux.Handle("/api/", h.requireSession(http.StripPrefix("/api", api)))
@@ -55,7 +73,7 @@ func Handler(a *Auth, api http.Handler, static fs.FS, hosts []string) http.Handl
 // checks runs before routing. The Host allowlist stops DNS rebinding; the
 // X-GHR header forces a CORS preflight on any cross-origin script, which ghr
 // never approves; the Origin check refuses cross-site form posts. Every /auth
-// POST body is read in full here, so the 4 KB cap holds for routes that
+// POST body is read in full here, so authBodyLimit holds for routes that
 // ignore their body.
 func (h *handler) checks(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +104,12 @@ func (h *handler) checks(next http.Handler) http.Handler {
 		}
 		if auth && r.Method == http.MethodPost {
 			data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, authBodyLimit))
-			if err != nil {
+			var tooLarge *http.MaxBytesError
+			switch {
+			case errors.As(err, &tooLarge):
+				writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+				return
+			case err != nil:
 				writeError(w, http.StatusBadRequest, "invalid request body")
 				return
 			}
