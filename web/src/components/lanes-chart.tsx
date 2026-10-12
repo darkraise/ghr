@@ -1,6 +1,7 @@
 import type { Activity, ActivityRun } from "@/api/types"
 import { GUTTER, hasJob, laneTicks, lineRuns, PAD_RIGHT, retentionText, runAria, runEnd, runLabel, scaleX, windowWords } from "@/lib/activity-view"
 import { fmtMem } from "@/lib/format"
+import { httpsUrl } from "@/lib/links"
 import { plainClick } from "@/lib/plain-click"
 
 const LANE_H = 20
@@ -104,9 +105,10 @@ function RunMark({
       </a>
     )
   }
-  if (run.html_url?.startsWith("https://")) {
+  const url = httpsUrl(run.html_url)
+  if (url) {
     return (
-      <a href={run.html_url} target="_blank" rel="noreferrer" aria-label={label} className="ghr-mark">
+      <a href={url} target="_blank" rel="noreferrer" aria-label={label} className="ghr-mark">
         {body}
       </a>
     )
