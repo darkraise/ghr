@@ -132,6 +132,11 @@ describe("RunFrame", () => {
   it.each([
     [{ status: "completed", conclusion: "failure" }, "Failed", "bg-destructive/15", "text-destructive"],
     [{ status: "completed", conclusion: "success" }, "Succeeded", "bg-success/15", "text-success"],
+    [{ status: "completed", conclusion: "timed_out" }, "Failed", "bg-destructive/15", "text-destructive"],
+    [{ status: "completed", conclusion: "unknown" }, "Unknown", "bg-muted-foreground/15", "text-muted-foreground"],
+    [{ status: "completed", conclusion: "neutral" }, "Neutral", "bg-muted-foreground/15", "text-muted-foreground"],
+    [{ status: "completed", conclusion: "stale" }, "Stale", "bg-muted-foreground/15", "text-muted-foreground"],
+    [{ status: "completed", conclusion: "action_required" }, "Action required", "bg-warning/15", "text-warning"],
     [{ status: "in_progress", conclusion: "" }, "Running", "bg-running/15", "text-running"],
     [{ status: "queued", conclusion: "" }, "Waiting", "bg-warning/15", "text-warning"],
   ])("shows the run's state as a pill before the header actions (%o)", (over, word, fill, text) => {

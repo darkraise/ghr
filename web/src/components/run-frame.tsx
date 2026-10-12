@@ -9,6 +9,7 @@ import { RunStatusIcon } from "@/components/run-status-icon"
 import { dur } from "@/lib/format"
 import { attemptLabel, githubLinks, isRunActive, jobMs, runDescription } from "@/lib/run-details"
 import { SIDE_LINK } from "@/lib/side-link"
+import { resultState } from "@/lib/status"
 
 export interface JobLinkOptions {
   step?: number
@@ -26,10 +27,7 @@ export type SummaryLinkFn = (children: ReactNode, opts: { className?: string; cu
 const RAIL_LINK = SIDE_LINK
 
 function RunPill({ run }: { run: RunDetail }) {
-  if (!isRunActive(run.status)) {
-    const done = run.conclusion === "success" || run.conclusion === "cancelled" || run.conclusion === "skipped"
-    return <StatusPill state={done ? run.conclusion : "failure"} />
-  }
+  if (!isRunActive(run.status)) return <StatusPill state={resultState(run.conclusion)} />
   return <StatusPill state={run.status === "in_progress" ? "running" : "queued"} />
 }
 
