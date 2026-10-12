@@ -4,7 +4,7 @@ import { keys } from "@/api/hooks"
 import type { InstanceStatus, MetricSample } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
-import { ago, clock, dateTime, dateTimeSec, dur, elapsed, fmtMem, hhmm, humanBytes, isZeroTime, monthDay, plural, series, shortWhen, startedAt } from "./format"
+import { ago, count, dateTime, dateTimeSec, dur, elapsed, fmtMem, hhmm, humanBytes, isZeroTime, monthDay, plural, series, shortWhen, startedAt } from "./format"
 import { clockOffset, useNow } from "./use-now"
 
 const statusFixture = fixtures.status
@@ -56,8 +56,12 @@ describe("small formatters", () => {
     expect(isZeroTime(undefined)).toBe(true)
     expect(isZeroTime("2026-10-03T14:05:00Z")).toBe(false)
   })
+  it("count groups the thousands of a number", () => {
+    expect(count(4980)).toBe("4,980")
+    expect(count(1_250_000)).toBe("1,250,000")
+    expect(count(0)).toBe("0")
+  })
   it("formats local times (TZ=UTC in tests)", () => {
-    expect(clock("2026-10-03T14:05:09Z")).toBe("14:05:09")
     expect(hhmm(new Date("2026-10-06T14:20:00Z"))).toBe("14:20")
     expect(dateTime("2026-10-03T14:05:09Z")).toBe("2026-10-03 14:05")
     expect(dateTimeSec("2026-10-03T14:05:09Z")).toBe("2026-10-03 14:05:09")

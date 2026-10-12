@@ -50,11 +50,6 @@ export function hhmm(d: Date): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-export function clock(iso: string): string {
-  const d = new Date(iso)
-  return `${hhmm(d)}:${pad(d.getSeconds())}`
-}
-
 export function dateTime(iso: string): string {
   const d = new Date(iso)
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hhmm(d)}`
@@ -102,4 +97,8 @@ export function plural(n: number, word: string): string {
 
 export function repositories(n: number): string {
   return n === 1 ? "1 repository" : `${n} repositories`
+}
+
+export function count(n: number): string {
+  return n.toLocaleString("en-US")
 }
