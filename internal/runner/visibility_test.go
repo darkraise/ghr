@@ -277,3 +277,29 @@ func TestHandedOverAnswerWaitsForItsRepository(t *testing.T) {
 		t.Fatal("the answer outlived its repository")
 	}
 }
+
+// A handed-over answer whose repository never shows up in the config is not
+// kept for ever: once it is visibilityTTL old it is dropped like any other.
+func TestUnseenHandedOverAnswerExpires(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	without := h.cfg.Clone()
+	without.Repos = without.Repos[:1]
+	tick := func(cfg *config.Config) {
+		h.cfg = cfg
+		h.now = h.now.Add(10 * time.Second)
+		h.m.Tick(ctx)
+		h.m.Wait()
+	}
+	tick(without)
+	h.m.RecordVisibility("darkmem", false)
+	tick(without)
+	if _, known := h.visibility("darkmem"); !known {
+		t.Fatal("a tick before the repository was in the config dropped the answer")
+	}
+	h.now = h.now.Add(visibilityTTL)
+	tick(without)
+	if _, known := h.visibility("darkmem"); known {
+		t.Fatal("an answer for a repository never seen in the config outlived visibilityTTL")
+	}
+}

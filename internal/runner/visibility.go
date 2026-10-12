@@ -27,7 +27,8 @@ type visibility struct {
 	// read applies its answer only when rev is what it was as the read began.
 	rev uint64
 	// handed marks an answer handed over for a repository that is being
-	// added: it is kept until that repository shows up in the config.
+	// added: it is kept until that repository shows up in the config, or for
+	// at most visibilityTTL.
 	handed bool
 }
 
@@ -185,9 +186,9 @@ func (m *Manager) noteBlocked(cfg *config.Config) {
 // longer in the config, so one that is removed and added again starts unread
 // and its removal is not reported as a block being lifted. An answer handed
 // over for a repo that is being added is not in the config yet; it is kept
-// until the repo has been seen there once. It needs no API call, so it runs
-// on every tick.
-func (m *Manager) forgetRemoved(cfg *config.Config) {
+// until the repo has been seen there once, or for at most visibilityTTL. It
+// needs no API call, so it runs on every tick.
+func (m *Manager) forgetRemoved(cfg *config.Config, now time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for key, v := range m.vis {
@@ -195,7 +196,7 @@ func (m *Manager) forgetRemoved(cfg *config.Config) {
 		case listed && v.handed:
 			v.handed = false
 			m.vis[key] = v
-		case !listed && !v.handed:
+		case !listed && (!v.handed || now.Sub(v.readAt) >= visibilityTTL):
 			delete(m.vis, key)
 		}
 	}

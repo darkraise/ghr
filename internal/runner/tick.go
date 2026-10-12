@@ -23,7 +23,7 @@ func (m *Manager) Tick(ctx context.Context) {
 	m.refreshUnits(ctx)
 	m.readJobFiles()
 	m.forgetPaused(cfg)
-	m.forgetRemoved(cfg)
+	m.forgetRemoved(cfg, now)
 	if m.apiAllowed(now) {
 		m.refreshRunners(ctx)
 	}
