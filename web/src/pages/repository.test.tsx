@@ -11,8 +11,8 @@ function routes(over: Record<string, unknown> = {}) {
 
 // The daemon applies a PATCH, so the config read after it reflects the save.
 // A null clears the value, and the daemon then leaves the key out.
-function applyingRoutes() {
-  let config: Config = fixtures.config
+function applyingRoutes(initial: Config = fixtures.config) {
+  let config = initial
   return routes({
     "GET /api/config": () => config,
     "PATCH /api/config": ({ body }: { body: unknown }) => {
@@ -338,5 +338,89 @@ describe("repository page", () => {
     expect(actions.firstElementChild).toContainElement(label)
     expect(label.parentElement).toHaveClass("rounded-full", fill)
     expect(label.parentElement?.querySelector("svg")).toHaveClass(text)
+  })
+})
+
+const PUBLIC_HELP = "A job in a public repository can come from anyone's pull request and runs on this host."
+
+const publicConfig: Config = {
+  ...fixtures.config,
+  repos: (fixtures.config.repos ?? []).map((r) => (r.name === "darkmem" ? { ...r, allow_public: true } : r)),
+}
+
+describe("Serve when public", () => {
+  it("asks before serving a public repository and sends the whole save once confirmed", async () => {
+    const { calls } = mockApi(applyingRoutes())
+    const { user } = renderApp("/repositories/darkmem/settings")
+    const toggle = await screen.findByRole("switch", { name: "Serve when public" })
+    expect(toggle).not.toBeChecked()
+    expect(screen.getByText(PUBLIC_HELP)).toBeInTheDocument()
+    expect(screen.queryByText(/GitHub reports this repository public/)).toBeNull()
+    const max = screen.getByLabelText("Max")
+    await user.clear(max)
+    await user.type(max, "3")
+    await user.click(toggle)
+    expect(screen.getByText("2 unsaved changes")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    const ask = await screen.findByRole("alertdialog", { name: "Serve darkmem while it is public?" })
+    expect(within(ask).getByText(PUBLIC_HELP)).toBeInTheDocument()
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false)
+    await user.click(within(ask).getByRole("button", { name: "Serve when public" }))
+    await waitFor(() =>
+      expect(calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([{ repos: { darkmem: { max: 3, allow_public: true } } }]),
+    )
+    await waitFor(() => expect(screen.queryByText(/unsaved change/)).toBeNull())
+    expect(screen.getByRole("switch", { name: "Serve when public" })).toBeChecked()
+    expect(screen.queryAllByText(/Daemon did not apply darkmem\.allow_public/)).toHaveLength(0)
+  })
+
+  it("sends nothing when the question is cancelled, and keeps the draft", async () => {
+    const { calls } = mockApi(applyingRoutes())
+    const { user } = renderApp("/repositories/darkmem/settings")
+    await user.click(await screen.findByRole("switch", { name: "Serve when public" }))
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    const ask = await screen.findByRole("alertdialog", { name: "Serve darkmem while it is public?" })
+    await user.click(within(ask).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false)
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Serve when public" })).toBeChecked()
+  })
+
+  it("asks the same question when the guard saves on leaving", async () => {
+    const { calls } = mockApi(applyingRoutes())
+    const { user, router } = renderApp("/repositories/darkmem/settings")
+    await user.click(await screen.findByRole("switch", { name: "Serve when public" }))
+    await user.click(screen.getByRole("link", { name: /^Runners/ }))
+    const guard = await screen.findByRole("alertdialog", { name: "Unsaved changes" })
+    await user.click(within(guard).getByRole("button", { name: "Save" }))
+    const ask = await screen.findByRole("alertdialog", { name: "Serve darkmem while it is public?" })
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false)
+    await user.click(within(ask).getByRole("button", { name: "Serve when public" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/runners"))
+    expect(calls.filter((c) => c.method === "PATCH").map((c) => c.body)).toEqual([{ repos: { darkmem: { allow_public: true } } }])
+  })
+
+  it("saves it off without asking", async () => {
+    const { calls } = mockApi(applyingRoutes(publicConfig))
+    const { user } = renderApp("/repositories/darkmem/settings")
+    const toggle = await screen.findByRole("switch", { name: "Serve when public" })
+    expect(toggle).toBeChecked()
+    await user.click(toggle)
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ repos: { darkmem: { allow_public: false } } }))
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+    await waitFor(() => expect(screen.queryByText(/unsaved change/)).toBeNull())
+    expect(screen.queryAllByText(/Daemon did not apply darkmem\.allow_public/)).toHaveLength(0)
+  })
+
+  it("notes when GitHub reports the repository public, and what turning it off does", async () => {
+    const repos = fixtures.status.repos.map((r) => (r.name === "darkmem" ? { ...r, public: true } : r))
+    mockApi(routes({ "GET /api/config": publicConfig, "GET /api/status": { ...fixtures.status, repos } }))
+    const { user } = renderApp("/repositories/darkmem/settings")
+    expect(await screen.findByText("GitHub reports this repository public.")).toBeInTheDocument()
+    await user.click(screen.getByRole("switch", { name: "Serve when public" }))
+    expect(screen.getByText("GitHub reports this repository public. Idle runners stop; running jobs finish.")).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Visibility" })).getByText("Changed")).toBeInTheDocument()
   })
 })

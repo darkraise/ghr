@@ -5,6 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "darkraise-ui/components/input"
 import { toast } from "darkraise-ui/components/sonner"
 import { Spinner } from "darkraise-ui/components/spinner"
+import { Switch } from "darkraise-ui/components/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "darkraise-ui/components/tooltip"
 import { PageHeader } from "darkraise-ui/layout"
 import { Ellipsis } from "lucide-react"
@@ -12,7 +13,7 @@ import { useState } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useStatus } from "@/api/hooks"
 import type { Config, RepoConfig, RepoPatch, RepoStatus } from "@/api/types"
-import { ConfirmDialog } from "@/components/confirm-dialog"
+import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { LabelCheckGroup } from "@/components/label-check-group"
 import { ErrorLine } from "@/components/page/error-line"
 import { Field, FieldGroup } from "@/components/page/field"
@@ -41,7 +42,20 @@ const SECTIONS = [
 ] as const
 
 function repoValues(r: RepoConfig | undefined): Values {
-  return { max: r?.max, warm: r?.warm, labels: r?.labels ?? [], cleanup_name_prefixes: r?.cleanup_name_prefixes ?? [] }
+  return {
+    max: r?.max,
+    warm: r?.warm,
+    labels: r?.labels ?? [],
+    cleanup_name_prefixes: r?.cleanup_name_prefixes ?? [],
+    allow_public: r?.allow_public ?? false,
+  }
+}
+
+const PUBLIC_HELP = "A job in a public repository can come from anyone's pull request and runs on this host."
+
+function publicNote(isPublic: boolean | undefined, on: boolean): string {
+  if (!isPublic) return ""
+  return on ? "GitHub reports this repository public." : "GitHub reports this repository public. Idle runners stop; running jobs finish."
 }
 
 // Mirrors config.CustomLabels: global then repo labels, trimmed, lower-cased
@@ -149,6 +163,7 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
   const [draft, setDraft] = useState<Values>({})
   const [saving, setSaving] = useState(false)
   const [rejection, setRejection] = useState("")
+  const [question, setQuestion] = useState<{ confirm: Confirm; cancel: () => void } | null>(null)
 
   const cfg = config.data
   const repoCfg = cfg?.repos?.find((r) => r.name === name)
@@ -173,11 +188,29 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
     setRejection("")
   }
 
-  async function save(): Promise<boolean> {
+  // Turning Serve when public on asks first, and the answer covers the whole
+  // save: confirming sends every change, Cancel sends nothing and keeps the
+  // draft. The promise settles with the answer, so UnsavedGuard waits for it.
+  function save(): Promise<boolean> {
     if (warmError) {
       toast.error("Fix the highlighted settings first")
-      return false
+      return Promise.resolve(false)
     }
+    if (!changed.includes("allow_public") || draft.allow_public !== true) return send()
+    return new Promise((resolve) => {
+      setQuestion({
+        confirm: { title: `Serve ${name} while it is public?`, body: PUBLIC_HELP, action: "Serve when public", run: () => resolve(send()) },
+        cancel: () => resolve(false),
+      })
+    })
+  }
+
+  function closeQuestion() {
+    question?.cancel()
+    setQuestion(null)
+  }
+
+  async function send(): Promise<boolean> {
     const sent: Values = Object.fromEntries(changed.map((k) => [k, draft[k]]))
     // An emptied Max or Warm box is undefined in the draft; null tells the
     // daemon to clear the value, where a missing key would leave it.
@@ -242,6 +275,7 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
   const effective = [...SYSTEM_LABELS, ...custom.map((c) => c.label)]
   const degraded = status.data?.degraded ?? false
   const is = (key: string) => changed.includes(key)
+  const note = publicNote(repoStatus?.public, values.allow_public === true)
 
   const base = `/repositories/${name}`
 
@@ -309,6 +343,17 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
                 />
               </Field>
             </FieldGroup>
+            <FieldGroup id="visibility" title="Visibility">
+              <Field label="Serve when public" htmlFor="repo-allow-public" help={PUBLIC_HELP} changed={is("allow_public")}>
+                <Switch
+                  id="repo-allow-public"
+                  checked={values.allow_public === true}
+                  disabled={locked}
+                  onCheckedChange={(on) => setDraft((d) => ({ ...d, allow_public: on }))}
+                />
+                {note && <span className="text-xs text-warning">{note}</span>}
+              </Field>
+            </FieldGroup>
             <FieldGroup id="labels" title="Labels">
               <Field label="Repo labels" help="Added to this repository's runners." changed={is("labels")}>
                 <TagField
@@ -363,6 +408,7 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
         onSave={save}
         onDiscard={discard}
       />
+      <ConfirmDialog confirm={question?.confirm ?? null} onClose={closeQuestion} />
     </div>
   )
 }
