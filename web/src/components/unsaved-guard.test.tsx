@@ -10,6 +10,7 @@ import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { useEffect, useState } from "react"
 import { describe, expect, it, vi } from "vitest"
+import { unsavedCount } from "@/lib/unsaved"
 import { UnsavedGuard } from "./unsaved-guard"
 
 function setup(saveResult = true, settles = saveResult, allow?: (pathname: string) => boolean, hold?: Promise<void>) {
@@ -132,6 +133,15 @@ describe("UnsavedGuard", () => {
     act(() => router.history.push("/inside"))
     expect(await screen.findByText("inside page")).toBeInTheDocument()
     expect(screen.queryByRole("alertdialog")).toBeNull()
+  })
+
+  it("publishes its count while mounted, and none once the page is left", async () => {
+    const { router } = setup(true, true, (pathname) => pathname === "/inside")
+    await screen.findByText("form page")
+    expect(unsavedCount()).toBe(1)
+    act(() => router.history.push("/inside"))
+    expect(await screen.findByText("inside page")).toBeInTheDocument()
+    expect(unsavedCount()).toBe(0)
   })
 
   it("still guards a navigation the page does not allow", async () => {

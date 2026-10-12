@@ -9,6 +9,7 @@ import {
 } from "darkraise-ui/components/alert-dialog"
 import { Button } from "darkraise-ui/components/button"
 import { useEffect, useRef, useState } from "react"
+import { setUnsavedCount } from "@/lib/unsaved"
 
 export function UnsavedGuard({
   count,
@@ -33,6 +34,10 @@ export function UnsavedGuard({
     enableBeforeUnload: count > 0,
     withResolver: true,
   })
+  useEffect(() => {
+    setUnsavedCount(count)
+    return () => setUnsavedCount(0)
+  }, [count])
   const [saved, setSaved] = useState(false)
   // A save started from one prompt must not act on a later one.
   const prompt = useRef(0)
