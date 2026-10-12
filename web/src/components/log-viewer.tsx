@@ -1,6 +1,6 @@
 import { Input } from "darkraise-ui/components/input"
 import { ChevronRight } from "lucide-react"
-import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import type { JobLog, LogLine, LogStep, Step } from "@/api/types"
 import { RunStatusIcon } from "@/components/run-status-icon"
 import { renderAnsi } from "@/lib/ansi"
@@ -81,8 +81,16 @@ export function LogViewer({
     return new Set(g === undefined ? [] : [groupKey(target.step, g)])
   })
   const [showAll, setShowAll] = useState<Set<number>>(() => new Set())
-  const [query, setQuery] = useState("")
-  const [cur, setCur] = useState(0)
+  const [typed, setTyped] = useState("")
+  // The box takes each keystroke at once; the matching and the lines follow
+  // when the browser has time for them.
+  const query = useDeferredValue(typed)
+  // The current match belongs to the search it was counted in, so a new
+  // search text starts again at its first match, and so does an earlier
+  // text typed again.
+  const [at, setAt] = useState({ query: "", index: 0 })
+  if (at.query !== query) setAt({ query, index: 0 })
+  const cur = at.query === query ? at.index : 0
   const ref = useRef<HTMLDivElement>(null)
 
   const matches = useMemo(() => findMatches(log, query), [log, query])
@@ -95,16 +103,11 @@ export function LogViewer({
   const groupOpen = (stepN: number, n: number) =>
     openGroups.has(groupKey(stepN, n)) || (current?.step === stepN && currentGroup === n)
 
-  function onQuery(next: string) {
-    setQuery(next)
-    setCur(0)
-  }
-
   function onKey(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key !== "Enter" || matches.length === 0) return
     e.preventDefault()
     const next = (cur + (e.shiftKey ? matches.length - 1 : 1)) % matches.length
-    setCur(next)
+    setAt({ query, index: next })
   }
 
   function toggle<T>(set: (f: (s: Set<T>) => Set<T>) => void, key: T) {
@@ -183,8 +186,8 @@ export function LogViewer({
           type="search"
           aria-label="Search logs"
           placeholder="Search logs"
-          value={query}
-          onChange={(e) => onQuery(e.target.value)}
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
           onKeyDown={onKey}
           className="w-64"
         />

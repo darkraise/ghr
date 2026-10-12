@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { Profiler } from "react"
 import { describe, expect, it, vi } from "vitest"
 import type { JobLog, LogLine, Step } from "@/api/types"
 import { renderAnsi } from "@/lib/ansi"
@@ -169,6 +170,36 @@ describe("LogViewer", () => {
     expect(screen.getByText("2 of 4")).toBeInTheDocument()
     await user.keyboard("{Shift>}{Enter}{/Shift}{Shift>}{Enter}{/Shift}")
     expect(screen.getByText("4 of 4")).toBeInTheDocument()
+  })
+
+  it("commits a keystroke before it matches the new text", async () => {
+    const user = userEvent.setup()
+    const commits: (string | undefined)[] = []
+    const count = () => screen.queryByText(/^\d+ of \d+$/)?.textContent ?? undefined
+    render(
+      <Profiler id="log" onRender={() => commits.push(count())}>
+        <LogViewer log={fixtures.jobLog} steps={steps} />
+      </Profiler>,
+    )
+    const box = screen.getByRole("searchbox", { name: "Search logs" })
+    await user.type(box, "ruf{Enter}")
+    expect(count()).toBe("2 of 4")
+    commits.length = 0
+    await user.type(box, "f")
+    // The box takes the keystroke in a commit of its own, the earlier search
+    // untouched; the new search starts again at its first match.
+    expect(commits).toEqual(["2 of 4", "1 of 4"])
+  })
+
+  it("starts an earlier search again at its first match", async () => {
+    const { user } = renderViewer()
+    const box = screen.getByRole("searchbox", { name: "Search logs" })
+    await user.type(box, "ruf{Enter}")
+    expect(screen.getByText("2 of 4")).toBeInTheDocument()
+    await user.type(box, "f")
+    expect(screen.getByText("1 of 4")).toBeInTheDocument()
+    await user.type(box, "{Backspace}")
+    expect(screen.getByText("1 of 4")).toBeInTheDocument()
   })
 
   it("says when nothing matches", async () => {
