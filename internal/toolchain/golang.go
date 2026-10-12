@@ -54,5 +54,5 @@ func (g golang) sha256(ctx context.Context, name string) (string, error) {
 }
 
 func (g golang) Install(ctx context.Context, rel Release, progress func(string)) error {
-	return g.e.installArchive(ctx, g.dir, rel, progress)
+	return g.e.installArchive(ctx, g.dir, Origin{Dir: g.e.Sources.GoDownload}, rel, progress)
 }

@@ -198,9 +198,22 @@ func dropFailed(dir string) {
 	os.Remove(filepath.Dir(dir))
 }
 
-// installArchive installs rel's archive at <Root>/<toolDir>/<rel.Folder>/x64,
-// the layout @actions/tool-cache find() reads, writing the marker last.
-func (e *Env) installArchive(ctx context.Context, toolDir string, rel Release, progress func(string)) error {
+// fetch is the one way an installer downloads: Allow judges rawURL against
+// the installer's own origin, and Fetch then gets that same string.
+func (e *Env) fetch(ctx context.Context, from Origin, rawURL, dst string) error {
+	if err := e.Allow(rawURL, from); err != nil {
+		return err
+	}
+	if err := e.Fetch(ctx, rawURL, dst); err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+	return nil
+}
+
+// installArchive installs rel's archive, which must come from from, at
+// <Root>/<toolDir>/<rel.Folder>/x64, the layout @actions/tool-cache find()
+// reads, writing the marker last.
+func (e *Env) installArchive(ctx context.Context, toolDir string, from Origin, rel Release, progress func(string)) error {
 	if !validFolder(rel.Folder) {
 		return fmt.Errorf("invalid version folder %q", rel.Folder)
 	}
@@ -214,8 +227,8 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, rel Release, p
 	defer os.RemoveAll(op)
 	progress("downloading")
 	archive := filepath.Join(op, "archive.tar.gz")
-	if err := e.Fetch(ctx, rel.URL, archive); err != nil {
-		return fmt.Errorf("download: %w", err)
+	if err := e.fetch(ctx, from, rel.URL, archive); err != nil {
+		return err
 	}
 	if err := verify(archive, rel.SHA256); err != nil {
 		return err

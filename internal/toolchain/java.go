@@ -11,6 +11,17 @@ import (
 
 const javaDir = "Java_Temurin-Hotspot_jdk"
 
+// javaReleases is where Adoptium publishes the builds of version's major:
+// the temurin<major>-binaries repository. A major that is not a number has
+// no such place, and the "" returned for it passes no URL.
+func javaReleases(version string) string {
+	major, _, _ := strings.Cut(version, ".")
+	if major == "" || strings.Trim(major, "0123456789") != "" {
+		return ""
+	}
+	return "https://github.com/adoptium/temurin" + major + "-binaries/releases/download/"
+}
+
 type java struct{ e *Env }
 
 func newJava(e *Env) Installer { return java{e} }
@@ -79,7 +90,7 @@ func (j java) Resolve(ctx context.Context, spec string) (Release, error) {
 }
 
 func (j java) Install(ctx context.Context, rel Release, progress func(string)) error {
-	return j.e.installArchive(ctx, javaDir, rel, progress)
+	return j.e.installArchive(ctx, javaDir, Origin{Dir: javaReleases(rel.Version)}, rel, progress)
 }
 
 func (j java) Installed() ([]Installed, error) {

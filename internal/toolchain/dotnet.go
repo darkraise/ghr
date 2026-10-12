@@ -116,8 +116,8 @@ func (d dotnet) Install(ctx context.Context, rel Release, progress func(string))
 	}
 	defer os.RemoveAll(op)
 	progress("downloading")
-	if err := e.Fetch(ctx, rel.URL, filepath.Join(op, "dotnet-install.sh")); err != nil {
-		return fmt.Errorf("download: %w", err)
+	if err := e.fetch(ctx, Origin{File: e.Sources.DotnetScript}, rel.URL, filepath.Join(op, "dotnet-install.sh")); err != nil {
+		return err
 	}
 	if err := e.chownTree(ctx, op); err != nil {
 		return fmt.Errorf("chown: %w", err)

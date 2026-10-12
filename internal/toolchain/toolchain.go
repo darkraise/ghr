@@ -35,6 +35,11 @@ type Sources struct {
 	DotnetScript   string
 }
 
+// Origin is where an installer's downloads may come from: every URL below
+// the directory Dir, which must end in "/", or the one URL File. Exactly one
+// of the two is set.
+type Origin struct{ Dir, File string }
+
 // Env is what the installers need from the host.
 type Env struct {
 	Root    string // the tool cache (RUNNER_TOOL_CACHE)
@@ -43,6 +48,10 @@ type Env struct {
 	Sources Sources
 	Get     func(ctx context.Context, url string) ([]byte, error)
 	Fetch   func(ctx context.Context, url, dst string) error
+	// Allow returns an error unless url may be downloaded for an installer
+	// whose files come from from. A version list names the URL, and what it
+	// downloads is unpacked or run on this machine.
+	Allow   func(url string, from Origin) error
 	Run     func(ctx context.Context, name string, args ...string) ([]byte, error)
 	Extract func(ctx context.Context, archive, dir string) error
 	OpID    func() string

@@ -8,6 +8,10 @@ import (
 	"path/filepath"
 )
 
+// pythonReleases is where every download_url of the python-versions manifest
+// points.
+const pythonReleases = "https://github.com/actions/python-versions/releases/download/"
+
 type python struct{ manifestTool }
 
 func newPython(e *Env) Installer {
@@ -43,8 +47,8 @@ func (p python) Install(ctx context.Context, rel Release, progress func(string))
 	defer os.RemoveAll(op)
 	progress("downloading")
 	archive := filepath.Join(op, "python.tar.gz")
-	if err := e.Fetch(ctx, rel.URL, archive); err != nil {
-		return fmt.Errorf("download: %w", err)
+	if err := e.fetch(ctx, Origin{Dir: pythonReleases}, rel.URL, archive); err != nil {
+		return err
 	}
 	progress("extracting")
 	out := filepath.Join(op, "x")

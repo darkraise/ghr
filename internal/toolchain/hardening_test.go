@@ -65,7 +65,7 @@ func TestInstallArchiveKeepsAVersionACompletedMeanwhile(t *testing.T) {
 		mkInstall(t, f.Root, "demo", "1.2.3", true)
 		return nil
 	}
-	if err := f.installArchive(context.Background(), "demo", rel, func(string) {}); !errors.Is(err, ErrAlreadyInstalled) {
+	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); !errors.Is(err, ErrAlreadyInstalled) {
 		t.Fatalf("got %v", err)
 	}
 	if !exists(filepath.Join(f.Root, "demo", "1.2.3", "x64", "file")) {
@@ -106,7 +106,7 @@ func TestInstallArchiveCancelledKeepsAnExistingMarkerlessFolder(t *testing.T) {
 		defer cancel()
 		return extract(c, archive, dir)
 	}
-	if err := f.installArchive(ctx, "demo", rel, func(string) {}); !errors.Is(err, context.Canceled) {
+	if err := f.installArchive(ctx, "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("got %v", err)
 	}
 	if !exists(filepath.Join(existing, "file")) {

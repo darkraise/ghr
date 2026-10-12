@@ -2,6 +2,10 @@ package toolchain
 
 import "context"
 
+// nodeReleases is where every download_url of the node-versions manifest
+// points.
+const nodeReleases = "https://github.com/actions/node-versions/releases/download/"
+
 type node struct{ manifestTool }
 
 func newNode(e *Env) Installer {
@@ -17,5 +21,5 @@ func (n node) Resolve(ctx context.Context, spec string) (Release, error) {
 }
 
 func (n node) Install(ctx context.Context, rel Release, progress func(string)) error {
-	return n.e.installArchive(ctx, n.dir, rel, progress)
+	return n.e.installArchive(ctx, n.dir, Origin{Dir: nodeReleases}, rel, progress)
 }

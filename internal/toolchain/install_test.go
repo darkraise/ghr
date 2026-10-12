@@ -20,7 +20,7 @@ func TestInstallArchiveWritesTheToolCacheLayout(t *testing.T) {
 	f := newFixture(t)
 	rel := demoRelease(f, tarGz(map[string]string{"demo-1.2.3/bin/demo": "bin"}))
 	var steps []string
-	if err := f.installArchive(context.Background(), "demo", rel, func(s string) { steps = append(steps, s) }); err != nil {
+	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(s string) { steps = append(steps, s) }); err != nil {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(f.Root, "demo", "1.2.3", "x64")
@@ -50,7 +50,7 @@ func TestInstallArchiveWritesTheToolCacheLayout(t *testing.T) {
 func TestInstallArchiveKeepsARootWithSeveralEntries(t *testing.T) {
 	f := newFixture(t)
 	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin", "LICENSE": "l"}))
-	if err := f.installArchive(context.Background(), "demo", rel, func(string) {}); err != nil {
+	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(filepath.Join(f.Root, "demo", "1.2.3", "x64", "bin", "demo")) {
@@ -62,7 +62,7 @@ func TestInstallArchiveSkipsACompleteVersion(t *testing.T) {
 	f := newFixture(t)
 	mkInstall(t, f.Root, "demo", "1.2.3", true)
 	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
-	if err := f.installArchive(context.Background(), "demo", rel, func(string) {}); !errors.Is(err, ErrAlreadyInstalled) {
+	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); !errors.Is(err, ErrAlreadyInstalled) {
 		t.Fatalf("got %v", err)
 	}
 	if f.hitCount("/demo.tar.gz") != 0 {
@@ -74,7 +74,7 @@ func TestInstallArchiveReplacesAFolderWithoutMarker(t *testing.T) {
 	f := newFixture(t)
 	stale := mkInstall(t, f.Root, "demo", "1.2.3", false)
 	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
-	if err := f.installArchive(context.Background(), "demo", rel, func(string) {}); err != nil {
+	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); err != nil {
 		t.Fatal(err)
 	}
 	if exists(filepath.Join(stale, "file")) {
@@ -96,7 +96,7 @@ func TestInstallArchiveFailuresLeaveNothing(t *testing.T) {
 			f := newFixture(t)
 			rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
 			breakIt(f, &rel)
-			err := f.installArchive(context.Background(), "demo", rel, func(string) {})
+			err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {})
 			if err == nil || !strings.Contains(err.Error(), name) {
 				t.Fatalf("error %v does not name %s", err, name)
 			}
@@ -120,7 +120,7 @@ func TestInstallArchiveCancelledLateLeavesNoVersionFolder(t *testing.T) {
 		defer cancel()
 		return extract(c, archive, dir)
 	}
-	if err := f.installArchive(ctx, "demo", rel, func(string) {}); !errors.Is(err, context.Canceled) {
+	if err := f.installArchive(ctx, "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("got %v", err)
 	}
 	if exists(filepath.Join(f.Root, "demo", "1.2.3")) {
@@ -148,7 +148,7 @@ func TestInstallArchiveTmpModes(t *testing.T) {
 		}
 		return fetch(ctx, url, dst)
 	}
-	if err := f.installArchive(context.Background(), "demo", rel, func(string) {}); err != nil {
+	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); err != nil {
 		t.Fatal(err)
 	}
 }

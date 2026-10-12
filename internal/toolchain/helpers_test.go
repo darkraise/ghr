@@ -276,6 +276,7 @@ func newFixture(t *testing.T) *fixture {
 		},
 		Get:   testGet,
 		Fetch: system.Download,
+		Allow: func(string, Origin) error { return nil },
 		Run:   f.host.run,
 		Extract: func(_ context.Context, archive, dir string) error {
 			if f.host.failExtract != nil {
