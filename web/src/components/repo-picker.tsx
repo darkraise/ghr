@@ -41,10 +41,11 @@ export function RepoPicker({
   const items = (repos.data ?? []).filter((r) => r.name.toLowerCase().includes(needle))
   const tabStop = items.find((r) => r.name === picked && !off(r))?.name ?? items.find((r) => !off(r))?.name
 
-  if (repos.isError) return <ErrorLine onRetry={() => void repos.refetch()}>{errorText(repos.error)}</ErrorLine>
-  if (!repos.data) return <Spinner label="Loading repositories" />
+  const error = repos.isError ? <ErrorLine onRetry={() => void repos.refetch()}>{errorText(repos.error)}</ErrorLine> : null
+  if (!repos.data) return error ?? <Spinner label="Loading repositories" />
   return (
     <div className="flex flex-col gap-2">
+      {error}
       <Input aria-label="Filter repositories" placeholder="Type to filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
       {repos.data.length === 0 && <p className="text-sm text-muted-foreground">Nothing to pick</p>}
       {repos.data.length > 0 && items.length === 0 && <p className="text-sm text-muted-foreground">No match</p>}
