@@ -3,12 +3,16 @@
 // newlines and reads "\" as "/", so "/<tab>/host" goes to another origin.
 const BASE = "http://ghr.invalid"
 
-// Only a path on this site, returned in the form the browser parsed it.
+// Only a path on this site, returned in the form the browser parsed it. The
+// browser follows that returned path, so it is checked again: removing dot
+// segments can turn "/.//host" into "//host", another origin.
 export function safeRedirect(target: string | undefined): string {
   if (!target?.startsWith("/")) return "/"
   try {
     const url = new URL(target, BASE)
-    return url.origin === BASE ? url.pathname + url.search + url.hash : "/"
+    if (url.origin !== BASE) return "/"
+    const path = url.pathname + url.search + url.hash
+    return new URL(path, BASE).origin === BASE ? path : "/"
   } catch {
     return "/"
   }

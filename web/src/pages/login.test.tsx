@@ -110,8 +110,19 @@ describe("login page", () => {
     await waitFor(() => expect(assign).toHaveBeenCalledWith("/history"))
   })
 
-  // The browser drops tabs and newlines from a URL, so "/<tab>/host" is "//host".
-  const offSite = ["//evil.example/x", "https://evil.example/x", "/\\evil.example/x", "/\t/evil.example/x", "/\n/evil.example/x", "/\r\\evil.example/x"]
+  // The browser drops tabs and newlines from a URL, so "/<tab>/host" is "//host",
+  // and removing dot segments turns "/.//host" into "//host".
+  const offSite = [
+    "//evil.example/x",
+    "https://evil.example/x",
+    "/\\evil.example/x",
+    "/\t/evil.example/x",
+    "/\n/evil.example/x",
+    "/\r\\evil.example/x",
+    "/.//evil.example/x",
+    "/a/..//evil.example/x",
+    "/%2e//evil.example/x",
+  ]
 
   it.each(offSite)("ignores the redirect %j that leaves the site", async (target) => {
     let done = false
