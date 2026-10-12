@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { json, mockApi, noContent } from "@/test/api"
 import { ApiError, api, setUnauthorizedHandler } from "./client"
 
@@ -124,5 +124,88 @@ describe("api client", () => {
     await expect(api.restart()).resolves.toBeUndefined()
     expect(calls).toEqual([{ method: "POST", path: "/api/restart", search: "", body: undefined, contentType: undefined }])
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("X-GHR")).toBe("1")
+  })
+})
+
+const aborted = () => new DOMException("The operation was aborted.", "AbortError")
+
+// Stands in for a daemon that never answers: like the browser's fetch, the
+// promise rejects when the request's signal aborts.
+function silentFetch() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(aborted()))
+        }),
+    ),
+  )
+}
+
+describe("request timeouts", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const settle = (call: Promise<unknown>) => {
+    const out: { error?: unknown } = {}
+    call.catch((err: unknown) => {
+      out.error = err
+    })
+    return out
+  }
+
+  it.each<[string, number, () => Promise<unknown>]>([
+    ["a read", 70_000, () => api.status()],
+    ["an action", 70_000, () => api.pauseAll()],
+    ["the raw-log download", 70_000, () => api.rawJobLog("darkmem", 2)],
+    ["Stop runner", 110_000, () => api.stopRunner("aaaaaa")],
+  ])("gives up on %s after %i ms of silence", async (_name, ms, call) => {
+    silentFetch()
+    const out = settle(call())
+    await vi.advanceTimersByTimeAsync(ms - 1)
+    expect(out.error).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(out.error).toEqual(new Error("the daemon did not answer"))
+    expect(out.error).not.toBeInstanceOf(ApiError)
+  })
+
+  it("keeps counting while a body that started does not end", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(new TextEncoder().encode('{"epoch":'))
+            init?.signal?.addEventListener("abort", () => c.error(aborted()))
+          },
+        })
+        return new Response(body, { status: 200 })
+      }),
+    )
+    const out = settle(api.status())
+    await vi.advanceTimersByTimeAsync(70_000)
+    expect(out.error).toEqual(new Error("the daemon did not answer"))
+  })
+
+  it("leaves the caller's own abort as it is", async () => {
+    silentFetch()
+    const ctrl = new AbortController()
+    const out = settle(api.status(ctrl.signal))
+    ctrl.abort()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(out.error).toMatchObject({ name: "AbortError" })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("leaves no timer behind an answered request", async () => {
+    mockApi({ "GET /api/status": { epoch: "e" } })
+    await api.status()
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

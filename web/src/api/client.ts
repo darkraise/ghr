@@ -51,7 +51,42 @@ export function notifyUnauthorized(): void {
   onUnauthorized()
 }
 
-export async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+// The daemon's web listener cuts a response after 60 seconds, so an answer
+// that has not come by then never will.
+const REQUEST_TIMEOUT = 70_000
+// The stop route lets a stop take 100 seconds.
+const STOP_TIMEOUT = 110_000
+
+// Runs one request under a time limit that covers the body as well as the
+// headers. An abort through the caller's signal passes through as it is.
+async function withTimeout<T>(ms: number, signal: AbortSignal | undefined, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const ctrl = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    ctrl.abort()
+  }, ms)
+  const cancel = () => ctrl.abort(signal?.reason)
+  signal?.addEventListener("abort", cancel)
+  if (signal?.aborted) cancel()
+  try {
+    return await run(ctrl.signal)
+  } catch (err) {
+    if (timedOut) throw new Error("the daemon did not answer")
+    throw err
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener("abort", cancel)
+  }
+}
+
+export async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+  timeoutMs = REQUEST_TIMEOUT,
+): Promise<T> {
   const headers: Record<string, string> = { "X-GHR": "1" }
   let payload: string | undefined
   if (typeof body === "string") {
@@ -61,26 +96,30 @@ export async function request<T>(method: string, path: string, body?: unknown, s
     headers["Content-Type"] = "application/json"
     payload = JSON.stringify(body)
   }
-  const res = await fetch(path, { method, headers, credentials: "same-origin", body: payload, signal })
-  if (res.ok) {
-    const text = await res.text()
-    return (text === "" ? undefined : JSON.parse(text)) as T
-  }
-  const err = await toError(res)
-  // A 401 from the API or /auth/password means "log in again"; one from
-  // /auth/login or /auth/setup is a wrong password or setup code the form
-  // shows. /auth/password answers a wrong current password with 403.
-  if (res.status === 401 && (path.startsWith("/api/") || path === "/auth/password")) onUnauthorized()
-  throw err
+  return withTimeout(timeoutMs, signal, async (limited) => {
+    const res = await fetch(path, { method, headers, credentials: "same-origin", body: payload, signal: limited })
+    if (res.ok) {
+      const text = await res.text()
+      return (text === "" ? undefined : JSON.parse(text)) as T
+    }
+    const err = await toError(res)
+    // A 401 from the API or /auth/password means "log in again"; one from
+    // /auth/login or /auth/setup is a wrong password or setup code the form
+    // shows. /auth/password answers a wrong current password with 403.
+    if (res.status === 401 && (path.startsWith("/api/") || path === "/auth/password")) onUnauthorized()
+    throw err
+  })
 }
 
 // A download whose body is the file itself, not JSON.
 async function requestBlob(path: string): Promise<Blob> {
-  const res = await fetch(path, { method: "GET", headers: { "X-GHR": "1" }, credentials: "same-origin" })
-  if (res.ok) return res.blob()
-  const err = await toError(res)
-  if (res.status === 401) onUnauthorized()
-  throw err
+  return withTimeout(REQUEST_TIMEOUT, undefined, async (limited) => {
+    const res = await fetch(path, { method: "GET", headers: { "X-GHR": "1" }, credentials: "same-origin", signal: limited })
+    if (res.ok) return res.blob()
+    const err = await toError(res)
+    if (res.status === 401) onUnauthorized()
+    throw err
+  })
 }
 
 const PLAIN_ERROR_MAX = 200
@@ -105,7 +144,8 @@ async function toError(res: Response): Promise<ApiError> {
 const query = (params: Record<string, string | number>) =>
   new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)])).toString()
 const seg = encodeURIComponent
-const send = (method: string, path: string, body?: unknown): Promise<void> => request<undefined>(method, path, body)
+const send = (method: string, path: string, body?: unknown, timeoutMs?: number): Promise<void> =>
+  request<undefined>(method, path, body, undefined, timeoutMs)
 
 export const api = {
   authState: (signal?: AbortSignal) => request<AuthState>("GET", "/auth/state", undefined, signal),
@@ -144,7 +184,7 @@ export const api = {
   rawJobLog: (repo: string, jobId: number) => requestBlob(`/api/actions/${seg(repo)}/jobs/${jobId}/log/raw`),
   artifactDownload: (repo: string, id: number) => request<DownloadURL>("GET", `/api/actions/${seg(repo)}/artifacts/${id}/download`),
   config: (signal?: AbortSignal) => request<Config>("GET", "/api/config", undefined, signal),
-  stopRunner: (id: string) => send("DELETE", `/api/runners/${seg(id)}`),
+  stopRunner: (id: string) => send("DELETE", `/api/runners/${seg(id)}`, undefined, STOP_TIMEOUT),
   pauseAll: () => send("POST", "/api/pause-all"),
   resumeAll: () => send("POST", "/api/resume-all"),
   patchConfig: (patch: ConfigPatch) => send("PATCH", "/api/config", patch),
