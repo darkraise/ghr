@@ -114,8 +114,8 @@ function LiveActions({ repo, offline }: { repo: RepoStatus; offline: boolean }) 
   const actions = useRepoActions(repo, offline)
   return (
     <>
-      <Button variant="outline" disabled={actions.locked} onClick={actions.togglePause}>
-        {repo.paused ? "Resume" : "Pause"}
+      <Button variant="outline" disabled={actions.toggleLocked} onClick={actions.togglePause}>
+        {actions.toggleLabel}
       </Button>
       <HistoryLink name={repo.name} />
       <MoreMenu name={repo.name} disabled={actions.locked} onRemove={actions.askRemove} />

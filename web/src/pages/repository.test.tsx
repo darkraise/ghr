@@ -338,6 +338,18 @@ describe("repository page", () => {
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/repos/darkmem/pause")).toBe(true))
   })
 
+  it("offers to cancel a removal from the header, and keeps Remove locked", async () => {
+    const repos = fixtures.status.repos.map((r) => (r.name === "darkmem" ? { ...r, removing: true } : r))
+    const { calls } = mockApi(
+      routes({ "GET /api/status": { ...fixtures.status, repos }, "POST /api/repos/darkmem/resume": () => noContent() }),
+    )
+    const { user } = renderApp("/repositories/darkmem")
+    await user.click(await screen.findByRole("button", { name: "Cancel removal" }))
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/repos/darkmem/resume")).toBe(true))
+    await user.click(screen.getByRole("button", { name: "More actions for darkmem" }))
+    expect(await screen.findByRole("menuitem", { name: "Remove" })).toHaveAttribute("aria-disabled", "true")
+  })
+
   it("removes from the More actions menu after confirmation", async () => {
     const { calls } = mockApi(routes({ "DELETE /api/repos/darkmem": () => noContent() }))
     const { user } = renderApp("/repositories/darkmem")
