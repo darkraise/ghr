@@ -69,8 +69,12 @@ func TestCountsByConclusion(t *testing.T) {
 		job("c", at(13, 0), at(13, 7), "cancelled"),
 		job("d", at(13, 0), at(13, 8), "skipped"),
 		job("e", at(13, 0), at(13, 9), "unknown"),
+		job("f", at(13, 0), at(13, 10), "timed_out"),
+		job("g", at(13, 0), at(13, 11), "neutral"),
+		job("h", at(13, 0), at(13, 12), "stale"),
+		job("i", at(13, 0), at(13, 13), "action_required"),
 	}})
-	if b := bucketAt(t, a, at(13, 0)); b.Succeeded != 1 || b.Failed != 1 || b.Cancelled != 2 || b.Unknown != 1 {
+	if b := bucketAt(t, a, at(13, 0)); b.Succeeded != 1 || b.Failed != 2 || b.Cancelled != 5 || b.Unknown != 1 {
 		t.Fatalf("counts %+v", b)
 	}
 }
