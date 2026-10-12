@@ -70,15 +70,23 @@ func (p python) Install(ctx context.Context, rel Release, progress func(string))
 		return ErrAlreadyInstalled
 	}
 	progress("running setup.sh")
-	target := e.versionDir(p.dir, rel.Folder)
+	verDir := filepath.Join(e.Root, p.dir, rel.Folder)
+	// A version folder that is already there may be a job's own setup-python
+	// at work, and the runner user can swap any folder above it for a link.
+	_, statErr := os.Lstat(verDir)
+	existed := !os.IsNotExist(statErr)
+	fail := func(err error) error {
+		if !existed && noSymlinks(e.Root, verDir) == nil {
+			os.RemoveAll(verDir)
+		}
+		return err
+	}
 	env := []string{"RUNNER_TOOL_CACHE=" + e.Root, "LD_LIBRARY_PATH=" + filepath.Join(out, "lib"), "HOME=" + e.Home}
 	if _, err := e.runAs(ctx, out, env, "setup.sh"); err != nil {
-		dropFailed(target)
-		return fmt.Errorf("setup.sh: %w", err)
+		return fail(fmt.Errorf("setup.sh: %w", err))
 	}
 	if !e.has(p.dir, rel.Folder) {
-		dropFailed(target)
-		return errors.New("setup.sh finished without writing the .complete marker")
+		return fail(errors.New("setup.sh finished without writing the .complete marker"))
 	}
 	return nil
 }

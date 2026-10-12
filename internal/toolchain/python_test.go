@@ -133,3 +133,53 @@ func TestPythonFailedSetupLeavesNoVersion(t *testing.T) {
 		})
 	}
 }
+
+func TestPythonFailedSetupKeepsAFolderThatWasThere(t *testing.T) {
+	for name, fail := range map[string]bool{"script error": true, "no marker": false} {
+		t.Run(name, func(t *testing.T) {
+			f := pythonFixture(t)
+			theirs := mkInstall(t, f.Root, "Python", "3.13.7", false)
+			f.host.scripts["setup.sh"] = func(string, map[string]string, []string) error {
+				if fail {
+					return errors.New("ensurepip failed")
+				}
+				return nil
+			}
+			p := newPython(f.Env)
+			rel, _ := p.Resolve(context.Background(), "3.13")
+			if err := p.Install(context.Background(), rel, func(string) {}); err == nil {
+				t.Fatal("no error")
+			}
+			if !exists(filepath.Join(theirs, "file")) {
+				t.Fatal("a version folder that was there before the install was removed")
+			}
+		})
+	}
+}
+
+func TestPythonFailedSetupRemovesNothingThroughASymlink(t *testing.T) {
+	f := pythonFixture(t)
+	outside := t.TempDir()
+	theirs := mkInstall(t, outside, "", "3.13.7", false)
+	symlinkOrSkip(t, outside, filepath.Join(t.TempDir(), "probe"))
+	// <Root>/Python belongs to the runner user, so a job can swap it for a
+	// link while setup.sh runs.
+	f.host.scripts["setup.sh"] = func(string, map[string]string, []string) error {
+		link := filepath.Join(f.Root, "Python")
+		if err := os.Remove(link); err != nil {
+			return err
+		}
+		if err := os.Symlink(outside, link); err != nil {
+			return err
+		}
+		return errors.New("ensurepip failed")
+	}
+	p := newPython(f.Env)
+	rel, _ := p.Resolve(context.Background(), "3.13")
+	if err := p.Install(context.Background(), rel, func(string) {}); err == nil || !strings.Contains(err.Error(), "ensurepip failed") {
+		t.Fatalf("got %v", err)
+	}
+	if !exists(filepath.Join(theirs, "file")) {
+		t.Fatal("the failed install removed a folder outside the tool cache")
+	}
+}
