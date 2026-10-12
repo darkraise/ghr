@@ -110,7 +110,10 @@ describe("login page", () => {
     await waitFor(() => expect(assign).toHaveBeenCalledWith("/history"))
   })
 
-  it.each(["//evil.example/x", "https://evil.example/x", "/\\evil.example/x"])("ignores the redirect %s that leaves the site", async (target) => {
+  // The browser drops tabs and newlines from a URL, so "/<tab>/host" is "//host".
+  const offSite = ["//evil.example/x", "https://evil.example/x", "/\\evil.example/x", "/\t/evil.example/x", "/\n/evil.example/x", "/\r\\evil.example/x"]
+
+  it.each(offSite)("ignores the redirect %j that leaves the site", async (target) => {
     let done = false
     mockApi(
       authedRoutes({
