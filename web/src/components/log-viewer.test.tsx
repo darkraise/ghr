@@ -1,10 +1,18 @@
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { JobLog, LogLine, Step } from "@/api/types"
+import { renderAnsi } from "@/lib/ansi"
 import { fixtures } from "@/test/fixtures"
 import { LOG_WINDOW } from "@/lib/log-view"
 import { LogViewer } from "./log-viewer"
+
+// Every line and every group header draws its text through renderAnsi, so
+// its calls count how many of them rendered.
+vi.mock("@/lib/ansi", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/lib/ansi")>()
+  return { ...mod, renderAnsi: vi.fn(mod.renderAnsi) }
+})
 
 const steps: Step[] = fixtures.runDetail.jobs[1]?.steps ?? []
 
@@ -78,6 +86,16 @@ describe("LogViewer", () => {
     await user.click(group)
     expect(group).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByText("ruff check .")).toBeInTheDocument()
+  })
+
+  it("renders no other line again when a group opens", async () => {
+    const { user } = renderViewer()
+    const draws = vi.mocked(renderAnsi)
+    const before = draws.mock.calls.length
+    await user.click(screen.getByRole("button", { name: "Run ruff check ." }))
+    expect(screen.getByText("ruff check .")).toBeInTheDocument()
+    // The group's header and its one line; the step's four other lines stay.
+    expect(draws.mock.calls.length - before).toBe(2)
   })
 
   it("prefixes notices without a tint and warnings with one", () => {

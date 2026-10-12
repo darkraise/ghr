@@ -1,6 +1,6 @@
 import { Input } from "darkraise-ui/components/input"
 import { ChevronRight } from "lucide-react"
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import type { JobLog, LogLine, LogStep, Step } from "@/api/types"
 import { RunStatusIcon } from "@/components/run-status-icon"
 import { renderAnsi } from "@/lib/ansi"
@@ -35,7 +35,9 @@ function rowsIn(lines: LogLine[], start: number, end: number): LogRow[] {
   })
 }
 
-function Line({ line, query, current, target }: { line: LogLine; query: string; current?: number; target: boolean }) {
+// Memoised: a step shows thousands of these, and a render of the viewer
+// changes the props of few of them.
+const Line = memo(function Line({ line, query, current, target }: { line: LogLine; query: string; current?: number; target: boolean }) {
   return (
     <div
       data-line={line.n}
@@ -49,7 +51,7 @@ function Line({ line, query, current, target }: { line: LogLine; query: string; 
       </span>
     </div>
   )
-}
+})
 
 export function LogViewer({
   log,
