@@ -30,6 +30,7 @@ import {
   type HistorySearch,
   type HistoryWindow,
 } from "@/lib/history"
+import { httpsUrl } from "@/lib/links"
 import { ALL_REPOS } from "@/lib/repos"
 import { runCols } from "@/lib/run-cols"
 import { useMediaQuery } from "@/lib/use-media-query"
@@ -60,7 +61,7 @@ function Legend() {
 
 function HistoryRow({ entry, longest, wide }: { entry: HistoryEntry; longest: number; wide: boolean }) {
   const ms = took(entry)
-  const url = entry.html_url
+  const url = httpsUrl(entry.html_url)
   const name = `${entry.job_name} #${entry.run_number}`
   return (
     <RunRow

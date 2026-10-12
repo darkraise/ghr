@@ -308,4 +308,13 @@ describe("History page", () => {
     expect(writeText).toHaveBeenCalledWith("https://github.com/darkraise/darkmem/actions/runs/101/job/1")
     expect((await screen.findAllByText("Copied run URL")).length).toBeGreaterThan(0)
   })
+
+  it("offers no run link for an address that is not https", async () => {
+    const [build] = fixtures.history as [HistoryEntry]
+    mockApi(authedRoutes({ "GET /api/history": [{ ...build, html_url: "http://github.com/darkraise/darkmem/actions/runs/101/job/1" }] }))
+    renderApp("/history")
+    await screen.findByText("#41")
+    expect(screen.queryByRole("link", { name: /^Open run/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Copy run URL/ })).toBeNull()
+  })
 })
