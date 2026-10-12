@@ -23,6 +23,12 @@ type visibility struct {
 	public   bool
 	readAt   time.Time
 	listedAt time.Time
+	// rev counts the answers handed over through RecordVisibility. A GetRepo
+	// read applies its answer only when rev is what it was as the read began.
+	rev uint64
+	// handed marks an answer handed over for a repository that is being
+	// added: it is kept until that repository shows up in the config.
+	handed bool
 }
 
 // visibilityLocked reports whether GitHub last said repo is public, through
@@ -49,18 +55,37 @@ func (m *Manager) readVisibility(ctx context.Context, repo string, now time.Time
 		return err
 	}
 	m.mu.Lock()
-	nv := visibility{public: !r.Private, readAt: now}
+	defer m.mu.Unlock()
+	nv := m.vis[key]
+	if nv.rev != v.rev {
+		return nil // an answer was handed over during the read; it is the newer one
+	}
+	nv.public, nv.readAt = !r.Private, now
 	if m.visGen != gen {
 		nv.readAt = time.Time{} // ClearDegraded ran during the read; the next poll reads again
 	}
 	// A listing of this same poll said public: the block holds for this tick
 	// whatever GetRepo says. An older one is what this answer replaces.
-	if at := m.vis[key].listedAt; at.Equal(now) {
-		nv.listedAt = at
+	if !nv.listedAt.Equal(now) {
+		nv.listedAt = time.Time{}
 	}
 	m.vis[key] = nv
-	m.mu.Unlock()
 	return nil
+}
+
+// RecordVisibility takes an answer the caller has just read from GitHub for
+// repo, as a read made now. Adding a repository reads it first; handing that
+// answer over replaces whatever is left from before the repository was
+// removed, and a read of the manager's own that is still in flight does not
+// replace it. The caller hands over only for a repository it is adding: the
+// answer is kept until that repository shows up in the config, so it must be
+// handed over before the config with the repository can be seen.
+func (m *Manager) RecordVisibility(repo string, public bool) {
+	now := m.Now()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := strings.ToLower(repo)
+	m.vis[key] = visibility{public: public, readAt: now, rev: m.vis[key].rev + 1, handed: true}
 }
 
 // sawPublic records that a run GitHub just listed for repo says its
@@ -158,13 +183,19 @@ func (m *Manager) noteBlocked(cfg *config.Config) {
 
 // forgetRemoved drops what is kept about visibility for repos that are no
 // longer in the config, so one that is removed and added again starts unread
-// and its removal is not reported as a block being lifted. It needs no API
-// call, so it runs on every tick.
+// and its removal is not reported as a block being lifted. An answer handed
+// over for a repo that is being added is not in the config yet; it is kept
+// until the repo has been seen there once. It needs no API call, so it runs
+// on every tick.
 func (m *Manager) forgetRemoved(cfg *config.Config) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for key := range m.vis {
-		if cfg.Repo(key) == nil {
+	for key, v := range m.vis {
+		switch listed := cfg.Repo(key) != nil; {
+		case listed && v.handed:
+			v.handed = false
+			m.vis[key] = v
+		case !listed && !v.handed:
 			delete(m.vis, key)
 		}
 	}

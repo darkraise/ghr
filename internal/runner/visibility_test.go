@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/github"
 )
 
@@ -200,5 +201,79 @@ func TestClearDegradedDuringAReadLeavesItDue(t *testing.T) {
 	h.m.Tick(context.Background())
 	if h.repoReads("darkmem") != 2 || h.repoReads("darkcloud") != 2 {
 		t.Fatalf("reads darkmem %d darkcloud %d, want 2 each", h.repoReads("darkmem"), h.repoReads("darkcloud"))
+	}
+}
+
+// AddRepo reads a repository before it saves it and hands the answer over,
+// as a read made now. Without it, a repository removed and added again before
+// a tick would keep the answer from before its removal.
+func TestRecordVisibilityReplacesAnOlderAnswer(t *testing.T) {
+	h := newHarness(t)
+	blockDarkmem(t, h)
+	reads := h.repoReads("darkmem")
+	h.m.RecordVisibility("DarkMem", false)
+	if mem := h.cfg.Repos[1]; h.m.unread(mem) || h.m.blocked(h.cfg, mem) {
+		t.Fatalf("after a private answer: unread %v blocked %v", h.m.unread(mem), h.m.blocked(h.cfg, mem))
+	}
+	queuedRun(h, "darkmem", 7, homelabJob(h, 71))
+	h.now = h.now.Add(10 * time.Second)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	// GitHub still says public to a read, so a read would have blocked it again.
+	if spawnsFor(h, "darkmem") != 1 || h.repoReads("darkmem") != reads {
+		t.Fatalf("%d spawns, %d reads since the answer\n%s", spawnsFor(h, "darkmem"), h.repoReads("darkmem")-reads, h.eventText())
+	}
+	h.m.RecordVisibility("darkmem", true)
+	if !h.m.blocked(h.cfg, h.cfg.Repos[1]) {
+		t.Fatal("not blocked after a public answer")
+	}
+}
+
+// A read of the repository that began before an answer was handed over ends
+// after it. The handed-over answer is the newer one and stays.
+func TestOlderRepositoryReadDoesNotReplaceAHandedOverAnswer(t *testing.T) {
+	h := newHarness(t)
+	h.gh.hook = func(method string) {
+		if method == "GetRepo" && strings.HasSuffix(h.gh.callsText(), "GetRepo darkmem") {
+			h.m.RecordVisibility("darkmem", true)
+		}
+	}
+	h.m.Tick(context.Background()) // the read in flight will answer private
+	h.gh.hook = nil
+	if public, known := h.visibility("darkmem"); !public || !known || h.repoReads("darkmem") != 1 {
+		t.Fatalf("public %v known %v after %d reads; the read that began first replaced the answer", public, known, h.repoReads("darkmem"))
+	}
+}
+
+// An answer is handed over just before its repository shows up in the
+// config. A tick that still sees the config without the repository keeps the
+// answer, the tick that first sees the repository plans with it without a
+// read of its own, and removing the repository later drops it.
+func TestHandedOverAnswerWaitsForItsRepository(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	with := h.cfg
+	without := h.cfg.Clone()
+	without.Repos = without.Repos[:1]
+	tick := func(cfg *config.Config) {
+		h.cfg = cfg
+		h.now = h.now.Add(10 * time.Second)
+		h.m.Tick(ctx)
+		h.m.Wait()
+	}
+	tick(without)
+	h.m.RecordVisibility("darkmem", false)
+	tick(without)
+	if _, known := h.visibility("darkmem"); !known {
+		t.Fatal("a tick before the repository was in the config dropped the answer")
+	}
+	queuedRun(h, "darkmem", 7, homelabJob(h, 71))
+	tick(with)
+	if spawnsFor(h, "darkmem") != 1 || h.repoReads("darkmem") != 0 {
+		t.Fatalf("%d spawns, %d reads; want a runner planned on the handed-over answer\n%s", spawnsFor(h, "darkmem"), h.repoReads("darkmem"), h.eventText())
+	}
+	tick(without)
+	if _, known := h.visibility("darkmem"); known {
+		t.Fatal("the answer outlived its repository")
 	}
 }
