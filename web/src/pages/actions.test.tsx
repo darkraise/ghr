@@ -116,7 +116,7 @@ describe("Actions page", () => {
     expect(progress.getByText(/^4m0\ds$/)).toBeInTheDocument()
   })
 
-  it("ticks the elapsed time of a running run with the daemon's clock", { timeout: 10_000 }, async () => {
+  it("ticks the elapsed time of a running run with the daemon's clock", async () => {
     let polls = 0
     mockApi(
       authedRoutes({

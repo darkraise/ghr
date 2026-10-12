@@ -51,7 +51,7 @@ describe("Runners page", () => {
     expect(screen.queryByRole("link", { name: "Back to Runners" })).toBeNull()
   })
 
-  it("keeps the selection when the selected runner finishes", { timeout: 10_000 }, async () => {
+  it("keeps the selection when the selected runner finishes", async () => {
     setViewport(1280)
     let gone = false
     mockApi(
@@ -101,7 +101,7 @@ describe("Runners page", () => {
     expect(await screen.findByText("Stop runner bbbbbb?")).toBeInTheDocument()
   })
 
-  it("follows a runner that picks up a job while the dialog is open", { timeout: 10_000 }, async () => {
+  it("follows a runner that picks up a job while the dialog is open", async () => {
     let busy = false
     mockApi(
       routes({
@@ -118,7 +118,7 @@ describe("Runners page", () => {
     expect(await screen.findByText("Runner bbbbbb is running a job. Stop it?")).toBeInTheDocument()
   })
 
-  it("says a runner that left while the dialog is open has finished", { timeout: 10_000 }, async () => {
+  it("says a runner that left while the dialog is open has finished", async () => {
     let gone = false
     const { calls } = mockApi(
       routes({
@@ -138,7 +138,7 @@ describe("Runners page", () => {
     expect(calls.some((c) => c.method === "DELETE")).toBe(false)
   })
 
-  it("says a runner that starts stopping while the dialog is open is already stopping", { timeout: 10_000 }, async () => {
+  it("says a runner that starts stopping while the dialog is open is already stopping", async () => {
     let stopping = false
     const { calls } = mockApi(
       routes({

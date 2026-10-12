@@ -48,7 +48,7 @@ describe("Add repository dialog", () => {
     expect(dialog.getByText("watched")).toBeInTheDocument()
   })
 
-  it("sends Add while the daemon is unreachable and shows the request's error", { timeout: 10_000 }, async () => {
+  it("sends Add while the daemon is unreachable and shows the request's error", async () => {
     let down = false
     const { calls } = mockApi(
       routes({

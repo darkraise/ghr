@@ -49,7 +49,7 @@ describe("useJobLog", () => {
 })
 
 describe("useLabelCheck", () => {
-  it("polls while the check runs and stops when it is done", { timeout: 10_000 }, async () => {
+  it("polls while the check runs and stops when it is done", async () => {
     let reads = 0
     const { calls } = mockApi({
       "GET /api/repos/darkmem/label-check": (): LabelCheck => {

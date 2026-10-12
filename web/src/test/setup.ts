@@ -32,7 +32,7 @@ window.scrollTo = () => {}
 Element.prototype.scrollIntoView = () => {}
 
 // A loaded machine can take over a second to settle a poll; findBy queries
-// get 3 seconds, under Vitest's 5-second test timeout.
+// get 3 seconds, under the suite's 15-second test timeout.
 configure({ asyncUtilTimeout: 3000 })
 
 // The kit keeps its toasts in a module store and announces them in a live

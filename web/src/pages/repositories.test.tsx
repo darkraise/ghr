@@ -39,7 +39,7 @@ describe("Repositories page", () => {
     expect(await screen.findByText("Waiting for the daemon")).toBeInTheDocument()
   })
 
-  it("keeps the table but locks its actions while the daemon is unreachable", { timeout: 10_000 }, async () => {
+  it("keeps the table but locks its actions while the daemon is unreachable", async () => {
     let reads = 0
     mockApi(authedRoutes({ "GET /api/status": () => (++reads === 1 ? fixtures.status : json({ error: "connection refused" }, 502)) }))
     const { user } = renderApp("/repositories")

@@ -118,7 +118,7 @@ describe("History page", () => {
     await waitFor(() => expect(historyCalls(calls)).toContain("?repo=darkmem&conclusion=&since=2026-10-02T14%3A00%3A00Z&limit=500"))
   })
 
-  it("hides the previous filter's rows while the next ones load", { timeout: 10_000 }, async () => {
+  it("hides the previous filter's rows while the next ones load", async () => {
     let release = () => {}
     const gate = new Promise<void>((resolve) => (release = resolve))
     let reads = 0
@@ -141,7 +141,7 @@ describe("History page", () => {
     expect(await screen.findByText("#7")).toBeInTheDocument()
   })
 
-  it("keeps the rows while the window rolls to the next bucket", { timeout: 10_000 }, async () => {
+  it("keeps the rows while the window rolls to the next bucket", async () => {
     let release = () => {}
     const gate = new Promise<void>((resolve) => (release = resolve))
     let rolled = false
@@ -166,7 +166,7 @@ describe("History page", () => {
     expect(screen.getByText("#7")).toBeInTheDocument()
   })
 
-  it("shows the spinner when the repository filter changes", { timeout: 10_000 }, async () => {
+  it("shows the spinner when the repository filter changes", async () => {
     let release = () => {}
     const gate = new Promise<void>((resolve) => (release = resolve))
     mockApi(

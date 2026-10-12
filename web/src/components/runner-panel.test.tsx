@@ -235,7 +235,7 @@ describe("RunnerPanel", () => {
     expect(screen.getByRole("button", { name: "Stop runner" })).toBeDisabled()
   })
 
-  it("disables Stop when the daemon stops answering for a live runner", { timeout: 10_000 }, async () => {
+  it("disables Stop when the daemon stops answering for a live runner", async () => {
     let down = false
     mockApi(routes({ "GET /api/status": () => (down ? json({ error: "connection refused" }, 502) : fixtures.status) }))
     draw()

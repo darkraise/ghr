@@ -96,7 +96,7 @@ describe("Storage page", () => {
     expect(screen.queryByRole("button", { name: "Install popular set" })).toBeNull()
   })
 
-  it("disables pruning while the daemon is unreachable", { timeout: 10_000 }, async () => {
+  it("disables pruning while the daemon is unreachable", async () => {
     let reads = 0
     mockApi(routes({ "GET /api/status": () => (++reads === 1 ? fixtures.status : json({ error: "connection refused" }, 502)) }))
     renderApp("/storage")
@@ -278,7 +278,7 @@ describe("Activity", () => {
     expect(await screen.findByText("No operations since the daemon started.")).toBeInTheDocument()
   })
 
-  it("toasts operations that finish while the page is open, failures first", { timeout: 10_000 }, async () => {
+  it("toasts operations that finish while the page is open, failures first", async () => {
     const later: Storage = {
       ...fixtures.storage,
       operations: {

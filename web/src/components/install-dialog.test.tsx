@@ -81,7 +81,7 @@ describe("Install toolchain dialog", () => {
     expect(await screen.findByRole("button", { name: "Install" })).toBeDisabled()
   })
 
-  it("sends Install after the daemon went unreachable and shows the request's error", { timeout: 10_000 }, async () => {
+  it("sends Install after the daemon went unreachable and shows the request's error", async () => {
     let down = false
     const { calls } = mockApi(
       routes({
