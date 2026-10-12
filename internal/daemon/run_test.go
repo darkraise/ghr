@@ -749,6 +749,24 @@ func TestRunConfiguresOnReload(t *testing.T) {
 	}
 }
 
+// Before ghr is configured a reload is handled by Run itself. It too writes a
+// warning only when the load before did not have it; the start-up load did.
+func TestRunUnconfiguredReloadRepeatsNoWarning(t *testing.T) {
+	o, reload := unconfiguredOptions(t, "")
+	cfg, err := os.ReadFile(o.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(o.ConfigPath, []byte(strings.Replace(string(cfg), "global_max: 2", "global_max: 500", 1)), 0o600)
+	startRun(t, o)
+	waitFor(t, "the setup phase", func() bool { _, ok := setupStateOver(o.Socket); return ok })
+	reload <- os.Interrupt
+	waitFor(t, "the reload", func() bool { return strings.Contains(eventMsgs(t, o.Socket), "config and token reloaded") })
+	if n := strings.Count(eventMsgs(t, o.Socket), "global_max 500 is above 99; using 99"); n != 1 {
+		t.Fatalf("the warning was written %d times:\n%s", n, eventMsgs(t, o.Socket))
+	}
+}
+
 func TestRunConfiguresOnceWhenReloadAndSetupRace(t *testing.T) {
 	o, reload := unconfiguredOptions(t, "")
 	startRun(t, o)

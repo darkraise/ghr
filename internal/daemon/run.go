@@ -409,12 +409,12 @@ func Run(ctx context.Context, o Options) error {
 			case <-ready:
 				break wait
 			case <-reload:
-				ws, _, err := store.Reload()
+				_, added, _, err := store.Reload()
 				if err != nil {
 					ev.Add("error", "", "reload rejected, keeping previous config: %v", err)
 					continue
 				}
-				for _, w := range ws {
+				for _, w := range added {
 					ev.Add("warn", "", "config: %s", w)
 				}
 				ev.Add("info", "", "config and token reloaded")

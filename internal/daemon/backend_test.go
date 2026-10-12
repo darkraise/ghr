@@ -31,7 +31,7 @@ import (
 
 type fakeManager struct {
 	insts     []model.InstanceStatus
-	cleared   bool
+	cleared   atomic.Bool // set by ClearDegraded, which two reloads at once both call
 	killed    []string
 	killErr   error // returned by Kill
 	pruneErr  error
@@ -107,7 +107,7 @@ func (f *fakeManager) Kill(ctx context.Context, id string) error {
 	f.killed = append(f.killed, id)
 	return f.killErr
 }
-func (f *fakeManager) ClearDegraded() { f.cleared = true }
+func (f *fakeManager) ClearDegraded() { f.cleared.Store(true) }
 
 type fakeGH struct {
 	fakeRuns
@@ -762,7 +762,7 @@ func TestPauseAllStepsKillToken(t *testing.T) {
 	if err := b.SetToken(ctx, "tok2"); err != nil {
 		t.Fatal(err)
 	}
-	if b.Store.Token() != "tok2" || !gh.forgot || !m.cleared {
+	if b.Store.Token() != "tok2" || !gh.forgot || !m.cleared.Load() {
 		t.Fatal("token not applied")
 	}
 }
@@ -772,19 +772,19 @@ func TestReloadAppliesWakesAndRejects(t *testing.T) {
 	woke := 0
 	b.Wake = func() { woke++ }
 	ws, err := b.Reload()
-	if err != nil || ws == nil || woke != 1 || !m.cleared {
-		t.Fatalf("reload: %v %v woke=%d cleared=%v", ws, err, woke, m.cleared)
+	if err != nil || ws == nil || woke != 1 || !m.cleared.Load() {
+		t.Fatalf("reload: %v %v woke=%d cleared=%v", ws, err, woke, m.cleared.Load())
 	}
 	// The token did not change, so what the client holds for it stays.
 	if gh.forgot {
 		t.Fatal("a reload with the same token dropped the GitHub client's cache")
 	}
-	m.cleared = false
+	m.cleared.Store(false)
 	if err := os.WriteFile(b.Store.TokenPath, []byte("tok2\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Reload(); err != nil || woke != 2 || !gh.forgot || !m.cleared {
-		t.Fatalf("reload with a new token: %v woke=%d forgot=%v cleared=%v", err, woke, gh.forgot, m.cleared)
+	if _, err := b.Reload(); err != nil || woke != 2 || !gh.forgot || !m.cleared.Load() {
+		t.Fatalf("reload with a new token: %v woke=%d forgot=%v cleared=%v", err, woke, gh.forgot, m.cleared.Load())
 	}
 	if err := os.WriteFile(b.Store.TokenPath, []byte("  \n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1087,6 +1087,68 @@ func TestReloadWarnsOnWebChange(t *testing.T) {
 	write("")
 	if ws, err := b.Reload(); err != nil || len(ws) != 0 {
 		t.Fatalf("reverted web still warns: %v %v", ws, err)
+	}
+}
+
+// A reload writes a warning as an event when the load before did not have it,
+// and still returns every warning of the load. A save writes the lowered value
+// to config.yaml, so the same bad edit made again is reported again.
+func TestReloadRepeatsNoWarning(t *testing.T) {
+	b, _, _ := newBackend(t)
+	const clamp = "global_max 500 is above 99; using 99"
+	bad := []byte(strings.Replace(cfgYAML, "global_max: 2", "global_max: 500", 1))
+	reload := func(wantEvents int, what string) {
+		t.Helper()
+		if err := os.WriteFile(b.Store.ConfigPath, bad, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ws, err := b.Reload()
+		if err != nil || !slices.Contains(ws, clamp) {
+			t.Fatalf("%s: warnings %v, err %v", what, ws, err)
+		}
+		n := 0
+		for _, e := range b.Events.After(0) {
+			if e.Level == "warn" && e.Msg == "config: "+clamp {
+				n++
+			}
+		}
+		if n != wantEvents {
+			t.Fatalf("%s: %d warning events, want %d", what, n, wantEvents)
+		}
+	}
+	reload(1, "the bad edit")
+	reload(1, "the same file again")
+	all := "all"
+	if err := b.PatchConfig(model.ConfigPatch{Mode: &all}); err != nil {
+		t.Fatal(err)
+	}
+	reload(2, "the bad edit made again after a save")
+}
+
+// Two reloads at once write a new warning as one event. Both are started
+// while an update that saves nothing holds the store's lock.
+func TestReloadsAtOnceWriteAWarningOnce(t *testing.T) {
+	b, _, _ := newBackend(t)
+	const clamp = "global_max 500 is above 99; using 99"
+	if err := os.WriteFile(b.Store.ConfigPath, []byte(strings.Replace(cfgYAML, "global_max: 2", "global_max: 500", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	b.Store.Update(func(*config.Config) error {
+		for range 2 {
+			wg.Go(func() { b.Reload() })
+		}
+		return errors.New("nothing to save")
+	})
+	wg.Wait()
+	n := 0
+	for _, e := range b.Events.After(0) {
+		if e.Level == "warn" && e.Msg == "config: "+clamp {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d warning events, want 1", n)
 	}
 }
 
@@ -1657,13 +1719,13 @@ func TestSetTokenJudgesEveryRepository(t *testing.T) {
 				if !errors.As(err, &ae) || ae.Status != tc.status || ae.Msg != tc.msg || (tc.status == 429) != ae.RetryAt.Equal(retry) {
 					t.Fatalf("err %#v", err)
 				}
-				if b.Store.Token() != "tok1" || gh.forgot || m.cleared || woke != 0 || len(b.Events.After(0)) != 0 {
-					t.Fatalf("a refused token changed something: token %q forgot %v cleared %v woke %d", b.Store.Token(), gh.forgot, m.cleared, woke)
+				if b.Store.Token() != "tok1" || gh.forgot || m.cleared.Load() || woke != 0 || len(b.Events.After(0)) != 0 {
+					t.Fatalf("a refused token changed something: token %q forgot %v cleared %v woke %d", b.Store.Token(), gh.forgot, m.cleared.Load(), woke)
 				}
 				return
 			}
-			if err != nil || b.Store.Token() != "tok2" || !gh.forgot || !m.cleared || woke != 1 {
-				t.Fatalf("err %v token %q forgot %v cleared %v woke %d", err, b.Store.Token(), gh.forgot, m.cleared, woke)
+			if err != nil || b.Store.Token() != "tok2" || !gh.forgot || !m.cleared.Load() || woke != 1 {
+				t.Fatalf("err %v token %q forgot %v cleared %v woke %d", err, b.Store.Token(), gh.forgot, m.cleared.Load(), woke)
 			}
 			if !reflect.DeepEqual(warnings, tc.warnings) {
 				t.Fatalf("warnings %q, want %q", warnings, tc.warnings)

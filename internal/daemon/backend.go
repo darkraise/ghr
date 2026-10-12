@@ -818,15 +818,18 @@ func judgeToken(repos []string, errs []error) error {
 // only when the token changed. The degraded state is cleared every time, so
 // a reload remains the way to say "try the token again now".
 func (b *Backend) Reload() ([]string, error) {
-	warnings, tokenChanged, err := b.Store.Reload()
+	warnings, added, tokenChanged, err := b.Store.Reload()
 	if err != nil {
 		b.Events.Add("error", "", "reload rejected, keeping previous config: %v", err)
 		return nil, api.BadRequest(err.Error())
 	}
+	// The web warning is not the store's, so it is written on every reload
+	// until the restart it asks for.
 	if w := b.Store.Config().Web; w.Listen != b.WebApplied.Listen || !slices.Equal(w.Hosts, b.WebApplied.Hosts) {
-		warnings = append(warnings, "web settings changed; restart ghr to apply")
+		const restart = "web settings changed; restart ghr to apply"
+		warnings, added = append(warnings, restart), append(added, restart)
 	}
-	for _, w := range warnings {
+	for _, w := range added {
 		b.Events.Add("warn", "", "config: %s", w)
 	}
 	if tokenChanged {

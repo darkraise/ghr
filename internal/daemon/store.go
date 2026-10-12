@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,11 +40,14 @@ type Store struct {
 	mu    sync.Mutex
 	cfg   atomic.Pointer[config.Config]
 	token atomic.Pointer[string]
+	// warnings are those of the last load, or of the config last saved;
+	// guarded by mu.
+	warnings []string
 }
 
 func OpenStore(configPath, tokenPath string) (*Store, []string, error) {
 	s := &Store{ConfigPath: configPath, TokenPath: tokenPath}
-	warnings, _, err := s.Reload()
+	warnings, _, _, err := s.Reload()
 	return s, warnings, err
 }
 
@@ -67,26 +71,37 @@ func (s *Store) Configured() bool {
 // live runner belong to the owner it started with. A first owner may be set.
 // tokenChanged reports whether the token now in use differs from the one
 // before the call, so a caller can keep what it fetched with an unchanged one.
-func (s *Store) Reload() (warnings []string, tokenChanged bool, err error) {
+// added are the warnings of this load that the store did not have yet: those
+// that were neither in the load before nor in the config saved since. They
+// are worked out under the same hold of the lock as the load, so of two
+// reloads at once only one reports a warning as new.
+func (s *Store) Reload() (warnings, added []string, tokenChanged bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cfg, warnings, err := config.Load(s.ConfigPath)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	if cur := s.cfg.Load(); cur != nil && cur.Owner != "" && cur.Owner != cfg.Owner {
-		return nil, false, fmt.Errorf("owner changed from %s to %s: restart ghr to switch owners", cur.Owner, cfg.Owner)
+		return nil, nil, false, fmt.Errorf("owner changed from %s to %s: restart ghr to switch owners", cur.Owner, cfg.Owner)
 	}
 	tok, err := s.readToken()
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	s.cfg.Store(cfg)
+	for _, w := range warnings {
+		if !slices.Contains(s.warnings, w) {
+			added = append(added, w)
+		}
+	}
+	// A copy: the caller may append to what it gets.
+	s.warnings = slices.Clone(warnings)
 	if tok != "" && tok != s.Token() {
 		s.token.Store(&tok)
 		tokenChanged = true
 	}
-	return warnings, tokenChanged, nil
+	return warnings, added, tokenChanged, nil
 }
 
 // readToken returns the token file's trimmed content. Until a token has been
@@ -125,6 +140,7 @@ func (s *Store) Update(fn func(c *config.Config) error) ([]string, error) {
 		return nil, &SaveError{Err: err}
 	}
 	s.cfg.Store(c)
+	s.warnings = slices.Clone(warnings)
 	return warnings, nil
 }
 
@@ -160,6 +176,7 @@ func (s *Store) Configure(owner, token string) error {
 			return err
 		}
 		s.cfg.Store(c)
+		s.warnings, _ = c.Validate()
 	}
 	s.token.Store(&token)
 	return nil
