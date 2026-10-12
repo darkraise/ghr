@@ -29,3 +29,4 @@
 - 2026-10-11 `docs/superpowers/plans/2026-10-10-ghr-forge-ui.md` — merged into `master` at 620318c
 - 2026-10-11 `docs/superpowers/plans/2026-10-11-ghr-runner-lifecycle-fixes.md` — merged into `master` at c992cde
 - 2026-10-12 `docs/superpowers/plans/2026-10-11-ghr-daemon-fixes.md` — merged into `master` at d10e413
+- 2026-10-12 `docs/superpowers/plans/2026-10-12-ghr-host-fixes.md` — merged into `master` at 1fbf661
