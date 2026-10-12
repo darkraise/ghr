@@ -275,7 +275,7 @@ export function HistoryPage() {
           </div>
         )}
         {all.length >= HISTORY_LIMIT && (
-          <p className="border-b border-border px-4 py-2.5 text-sm text-muted-foreground">Showing the newest 500 jobs in this window.</p>
+          <p className="border-b border-border px-4 py-2.5 text-sm text-muted-foreground">{`Showing the newest ${HISTORY_LIMIT} jobs in this window.`}</p>
         )}
         {settled && rows.length > 0 ? body : <div className="p-4">{body}</div>}
       </Section>

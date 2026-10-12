@@ -31,11 +31,6 @@ export const isActive = (r: ActionsRun): boolean => r.status !== "completed"
 // status GitHub adds later wait.
 export const isQueued = (r: ActionsRun): boolean => isActive(r) && r.status !== "in_progress"
 
-export function statusWord(r: ActionsRun): string {
-  if (!isActive(r)) return resultWord(r.conclusion)
-  return isQueued(r) ? "Queued" : "Running"
-}
-
 function matchesRepo(r: ActionsRun, repo: string | undefined): boolean {
   return !repo || r.repo.toLowerCase() === repo.toLowerCase()
 }

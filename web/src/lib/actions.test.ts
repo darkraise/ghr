@@ -11,7 +11,6 @@ import {
   runMs,
   splitRuns,
   startText,
-  statusWord,
 } from "./actions"
 
 const now = Date.parse("2026-10-03T14:05:00Z")
@@ -33,21 +32,16 @@ describe("parseActionsSearch", () => {
 
 describe("run states", () => {
   it.each([
-    ["queued", true, true, "Queued"],
-    ["waiting", true, true, "Queued"],
-    ["pending", true, true, "Queued"],
-    ["requested", true, true, "Queued"],
-    ["action_required", true, true, "Queued"],
-    ["in_progress", true, false, "Running"],
-  ])("reads %s", (status, active, queued, word) => {
+    ["queued", true, true],
+    ["waiting", true, true],
+    ["pending", true, true],
+    ["requested", true, true],
+    ["action_required", true, true],
+    ["in_progress", true, false],
+    ["completed", false, false],
+  ])("reads %s", (status, active, queued) => {
     const r = run({ status, conclusion: "" })
-    expect([isActive(r), isQueued(r), statusWord(r)]).toEqual([active, queued, word])
-  })
-
-  it("words a completed run by its result", () => {
-    expect(statusWord(run({ conclusion: "success" }))).toBe("Succeeded")
-    expect(statusWord(run({ conclusion: "timed_out" }))).toBe("Failed")
-    expect(statusWord(run({ conclusion: "skipped" }))).toBe("Skipped")
+    expect([isActive(r), isQueued(r)]).toEqual([active, queued])
   })
 })
 
