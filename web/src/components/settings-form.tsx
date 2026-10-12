@@ -3,6 +3,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "d
 import { Field, FieldGroup } from "@/components/page/field"
 import { RejectedAlert } from "@/components/save-bar"
 import { TagField } from "@/components/tag-field"
+import { FIELD_WIDTH } from "@/lib/field-width"
 import type { SettingsForm } from "@/lib/settings-form"
 import { UNIT_SETTINGS } from "@/lib/units"
 
@@ -28,7 +29,7 @@ export function SettingsSections({ form }: { form: SettingsForm }) {
           type="number"
           min={0}
           suffix={UNIT_SETTINGS[key]?.unit}
-          groupClassName="w-40"
+          groupClassName={FIELD_WIDTH}
           className="min-w-0"
           placeholder={typeof v === "string" ? v : empty}
           value={typeof v === "number" && !Number.isNaN(v) ? String(v) : ""}
@@ -45,7 +46,7 @@ export function SettingsSections({ form }: { form: SettingsForm }) {
       <FieldGroup id="scheduling" title="Scheduling">
         <Field label="Mode" help={MODES[text("mode")]} changed={is("mode")}>
           <Select value={text("mode")} onValueChange={set("mode")} disabled={offline}>
-            <SelectTrigger aria-label="Mode" className="w-40">
+            <SelectTrigger aria-label="Mode" className={FIELD_WIDTH}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -70,7 +71,7 @@ export function SettingsSections({ form }: { form: SettingsForm }) {
             min={1}
             max={99}
             step={1}
-            className="w-24"
+            className={FIELD_WIDTH}
             value={num("global_max")}
             disabled={offline}
             onChange={(e) => set("global_max")(toNum(e.target.value))}
@@ -94,7 +95,7 @@ export function SettingsSections({ form }: { form: SettingsForm }) {
             max={100}
             step={5}
             suffix="%"
-            groupClassName="w-40"
+            groupClassName={FIELD_WIDTH}
             className="min-w-0"
             value={num("disk_high_water")}
             disabled={offline}
@@ -106,7 +107,7 @@ export function SettingsSections({ form }: { form: SettingsForm }) {
       </FieldGroup>
       <FieldGroup id="runner-defaults" title="Runner defaults" note="Limits apply to newly started runners.">
         <Field label="Global labels" help="Added to every runner" changed={is("labels")}>
-          <TagField label="Global labels" value={values.labels as string[]} onChange={set("labels")} disabled={offline} />
+          <TagField label="Global labels" value={values.labels as string[]} onChange={set("labels")} disabled={offline} className={FIELD_WIDTH} />
         </Field>
         {unitField("memory_max", "Memory max", "Per runner. Leave it empty for no limit.", "No limit")}
         {unitField("cpu_quota", "CPU quota", "Per runner. 100% is one CPU core.")}

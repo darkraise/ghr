@@ -10,11 +10,13 @@ export function TagField({
   value,
   onChange,
   disabled,
+  className = "",
 }: {
   label: string
   value: string[]
   onChange: (next: string[]) => void
   disabled?: boolean
+  className?: string
 }) {
   const [text, setText] = useState("")
 
@@ -25,7 +27,7 @@ export function TagField({
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className={`flex flex-col gap-2 ${className}`}>
       {value.length > 0 && (
         <ul className="flex flex-wrap gap-1">
           {value.map((tag) => (
@@ -49,6 +51,7 @@ export function TagField({
         <Input
           aria-label={label}
           placeholder="+ add"
+          className="min-w-0 flex-1"
           value={text}
           disabled={disabled}
           onChange={(e) => setText(e.target.value)}

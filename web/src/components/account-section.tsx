@@ -5,6 +5,7 @@ import { useState, type FormEvent } from "react"
 import { ApiError, api } from "@/api/client"
 import { ErrorLine } from "@/components/page/error-line"
 import { Field, FieldGroup } from "@/components/page/field"
+import { FIELD_WIDTH } from "@/lib/field-width"
 import { passwordLengthOk } from "@/lib/password"
 import { errorText } from "@/query"
 
@@ -42,20 +43,20 @@ export function AccountSection() {
             id="current-password"
             type="password"
             autoComplete="current-password"
-            className="max-w-xs"
+            className={FIELD_WIDTH}
             value={current}
             onChange={(e) => setCurrent(e.target.value)}
           />
         </Field>
         <Field label="New password" htmlFor="new-password" help="12 to 1024 characters">
-          <Input id="new-password" type="password" autoComplete="new-password" className="max-w-xs" value={next} onChange={(e) => setNext(e.target.value)} />
+          <Input id="new-password" type="password" autoComplete="new-password" className={FIELD_WIDTH} value={next} onChange={(e) => setNext(e.target.value)} />
         </Field>
         <Field label="Confirm new password" htmlFor="confirm-password">
           <Input
             id="confirm-password"
             type="password"
             autoComplete="new-password"
-            className="max-w-xs"
+            className={FIELD_WIDTH}
             value={again}
             onChange={(e) => setAgain(e.target.value)}
           />
