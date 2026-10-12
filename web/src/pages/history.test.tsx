@@ -273,22 +273,35 @@ describe("History page", () => {
     await waitFor(() => expect(router.state.location.search).toEqual({}))
   })
 
-  it("shows a failed read", async () => {
-    mockApi(authedRoutes({ "GET /api/history": () => json({ error: "history file unreadable" }, 500) }))
-    renderApp("/history")
-    expect(within(await screen.findByRole("alert")).getByText("history file unreadable")).toBeInTheDocument()
+  it("shows a failed first read with a retry", async () => {
+    let fail = true
+    mockApi(authedRoutes({ "GET /api/history": () => (fail ? json({ error: "history file unreadable" }, 500) : fixtures.history) }))
+    const { user } = renderApp("/history")
+    const alert = await screen.findByRole("alert")
+    expect(within(alert).getByText("history file unreadable")).toBeInTheDocument()
+    expect(alert.closest(".p-4")).not.toBeNull()
+    fail = false
+    await user.click(within(alert).getByRole("button", { name: "Try again" }))
+    expect(await screen.findByText("#7")).toBeInTheDocument()
+    expect(screen.queryByRole("alert")).toBeNull()
   })
 
-  it("pads a failed refresh that leaves the earlier rows behind", async () => {
+  it("keeps the rows when a refresh fails and offers a retry above them", async () => {
     let fail = false
     mockApi(authedRoutes({ "GET /api/history": () => (fail ? json({ error: "history file unreadable" }, 500) : fixtures.history) }))
-    const { queryClient } = renderApp("/history")
-    await screen.findByRole("table")
+    const { queryClient, user } = renderApp("/history")
+    const table = await screen.findByRole("table")
     fail = true
     await queryClient.invalidateQueries({ queryKey: ["history"] })
     const alert = await screen.findByRole("alert")
     expect(within(alert).getByText("history file unreadable")).toBeInTheDocument()
-    expect(alert.closest(".p-4")).not.toBeNull()
+    expect(within(table).getByText("#7")).toBeInTheDocument()
+    expect(screen.getByText("2 jobs, 1 failed, median 3m15s")).toBeInTheDocument()
+    expect(alert.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fail = false
+    await user.click(within(alert).getByRole("button", { name: "Try again" }))
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
+    expect(screen.getByText("#7")).toBeInTheDocument()
   })
 
   it("shows loading until the chart's span is known", async () => {

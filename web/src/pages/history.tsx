@@ -173,10 +173,13 @@ export function HistoryPage() {
   const longest = Math.max(1, ...rows.flatMap((r) => took(r) ?? []))
   const filtered = repo !== "" || result !== ""
 
+  const failure = history.isError ? <ErrorLine onRetry={() => void history.refetch()}>{errorText(history.error)}</ErrorLine> : null
+
   let body
-  if (history.isError) body = <ErrorLine>{errorText(history.error)}</ErrorLine>
-  else if (!settled) {
-    body = activity.isError ? <p className="text-sm text-muted-foreground">The table loads once the chart does.</p> : <Spinner label="Loading" />
+  if (!settled) {
+    body =
+      failure ??
+      (activity.isError ? <p className="text-sm text-muted-foreground">The table loads once the chart does.</p> : <Spinner label="Loading" />)
   } else if (rows.length === 0) {
     body = picked ? (
       <p className="text-sm text-muted-foreground">No jobs finished in this span.</p>
@@ -262,6 +265,7 @@ export function HistoryPage() {
         </div>
       </Section>
       <Section title="Finished jobs" aside={settled ? <span className="text-sm text-muted-foreground">{historySummary(rows)}</span> : undefined} flush>
+        {failure && settled && <div className="border-b border-border px-4 py-2.5">{failure}</div>}
         {picked && (
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5 text-sm">
             <span>{pickText(picked)}</span>
@@ -273,7 +277,7 @@ export function HistoryPage() {
         {all.length >= HISTORY_LIMIT && (
           <p className="border-b border-border px-4 py-2.5 text-sm text-muted-foreground">Showing the newest 500 jobs in this window.</p>
         )}
-        {!history.isError && settled && rows.length > 0 ? body : <div className="p-4">{body}</div>}
+        {settled && rows.length > 0 ? body : <div className="p-4">{body}</div>}
       </Section>
     </div>
   )
