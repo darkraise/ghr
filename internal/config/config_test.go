@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -356,6 +357,206 @@ func TestSaveRoundTrip(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Dir(path))
 	if len(entries) != 1 {
 		t.Fatalf("temp file left behind: %v", entries)
+	}
+}
+
+func saveOwner(t *testing.T, path, owner string) error {
+	t.Helper()
+	c, _, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Owner = owner
+	return Save(path, c)
+}
+
+func isSymlink(t *testing.T, path string) bool {
+	t.Helper()
+	fi, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fi.Mode()&os.ModeSymlink != 0
+}
+
+func TestSaveThroughSymlinkReplacesTheTarget(t *testing.T) {
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "elsewhere")
+	if err := os.Mkdir(targetDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(targetDir, "config.yaml")
+	if err := os.WriteFile(target, []byte("owner: before\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink(filepath.Join("elsewhere", "config.yaml"), link); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveOwner(t, link, "after"); err != nil {
+		t.Fatal(err)
+	}
+	if !isSymlink(t, link) {
+		t.Fatal("the link was replaced by a file")
+	}
+	if got, _ := os.Readlink(link); got != filepath.Join("elsewhere", "config.yaml") {
+		t.Fatalf("link now points at %q", got)
+	}
+	back, _, err := Load(target)
+	if err != nil || back.Owner != "after" {
+		t.Fatalf("target after save: owner %q, err %v", back.Owner, err)
+	}
+	if fi, _ := os.Stat(target); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("target mode = %v, want 0600", fi.Mode().Perm())
+	}
+	for d, want := range map[string]int{dir: 2, targetDir: 1} {
+		entries, _ := os.ReadDir(d)
+		if len(entries) != want {
+			t.Fatalf("%s holds %v, want %d entries (a temp file was left)", d, entries, want)
+		}
+	}
+}
+
+// The target can disappear after the file was loaded; the link must still
+// stay a link and the target must be created.
+func TestSaveThroughDanglingSymlinkCreatesTheTarget(t *testing.T) {
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "elsewhere")
+	if err := os.Mkdir(targetDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink(filepath.Join("elsewhere", "config.yaml"), link); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveOwner(t, link, "after"); err != nil {
+		t.Fatal(err)
+	}
+	if !isSymlink(t, link) {
+		t.Fatal("the link was replaced by a file")
+	}
+	back, _, err := Load(filepath.Join(targetDir, "config.yaml"))
+	if err != nil || back.Owner != "after" {
+		t.Fatalf("target after save: owner %q, err %v", back.Owner, err)
+	}
+}
+
+func TestSaveThroughLinkChain(t *testing.T) {
+	dir := t.TempDir()
+	realDir := filepath.Join(dir, "real")
+	if err := os.Mkdir(realDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(realDir, "config.yaml")
+	middle := filepath.Join(dir, "middle.yaml")
+	if err := os.Symlink(target, middle); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "config.yaml")
+	if err := os.Symlink("middle.yaml", link); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveOwner(t, link, "after"); err != nil {
+		t.Fatal(err)
+	}
+	if !isSymlink(t, link) || !isSymlink(t, middle) {
+		t.Fatal("a link in the chain was replaced by a file")
+	}
+	back, _, err := Load(target)
+	if err != nil || back.Owner != "after" {
+		t.Fatalf("target after save: owner %q, err %v", back.Owner, err)
+	}
+}
+
+func TestSaveWritesNothingWhenTheLinkCannotBeResolved(t *testing.T) {
+	for name, build := range map[string]func(t *testing.T, dir string) string{
+		"loop": func(t *testing.T, dir string) string {
+			a, b := filepath.Join(dir, "a.yaml"), filepath.Join(dir, "b.yaml")
+			if err := os.Symlink("b.yaml", a); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("a.yaml", b); err != nil {
+				t.Fatal(err)
+			}
+			return a
+		},
+		"missing directory": func(t *testing.T, dir string) string {
+			link := filepath.Join(dir, "config.yaml")
+			if err := os.Symlink(filepath.Join("missing", "config.yaml"), link); err != nil {
+				t.Fatal(err)
+			}
+			return link
+		},
+	} {
+		dir := t.TempDir()
+		link := build(t, dir)
+		before, _ := os.ReadDir(dir)
+		if err := saveOwner(t, link, "after"); err == nil {
+			t.Errorf("%s: Save returned nil", name)
+		}
+		after, _ := os.ReadDir(dir)
+		if len(after) != len(before) {
+			t.Errorf("%s: directory held %v, now %v", name, before, after)
+		}
+		for _, e := range before {
+			if fi, err := os.Lstat(filepath.Join(dir, e.Name())); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+				t.Errorf("%s: %s is no longer a link (%v)", name, e.Name(), err)
+			}
+		}
+	}
+}
+
+func stubSync(t *testing.T, stub func(*os.File) error) {
+	t.Helper()
+	orig := syncFile
+	syncFile = stub
+	t.Cleanup(func() { syncFile = orig })
+}
+
+func TestSaveSyncsBeforeTheRename(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("owner: before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	var targetAtSync, tempAtSync string
+	stubSync(t, func(f *os.File) error {
+		calls++
+		b, _ := os.ReadFile(path)
+		targetAtSync = string(b)
+		b, _ = os.ReadFile(f.Name())
+		tempAtSync = string(b)
+		return nil
+	})
+	if err := saveOwner(t, path, "after"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("sync ran %d times, want 1", calls)
+	}
+	if targetAtSync != "owner: before\n" {
+		t.Fatalf("config.yaml held %q when the temp file was synced, want the old content", targetAtSync)
+	}
+	if !strings.Contains(tempAtSync, "owner: after") {
+		t.Fatalf("temp file held %q when synced, want the new config", tempAtSync)
+	}
+}
+
+func TestSaveKeepsTheFileWhenSyncFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("owner: before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stubSync(t, func(*os.File) error { return errors.New("disk full") })
+	if err := saveOwner(t, path, "after"); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("Save returned %v, want the sync error", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "owner: before\n" {
+		t.Fatalf("config.yaml now holds %q", b)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Fatalf("directory holds %v, want only config.yaml", entries)
 	}
 }
 

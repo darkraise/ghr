@@ -295,12 +295,61 @@ func Load(path string) (*Config, []string, error) {
 	return Parse(data)
 }
 
-// Save validates c, then writes it atomically (temp file in the same dir + rename).
+// syncFile is os.File.Sync; a test replaces it to see when the sync runs and to
+// make it fail.
+var syncFile = (*os.File).Sync
+
+// maxLinkHops is how many symbolic links saveTarget follows before it gives up.
+const maxLinkHops = 8
+
+// saveTarget returns the file Save replaces: path itself, or the file at the
+// end of the symbolic links that start there. That file may not exist yet.
+// Anything else that stops the resolution is an error, so Save never writes
+// over a link.
+func saveTarget(path string) (string, error) {
+	orig := path
+	for hops := 0; ; hops++ {
+		dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(dir, filepath.Base(path))
+		fi, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return path, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			return path, nil
+		}
+		if hops == maxLinkHops {
+			return "", fmt.Errorf("%s: more than %d symbolic links", orig, maxLinkHops)
+		}
+		dest, err := os.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(dest) {
+			dest = filepath.Join(dir, dest)
+		}
+		path = dest
+	}
+}
+
+// Save validates c, then writes it atomically (temp file beside the file, then
+// renamed over it). When path is a symbolic link, the file at the end of the
+// link is replaced and the link stays.
 func Save(path string, c *Config) error {
 	if _, err := c.Validate(); err != nil {
 		return err
 	}
 	data, err := yaml.Marshal(c)
+	if err != nil {
+		return err
+	}
+	path, err = saveTarget(path)
 	if err != nil {
 		return err
 	}
@@ -314,6 +363,10 @@ func Save(path string, c *Config) error {
 		return err
 	}
 	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := syncFile(tmp); err != nil {
 		tmp.Close()
 		return err
 	}
