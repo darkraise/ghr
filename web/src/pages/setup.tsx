@@ -21,6 +21,7 @@ import { api } from "@/api/client"
 import { keys, setupStart, useConfig, useSetupState, useStatus, useStorage } from "@/api/hooks"
 import { AddRepoDialog } from "@/components/add-repo-dialog"
 import { Brand } from "@/components/brand"
+import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { ErrorLine } from "@/components/page/error-line"
 import { SettingsSections } from "@/components/settings-form"
 import { ToolchainActions } from "@/components/toolchain-actions"
@@ -37,9 +38,10 @@ interface NavProps {
   onSkip?: () => void
   nextLabel?: string
   busy?: boolean
+  skipBusy?: boolean
 }
 
-function Nav({ onBack, onNext, onSkip, nextLabel = "Next", busy }: NavProps) {
+function Nav({ onBack, onNext, onSkip, nextLabel = "Next", busy, skipBusy }: NavProps) {
   return (
     <div className="mt-6 flex flex-wrap items-center gap-2">
       {onBack && (
@@ -51,7 +53,7 @@ function Nav({ onBack, onNext, onSkip, nextLabel = "Next", busy }: NavProps) {
         {nextLabel}
       </Button>
       {onSkip && (
-        <Button variant="ghost" onClick={onSkip}>
+        <Button variant="ghost" onClick={onSkip} loading={skipBusy}>
           Skip the rest
         </Button>
       )}
@@ -258,6 +260,7 @@ export function SetupPage() {
   const [popular, setPopular] = useState<boolean | null>(null)
   const [finishing, setFinishing] = useState(false)
   const [finishError, setFinishError] = useState("")
+  const [confirm, setConfirm] = useState<Confirm | null>(null)
   const configured = state.data?.configured ?? false
 
   useEffect(() => {
@@ -307,7 +310,14 @@ export function SetupPage() {
       setFinishing(false)
     }
   }
-  const skip = () => void finish("none")
+  const toolchains = usePopular ? "popular" : "none"
+  const skip = () =>
+    setConfirm({
+      title: "Skip the rest of setup?",
+      body: usePopular ? "Setup finishes now and queues the popular toolchain set." : "Setup finishes now. No toolchain set is queued.",
+      action: "Skip the rest",
+      run: () => void finish(toolchains),
+    })
   const go = (n: number) => () => setStep(n)
 
   let body: ReactNode
@@ -330,18 +340,18 @@ export function SetupPage() {
       body = (
         <>
           <RepositoriesStep />
-          <Nav onNext={go(3)} onSkip={skip} />
+          <Nav onNext={go(3)} onSkip={skip} skipBusy={finishing} />
         </>
       )
       break
     case 3:
-      body = <SettingsStep nav={{ onBack: go(2), onNext: go(4), onSkip: skip }} />
+      body = <SettingsStep nav={{ onBack: go(2), onNext: go(4), onSkip: skip, skipBusy: finishing }} />
       break
     case 4:
       body = (
         <>
           <ToolchainsStep popular={usePopular} onPopular={setPopular} />
-          <Nav onBack={go(3)} onNext={go(5)} onSkip={skip} />
+          <Nav onBack={go(3)} onNext={go(5)} onSkip={skip} skipBusy={finishing} />
         </>
       )
       break
@@ -349,7 +359,7 @@ export function SetupPage() {
       body = (
         <>
           <p className="text-sm">ghr is set up.{usePopular ? " Finishing queues the popular toolchain set." : ""}</p>
-          <Nav onBack={go(4)} onNext={() => void finish(usePopular ? "popular" : "none")} nextLabel="Finish" busy={finishing} />
+          <Nav onBack={go(4)} onNext={() => void finish(toolchains)} nextLabel="Finish" busy={finishing} />
         </>
       )
   }
@@ -387,6 +397,7 @@ export function SetupPage() {
             </p>
           )}
         </section>
+        <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
       </div>
     </div>
   )

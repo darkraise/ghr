@@ -302,7 +302,32 @@ describe("setup wizard", () => {
     expect(title.closest(".overflow-y-auto")).toHaveClass("h-full")
   })
 
-  it("finishes without toolchains when the rest is skipped", async () => {
+  it.each([
+    [true, "Setup finishes now and queues the popular toolchain set.", "popular"],
+    [false, "Setup finishes now. No toolchain set is queued.", "none"],
+  ])("confirms Skip the rest and sends what Finish would send (popular set pending: %s)", async (pending, body, toolchains) => {
+    let finished: unknown
+    const { calls } = mockApi(
+      authedRoutes({
+        "GET /api/setup": { ...base, configured: true, toolchains_pending: pending },
+        "POST /api/setup/finish": ({ body }: { body: unknown }) => {
+          finished = body
+          return noContent()
+        },
+      }),
+    )
+    const { user, router } = renderApp("/setup")
+    await user.click(await screen.findByRole("button", { name: "Skip the rest" }))
+    const ask = within(await screen.findByRole("alertdialog"))
+    expect(ask.getByText("Skip the rest of setup?")).toBeInTheDocument()
+    expect(ask.getByText(body)).toBeInTheDocument()
+    expect(calls.some((c) => c.path === "/api/setup/finish")).toBe(false)
+    await user.click(ask.getByRole("button", { name: "Skip the rest" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"))
+    expect(finished).toEqual({ toolchains })
+  })
+
+  it("skips without the popular set once it was switched off", async () => {
     let finished: unknown
     mockApi(
       authedRoutes({
@@ -314,9 +339,41 @@ describe("setup wizard", () => {
       }),
     )
     const { user, router } = renderApp("/setup")
-    await user.click(await screen.findByRole("button", { name: "Skip the rest" }))
+    await user.click(await screen.findByRole("button", { name: "Next" }))
+    await screen.findByLabelText("Max concurrent runners")
+    await user.click(screen.getByRole("button", { name: "Next" }))
+    await user.click(await screen.findByRole("switch", { name: "Popular set" }))
+    await user.click(screen.getByRole("button", { name: "Skip the rest" }))
+    const ask = within(await screen.findByRole("alertdialog"))
+    expect(ask.getByText("Setup finishes now. No toolchain set is queued.")).toBeInTheDocument()
+    await user.click(ask.getByRole("button", { name: "Skip the rest" }))
     await waitFor(() => expect(router.state.location.pathname).toBe("/"))
     expect(finished).toEqual({ toolchains: "none" })
+  })
+
+  it("leaves setup open when Skip the rest is cancelled", async () => {
+    const { calls } = mockApi(authedRoutes({ "GET /api/setup": { ...base, configured: true }, "POST /api/setup/finish": () => noContent() }))
+    const { user, router } = renderApp("/setup")
+    await user.click(await screen.findByRole("button", { name: "Skip the rest" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(calls.some((c) => c.path === "/api/setup/finish")).toBe(false)
+    expect(router.state.location.pathname).toBe("/setup")
+  })
+
+  it("shows a busy Skip the rest that cannot be pressed again", async () => {
+    const { calls } = mockApi(
+      authedRoutes({ "GET /api/setup": { ...base, configured: true }, "POST /api/setup/finish": () => new Promise<Response>(() => {}) }),
+    )
+    const { user } = renderApp("/setup")
+    await user.click(await screen.findByRole("button", { name: "Skip the rest" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Skip the rest" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    // The kit's loading state marks the button aria-busy and keeps its label.
+    const skip = screen.getByRole("button", { name: "Skip the rest" })
+    expect(skip).toHaveAttribute("aria-busy", "true")
+    expect(skip).toBeDisabled()
+    expect(calls.filter((c) => c.path === "/api/setup/finish")).toHaveLength(1)
   })
 
   it("sends a visitor without a session to /login", async () => {
