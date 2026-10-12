@@ -26,7 +26,7 @@ func TestResetRouteIsSocketOnly(t *testing.T) {
 	}
 	apiHandler := api.NewServer(b)
 
-	web := httptest.NewServer(webui.Handler(auth, apiHandler, fstest.MapFS{}, nil))
+	web := httptest.NewServer(webui.Handler(auth, apiHandler, fstest.MapFS{}, nil, nil))
 	defer web.Close()
 	req, _ := http.NewRequest(http.MethodPost, web.URL+"/api/web/reset-password", bytes.NewReader(nil))
 	req.Header.Set("X-GHR", "1")
@@ -81,7 +81,7 @@ func TestSetPasswordRoute(t *testing.T) {
 	}
 	apiHandler := api.NewServer(b)
 
-	web := httptest.NewServer(webui.Handler(auth, apiHandler, fstest.MapFS{}, nil))
+	web := httptest.NewServer(webui.Handler(auth, apiHandler, fstest.MapFS{}, nil, nil))
 	defer web.Close()
 	req, _ := http.NewRequest(http.MethodPost, web.URL+"/api/web/set-password", strings.NewReader(`{"password":"over the network"}`))
 	req.Header.Set("X-GHR", "1")

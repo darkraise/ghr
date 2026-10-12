@@ -1,10 +1,13 @@
 package daemon
 
 import (
+	"errors"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/darkraise/ghr/internal/model"
 )
@@ -65,5 +68,51 @@ func TestListenWeb(t *testing.T) {
 			}
 			t.Errorf("%s: %v %q %+v", name, ln, served, failed)
 		}
+	}
+}
+
+func TestRecordWebListen(t *testing.T) {
+	if recordWebListen("", "0.0.0.0:8080") != nil {
+		t.Fatal("an empty path records")
+	}
+	dir := filepath.Join(t.TempDir(), "state")
+	path := filepath.Join(dir, "web-listen")
+	record := recordWebListen(path, "0.0.0.0:8080")
+	record()
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a write into a missing directory: %v", err)
+	}
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record()
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "0.0.0.0:8080\n" {
+		t.Fatalf("after a failed write: %q %v", data, err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v %v", info.Mode(), err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	record()
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("written twice in one process: %v", err)
+	}
+}
+
+func TestRecordWebListenKeepsAFileThatHoldsTheValue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "web-listen")
+	if err := os.WriteFile(path, []byte(" 0.0.0.0:8080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	recordWebListen(path, "0.0.0.0:8080")()
+	if info, err := os.Stat(path); err != nil || !info.ModTime().Equal(old) {
+		t.Fatalf("the file was rewritten: %v %v", info.ModTime(), err)
 	}
 }

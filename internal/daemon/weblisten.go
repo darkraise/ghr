@@ -2,9 +2,12 @@ package daemon
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/darkraise/ghr/internal/model"
 )
@@ -52,4 +55,68 @@ func webListenEvent(e *model.WebListenError) string {
 		return fmt.Sprintf("web.listen %s: %s; serving the web UI on %s", e.Address, e.Reason, e.ServingOn)
 	}
 	return fmt.Sprintf("web.listen %s: %s; the web UI is off until it is fixed", e.Address, e.Reason)
+}
+
+// recordWebListen returns the web handler's onSession: it records listen at
+// path once a browser has used it with a session, so the next start can
+// fall back to an address known to work. An empty path records nothing.
+func recordWebListen(path, listen string) func() {
+	if path == "" {
+		return nil
+	}
+	r := &webListenRecorder{path: path, listen: listen}
+	return r.record
+}
+
+// webListenRecorder writes at most once per process. A failed write is
+// tried again at the next request, so the flag is set only on success.
+type webListenRecorder struct {
+	path, listen string
+
+	mu      sync.Mutex
+	written bool
+	warned  bool
+}
+
+func (r *webListenRecorder) record() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.written {
+		return
+	}
+	if data, err := os.ReadFile(r.path); err == nil && strings.TrimSpace(string(data)) == r.listen {
+		r.written = true
+		return
+	}
+	if err := writeWebListen(r.path, r.listen); err != nil {
+		if !r.warned {
+			log.Printf("record the web address: %v", err)
+			r.warned = true
+		}
+		return
+	}
+	r.written = true
+}
+
+// writeWebListen replaces path atomically. os.CreateTemp creates the file
+// with mode 0600.
+func writeWebListen(path, listen string) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".web-listen-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if _, err := f.WriteString(listen + "\n"); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }

@@ -700,6 +700,43 @@ func TestRunRestartsThroughTheSeam(t *testing.T) {
 	}
 }
 
+// The web address is recorded once a browser has used it with a session,
+// not when it is bound or at a login.
+func TestRunRecordsTheWebAddressABrowserUsed(t *testing.T) {
+	addr := freeAddr(t)
+	o := testOptions(t, cfgYAML+"web:\n  listen: "+addr+"\n")
+	o.WebListenPath = filepath.Join(t.TempDir(), "web-listen")
+	startRun(t, o)
+	statusOver(t, o.Socket)
+	absent := func(when string) {
+		t.Helper()
+		if _, err := os.Stat(o.WebListenPath); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("recorded %s: %v", when, err)
+		}
+	}
+	if resp, _ := webCall(t, addr, http.MethodGet, "/auth/state", "", ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("state: %d", resp.StatusCode)
+	}
+	absent("after the bind alone")
+	resp, body := webCall(t, addr, http.MethodPost, "/auth/setup", `{"password":"correct horse battery"}`, "")
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("setup: %d %s", resp.StatusCode, body)
+	}
+	var session string
+	for _, ck := range resp.Cookies() {
+		if ck.Name == "ghr_session" {
+			session = ck.Value
+		}
+	}
+	absent("at the login")
+	if resp, body := webCall(t, addr, http.MethodGet, "/api/status", "", session); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: %d %s", resp.StatusCode, body)
+	}
+	if data, err := os.ReadFile(o.WebListenPath); err != nil || string(data) != addr+"\n" {
+		t.Fatalf("recorded %q %v, want %q", data, err, addr+"\n")
+	}
+}
+
 func TestRunServesStorageAndSweepsTheToolCache(t *testing.T) {
 	o := testOptions(t, cfgYAML)
 	left := filepath.Join(o.Paths.ToolCache, ".tmp", "20261006T140000-abcdef", "partial")

@@ -37,12 +37,17 @@ var afterFunc = time.AfterFunc
 type handler struct {
 	auth  *Auth
 	hosts []string
+	// onSession runs for every request a valid session lets through; nil
+	// runs nothing.
+	onSession func()
 }
 
 // Handler serves the web UI's TCP listener: /auth/* for login, the control
 // API under /api/ for logged-in sessions, and the app from static.
-func Handler(a *Auth, api http.Handler, static fs.FS, hosts []string) http.Handler {
-	h := &handler{auth: a, hosts: hosts}
+// onSession, when set, runs for every /api/ request a valid session lets
+// through, before the API handles it.
+func Handler(a *Auth, apiHandler http.Handler, static fs.FS, hosts []string, onSession func()) http.Handler {
+	h := &handler{auth: a, hosts: hosts, onSession: onSession}
 	mux := http.NewServeMux()
 	allow := map[string]string{}
 	route := func(method, path string, fn http.HandlerFunc) {
@@ -68,7 +73,7 @@ func Handler(a *Auth, api http.Handler, static fs.FS, hosts []string) http.Handl
 		}
 		writeError(w, http.StatusNotFound, "not found")
 	})
-	mux.Handle("/api/", h.requireSession(http.StripPrefix("/api", api)))
+	mux.Handle("/api/", h.requireSession(http.StripPrefix("/api", apiHandler)))
 	mux.Handle("/", staticHandler(static))
 	return h.checks(mux)
 }
@@ -169,6 +174,9 @@ func (h *handler) requireSession(next http.Handler) http.Handler {
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "not logged in")
 			return
+		}
+		if h.onSession != nil {
+			h.onSession()
 		}
 		every, after := sessionRecheck, afterFunc
 		ctx, cancel := context.WithCancel(api.WithBrowser(r.Context(), r.Host))

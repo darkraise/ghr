@@ -30,7 +30,7 @@ func newTestHandler(t *testing.T) (http.Handler, *Auth, *fakeAPI) {
 	t.Helper()
 	a, _ := newTestAuth(t)
 	api := &fakeAPI{}
-	return Handler(a, api, testFS(), []string{"ghr.lan"}), a, api
+	return Handler(a, api, testFS(), []string{"ghr.lan"}, nil), a, api
 }
 
 // do sends a request as the browser app would: Host ghr.lan:8080 and the
@@ -201,7 +201,7 @@ func TestAPIRequestsCarryTheBrowserMark(t *testing.T) {
 		seen = append(seen, r.Method+" "+r.URL.Path+" "+host)
 		w.WriteHeader(http.StatusNoContent)
 	})
-	h := Handler(a, backend, testFS(), []string{"ghr.lan"})
+	h := Handler(a, backend, testFS(), []string{"ghr.lan"}, nil)
 	id, err := a.Setup(pw)
 	if err != nil {
 		t.Fatal(err)
@@ -478,7 +478,7 @@ func TestLongRequestEndsWithItsSession(t *testing.T) {
 				t.Fatal(err)
 			}
 			api := &waitAPI{started: make(chan struct{}), ended: make(chan struct{})}
-			h := Handler(a, api, testFS(), []string{"ghr.lan"})
+			h := Handler(a, api, testFS(), []string{"ghr.lan"}, nil)
 			returned := make(chan struct{})
 			go func() {
 				do(h, http.MethodGet, "/api/changes", "", withCookie(id))
@@ -526,5 +526,31 @@ func TestRequestStopsItsSessionTimer(t *testing.T) {
 	}
 	if timers[0].Stop() {
 		t.Fatal("the request returned with its re-check timer still armed")
+	}
+}
+
+func TestOnSessionRunsForLoggedInAPIRequests(t *testing.T) {
+	a, _ := newTestAuth(t)
+	id, err := a.Setup(pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	h := Handler(a, &fakeAPI{}, testFS(), []string{"ghr.lan"}, func() { calls++ })
+	for _, tc := range []struct {
+		target string
+		mod    func(*http.Request)
+		want   int
+	}{
+		{"/api/status", nil, 0},
+		{"/auth/state", withCookie(id), 0},
+		{"/", withCookie(id), 0},
+		{"/api/status", withCookie(id), 1},
+		{"/api/status", withCookie(id), 2},
+	} {
+		do(h, http.MethodGet, tc.target, "", tc.mod)
+		if calls != tc.want {
+			t.Fatalf("GET %s: %d calls, want %d", tc.target, calls, tc.want)
+		}
 	}
 }
