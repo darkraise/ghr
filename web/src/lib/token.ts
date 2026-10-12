@@ -1,6 +1,6 @@
 import type { TokenStatus } from "@/api/types"
 import { DAY_MS } from "./duration"
-import { hhmm, monthDay, plural } from "./format"
+import { count, hhmm, monthDay, plural } from "./format"
 
 const SOON = 14 * DAY_MS
 
@@ -24,8 +24,6 @@ export function expiryText(t: TokenStatus, now: number): string {
   if (left <= 0) return `Expired ${day}`
   return left < DAY_MS ? `Expires ${day}, in less than a day` : `Expires ${day}, in ${plural(Math.floor(left / DAY_MS), "day")}`
 }
-
-const count = (n: number) => n.toLocaleString("en-US")
 
 export function rateText(t: TokenStatus | undefined): string {
   if (t?.rate_remaining === undefined) return ""

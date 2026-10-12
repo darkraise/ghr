@@ -3,7 +3,7 @@ import type { Metrics, Status } from "@/api/types"
 import { CapacitySegments } from "@/components/capacity-bar"
 import { Sparkline } from "@/components/sparkline"
 import { capacity } from "@/lib/capacity"
-import { fmtMem, series } from "@/lib/format"
+import { count, fmtMem, series } from "@/lib/format"
 
 export function StatCard({ label, value, unit, children }: { label: string; value?: ReactNode; unit?: string; children?: ReactNode }) {
   return (
@@ -26,8 +26,6 @@ function oldestWaiting(status: Status, now: number): string | undefined {
   const minutes = Math.floor((now - Math.min(...times)) / 60_000)
   return minutes < 1 ? "oldest under 1 min" : `oldest ${minutes} min`
 }
-
-const count = (n: number) => n.toLocaleString("en-US")
 
 export function StatCards({ status, metrics, now }: { status: Status; metrics: Metrics | undefined; now: number }) {
   const c = capacity(status)
