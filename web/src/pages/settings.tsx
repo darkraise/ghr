@@ -1,7 +1,7 @@
-import { Link, useParams } from "@tanstack/react-router"
+import { Link, useLocation, useParams } from "@tanstack/react-router"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
-import type { ReactNode } from "react"
+import { useEffect, type ReactNode } from "react"
 import { AccountSection } from "@/components/account-section"
 import { ErrorLine } from "@/components/page/error-line"
 import { SideGroup, SideLayout } from "@/components/page/side-layout"
@@ -44,6 +44,13 @@ function SectionLink({ id, title }: { id: string; title: string }) {
 function GeneralSettings() {
   const form = useSettingsForm()
   const c = form.config
+  const hash = useLocation({ select: (l) => l.hash })
+  const ready = c !== undefined
+  // Scrolled here rather than by the router, as on Repositories: the group
+  // exists only once the config has loaded.
+  useEffect(() => {
+    if (ready && hash.replace(/^#/, "") === "web-access") document.getElementById("web-access")?.scrollIntoView()
+  }, [ready, hash])
   return (
     <>
       <PageHeader title="General" description={c ? `Serving ${c.owner} in ${c.mode} mode` : undefined} />

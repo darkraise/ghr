@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest"
 import { cleanup, configure } from "@testing-library/react"
 import { afterEach, vi } from "vitest"
 import { liveConfig } from "@/api/live"
+import { clearRestarting } from "@/lib/restarting"
 import { releaseQueryClients } from "./query-clients"
 
 // The change stream would add a fetch to every rendered app, and many tests
@@ -35,6 +36,7 @@ configure({ asyncUtilTimeout: 3000 })
 
 afterEach(async () => {
   cleanup()
+  clearRestarting()
   await releaseQueryClients()
   vi.unstubAllGlobals()
 })

@@ -1,6 +1,8 @@
 import { Input } from "darkraise-ui/components/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "darkraise-ui/components/select"
+import { useStatus } from "@/api/hooks"
 import { Field, FieldGroup } from "@/components/page/field"
+import { RestartControl } from "@/components/restart-banner"
 import { RejectedAlert } from "@/components/save-bar"
 import { TagField } from "@/components/tag-field"
 import { FIELD_WIDTH } from "@/lib/field-width"
@@ -16,6 +18,7 @@ const MODES: Record<string, string> = {
 // setup wizard leaves them out.
 export function SettingsSections({ form, webAccess = false }: { form: SettingsForm; webAccess?: boolean }) {
   const { values, changed, errors, offline, set } = form
+  const restart = useStatus().data?.restart
   const text = (key: string) => String(values[key] ?? "")
   const num = (key: string) => (Number.isNaN(values[key]) ? "" : String(values[key]))
   const toNum = (s: string) => (s === "" ? Number.NaN : Number(s))
@@ -139,6 +142,11 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
           >
             <TagField label="Allowed hostnames" value={values.web_hosts as string[]} onChange={set("web_hosts")} disabled={offline} className={FIELD_WIDTH} />
           </Field>
+          {restart?.pending?.length ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 text-sm">
+              <RestartControl restart={restart} offline={offline} />
+            </div>
+          ) : null}
         </FieldGroup>
       )}
     </div>

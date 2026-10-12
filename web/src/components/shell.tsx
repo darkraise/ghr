@@ -11,6 +11,7 @@ import type { Config, Status } from "@/api/types"
 import { Brand } from "@/components/brand"
 import { CapacitySegments } from "@/components/capacity-bar"
 import { ModeControl } from "@/components/mode-control"
+import { ListenErrorBanner, RestartBanner } from "@/components/restart-banner"
 import { UpdateCard } from "@/components/update-card"
 import { capacity } from "@/lib/capacity"
 import { running } from "@/lib/status"
@@ -149,7 +150,8 @@ export function Shell() {
         </Alert>
       )}
         {st && (
-          <div className="mb-4 empty:hidden">
+          <div className="mb-4 flex flex-col gap-2 empty:hidden">
+            {st.web_listen_error ? <ListenErrorBanner error={st.web_listen_error} /> : <RestartBanner status={st} offline={offline} />}
             <UpdateCard update={st.runner_update} offline={offline} />
           </div>
         )}
