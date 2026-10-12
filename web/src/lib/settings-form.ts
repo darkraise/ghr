@@ -5,10 +5,8 @@ import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useStatus } from "@/api/hooks"
 import type { Config, ConfigPatch, RunnerLimitsPatch } from "@/api/types"
 import { changedKeys, sameValue, settle, type Equal, type Values } from "@/lib/draft"
-import { DAY_MS, durationError, sameDuration } from "@/lib/duration"
+import { UNIT_SETTINGS, readSetting, writeSetting } from "@/lib/units"
 import { errorText } from "@/query"
-
-const FLOORS: Record<string, number> = { poll_interval: 5000, start_timeout: 0, idle_timeout: 0, history_retention: DAY_MS }
 
 // The daemon's cap on global_max (config.MaxRunners); it refuses a larger value.
 const MAX_RUNNERS = 99
@@ -17,34 +15,34 @@ function loadedValues(c: Config): Values {
   return {
     mode: c.mode,
     global_max: c.global_max,
-    poll_interval: c.poll_interval,
-    start_timeout: c.start_timeout,
-    idle_timeout: c.idle_timeout,
+    poll_interval: readSetting("poll_interval", c.poll_interval),
+    start_timeout: readSetting("start_timeout", c.start_timeout),
+    idle_timeout: readSetting("idle_timeout", c.idle_timeout),
     disk_high_water: c.disk_high_water,
-    build_cache_keep: c.build_cache_keep,
-    history_retention: c.history_retention,
+    build_cache_keep: readSetting("build_cache_keep", c.build_cache_keep),
+    history_retention: readSetting("history_retention", c.history_retention),
     labels: c.labels ?? [],
-    memory_max: c.runner_limits.memory_max,
-    cpu_quota: c.runner_limits.cpu_quota,
+    memory_max: readSetting("memory_max", c.runner_limits.memory_max),
+    cpu_quota: readSetting("cpu_quota", c.runner_limits.cpu_quota),
   }
 }
 
-const equal: Equal = (key, a, b) => {
-  if (key in FLOORS) return sameDuration(String(a), String(b))
+const equal: Equal = (_key, a, b) => {
+  if (typeof a === "number" && typeof b === "number") return Object.is(a, b)
   return typeof a === "string" && typeof b === "string" ? a.trim() === b.trim() : sameValue(a, b)
 }
 
 function fieldErrors(v: Values): Record<string, string> {
   const errors: Record<string, string> = {}
-  for (const [key, floor] of Object.entries(FLOORS)) {
-    const err = durationError(key, String(v[key] ?? ""), floor)
+  for (const [key, spec] of Object.entries(UNIT_SETTINGS)) {
+    const value = v[key]
+    const err = typeof value === "number" ? spec.error(value) : ""
     if (err) errors[key] = err
   }
   const max = Number(v.global_max)
-  if (!Number.isInteger(max) || max < 1) errors.global_max = "global_max must be >= 1"
-  else if (max > MAX_RUNNERS) errors.global_max = `global_max must be <= ${MAX_RUNNERS}`
+  if (!Number.isInteger(max) || max < 1 || max > MAX_RUNNERS) errors.global_max = `Enter a whole number from 1 to ${MAX_RUNNERS}`
   const high = Number(v.disk_high_water)
-  if (!Number.isInteger(high) || high < 1 || high > 100) errors.disk_high_water = "disk_high_water must be 1..100"
+  if (!Number.isInteger(high) || high < 1 || high > 100) errors.disk_high_water = "Enter a whole number from 1 to 100"
   return errors
 }
 
@@ -54,7 +52,8 @@ function toPatch(sent: Values): ConfigPatch {
   const patch: Record<string, unknown> = {}
   const limits: RunnerLimitsPatch = {}
   for (const [key, v] of Object.entries(sent)) {
-    const value = typeof v === "string" ? v.trim() : v
+    const written = writeSetting(key, v)
+    const value = typeof written === "string" ? written.trim() : written
     if (isLimit(key)) limits[key] = value as string
     else patch[key] = value
   }

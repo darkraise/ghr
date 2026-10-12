@@ -27,22 +27,3 @@ export function parseDuration(text: string): number | null {
   }
   return sign * total
 }
-
-function floorText(ms: number): string {
-  return ms % DAY_MS === 0 ? `${ms / DAY_MS}d` : `${ms / 1000}s`
-}
-
-export function durationError(name: string, text: string, floorMs: number): string {
-  const s = text.trim()
-  const v = parseDuration(s)
-  if (v === null) return `invalid duration "${s}"`
-  if (v <= 0) return `${name} must be greater than 0`
-  if (v < floorMs) return `${name} must be at least ${floorText(floorMs)}`
-  return ""
-}
-
-export function sameDuration(a: string, b: string): boolean {
-  const x = parseDuration(a.trim())
-  const y = parseDuration(b.trim())
-  return x !== null && y !== null ? x === y : a.trim() === b.trim()
-}

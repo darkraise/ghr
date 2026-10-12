@@ -107,7 +107,7 @@ describe("setup wizard", () => {
     expect(await screen.findByRole("list", { name: "Configured repositories" })).toHaveTextContent("darkmem")
     await user.click(screen.getByRole("button", { name: "Next" }))
 
-    const max = await screen.findByLabelText("Global max")
+    const max = await screen.findByLabelText("Max concurrent runners")
     await user.clear(max)
     await user.type(max, "3")
     await user.click(screen.getByRole("button", { name: "Next" }))
