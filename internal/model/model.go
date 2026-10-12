@@ -202,11 +202,14 @@ type HistoryEntry struct {
 }
 
 // Failed reports whether a job conclusion counts as a failure: anything that
-// is not a success, a cancellation, a skip or "unknown", ghr's own conclusion
-// for a job whose result it never learned.
+// is not a success, a cancellation, a skip, one of GitHub's "neutral", "stale"
+// and "action_required", or "unknown", ghr's own conclusion for a job whose
+// result it never learned. A conclusion GitHub adds later counts as a failure
+// until it is listed here, so it cannot look harmless. The web UI's
+// resultState keeps the same list.
 func Failed(conclusion string) bool {
 	switch conclusion {
-	case "success", "cancelled", "skipped", "unknown":
+	case "success", "cancelled", "skipped", "unknown", "neutral", "stale", "action_required":
 		return false
 	}
 	return true
