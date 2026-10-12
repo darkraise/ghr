@@ -47,7 +47,7 @@ const Line = memo(function Line({ line, query, current, target }: { line: LogLin
       <span className="ghr-log-muted w-12 shrink-0 text-right select-none">{line.n}</span>
       <span className={`min-w-0 break-all whitespace-pre-wrap ${TEXT_CLASS[line.kind] ?? ""}`}>
         {PREFIX[line.kind]}
-        {renderAnsi(line.text, query, current)}
+        {renderAnsi(line, query, current)}
       </span>
     </div>
   )
@@ -156,7 +156,7 @@ export function LogViewer({
                 <ChevronRight aria-hidden="true" size={14} className={`mt-0.5 ml-12 shrink-0 ${open ? "rotate-90" : ""}`} />
                 <span className="min-w-0 break-all whitespace-pre-wrap">
                   {renderAnsi(
-                    row.line.text,
+                    row.line,
                     query,
                     current && current.step === s.number && current.line === row.line.n ? current.index : undefined,
                   )}

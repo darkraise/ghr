@@ -1,9 +1,9 @@
 import { render } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import { ansiSegments, matchRanges, plainText, renderAnsi } from "./ansi"
+import { ansiSegments, matchRanges, parsedLine, plainText, renderAnsi } from "./ansi"
 
 function html(raw: string, query?: string, current?: number): HTMLElement {
-  return render(<p>{renderAnsi(raw, query, current)}</p>).container.firstElementChild as HTMLElement
+  return render(<p>{renderAnsi({ text: raw }, query, current)}</p>).container.firstElementChild as HTMLElement
 }
 
 describe("ansiSegments", () => {
@@ -49,6 +49,30 @@ describe("ansiSegments", () => {
     expect(plainText("10%\r50%\r100%")).toBe("100%")
     expect(plainText("done\r")).toBe("done")
     expect(plainText("\u001b[32m10%\r\u001b[31m100%")).toBe("100%")
+  })
+})
+
+describe("parsedLine", () => {
+  it("parses a line object once, however often it is asked for or rendered", () => {
+    let reads = 0
+    const line = {
+      get text() {
+        reads++
+        return "\u001b[31mFound\u001b[0m 1 error."
+      },
+    }
+    const parsed = parsedLine(line)
+    expect(parsed).toEqual({
+      segments: [
+        { text: "Found", color: "red", bold: false },
+        { text: " 1 error.", color: undefined, bold: false },
+      ],
+      text: "Found 1 error.",
+    })
+    expect(parsedLine(line)).toBe(parsed)
+    render(<p>{renderAnsi(line, "found", 0)}</p>)
+    render(<p>{renderAnsi(line, "error")}</p>)
+    expect(reads).toBe(1)
   })
 })
 

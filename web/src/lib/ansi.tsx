@@ -68,6 +68,26 @@ export function plainText(raw: string): string {
     .join("")
 }
 
+export interface ParsedLine {
+  segments: AnsiSegment[]
+  // The segments' text joined: what the line shows and what a search reads.
+  text: string
+}
+
+const parsed = new WeakMap<object, ParsedLine>()
+
+// Keyed by the line object, so a line is parsed once however often it is
+// rendered or searched, and the entry goes when the log does.
+export function parsedLine(line: { text: string }): ParsedLine {
+  let out = parsed.get(line)
+  if (!out) {
+    const segments = ansiSegments(line.text)
+    out = { segments, text: segments.map((s) => s.text).join("") }
+    parsed.set(line, out)
+  }
+  return out
+}
+
 // Case-insensitive, non-overlapping occurrences of query in text, as
 // [start, end) offsets in text itself (lowercasing a copy can change lengths).
 export function matchRanges(text: string, query: string): [number, number][] {
@@ -84,9 +104,9 @@ function segmentClass(s: AnsiSegment): string | undefined {
 // Renders one log line as React elements: coloured and bold spans, and a
 // <mark> on each occurrence of query, the one numbered current marked as the
 // current match.
-export function renderAnsi(raw: string, query = "", current?: number): ReactNode[] {
-  const segments = ansiSegments(raw)
-  const ranges = matchRanges(segments.map((s) => s.text).join(""), query)
+export function renderAnsi(line: { text: string }, query = "", current?: number): ReactNode[] {
+  const { segments, text: plain } = parsedLine(line)
+  const ranges = matchRanges(plain, query)
   const out: ReactNode[] = []
   let offset = 0
   let r = 0
