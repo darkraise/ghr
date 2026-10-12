@@ -314,8 +314,8 @@ fi
 # fake_docker_key makes curl save $1 as the download. The fake gpg reads it as
 # lines of "KEY <primary fpr> [<subkey fpr> ...]" and ignores any other line, then
 # imports, lists and exports those keys the way gpg does: a key it does not hold
-# fails to list but exports nothing with status 0. It refuses to run without a
-# private, empty-at-start --homedir, so a run can never touch the real keyring.
+# fails to list but exports nothing with status 0. It refuses to run without an
+# existing --homedir of mode 700, so a run can never touch the real keyring.
 # CURL_RC, GPG_IMPORT_RC and GPG_EXPORT (empty or noheader) inject failures.
 DOCKER_FPR=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 OTHER_FPR=D3306A018370199E527AE7997EA0A9C3F273FCD8

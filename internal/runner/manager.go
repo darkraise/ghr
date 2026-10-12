@@ -608,7 +608,7 @@ const maxJobFile = 1 << 20
 
 // readJobJSON reads a JSON file from an instance directory. The job can
 // write that directory and root reads the file, so it gets the checks
-// readFrom makes for logs: a link is not followed, only a regular file is
+// readFrom makes for logs: a link is refused, only a regular file is
 // read, and at most maxJobFile of it. A FIFO would block the caller, which is
 // the tick, and a device would feed it for ever. The check is repeated on the
 // open file, because the job can swap the name between the two; whatever it
