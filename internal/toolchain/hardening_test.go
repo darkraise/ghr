@@ -54,6 +54,65 @@ func TestOpDirDoesNotFollowASymlinkedTmp(t *testing.T) {
 	}
 }
 
+// The tool cache belongs to the runner user, so a job can swap .tmp for a
+// link at any moment. OpID runs after opDir has looked at .tmp and before it
+// makes the operation directory.
+func TestOpDirDoesNotFollowATmpSwappedForALink(t *testing.T) {
+	f := newFixture(t)
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.Mkdir(victim, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	symlinkOrSkip(t, victim, filepath.Join(t.TempDir(), "probe"))
+	tmp, moved := filepath.Join(f.Root, ".tmp"), filepath.Join(f.Root, ".moved")
+	f.OpID = func() string {
+		if err := os.Rename(tmp, moved); err != nil {
+			t.Error(err)
+		}
+		if err := os.Symlink(victim, tmp); err != nil {
+			t.Error(err)
+		}
+		return "op1"
+	}
+	f.opDir()
+	if es, _ := os.ReadDir(victim); len(es) != 0 {
+		t.Fatalf("an operation directory was created through the link: %v", es)
+	}
+	if runtime.GOOS != "windows" {
+		if st, err := os.Stat(victim); err != nil || st.Mode().Perm() != 0o700 {
+			t.Fatalf("the link's target was chmodded: %v, %v", st, err)
+		}
+	}
+	if !exists(filepath.Join(moved, "op1")) {
+		t.Fatal("the operation directory was not made in the directory opDir had opened")
+	}
+}
+
+func TestOpenOwnedOpensOnlyTheDirectoryItself(t *testing.T) {
+	dir := t.TempDir()
+	own := filepath.Join(dir, "own")
+	if err := os.Mkdir(own, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	r, err := openOwned(own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	symlinkOrSkip(t, own, link)
+	for _, path := range []string{link, file, filepath.Join(dir, "missing")} {
+		if r, err := openOwned(path); err == nil {
+			r.Close()
+			t.Errorf("%s was opened as a directory of this user", path)
+		}
+	}
+}
+
 func TestInstallArchiveKeepsAVersionACompletedMeanwhile(t *testing.T) {
 	f := newFixture(t)
 	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))

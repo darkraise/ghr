@@ -87,9 +87,8 @@ func (e *Env) removeLayout(toolDir, folder string) error {
 // download.
 func (e *Env) opDir() (string, error) {
 	tmp := filepath.Join(e.Root, ".tmp")
-	// A job can plant a symlink or its own directory here; Chmod would follow
-	// the link as root and a foreign directory would let the job swap an
-	// operation directory for a link.
+	// A job can plant a symlink or its own directory here; a foreign directory
+	// would let the job swap an operation directory for a link.
 	if fi, err := os.Lstat(tmp); err == nil && (!fi.IsDir() || !ownedByMe(fi)) {
 		if err := os.RemoveAll(tmp); err != nil {
 			return "", err
@@ -98,14 +97,44 @@ func (e *Env) opDir() (string, error) {
 	if err := os.MkdirAll(tmp, 0o711); err != nil {
 		return "", err
 	}
-	if err := os.Chmod(tmp, 0o711); err != nil {
+	// The job can swap .tmp again after that look, so the rest goes through
+	// one handle on the directory and never through its path.
+	r, err := openOwned(tmp)
+	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(tmp, e.OpID())
-	if err := os.Mkdir(dir, 0o700); err != nil {
+	defer r.Close()
+	if err := r.Chmod(".", 0o711); err != nil {
 		return "", err
 	}
-	return dir, nil
+	id := e.OpID()
+	if err := r.Mkdir(id, 0o700); err != nil {
+		return "", err
+	}
+	return filepath.Join(tmp, id), nil
+}
+
+// openOwned opens the directory at path, and only one that belongs to this
+// process. os.OpenRoot follows a link at path, so what it opened is compared
+// with what path itself is.
+func openOwned(path string) (*os.Root, error) {
+	r, err := os.OpenRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := r.Stat(".")
+	if err == nil {
+		var named os.FileInfo
+		named, err = os.Lstat(path)
+		if err == nil && (!os.SameFile(named, opened) || !ownedByMe(opened)) {
+			err = fmt.Errorf("%s is a link or belongs to another user", path)
+		}
+	}
+	if err != nil {
+		r.Close()
+		return nil, err
+	}
+	return r, nil
 }
 
 // CleanTmp removes what unfinished operations left in <Root>/.tmp. Version
