@@ -51,6 +51,23 @@ type fakeManager struct {
 	diskUsed    int64        // Status().DiskUsedBytes
 	rate        int          // Status().RateRemaining
 	statusCalls atomic.Int64 // Status calls; the change hub reads it from its own goroutine
+
+	vmu          sync.Mutex
+	visibility   []string          // RecordVisibility calls, as "<repo> public" or "<repo> private"; guarded by vmu
+	onVisibility func(repo string) // runs during RecordVisibility, before the call is recorded
+}
+
+func (f *fakeManager) RecordVisibility(repo string, public bool) {
+	if f.onVisibility != nil {
+		f.onVisibility(repo)
+	}
+	answer := " private"
+	if public {
+		answer = " public"
+	}
+	f.vmu.Lock()
+	f.visibility = append(f.visibility, repo+answer)
+	f.vmu.Unlock()
 }
 
 func (f *fakeManager) PausedUntil() time.Time { return f.paused }
@@ -482,8 +499,19 @@ func TestPatchConfigReportsFirstBadDuration(t *testing.T) {
 }
 
 func TestAddRepo(t *testing.T) {
-	b, _, _ := newBackend(t)
+	b, m, gh := newBackend(t)
 	ctx := context.Background()
+	// oldcloud is a former name of darkcloud, which is configured.
+	gh.repos["oldcloud"] = &github.Repository{FullName: "darkraise/darkcloud", Private: true}
+	var order, misplaced []string
+	b.Wake = func() { order = append(order, "wake") }
+	m.onVisibility = func(repo string) {
+		order = append(order, "hand-over "+repo)
+		saved, _, err := config.Load(b.Store.ConfigPath)
+		if err != nil || saved.Repo(repo) == nil || b.Store.Config().Repo(repo) != nil {
+			misplaced = append(misplaced, repo)
+		}
+	}
 	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "missing"}); apiStatus(err) != 400 || !strings.Contains(err.Error(), "repository access") {
 		t.Fatalf("missing err %v", err)
 	}
@@ -493,6 +521,9 @@ func TestAddRepo(t *testing.T) {
 	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "darkcloud"}); apiStatus(err) != 409 {
 		t.Fatalf("duplicate err %v", err)
 	}
+	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "oldcloud"}); apiStatus(err) != 409 {
+		t.Fatalf("duplicate under a former name: err %v", err)
+	}
 	if err := b.AddRepo(ctx, model.AddRepoRequest{Name: "public", AllowPublic: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -501,6 +532,18 @@ func TestAddRepo(t *testing.T) {
 	}
 	if b.Store.Config().Repo("newrepo") == nil {
 		t.Fatal("repo not saved")
+	}
+	// What AddRepo read goes to the manager only for an add that is saved. A
+	// refused one hands over nothing, so the answer of the repository that
+	// is already configured is left alone.
+	if want := []string{"public public", "newrepo private"}; !reflect.DeepEqual(m.visibility, want) {
+		t.Fatalf("handed over %v, want %v", m.visibility, want)
+	}
+	// The hand-over comes once config.yaml holds the repository and before
+	// the new config can be seen, so before the loop is woken: a tick that
+	// sees the repository finds its answer.
+	if want := []string{"hand-over public", "wake", "hand-over newrepo", "wake"}; !reflect.DeepEqual(order, want) || len(misplaced) != 0 {
+		t.Fatalf("order %v, want %v; handed over before the save or after the new config showed: %v", order, want, misplaced)
 	}
 }
 
@@ -582,7 +625,7 @@ func TestAddRepoStoresGitHubsName(t *testing.T) {
 // Two adds of one repository can both pass the early check. The check inside
 // the update decides, and the loser gets the 409 a late duplicate gets.
 func TestConcurrentAddRepoConflicts(t *testing.T) {
-	b, _, gh := newBackend(t)
+	b, m, gh := newBackend(t)
 	entered, release := make(chan struct{}), make(chan struct{})
 	gh.onGetRepo = func() {
 		entered <- struct{}{}
@@ -607,6 +650,9 @@ func TestConcurrentAddRepoConflicts(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("newrepo configured %d times", n)
+	}
+	if !reflect.DeepEqual(m.visibility, []string{"newrepo private"}) {
+		t.Fatalf("handed over %v, want one answer from the add that won", m.visibility)
 	}
 }
 

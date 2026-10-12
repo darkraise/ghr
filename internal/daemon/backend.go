@@ -44,6 +44,7 @@ type Manager interface {
 	QueueUpdate(ctx context.Context) error
 	CancelUpdate() error
 	Pending() []model.HistoryEntry
+	RecordVisibility(repo string, public bool)
 }
 
 // GitHub is the part of the GitHub client the backend uses.
@@ -416,12 +417,18 @@ func (b *Backend) KillRunner(ctx context.Context, id string) error {
 // fn works on a copy, so a rejected change leaves no partial state anywhere.
 // A warning is written as an event only when the change introduced it.
 func (b *Backend) update(fn func(c *config.Config) error) error {
+	return b.updateThen(fn, nil)
+}
+
+// updateThen is update with a step that runs once the change is saved and
+// before it can be seen, as Store.UpdateThen runs it.
+func (b *Backend) updateThen(fn func(c *config.Config) error, saved func()) error {
 	var before []string
-	warnings, err := b.Store.Update(func(c *config.Config) error {
+	warnings, err := b.Store.UpdateThen(func(c *config.Config) error {
 		// Until fn runs, c is a copy of the config this update replaces.
 		before, _ = c.Validate()
 		return fn(c)
-	})
+	}, saved)
 	if err != nil {
 		var ae *api.Error
 		if errors.As(err, &ae) {
@@ -560,13 +567,19 @@ func (b *Backend) AddRepo(ctx context.Context, req model.AddRepoRequest) error {
 	if !repo.Private && !req.AllowPublic {
 		return api.Conflict(name + " is public; self-hosted runners must only serve private repos (pass --allow-public to override)")
 	}
-	if err := b.update(func(c *config.Config) error {
+	if err := b.updateThen(func(c *config.Config) error {
 		if c.Repo(name) != nil {
 			return api.Conflict("repo " + name + " is already configured")
 		}
 		c.WatchRepos = slices.DeleteFunc(c.WatchRepos, func(w string) bool { return strings.EqualFold(w, name) || strings.EqualFold(w, typed) })
 		c.Repos = append(c.Repos, config.Repo{Name: name, Max: req.Max, Labels: req.Labels, AllowPublic: req.AllowPublic})
 		return nil
+	}, func() {
+		// The answer just read goes to the manager only for an add that is
+		// saved, and before the config with the repository can be seen: a
+		// tick that sees the repository then finds this answer, not one
+		// left from before the repository was removed.
+		b.M.RecordVisibility(name, !repo.Private)
 	}); err != nil {
 		return err
 	}

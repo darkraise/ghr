@@ -126,6 +126,15 @@ func (s *Store) readToken() (string, error) {
 // Update applies fn to a copy of the config, validates, saves, then swaps it in.
 // A failed save is returned as a *SaveError.
 func (s *Store) Update(fn func(c *config.Config) error) ([]string, error) {
+	return s.UpdateThen(fn, nil)
+}
+
+// UpdateThen is Update with a step between the save and the swap: saved, when
+// not nil, runs once config.yaml holds the change and before any reader of
+// Config can see it. Whatever must be in place when the change shows is put
+// in place there. It runs with the store's lock held and must not call the
+// store.
+func (s *Store) UpdateThen(fn func(c *config.Config) error, saved func()) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c := s.Config().Clone()
@@ -138,6 +147,9 @@ func (s *Store) Update(fn func(c *config.Config) error) ([]string, error) {
 	}
 	if err := config.Save(s.ConfigPath, c); err != nil {
 		return nil, &SaveError{Err: err}
+	}
+	if saved != nil {
+		saved()
 	}
 	s.cfg.Store(c)
 	s.warnings = slices.Clone(warnings)
