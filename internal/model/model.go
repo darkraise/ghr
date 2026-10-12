@@ -30,7 +30,30 @@ type Status struct {
 	// omits it, which reads as configured.
 	Unconfigured bool `json:"unconfigured,omitempty"`
 	// SetupPending is true until first-run setup is finished.
-	SetupPending bool `json:"setup_pending,omitempty"`
+	SetupPending bool          `json:"setup_pending,omitempty"`
+	Restart      RestartStatus `json:"restart"`
+	// WebListenError is set when the configured web.listen failed to bind at
+	// start.
+	WebListenError *WebListenError `json:"web_listen_error,omitempty"`
+}
+
+type RestartStatus struct {
+	// Pending names the settings whose saved value differs from the one the
+	// running daemon applied: "web.listen", "web.hosts".
+	Pending []string `json:"pending,omitempty"`
+	// BlockedBy names the daemon work that refuses a restart now.
+	BlockedBy []string `json:"blocked_by,omitempty"`
+	// Available is false when this process is not ghr.service's main process.
+	Available bool `json:"available"`
+	// WebListen is the listen value the running web listener serves; empty
+	// when none runs.
+	WebListen string `json:"web_listen,omitempty"`
+}
+
+type WebListenError struct {
+	Address   string `json:"address"`
+	Reason    string `json:"reason"`
+	ServingOn string `json:"serving_on,omitempty"`
 }
 
 // SetupState is GET /setup. Configured means the full API serves; Starting

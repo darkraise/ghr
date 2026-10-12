@@ -70,6 +70,7 @@ func (b *Backend) fingerprints() map[string]uint64 {
 	hash("status", func() any {
 		st := status()
 		st.WebSetupRequired, st.SetupPending = b.setupFlags()
+		st.Restart, st.WebListenError = b.restartStatus(st), b.WebListenErr
 		st.Now, st.RateRemaining, st.RateLimit, st.DiskUsedBytes, st.DiskTotalBytes = time.Time{}, 0, 0, 0, 0
 		return st
 	})

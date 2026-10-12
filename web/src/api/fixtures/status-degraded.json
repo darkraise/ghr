@@ -43,5 +43,8 @@
     "last_error": "download failed: 502",
     "last_finished": "2026-10-03T12:05:00Z"
   },
-  "web_setup_required": false
+  "web_setup_required": false,
+  "restart": {
+    "available": false
+  }
 }

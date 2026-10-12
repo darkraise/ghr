@@ -105,9 +105,15 @@ type Backend struct {
 	Now func() time.Time
 	// Sampler supplies the metrics series; nil serves an empty one.
 	Sampler *metrics.Sampler
-	// WebApplied is the web block the running listener started with. Only a
+	// WebApplied is the web block the running listener started with; its
+	// Listen is the string bound, empty when no listener runs. Only a
 	// restart applies a change, so a reload that changes it warns.
 	WebApplied config.Web
+	// WebListenErr is set when web.listen failed to bind at start.
+	WebListenErr *model.WebListenError
+	// RestartAvailable is true when this process is ghr.service's main
+	// process, so systemd can restart it.
+	RestartAvailable bool
 	// InterfaceAddrs lists this host's addresses for the web.listen check;
 	// nil means net.InterfaceAddrs.
 	InterfaceAddrs func() ([]net.Addr, error)
@@ -270,6 +276,8 @@ func (b *Backend) Status() model.Status {
 			st.RateLimit = *l
 		}
 	}
+	st.Restart = b.restartStatus(st)
+	st.WebListenError = b.WebListenErr
 	return st
 }
 func (b *Backend) EventsAfter(seq int64) []model.Event { return b.Events.After(seq) }
