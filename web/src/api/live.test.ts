@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { json, mockApi } from "@/test/api"
 import { setUnauthorizedHandler } from "./client"
 import { readChanges, RETRY_MAX, RETRY_MIN, runChanges, setLive, SseParser, useLive } from "./live"
@@ -146,6 +146,72 @@ describe("readChanges", () => {
     const end = await readChanges({ ...handlers, onHello: () => ctrl.abort() }, ctrl.signal)
     expect(end).toBe("ended")
     expect(cancelled).toBe(true)
+  })
+
+  describe("when the stream goes silent", () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    const reading = (handlers = recorder().handlers) => {
+      const out: { end?: string } = {}
+      void readChanges(handlers, new AbortController().signal).then((end) => {
+        out.end = end
+      })
+      return out
+    }
+
+    it("ends the attempt 45 seconds after the last byte", async () => {
+      let send: (text: string) => void = () => {}
+      let cancelled = false
+      mockApi({
+        "GET /api/changes": () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(c) {
+                send = (text) => c.enqueue(enc.encode(text))
+              },
+              cancel() {
+                cancelled = true
+              },
+            }),
+          ),
+      })
+      const { seen, handlers } = recorder()
+      const out = reading(handlers)
+      await vi.advanceTimersByTimeAsync(0)
+      send("event: hello\ndata: {}\n\n")
+      await vi.advanceTimersByTimeAsync(30_000)
+      send(": ping\n\n")
+      await vi.advanceTimersByTimeAsync(44_999)
+      expect(out.end).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(out.end).toBe("ended")
+      expect(cancelled).toBe(true)
+      expect(seen).toEqual(["hello", "alive"])
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it("ends an attempt whose response never starts", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          (_input: RequestInfo | URL, init?: RequestInit) =>
+            new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")))
+            }),
+        ),
+      )
+      const out = reading()
+      await vi.advanceTimersByTimeAsync(44_999)
+      expect(out.end).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(out.end).toBe("ended")
+    })
   })
 })
 

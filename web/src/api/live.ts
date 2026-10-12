@@ -75,15 +75,39 @@ export class SseParser {
 
 export type StreamEnd = "ended" | "unauthorized"
 
+// The server writes a ping every 15 seconds while it has nothing to say, so
+// this much silence means the connection is dead although it looks open.
+const STREAM_SILENCE = 45_000
+
 // readChanges reads one connection to the change stream until it ends. An
-// abort through signal cancels the reader and ends it like any other end.
+// abort through signal, or STREAM_SILENCE without a byte, cancels the reader
+// and ends it like any other end.
 export async function readChanges(h: ChangeHandlers, signal: AbortSignal): Promise<StreamEnd> {
+  const attempt = new AbortController()
+  const stop = () => attempt.abort()
+  signal.addEventListener("abort", stop)
+  if (signal.aborted) stop()
+  let watchdog = setTimeout(stop, STREAM_SILENCE)
+  const heard = () => {
+    clearTimeout(watchdog)
+    watchdog = setTimeout(stop, STREAM_SILENCE)
+  }
+  try {
+    return await readAttempt(h, attempt.signal, heard)
+  } finally {
+    clearTimeout(watchdog)
+    signal.removeEventListener("abort", stop)
+  }
+}
+
+async function readAttempt(h: ChangeHandlers, signal: AbortSignal, heard: () => void): Promise<StreamEnd> {
   let res: Response
   try {
     res = await fetch("/api/changes", { headers: { "X-GHR": "1" }, credentials: "same-origin", signal })
   } catch {
     return "ended"
   }
+  heard()
   if (res.status === 401) {
     notifyUnauthorized()
     return "unauthorized"
@@ -110,6 +134,7 @@ export async function readChanges(h: ChangeHandlers, signal: AbortSignal): Promi
         break
       }
       if (chunk.done) break
+      heard()
       try {
         parser.push(decoder.decode(chunk.value, { stream: true }))
       } catch (err) {
