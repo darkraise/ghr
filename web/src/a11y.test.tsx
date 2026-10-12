@@ -163,7 +163,7 @@ describe("Storage accessibility", () => {
       mockApi(authedRoutes())
       renderApp("/settings/storage")
       await screen.findByText("cleared NuGet (3.6 GB freed)")
-      await screen.findByText("Last prune: manual build-cache-all at 13:16, ok")
+      await screen.findByText("Last prune: manual build-cache-all at 13:16, ok, 6.8 MB freed")
       expect(await violations()).toEqual([])
     },
     30_000,

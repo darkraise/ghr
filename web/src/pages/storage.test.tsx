@@ -1,14 +1,12 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import type { Storage } from "@/api/types"
+import type { LastPrune, Operation, Storage } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { expectPill } from "@/test/pill"
 import { renderApp } from "@/test/render"
 
 const routes = (over: Record<string, unknown> = {}) => authedRoutes({ "GET /api/storage": fixtures.storage, ...over })
-
-const region = (name: string) => within(screen.getByRole("region", { name }))
 
 describe("Storage page", () => {
   it("is served inside Settings", async () => {
@@ -33,29 +31,62 @@ describe("Storage page", () => {
     expect((await screen.findAllByText(text)).length).toBeGreaterThan(0)
   })
 
-  it("shows Docker's rows, the build cache types, the data root and the last prune", async () => {
+  it("lists every part of the disk under its bar, with Docker's counts and the build cache types", async () => {
     mockApi(routes())
     renderApp("/storage")
-    await screen.findByRole("region", { name: "Disk" })
-    const table = within(region("Disk").getByRole("table"))
+    const disk = within(await screen.findByRole("region", { name: "Disk" }))
+    expect(disk.getByRole("img", { name: /^Disk use:/ })).toBeInTheDocument()
+    expect(disk.queryByRole("list")).toBeNull()
+    expect(disk.getByText("/var/lib/docker")).toHaveClass("font-mono")
+    expect(disk.getByText("146.0 GB of 240.0 GB")).toHaveClass("font-mono")
+    const table = within(disk.getByRole("table"))
     expect(table.getByRole("columnheader", { name: "Reclaimable" })).toHaveClass("text-right")
-    expect(table.getByText("8.1 GB")).toHaveClass("font-mono", "text-right")
+    const images = within(table.getByRole("rowheader", { name: "Images" }).closest("tr") as HTMLElement)
+    expect(images.getByText("10")).toHaveClass("font-mono", "text-right")
+    expect(images.getByText("8.1 GB")).toHaveClass("font-mono", "text-right", "whitespace-nowrap")
     expect(table.getByText("regular")).toBeInTheDocument()
-    expect(region("Disk").getByText("/var/lib/docker")).toHaveClass("font-mono")
-    expect(region("Disk").getByText("Last prune: manual build-cache-all at 13:16, ok")).toBeInTheDocument()
-    expect(region("Disk").getByText("all build cache: 6.8 MB freed")).toBeInTheDocument()
+    expect(table.getByRole("rowheader", { name: "Other" })).toBeInTheDocument()
+    expect(table.getByRole("link", { name: "Toolchains" })).toHaveAttribute("href", "/settings/toolchains")
   })
 
-  it("offers each targeted prune with what it can free", async () => {
+  it("keeps what each Docker type can free under its size on a phone", async () => {
     mockApi(routes())
     renderApp("/storage")
-    const prune = within(await screen.findByRole("region", { name: "Prune" }))
-    expect(prune.getByText("Build cache beyond 20GB")).toBeInTheDocument()
-    expect(prune.getByText("All build cache, up to 380.0 MB")).toBeInTheDocument()
-    expect(prune.getByText("Dangling images")).toBeInTheDocument()
-    expect(prune.getByText("Unused volumes")).toBeInTheDocument()
-    expect(prune.getByRole("button", { name: "Trim build cache" })).toBeEnabled()
-    expect(prune.getByText("Unused volumes: refused while 1 job runs")).toBeInTheDocument()
+    const table = within(within(await screen.findByRole("region", { name: "Disk" })).getByRole("table"))
+    const images = within(table.getByRole("rowheader", { name: "Images" }).closest("tr") as HTMLElement)
+    expect(images.getByText("7.1 GB reclaimable")).toHaveClass("sm:hidden")
+    expect(images.getByText("7.1 GB").closest("td")).toHaveClass("hidden", "sm:table-cell")
+  })
+
+  it("is the target of the old prune link", async () => {
+    mockApi(routes())
+    renderApp("/storage")
+    expect(await screen.findByRole("region", { name: "Disk" })).toHaveAttribute("id", "prune")
+  })
+
+  it("puts each targeted prune on the row it frees, none of them red", async () => {
+    mockApi(routes())
+    renderApp("/storage")
+    const table = within(within(await screen.findByRole("region", { name: "Disk" })).getByRole("table"))
+    const row = (name: string) => within(table.getByRole("rowheader", { name }).closest("tr") as HTMLElement)
+    const trim = row("Build cache").getByRole("button", { name: "Trim to 20GB" })
+    expect(trim).toBeEnabled()
+    expect(row("Build cache").getByRole("button", { name: "Remove all build cache" })).toHaveTextContent(/^Remove all$/)
+    expect(row("Images").getByRole("button", { name: "Remove dangling images" })).toBeInTheDocument()
+    expect(row("Local volumes").getByRole("button", { name: "Remove unused volumes" })).toBeInTheDocument()
+    expect(table.getByText("Unused volumes: refused while 1 job runs")).toBeInTheDocument()
+    expect(row("Containers").queryByRole("button")).toBeNull()
+    for (const b of table.getAllByRole("button", { name: /^(Trim|Remove)/ })) expect(b.className).not.toMatch(/destructive/)
+  })
+
+  it("folds a row's prunes into one menu for narrow screens", async () => {
+    const { calls } = mockApi(routes({ "POST /api/prune/build-cache-keep": () => noContent() }))
+    const { user } = renderApp("/storage")
+    await user.click(await screen.findByRole("button", { name: "Prune build cache" }))
+    expect(await screen.findByRole("menuitem", { name: "Remove all build cache" })).toBeInTheDocument()
+    await user.click(screen.getByRole("menuitem", { name: "Trim to 20GB" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Trim to 20GB" }))
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/prune/build-cache-keep")).toBe(true))
   })
 
   it("leaves toolchains to the Toolchains page", async () => {
@@ -71,19 +102,20 @@ describe("Storage page", () => {
     renderApp("/storage")
     expect(await screen.findByText("Reconnecting", {}, { timeout: 4000 })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Prune" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Trim build cache" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Trim to 20GB" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Prune build cache" })).toBeDisabled()
   })
 
   it("says when nothing was pruned since the daemon started", async () => {
     mockApi(routes({ "GET /api/storage": { ...fixtures.storage, last_prune: null } }))
     renderApp("/storage")
-    expect(await screen.findByText("No prune since the daemon started")).toBeInTheDocument()
+    expect(within(await screen.findByRole("region", { name: "Activity" })).getByText("No prune since the daemon started")).toBeInTheDocument()
   })
 
   it("disables pruning while a prune runs", async () => {
     mockApi(routes({ "GET /api/status": { ...fixtures.status, maintenance: { running: true } } }))
     renderApp("/storage")
-    expect(await screen.findByText("Pruning")).toBeInTheDocument()
+    expect(within(await screen.findByRole("region", { name: "Activity" })).getByText("Pruning")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Prune" })).toBeDisabled()
   })
 
@@ -97,8 +129,8 @@ describe("Storage page", () => {
 
   it.each([
     ["Prune", "Prune now?", "Removes build cache beyond 20GB, dangling images, and history and logs past retention."],
-    ["Trim build cache", "Trim the build cache to 20GB?", "Build cache beyond that size is removed."],
-    ["Remove build cache", "Remove all build cache?", "Frees up to 380.0 MB. The next builds start cold."],
+    ["Trim to 20GB", "Trim the build cache to 20GB?", "Build cache beyond that size is removed."],
+    ["Remove all build cache", "Remove all build cache?", "Frees up to 380.0 MB. The next builds start cold."],
     ["Remove dangling images", "Remove dangling images?", "Images that are untagged and used by no container are removed."],
     ["Remove unused volumes", "Remove unused volumes?", "Every volume no container uses is removed. It is refused while jobs run."],
   ])("asks before %s and sends nothing on Cancel", async (label, title, body) => {
@@ -117,8 +149,8 @@ describe("Storage page", () => {
   it("prunes a scope once confirmed", async () => {
     const { calls } = mockApi(routes({ "POST /api/prune/build-cache-all": () => noContent() }))
     const { user } = renderApp("/storage")
-    await user.click(await screen.findByRole("button", { name: "Remove build cache" }))
-    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remove build cache" }))
+    await user.click(await screen.findByRole("button", { name: "Remove all build cache" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remove all build cache" }))
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/prune/build-cache-all")).toBe(true))
     expect((await screen.findAllByText("Prune started")).length).toBeGreaterThan(0)
   })
@@ -138,14 +170,23 @@ describe("Package caches", () => {
     renderApp("/storage")
     const caches = within(await screen.findByRole("region", { name: "Package caches" }))
     const row = within(caches.getByText("NuGet").closest("tr") as HTMLElement)
+    expect(row.getAllByRole("cell")[0]).toHaveTextContent(/^NuGet\.nuget\/packages$/)
     expect(row.getByText(".nuget/packages")).toHaveClass("font-mono")
-    expect(row.getByText("3.6 GB")).toHaveClass("font-mono")
-    expect(row.getByText("41000")).toHaveClass("font-mono")
-    expect(row.getByText("1h ago")).toBeInTheDocument()
+    expect(row.getByText("3.6 GB")).toHaveClass("font-mono", "whitespace-nowrap")
+    expect(row.getByText("41,000")).toHaveClass("font-mono")
+    expect(row.getByText("1h ago")).toHaveAttribute("title", "2026-10-03 13:05")
     expect(caches.getByText("Not present: Cargo")).toBeInTheDocument()
     expect(caches.queryByRole("button", { name: "Clear Cargo" })).toBeNull()
     expect(caches.getByText("Measured 14:03")).toBeInTheDocument()
     expect(caches.getByText("Clear: refused while 1 job runs")).toBeInTheDocument()
+    expect(caches.queryByRole("img")).toBeNull()
+    expect(caches.getByRole("columnheader", { name: "Last written" })).toHaveClass("hidden", "sm:table-cell")
+  })
+
+  it("names the day of a measurement before today", async () => {
+    mockApi(routes({ "GET /api/storage": { ...fixtures.storage, measured_at: "2026-10-02T14:03:00Z" } }))
+    renderApp("/storage")
+    expect(await screen.findByText("Measured Oct 2 14:03")).toBeInTheDocument()
   })
 
   it("says when a cache was never written", async () => {
@@ -190,16 +231,45 @@ describe("Package caches", () => {
   })
 })
 
-describe("Recent operations", () => {
+describe("Activity", () => {
+  it("leads with the last prune and what each step freed", async () => {
+    mockApi(routes())
+    renderApp("/storage")
+    const activity = within(await screen.findByRole("region", { name: "Activity" }))
+    expect(activity.getByText("Last prune: manual build-cache-all at 13:16, ok, 6.8 MB freed")).toBeInTheDocument()
+    expect(activity.getByText("all build cache: 6.8 MB freed")).toHaveClass("text-muted-foreground")
+  })
+
+  it("shows a failed prune step in red", async () => {
+    const last_prune = { ...(fixtures.storage.last_prune as LastPrune), steps: [{ name: "dangling images", freed: 0, error: "daemon busy" }] }
+    mockApi(routes({ "GET /api/storage": { ...fixtures.storage, last_prune } }))
+    renderApp("/storage")
+    expect(await screen.findByText("dangling images: daemon busy")).toHaveClass("text-destructive")
+  })
+
+  it("names what runs and what waits in its header", async () => {
+    mockApi(routes())
+    renderApp("/storage")
+    const activity = within(await screen.findByRole("region", { name: "Activity" }))
+    expect(activity.getByText("Installing node 24, extracting, 1 more queued")).toBeInTheDocument()
+  })
+
   it("lists finished operations with their outcome as a word", async () => {
     mockApi(routes())
     renderApp("/storage")
     const row = within((await screen.findByText("cleared NuGet (3.6 GB freed)")).closest("tr") as HTMLElement)
-    expect(row.getByText("13:06")).toHaveClass("font-mono")
-    expect(row.getByText("clear")).toBeInTheDocument()
-    expect(row.getByText("nuget")).toBeInTheDocument()
+    expect(row.getByText("13:06")).toHaveClass("font-mono", "whitespace-nowrap")
+    expect(row.getAllByRole("cell")[1]).toHaveTextContent(/^clear nugetcleared NuGet \(3\.6 GB freed\)$/)
     expectPill(row.getByText("OK"), "bg-success/15", "text-success")
     expect(row.getByText("cleared NuGet (3.6 GB freed)")).toHaveClass("text-muted-foreground")
+    expect(row.getAllByRole("cell")).toHaveLength(3)
+  })
+
+  it("names the day of an operation before today", async () => {
+    const recent = [{ ...(fixtures.storage.operations.recent?.[0] as Operation), finished_at: "2026-10-02T09:30:00Z" }]
+    mockApi(routes({ "GET /api/storage": { ...fixtures.storage, operations: { ...fixtures.storage.operations, recent } } }))
+    renderApp("/storage")
+    expect(await screen.findByText("Oct 2 09:30")).toHaveAttribute("title", "2026-10-02 09:30")
   })
 
   it("says when nothing has run", async () => {

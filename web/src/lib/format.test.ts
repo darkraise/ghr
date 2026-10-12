@@ -4,7 +4,7 @@ import { keys } from "@/api/hooks"
 import type { InstanceStatus, MetricSample } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
-import { ago, clock, dateTime, dateTimeSec, dur, elapsed, fmtMem, hhmm, humanBytes, isZeroTime, monthDay, plural, series, startedAt } from "./format"
+import { ago, clock, dateTime, dateTimeSec, dur, elapsed, fmtMem, hhmm, humanBytes, isZeroTime, monthDay, plural, series, shortWhen, startedAt } from "./format"
 import { clockOffset, useNow } from "./use-now"
 
 const statusFixture = fixtures.status
@@ -136,6 +136,16 @@ describe("startedAt", () => {
 describe("monthDay", () => {
   it("names the month and day", () => {
     expect(monthDay(new Date("2026-10-03T14:05:00Z"))).toBe("Oct 3")
+  })
+})
+
+describe("shortWhen", () => {
+  const now = Date.parse("2026-10-03T14:05:00Z")
+  it("gives the time alone for today", () => {
+    expect(shortWhen("2026-10-03T00:10:00Z", now)).toBe("00:10")
+  })
+  it("adds the day for an earlier one", () => {
+    expect(shortWhen("2026-10-02T23:50:00Z", now)).toBe("Oct 2 23:50")
   })
 })
 

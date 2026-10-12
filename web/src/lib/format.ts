@@ -91,6 +91,11 @@ export function monthDay(d: Date): string {
   return `${MONTHS[d.getMonth()] ?? ""} ${d.getDate()}`
 }
 
+export function shortWhen(iso: string, now: number): string {
+  const d = new Date(iso)
+  return d.toDateString() === new Date(now).toDateString() ? hhmm(d) : `${monthDay(d)} ${hhmm(d)}`
+}
+
 export function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`
 }

@@ -4,23 +4,12 @@ import { PageHeader } from "darkraise-ui/layout"
 import { useConfig, useStatus, useStorage } from "@/api/hooks"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ErrorLine } from "@/components/page/error-line"
-import { PruneSection } from "@/components/prune-section"
 import { DiskSection } from "@/components/storage-disk"
-import { OperationsSection, PackageCachesSection } from "@/components/storage-tables"
+import { ActivitySection, PackageCachesSection } from "@/components/storage-tables"
 import { standardPrune, storageSummary } from "@/lib/storage"
 import { useOperationToasts } from "@/lib/use-operation-toasts"
 import { usePrune } from "@/lib/use-prune"
 import { errorText } from "@/query"
-
-// Below 1280px the sections stack in reading order. At 1280px and wider
-// they form a 3:2 grid: Disk over Package caches, Prune over Recent
-// operations.
-const PLACE = {
-  disk: "xl:col-start-1 xl:row-start-1",
-  prune: "xl:col-start-2 xl:row-start-1",
-  caches: "xl:col-start-1 xl:row-start-2",
-  operations: "xl:col-start-2 xl:row-start-2",
-}
 
 export function StoragePage() {
   const status = useStatus()
@@ -46,12 +35,11 @@ export function StoragePage() {
       />
       {storage.isError && <ErrorLine onRetry={() => void storage.refetch()}>{errorText(storage.error)}</ErrorLine>}
       {data && st ? (
-        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-          <DiskSection storage={data} status={st} highWater={highWater} className={PLACE.disk} />
-          <PruneSection storage={data} status={st} config={config.data} disabled={disabled} className={PLACE.prune} />
-          <PackageCachesSection storage={data} status={st} offline={offline} className={PLACE.caches} />
-          <OperationsSection storage={data} className={PLACE.operations} />
-        </div>
+        <>
+          <DiskSection storage={data} status={st} config={config.data} highWater={highWater} disabled={disabled} />
+          <PackageCachesSection storage={data} status={st} offline={offline} />
+          <ActivitySection storage={data} status={st} />
+        </>
       ) : (
         !storage.isError && <Spinner label="Loading" />
       )}

@@ -1,10 +1,7 @@
 import { TriangleAlert } from "lucide-react"
 import type { Status } from "@/api/types"
 import { plural } from "@/lib/format"
-
-function busyJobs(status: Status | undefined): number {
-  return status?.instances.filter((i) => i.state === "busy").length ?? 0
-}
+import { busyJobs } from "@/lib/status"
 
 export function RefusedHint({ what, status }: { what: string; status: Status | undefined }) {
   const n = busyJobs(status)
