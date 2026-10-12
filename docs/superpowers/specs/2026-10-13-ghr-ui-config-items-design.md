@@ -78,7 +78,7 @@ type WebListenError struct {
 - Otherwise:
   1. Write the event `restart requested`, with `from the web UI` when the request carries the browser mark of section 2.1.
   2. `w.WriteHeader(http.StatusAccepted)`, then `http.NewResponseController(w).Flush()`.
-  3. Run `Options.Restart(ctx)` with `context.WithoutCancel(r.Context())`. The default runs `systemctl restart --no-block ghr.service` through `system.Exec`. It is its own seam, not a method on `runner.Systemd`, whose fakes stay as they are.
+  3. Check the blockers again; when work started since the first check, write `restart cancelled: <blockers> started` as a warning and stop. Otherwise run `Options.Restart(ctx)` with `context.WithoutCancel(r.Context())`. The default runs `systemctl restart --no-block ghr.service` through `system.Exec`. It is its own seam, not a method on `runner.Systemd`, whose fakes stay as they are.
   4. A failure of the command is written as an error event; the daemon keeps running.
 - The route is on the socket API, so the web listener serves it under `/api/restart` with its session, `X-GHR` and Origin checks. The CLI client gains no method for it.
 
@@ -133,7 +133,7 @@ Checks 3 to 5 call the network while `Store.mu` is held, as the patch function r
 
 ### 3.2 Settings → General: Web access
 
-A `FieldGroup` titled "Web access" after "Runner defaults", note "Changes apply after a restart.":
+A `FieldGroup` titled "Web access" after "Runner defaults", note "Changes apply after a restart." The setup wizard, which reuses these sections, does not show it:
 
 - **Listen address**: an `Input` in mono, value `web.listen`. When the saved value is empty (a hand edit), the field shows it empty with the note "The web UI turns off at the next restart."
 - **Allowed hostnames**: a `TagField`, value `web.hosts`, help "IP addresses and localhost always work."
@@ -144,7 +144,7 @@ A `FieldGroup` titled "Web access" after "Runner defaults", note "Changes apply 
 
 ### 3.3 Restart
 
-- **Banner.** While `restart.pending` is not empty and `web_listen_error` is absent, a warning banner in the shell, in the Runner update banner's place and style, on every page: "Restart needed: web.listen changed." (each pending key named), with a **Restart ghr** button. When `available` is false the button is absent and the text adds "Restart ghr with systemctl restart ghr."
+- **Banner.** The Restart ghr button stays disabled until the config has loaded, since the confirmation needs the saved `web.listen`. While `restart.pending` is not empty and `web_listen_error` is absent, a warning banner in the shell, in the Runner update banner's place and style, on every page: "Restart needed: web.listen changed." (each pending key named), with a **Restart ghr** button. When `available` is false the button is absent and the text adds "Restart ghr with systemctl restart ghr."
 - **Blocked.** While `restart.blocked_by` is not empty the button is disabled and the banner adds "Waits for: installing node 24, 1 queued".
 - **Confirmation.** "Restart ghr?" Body: "Running jobs keep running. The web UI is down for a few seconds and you will need to log in again." Then, when `web.listen` is pending:
   - saved empty: "The web UI turns off.";
@@ -152,10 +152,10 @@ A `FieldGroup` titled "Web access" after "Runner defaults", note "Changes apply 
   - otherwise (a proxy in front): "If a proxy forwards to ghr, point it at port <new port>."
   Action "Restart".
 - **The new URL**, for a direct page: the scheme and hostname are the page's own unless the new listen host is a specific IP, which then replaces the hostname; the port is the new listen port. Behind a proxy, or with `web.listen` not pending, the URL is the page's own origin.
-- **Restarting screen.** On the 202 the app clears its query cache (`queryClient.clear()`), so no poll or stream raises the 401 redirect, and renders a full-page "Restarting ghr…" screen from the root route, outside `appRoute` and its guards.
-  - When the URL is the page's own origin, it polls `GET /auth/state` every second and, once it answers, loads `<url>/login` with `window.location.assign`.
+- **Restarting screen.** On the 202 the app clears its query cache (`queryClient.clear()`), which aborts its polls and change stream, and renders a full-page "Restarting ghr…" screen from the root route, outside `appRoute` and its guards. A late 401 from a request already in flight may still move the route to `/login`; the restarting screen stays in place.
+  - When the URL is the page's own origin, it polls `GET /auth/state` every second until it answers `authenticated: false`, then loads `<url>/login` with `window.location.assign`. Sessions live in memory, so that answer comes from the new process; an error or `authenticated: true` (the old process, not yet stopped) keeps it polling.
   - When it differs, the page cannot reach it (the CSP's `default-src 'self'` limits fetches to the page's own origin; navigation is not limited), so it waits 10 seconds and then loads `<url>/login`.
-  - After 60 seconds without an answer it reads "ghr has not answered yet." with links to the page's origin and to `<url>`: a failed bind serves the UI on the last working address instead (section 2.2).
+  - After 60 seconds without an answer on the page's own origin it reads "ghr has not answered yet." with a link to it: a failed bind serves the UI on the last working address instead (section 2.2). For another origin the page has already been replaced; when that address does not answer, the browser shows its own error page.
 - **Listener error.** While `web_listen_error` is present, an error banner in the same place: "ghr could not listen on 10.0.0.5:8080: cannot assign requested address. Serving on 0.0.0.0:8080." with a link to Settings → Web access.
 
 ## 4. Docs
@@ -193,7 +193,7 @@ A `FieldGroup` titled "Web access" after "Runner defaults", note "Changes apply 
 - Web access: its values, the client shape checks, hosts reordered is no change, a `web.listen:` rejection under its field, another rejection in the alert, the empty-listen note.
 - The banners: pending, blocked, unavailable and listener error.
 - The confirmation's text and URL: a wildcard, a specific IP, a proxy in front, an empty listen, nothing pending for listen.
-- The restarting screen: the cache is cleared and no 401 redirect fires; polling for the page's origin; the 10-second wait for another origin; the 60-second message.
+- The restarting screen: the cache is cleared, the stream is aborted, and a late 401 does not replace the screen; polling for the page's origin; the 10-second wait for another origin; the 60-second message.
 
 ### 5.3 On the runner LXC, with the owner's yes
 
