@@ -16,7 +16,7 @@ describe("StepList", () => {
     const { container } = render(<StepList steps={steps} now={Date.parse(t("14:03:00"))} live />)
     expect(screen.getByRole("list", { name: "Steps" })).toBeInTheDocument()
     expect(screen.getByRole("img", { name: "Succeeded" })).toBeInTheDocument()
-    expect(screen.getByRole("img", { name: "Failed" })).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "Neutral" })).toBeInTheDocument()
     expect(screen.getByText("Running")).toHaveClass("sr-only")
     expect(screen.getByRole("img", { name: "Pending" })).toBeInTheDocument()
     expect(screen.getByText("upload")).toHaveClass("text-muted-foreground")
