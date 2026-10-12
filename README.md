@@ -15,8 +15,9 @@ configured caps:
 
 - Proxmox LXC, Debian 13, `features: nesting=1,keyctl=1`. It should host nothing else:
   any job can become root on it through Docker.
-- Every configured repo is **private** and does **not** enable "Run workflows from fork
-  pull requests".
+- ghr serves private repositories. It serves a public one only when `allow_public` is set
+  for it. Any repo it serves must **not** enable "Run workflows from fork pull requests",
+  because a fork's pull request could then run its code on this host.
 - A fine-grained PAT scoped to exactly those repos, with **Administration: read/write** and
   **Actions: read**, and an expiry. **Contents: read** is optional: with it, a run's page in
   the web UI draws the job graph from the workflow file; without it, a jobs timeline.
