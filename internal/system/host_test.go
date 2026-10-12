@@ -104,6 +104,47 @@ func TestDownload(t *testing.T) {
 	}
 }
 
+func TestDownloadFollowsARedirectOnlyToHTTPS(t *testing.T) {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("sent over plain http"))
+	}))
+	t.Cleanup(plain.Close)
+	// Another host, as GitHub serves a release download from its asset host.
+	assets := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("tarball bytes"))
+	}))
+	t.Cleanup(assets.Close)
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/to-https" {
+			http.Redirect(w, r, assets.URL+"/asset", http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, plain.URL+"/asset", http.StatusFound)
+	}))
+	t.Cleanup(secure.Close)
+	// The download client has no transport of its own, so it trusts the test
+	// servers' certificate through the default one.
+	old := http.DefaultTransport
+	http.DefaultTransport = secure.Client().Transport
+	defer func() { http.DefaultTransport = old }()
+
+	dst := filepath.Join(t.TempDir(), "runner.tar.gz")
+	if err := Download(context.Background(), secure.URL+"/to-https", dst); err != nil {
+		t.Fatalf("a redirect to https: %v", err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "tarball bytes" {
+		t.Fatalf("saved %q", b)
+	}
+	dst = filepath.Join(t.TempDir(), "runner.tar.gz")
+	err := Download(context.Background(), secure.URL+"/to-http", dst)
+	if err == nil || !strings.Contains(err.Error(), "refusing a redirect to "+plain.URL) {
+		t.Fatalf("a redirect to plain http: %v", err)
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Fatalf("what plain http sent was saved: %v", err)
+	}
+}
+
 // hangingServer never answers; a request ends only when the client gives up.
 func hangingServer(t *testing.T) *httptest.Server {
 	t.Helper()

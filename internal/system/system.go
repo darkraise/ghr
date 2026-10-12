@@ -409,8 +409,24 @@ func (Host) SwitchLink(target, path string) error {
 // DownloadTimeout bounds one Download.
 var DownloadTimeout = 10 * time.Minute
 
-// Download saves url to dst, following redirects. It sends no credentials:
-// it fetches public release assets.
+// HTTPSRedirect is the redirect rule for what the daemon unpacks or runs: a
+// redirect to anything but https is refused, so the body cannot be swapped on
+// the way. It keeps http.Client's own limit of ten redirects, which setting a
+// rule replaces.
+func HTTPSRedirect(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("refusing a redirect to %s://%s", req.URL.Scheme, req.URL.Host)
+	}
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	return nil
+}
+
+var downloadClient = &http.Client{CheckRedirect: HTTPSRedirect}
+
+// Download saves url to dst, following redirects to https URLs. It sends no
+// credentials: it fetches public release assets.
 func Download(ctx context.Context, url, dst string) error {
 	return download(ctx, DownloadTimeout, url, dst)
 }
@@ -429,7 +445,7 @@ func download(ctx context.Context, timeout time.Duration, url, dst string) error
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return err
 	}
