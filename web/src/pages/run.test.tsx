@@ -346,8 +346,9 @@ describe("Job page", () => {
     expect(await screen.findByText("This job produced no log.")).toBeInTheDocument()
   })
 
-  it("saves the raw log through a Blob", async () => {
-    const text = "2026-10-03T13:55:25.0000000Z Set up job\n"
+  it("saves the raw log through a Blob and keeps its URL for 40 seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const text ="2026-10-03T13:55:25.0000000Z Set up job\n"
     const { calls, fetchMock } = mockApi(
       runRoutes({
         "GET /api/actions/darkmem/jobs/1002/log/raw": () => new Response(text, { headers: { "Content-Type": "text/plain; charset=utf-8" } }),
@@ -378,7 +379,10 @@ describe("Job page", () => {
     const rawCall = fetchMock.mock.calls.find(([input]) => typeof input === "string" && input.endsWith("/log/raw"))
     expect(new Headers(rawCall?.[1]?.headers).get("X-GHR")).toBe("1")
     expect(rawCall?.[1]?.credentials).toBe("same-origin")
-    await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:http://localhost/raw"))
+    await act(() => vi.advanceTimersByTimeAsync(30_000))
+    expect(revoke).not.toHaveBeenCalled()
+    await act(() => vi.advanceTimersByTimeAsync(10_000))
+    expect(revoke).toHaveBeenCalledWith("blob:http://localhost/raw")
     click.mockRestore()
   })
 

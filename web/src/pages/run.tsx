@@ -238,8 +238,10 @@ function JobMeta({ job }: { job: RunJob }) {
 }
 
 // The Blob goes through a temporary object URL because a navigation to the
-// API cannot send X-GHR. The URL is revoked after the click has started the
-// download, not during it.
+// API cannot send X-GHR. The URL outlives the click by RAW_URL_MS, because a
+// browser may read it only after the click has returned.
+const RAW_URL_MS = 40_000
+
 function saveBlob(blob: Blob, fileName: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
@@ -248,7 +250,7 @@ function saveBlob(blob: Blob, fileName: string) {
   document.body.appendChild(a)
   a.click()
   a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
+  setTimeout(() => URL.revokeObjectURL(url), RAW_URL_MS)
 }
 
 // Memoised, and given the step, the line and whether the log may still come
