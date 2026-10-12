@@ -64,11 +64,12 @@ export function runDescription(run: RunDetail): string {
 const PATH_REF = /^(\.github\/workflows\/[^@]+\.ya?ml)@.+$/
 
 export function githubLinks(owner: string, run: RunDetail): { commit: string; workflowFile: string | undefined; pull: (n: number) => string } {
-  const base = `https://github.com/${owner}/${run.repo}`
+  const part = encodeURIComponent
+  const base = `https://github.com/${part(owner)}/${part(run.repo)}`
   const path = PATH_REF.exec(run.path)?.[1] ?? run.path
   return {
-    commit: `${base}/commit/${run.head_sha}`,
-    workflowFile: path.startsWith(".github/workflows/") ? `${base}/blob/${run.head_sha}/${path.split("/").map(encodeURIComponent).join("/")}` : undefined,
+    commit: `${base}/commit/${part(run.head_sha)}`,
+    workflowFile: path.startsWith(".github/workflows/") ? `${base}/blob/${part(run.head_sha)}/${path.split("/").map(part).join("/")}` : undefined,
     pull: (n) => `${base}/pull/${n}`,
   }
 }

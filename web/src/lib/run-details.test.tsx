@@ -98,6 +98,13 @@ describe("run facts", () => {
     )
   })
 
+  it("encodes each path segment of a GitHub link", () => {
+    const links = githubLinks("dark raise", { ...run, repo: "dark#mem", head_sha: "a?b", path: ".github/workflows/build and test#1.yml" })
+    expect(links.commit).toBe("https://github.com/dark%20raise/dark%23mem/commit/a%3Fb")
+    expect(links.workflowFile).toBe("https://github.com/dark%20raise/dark%23mem/blob/a%3Fb/.github/workflows/build%20and%20test%231.yml")
+    expect(links.pull(87)).toBe("https://github.com/dark%20raise/dark%23mem/pull/87")
+  })
+
   it("labels attempts", () => {
     expect(attemptLabel(2, 2)).toBe("Attempt 2 (latest)")
     expect(attemptLabel(1, 2)).toBe("Attempt 1")
