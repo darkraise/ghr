@@ -4,7 +4,7 @@ import { Button } from "darkraise-ui/components/button"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { memo, useId, type ReactNode } from "react"
-import { ApiError, api } from "@/api/client"
+import { api } from "@/api/client"
 import { logSettling, useConfig, useJobLog, useRunAnnotations, useRunDetail } from "@/api/hooks"
 import type { RunDetail, RunJob } from "@/api/types"
 import { LogViewer } from "@/components/log-viewer"
@@ -24,10 +24,6 @@ import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
 const GONE = "This run no longer exists on GitHub."
-
-function runError(err: unknown): string {
-  return err instanceof ApiError && err.status === 404 ? GONE : errorText(err)
-}
 
 function Bare({ repo, children }: { repo: string; children: ReactNode }) {
   return (
@@ -100,7 +96,7 @@ function RunGate({
     return (
       <Bare repo={repo}>
         {run.isError ? (
-          <ErrorLine onRetry={() => void run.refetch()}>{runError(run.error)}</ErrorLine>
+          <ErrorLine onRetry={() => void run.refetch()}>{errorText(run.error)}</ErrorLine>
         ) : (
           <Spinner label="Loading" />
         )}
@@ -109,7 +105,7 @@ function RunGate({
   }
   return (
     <>
-      {run.isError && <ErrorLine onRetry={() => void run.refetch()}>{runError(run.error)}</ErrorLine>}
+      {run.isError && <ErrorLine onRetry={() => void run.refetch()}>{errorText(run.error)}</ErrorLine>}
       {children(run.data, config.data.owner)}
     </>
   )
@@ -281,7 +277,7 @@ const JobLogs = memo(function JobLogs({
     </Button>
   )
   if (!log.data) {
-    return log.isError ? <ErrorLine onRetry={() => void log.refetch()}>{runError(log.error)}</ErrorLine> : <Spinner label="Loading" />
+    return log.isError ? <ErrorLine onRetry={() => void log.refetch()}>{errorText(log.error)}</ErrorLine> : <Spinner label="Loading" />
   }
   if (log.data.expired) return <p className="text-sm text-muted-foreground">GitHub no longer keeps this job&apos;s log.</p>
   if (log.data.no_log) {

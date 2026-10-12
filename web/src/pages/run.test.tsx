@@ -137,10 +137,11 @@ describe("Run page", () => {
     expect(await screen.findByRole("heading", { name: "Fix the cache key", level: 1 })).toBeInTheDocument()
   })
 
-  it("says the run is gone when GitHub no longer has it", async () => {
+  it("shows the daemon's wording when the run is not found", async () => {
     mockApi(runRoutes({ "GET /api/actions/darkmem/runs/102": () => json({ error: "not found on GitHub" }, 404) }))
     renderApp("/actions/darkmem/runs/102")
-    expect(await screen.findByText("This run no longer exists on GitHub.")).toBeInTheDocument()
+    expect(await screen.findByText("not found on GitHub")).toBeInTheDocument()
+    expect(screen.queryByText("This run no longer exists on GitHub.")).toBeNull()
   })
 
   it("shows the daemon's wording for a missing permission", async () => {
@@ -408,11 +409,15 @@ describe("Job page", () => {
     expect((await screen.findAllByText(message)).length).toBeGreaterThan(0)
   })
 
-  it("says the job is gone when GitHub has no log for it", async () => {
-    mockApi(runRoutes({ "GET /api/actions/darkmem/jobs/1002/log": () => json({ error: "not found on GitHub" }, 404) }))
-    renderApp("/actions/darkmem/runs/102/jobs/1002")
-    expect(await screen.findByText("This run no longer exists on GitHub.")).toBeInTheDocument()
-  })
+  it.each([["not found on GitHub"], ["repo darkmem is not configured or watched"]])(
+    "shows the daemon's wording when the job log is not found: %s",
+    async (message) => {
+      mockApi(runRoutes({ "GET /api/actions/darkmem/jobs/1002/log": () => json({ error: message }, 404) }))
+      renderApp("/actions/darkmem/runs/102/jobs/1002")
+      expect(await screen.findByText(message)).toBeInTheDocument()
+      expect(screen.queryByText("This run no longer exists on GitHub.")).toBeNull()
+    },
+  )
 
   it("says logs wait for a running job and lists its steps", async () => {
     const running = {
