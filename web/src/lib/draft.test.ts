@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { changedKeys, rejected, sameValue, settle, unsavedText, type Equal } from "./draft"
+import { changedKeys, prune, rejected, sameValue, settle, unsavedText, type Equal } from "./draft"
 
 describe("sameValue", () => {
   it("compares lists by element and everything else by identity", () => {
@@ -19,6 +19,23 @@ describe("changedKeys", () => {
   it("uses the given comparison", () => {
     const eq: Equal = (key, a, b) => (key === "poll_interval" ? String(a).trim() === String(b).trim() : a === b)
     expect(changedKeys({ poll_interval: " 10s " }, { poll_interval: "10s" }, eq)).toEqual([])
+  })
+})
+
+describe("prune", () => {
+  it("drops the entries that hold the loaded value and keeps the rest", () => {
+    const loaded = { mode: "queue", global_max: 2, labels: ["homelab"], max: undefined }
+    expect(prune({ mode: "queue", global_max: 3, labels: ["homelab"], max: undefined }, loaded)).toEqual({ global_max: 3 })
+  })
+
+  it("compares the stored values, not what they mean", () => {
+    const draft = { start_timeout: "60s", memory_max: "6G " }
+    expect(prune(draft, { start_timeout: "1m", memory_max: "6G" })).toEqual(draft)
+  })
+
+  it("returns the draft itself when nothing is dropped", () => {
+    const draft = { global_max: 3 }
+    expect(prune(draft, { global_max: 2 })).toBe(draft)
   })
 })
 

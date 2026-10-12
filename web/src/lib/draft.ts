@@ -12,6 +12,15 @@ export function changedKeys(draft: Values, loaded: Values, eq: Equal = plainEqua
   return Object.keys(draft).filter((k) => !eq(k, draft[k], loaded[k]))
 }
 
+// An entry that holds the loaded value is no edit, and left in the draft it
+// would count as one again once the loaded value moved. The stored values are
+// compared, so text that only means the same (60s over 1m) stays as typed.
+// Returns the draft itself when nothing is dropped.
+export function prune(draft: Values, loaded: Values): Values {
+  const kept = Object.entries(draft).filter(([k, v]) => !sameValue(v, loaded[k]))
+  return kept.length === Object.keys(draft).length ? draft : Object.fromEntries(kept)
+}
+
 // After a save, an edit still equal to what was sent is settled; one made
 // while the save was in flight stays pending.
 export function settle(draft: Values, sent: Values, eq: Equal = plainEqual): Values {
