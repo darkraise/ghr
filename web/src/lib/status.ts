@@ -44,6 +44,7 @@ const tones: Record<string, Tone> = {
   offline: "bad",
   unmatched: "bad",
   rejected: "bad",
+  expired: "bad",
   ok: "ok",
   success: "ok",
   succeeded: "ok",

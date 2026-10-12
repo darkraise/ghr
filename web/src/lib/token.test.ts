@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { TokenStatus } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
+import { stateTone, stateWord } from "./status"
 import { expiryText, rateText, tokenWord } from "./token"
 
 const DAY = 86_400_000
@@ -13,10 +14,20 @@ describe("tokenWord", () => {
     [token({ expires_at: at(60 * DAY) }), "valid"],
     [token({}), "valid"],
     [token({ expires_at: at(10 * DAY) }), "expires soon"],
+    [token({ expires_at: at(1000) }), "expires soon"],
+    [token({ expires_at: at(0) }), "expired"],
+    [token({ expires_at: at(-DAY) }), "expired"],
     [token({ state: "unverified" }), "unverified"],
     [token({ state: "rejected", expires_at: at(DAY) }), "rejected"],
+    [token({ state: "rejected", expires_at: at(-DAY) }), "rejected"],
   ])("reads %j as %s", (t, word) => {
     expect(tokenWord(t, now)).toBe(word)
+  })
+
+  it("puts an expired token in the failure tone and one about to expire in the warning tone", () => {
+    expect(stateTone(tokenWord(token({ expires_at: at(-DAY) }), now))).toBe("bad")
+    expect(stateWord(tokenWord(token({ expires_at: at(-DAY) }), now))).toBe("Expired")
+    expect(stateTone(tokenWord(token({ expires_at: at(10 * DAY) }), now))).toBe("warn")
   })
 })
 

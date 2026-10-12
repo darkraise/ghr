@@ -9,7 +9,11 @@ export const TOKEN_PERMISSIONS =
 
 export function tokenWord(t: TokenStatus, now: number): string {
   if (t.state !== "ok") return t.state
-  return t.expires_at && Date.parse(t.expires_at) - now < SOON ? "expires soon" : "valid"
+  if (!t.expires_at) return "valid"
+  // The daemon's last check can still say ok after the expiry has passed.
+  const left = Date.parse(t.expires_at) - now
+  if (left <= 0) return "expired"
+  return left < SOON ? "expires soon" : "valid"
 }
 
 export function expiryText(t: TokenStatus, now: number): string {
