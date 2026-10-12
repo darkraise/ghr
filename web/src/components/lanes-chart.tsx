@@ -20,6 +20,9 @@ const SEGMENT: Record<string, string | undefined> = {
   cancelled: "fill-muted stroke-muted-foreground",
   skipped: "fill-muted stroke-muted-foreground",
   unknown: "fill-muted stroke-muted-foreground",
+  neutral: "fill-muted stroke-muted-foreground",
+  stale: "fill-muted stroke-muted-foreground",
+  action_required: "fill-muted stroke-muted-foreground",
 }
 
 // The open segment of a run being stopped, whatever its state: the only

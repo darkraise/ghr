@@ -46,6 +46,23 @@ describe("LanesChart", () => {
     expect(container.querySelector(".ghr-pulse")).not.toBeNull()
   })
 
+  it.each([
+    ["neutral", "neutral"],
+    ["stale", "stale"],
+    ["action_required", "action required"],
+  ])("draws a job that ended %s muted, with its own word", (state, word) => {
+    const { container } = draw({
+      lanes: [
+        { runs: [{ instance_id: "cccccc", repo: "darkmem", job: "docs", segments: [{ state, from: "2026-10-03T13:08:00Z", to: "2026-10-03T13:09:00Z" }] }] },
+      ],
+    })
+    const box = container.querySelector(`rect[data-state="${state}"]`)
+    expect(box).toHaveClass("fill-muted", "stroke-muted-foreground")
+    expect(box).not.toHaveAttribute("stroke-dasharray")
+    expect(screen.getByRole("img", { name: `darkmem, docs, ${word}, 1m00s` })).toBeInTheDocument()
+    expect(screen.queryByText("No jobs ran in the last hour.")).toBeNull()
+  })
+
   it("draws a stopping run as a dashed grey outline with no pulse", () => {
     const lanes = fixtures.activityLanes.lanes.map((l) => ({
       runs: l.runs.map((r) =>

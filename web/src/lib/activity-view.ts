@@ -8,7 +8,7 @@ export const GUTTER = 64
 export const PAD_RIGHT = 8
 
 const HOUR = 3_600_000
-const JOB_STATES = new Set(["running", "finishing", "succeeded", "failed", "cancelled", "skipped", "unknown"])
+const JOB_STATES = new Set(["running", "finishing", "succeeded", "failed", "cancelled", "skipped", "unknown", "neutral", "stale", "action_required"])
 
 const WORDS: Record<string, string | undefined> = {
   "1h": "the last hour",
@@ -28,6 +28,9 @@ const RESULT: Record<string, string | undefined> = {
   cancelled: "cancelled",
   skipped: "skipped",
   unknown: "result unknown",
+  neutral: "neutral",
+  stale: "stale",
+  action_required: "action required",
 }
 
 export function hasJob(run: ActivityRun): boolean {
