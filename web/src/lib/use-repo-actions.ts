@@ -30,9 +30,14 @@ export function useRepoActions(repo: RepoStatus, offline: boolean) {
     },
     onSettled: refresh,
   })
+  const removing = Boolean(repo.removing)
   return {
-    locked: offline || Boolean(repo.removing),
-    togglePause: () => pause.mutate(repo.paused),
+    locked: offline || removing,
+    // A resume cancels a removal at the daemon, so the toggle stays live while
+    // Remove is locked.
+    toggleLocked: offline,
+    toggleLabel: removing ? "Cancel removal" : repo.paused ? "Resume" : "Pause",
+    togglePause: () => pause.mutate(removing || repo.paused),
     askRemove: () =>
       setConfirm({
         title: `Remove ${repo.name}?`,

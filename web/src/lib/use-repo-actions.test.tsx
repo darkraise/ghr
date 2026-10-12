@@ -39,9 +39,29 @@ describe("useRepoActions", () => {
     expect(result.current.confirm).toBeNull()
   })
 
-  it("locks a repository being removed, or while the daemon is unreachable", () => {
-    expect(setup({ ...darkmem, removing: true }).result.current.locked).toBe(true)
-    expect(setup(darkmem, true).result.current.locked).toBe(true)
-    expect(setup(darkmem).result.current.locked).toBe(false)
+  it.each([
+    ["a repository being removed", { ...darkmem, removing: true }, false, true, false],
+    ["an unreachable daemon", darkmem, true, true, true],
+    ["a live repository", darkmem, false, false, false],
+  ])("locks Remove and the toggle as %s needs", (_what, repo, offline, locked, toggleLocked) => {
+    const { result } = setup(repo, offline)
+    expect(result.current.locked).toBe(locked)
+    expect(result.current.toggleLocked).toBe(toggleLocked)
+  })
+
+  it.each([
+    [darkmem, "Pause"],
+    [darkcloud, "Resume"],
+    [{ ...darkmem, removing: true }, "Cancel removal"],
+    [{ ...darkcloud, removing: true }, "Cancel removal"],
+  ])("names the toggle after what it does (%#)", (repo, label) => {
+    expect(setup(repo).result.current.toggleLabel).toBe(label)
+  })
+
+  it("cancels a removal by resuming the repository", async () => {
+    const { calls } = mockApi({ "POST /api/repos/darkmem/resume": () => noContent() })
+    const { result } = setup({ ...darkmem, removing: true })
+    act(() => result.current.togglePause())
+    await waitFor(() => expect(calls.map((c) => c.path)).toEqual(["/api/repos/darkmem/resume"]))
   })
 })
