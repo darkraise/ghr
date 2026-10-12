@@ -8,8 +8,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/darkraise/ghr/internal/api"
@@ -321,11 +324,13 @@ func TestWebResetPassword(t *testing.T) {
 }
 
 // stubPasswordInput makes stdin look like a terminal, or not, and feeds the
-// no-echo reads from answers.
+// no-echo reads from answers. There is no terminal whose input could be
+// hidden.
 func stubPasswordInput(t *testing.T, terminal bool, answers ...string) {
 	t.Helper()
-	oldTerm, oldRead := stdinIsTerminal, readPassword
+	oldTerm, oldRead, oldHide := stdinIsTerminal, readPassword, hideInput
 	stdinIsTerminal = func() bool { return terminal }
+	hideInput = func() (func(), error) { return func() {}, nil }
 	readPassword = func() ([]byte, error) {
 		if len(answers) == 0 {
 			return nil, io.EOF
@@ -334,7 +339,7 @@ func stubPasswordInput(t *testing.T, terminal bool, answers ...string) {
 		answers = answers[1:]
 		return []byte(a), nil
 	}
-	t.Cleanup(func() { stdinIsTerminal, readPassword = oldTerm, oldRead })
+	t.Cleanup(func() { stdinIsTerminal, readPassword, hideInput = oldTerm, oldRead, oldHide })
 }
 
 func TestWebSetPasswordFromAPipe(t *testing.T) {
@@ -386,6 +391,121 @@ func TestSetPasswordPromptStopsWhenCancelled(t *testing.T) {
 	}
 	if prompts.String() != "New web password: \n" {
 		t.Fatalf("asked again after the cancel: %q", prompts.String())
+	}
+}
+
+// askPassword is the only code that changes the terminal's mode: it hides
+// the input before the read starts and puts the terminal back when the read
+// or the context has ended, whichever is first. Whenever the context ends,
+// also before the read has started, the change back must be the last one,
+// and the read left behind must change nothing after it.
+func TestPasswordPromptAlwaysPutsTheTerminalBack(t *testing.T) {
+	const beforePrompt, whileHidden, whileReading = "before the prompt", "while the input is hidden", "while the read waits"
+	failed := errors.New("stdin closed")
+	for _, tc := range []struct {
+		name   string
+		cancel string
+		read   func() ([]byte, error) // nil waits for an Enter that comes too late
+		want   string
+		err    error
+	}{
+		{"the read returns", "", func() ([]byte, error) { return []byte("a long secret"), nil }, "a long secret", nil},
+		{"the read fails", "", func() ([]byte, error) { return nil, failed }, "", failed},
+		{"cancelled before the prompt", beforePrompt, nil, "", context.Canceled},
+		{"cancelled before the read starts", whileHidden, nil, "", context.Canceled},
+		{"cancelled while the read waits", whileReading, nil, "", context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				stubPasswordInput(t, true)
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				terminal, changes := "saved", []string(nil)
+				hideInput = func() (func(), error) {
+					terminal, changes = "raw", append(changes, "raw")
+					if tc.cancel == whileHidden {
+						cancel()
+					}
+					return func() { terminal, changes = "saved", append(changes, "saved") }, nil
+				}
+				enter := make(chan struct{})
+				pressEnter := sync.OnceFunc(func() { close(enter) })
+				defer pressEnter()
+				if readPassword = tc.read; tc.read == nil {
+					readPassword = func() ([]byte, error) {
+						<-enter
+						return []byte("typed too late"), nil
+					}
+				}
+				if tc.cancel == beforePrompt {
+					cancel()
+				}
+				var prompts bytes.Buffer
+				var got string
+				var err error
+				returned := make(chan struct{})
+				go func() {
+					got, err = askPassword(ctx, &prompts, "New web password: ")
+					close(returned)
+				}()
+				synctest.Wait()
+				if tc.cancel == whileReading {
+					if terminal != "raw" || prompts.String() != "New web password: " {
+						t.Errorf("while the read waits: terminal %s, prompts %q", terminal, prompts.String())
+					}
+					cancel()
+					synctest.Wait()
+				}
+				select {
+				case <-returned:
+				default:
+					pressEnter()
+					<-returned
+					t.Fatal("the prompt still waits for the read after its context ended")
+				}
+				if got != tc.want || !errors.Is(err, tc.err) {
+					t.Errorf("password %q err %v, want %q and %v", got, err, tc.want, tc.err)
+				}
+				pressEnter()
+				synctest.Wait()
+				if terminal != "saved" || !slices.Equal(changes, []string{"raw", "saved"}) || prompts.String() != "New web password: \n" {
+					t.Fatalf("terminal %s after the changes %v, prompts %q", terminal, changes, prompts.String())
+				}
+			})
+		})
+	}
+}
+
+// readHidden reads what a terminal in raw mode delivers: Enter arrives as a
+// carriage return, and Ctrl-C and Ctrl-D arrive as bytes, not as a signal.
+func TestReadHidden(t *testing.T) {
+	for _, tc := range []struct {
+		name, typed, want string
+		err               error
+	}{
+		{"a line ended by Enter", "a long secret\r", "a long secret", nil},
+		{"a line ended by a line feed", "a long secret\n", "a long secret", nil},
+		{"spaces are kept", " a long secret \r", " a long secret ", nil},
+		{"backspace removes a character", "a lomg\x7f\x7fng secret\r", "a long secret", nil},
+		{"Ctrl-C", "\x03", "", errInterrupted},
+		{"Ctrl-C after some typing", "a long\x03", "", errInterrupted},
+		{"Ctrl-D on an empty line", "\x04", "", errInterrupted},
+		{"the terminal goes away", "", "", errInterrupted},
+	} {
+		got, err := readHidden(strings.NewReader(tc.typed))
+		if string(got) != tc.want || !errors.Is(err, tc.err) {
+			t.Errorf("%s: read %q err %v, want %q and %v", tc.name, got, err, tc.want, tc.err)
+		}
+	}
+}
+
+func TestCtrlCAtAPromptPrintsInterrupted(t *testing.T) {
+	reqs := fakeDaemon(t)
+	stubPasswordInput(t, true)
+	readPassword = func() ([]byte, error) { return readHidden(strings.NewReader("a long\x03")) }
+	code, out, errOut := runCLI(t, "", "web", "set-password")
+	if code != 1 || out != "" || errOut != "New web password: \nghr: interrupted\n" || len(*reqs) != 0 {
+		t.Fatalf("exit %d out %q err %q requests %v", code, out, errOut, *reqs)
 	}
 }
 
