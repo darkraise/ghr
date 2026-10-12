@@ -100,6 +100,29 @@ describe("login page", () => {
     expect(router.state.location.pathname).toBe("/login")
   })
 
+  it.each([
+    [true, "Set password", "POST /auth/setup", "a web password is already set", "Log in"],
+    [false, "Log in", "POST /auth/login", "no web password is set yet; set one first", "Set password"],
+  ])("changes mode after a 409 (setup required: %s)", async (required, submit, route, error, next) => {
+    let setup = required
+    mockApi({
+      "GET /auth/state": () => ({ setup_required: setup, authenticated: false }),
+      [route]: () => {
+        setup = !required
+        return json({ error }, 409)
+      },
+    })
+    const { user } = renderApp("/login")
+    await user.type(await screen.findByLabelText("Password"), "correct horse battery")
+    if (required) {
+      await user.type(screen.getByLabelText("Setup code"), "abcde-fghjk-mnpqr-stvwx")
+      await user.type(screen.getByLabelText("Confirm password"), "correct horse battery")
+    }
+    await user.click(screen.getByRole("button", { name: submit }))
+    expect(await screen.findByRole("button", { name: next })).toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent(error)
+  })
+
   it("says when to retry after too many failures", async () => {
     mockApi({
       ...loginState,

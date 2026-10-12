@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useSearch } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "darkraise-ui/components/card"
@@ -22,6 +22,7 @@ function loginError(err: unknown): string {
 
 export function LoginPage() {
   const auth = useQuery(authQuery)
+  const queryClient = useQueryClient()
   const { redirect } = useSearch({ from: "/login" })
   const [code, setCode] = useState("")
   const [password, setPassword] = useState("")
@@ -54,6 +55,8 @@ export function LoginPage() {
       // build that came with it. The button stays busy until the page goes.
       window.location.assign(safeRedirect(redirect))
     } catch (err) {
+      // A 409 means the daemon is in the other mode than this form shows.
+      if (err instanceof ApiError && err.status === 409) await queryClient.invalidateQueries({ queryKey: authQuery.queryKey })
       setError(loginError(err))
       setBusy(false)
     }
