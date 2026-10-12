@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -420,6 +421,38 @@ func TestPatchConfigRejectsInvalidSettings(t *testing.T) {
 				t.Fatalf("config.yaml changed:\n%s", after)
 			}
 		})
+	}
+}
+
+// A config.yaml that cannot be written is the daemon's failure, not the
+// client's: the answer is a 500 that leaves the OS error out, and the log gets
+// it. The valid change that was not saved does not go live.
+func TestSaveFailureIsA500(t *testing.T) {
+	b, _, _ := newBackend(t)
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	// A rename onto a directory fails for root too.
+	if err := os.Remove(b.Store.ConfigPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(b.Store.ConfigPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	three := 3
+	err := b.PatchConfig(model.ConfigPatch{GlobalMax: &three})
+	if apiStatus(err) != 500 || err.Error() != "could not save config.yaml" {
+		t.Fatalf("status %d, error %v", apiStatus(err), err)
+	}
+	if b.Store.Config().GlobalMax != 2 {
+		t.Fatal("a change that was not saved went live")
+	}
+	if got := logs.String(); !strings.Contains(got, "save config: ") || !strings.Contains(got, "config.yaml") {
+		t.Fatalf("log %q", got)
+	}
+	var se *SaveError
+	if _, err := b.Store.Update(func(c *config.Config) error { c.GlobalMax = 3; return nil }); !errors.As(err, &se) || se.Err == nil {
+		t.Fatalf("Store.Update: %v", err)
 	}
 }
 

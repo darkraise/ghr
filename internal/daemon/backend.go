@@ -427,6 +427,11 @@ func (b *Backend) update(fn func(c *config.Config) error) error {
 		if errors.As(err, &ae) {
 			return err
 		}
+		var se *SaveError
+		if errors.As(err, &se) {
+			log.Printf("save config: %v", se.Err)
+			return &api.Error{Status: http.StatusInternalServerError, Msg: "could not save config.yaml"}
+		}
 		return api.BadRequest(err.Error())
 	}
 	for _, w := range warnings {

@@ -24,6 +24,13 @@ func (e *OwnerMismatchError) Error() string {
 	return "config.yaml names owner " + e.Owner + "; edit config.yaml to change it"
 }
 
+// SaveError is a failure to write config.yaml, as opposed to a change the
+// config refuses.
+type SaveError struct{ Err error }
+
+func (e *SaveError) Error() string { return "save config: " + e.Err.Error() }
+func (e *SaveError) Unwrap() error { return e.Err }
+
 // Store owns the live config and token. Writes are validated and saved atomically.
 type Store struct {
 	ConfigPath string
@@ -102,6 +109,7 @@ func (s *Store) readToken() (string, error) {
 }
 
 // Update applies fn to a copy of the config, validates, saves, then swaps it in.
+// A failed save is returned as a *SaveError.
 func (s *Store) Update(fn func(c *config.Config) error) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -114,7 +122,7 @@ func (s *Store) Update(fn func(c *config.Config) error) ([]string, error) {
 		return nil, err
 	}
 	if err := config.Save(s.ConfigPath, c); err != nil {
-		return nil, err
+		return nil, &SaveError{Err: err}
 	}
 	s.cfg.Store(c)
 	return warnings, nil
