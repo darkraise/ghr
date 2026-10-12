@@ -97,6 +97,13 @@ func (j java) Installed() ([]Installed, error) {
 	return j.e.listLayout("java", javaDir, func(folder string) string { return strings.Replace(folder, "-", "+", 1) })
 }
 
+// Remove takes a version as Installed shows it, which fits two folders: one
+// that really has the "+" in its name, and the one setup-java names with "-".
+// The exact name wins.
 func (j java) Remove(version string) error {
-	return j.e.removeLayout(javaDir, strings.Replace(version, "+", "-", 1))
+	folder := strings.Replace(version, "+", "-", 1)
+	if validFolder(version) && j.e.has(javaDir, version) {
+		folder = version
+	}
+	return j.e.removeLayout(javaDir, folder)
 }

@@ -81,3 +81,39 @@ func TestJavaInstallIsFoundBySetupJava(t *testing.T) {
 		t.Fatalf("second remove: %v", err)
 	}
 }
+
+// A folder that keeps the "+" in its name is listed under that name, so it
+// must be removable under it.
+func TestJavaRemovesAFolderNamedWithAPlus(t *testing.T) {
+	const version = "21.0.12+101.0.LTS"
+	f := newFixture(t)
+	j := newJava(f.Env)
+	plus := mkInstall(t, f.Root, javaDir, version, true)
+	if got, err := j.Installed(); err != nil || len(got) != 1 || got[0].Version != version {
+		t.Fatalf("installed %+v, %v", got, err)
+	}
+	if err := j.Remove(version); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if exists(plus) {
+		t.Fatal("the folder named with a plus survived")
+	}
+
+	plus = mkInstall(t, f.Root, javaDir, version, true)
+	dash := mkInstall(t, f.Root, javaDir, "21.0.12-101.0.LTS", true)
+	if err := j.Remove(version); err != nil || exists(plus) || !exists(dash) {
+		t.Fatalf("with both folders the exact name goes first: %v", err)
+	}
+	if err := j.Remove(version); err != nil || exists(dash) {
+		t.Fatalf("then the folder setup-java names: %v", err)
+	}
+	if err := j.Remove(version); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("third remove: %v", err)
+	}
+
+	unfinished := mkInstall(t, f.Root, javaDir, version, false)
+	dash = mkInstall(t, f.Root, javaDir, "21.0.12-101.0.LTS", true)
+	if err := j.Remove(version); err != nil || exists(dash) || !exists(unfinished) {
+		t.Fatalf("an unfinished folder under the exact name is not the installed version: %v", err)
+	}
+}
