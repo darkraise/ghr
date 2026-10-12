@@ -167,7 +167,7 @@ func (m *Manager) readJobFiles() {
 			continue
 		}
 		var rec JobRecord
-		if err := readJSON(filepath.Join(m.instanceDir(i.ID), JobFile), &rec); err != nil {
+		if err := readJobJSON(filepath.Join(m.instanceDir(i.ID), JobFile), &rec); err != nil {
 			continue
 		}
 		m.mu.Lock()
@@ -428,7 +428,7 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	dir := m.instanceDir(id)
 
 	var rec JobRecord
-	recOK := readJSON(filepath.Join(dir, JobFile), &rec) == nil
+	recOK := readJobJSON(filepath.Join(dir, JobFile), &rec) == nil
 	p, hadJob := m.pendingFor(i, rec, recOK)
 	pendingPath := m.pendingPath(id)
 	if hadJob {

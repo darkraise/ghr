@@ -47,7 +47,7 @@ func (m *Manager) readMeta(id string) (Meta, error) {
 	var meta Meta
 	err := readJSON(m.privateMeta(id), &meta)
 	if errors.Is(err, fs.ErrNotExist) {
-		err = readJSON(filepath.Join(m.instanceDir(id), MetaFile), &meta)
+		err = readJobJSON(filepath.Join(m.instanceDir(id), MetaFile), &meta)
 		if err == nil && meta.ID == id {
 			if werr := m.writePrivateMeta(meta); werr != nil {
 				return Meta{}, fmt.Errorf("%w for %s: %w", errRecordMeta, id, werr)

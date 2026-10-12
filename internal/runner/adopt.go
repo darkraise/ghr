@@ -87,7 +87,7 @@ func (m *Manager) Adopt(ctx context.Context) error {
 			inst.StateSince = now
 		}
 		var rec JobRecord
-		if readJSON(filepath.Join(dir, JobFile), &rec) == nil {
+		if readJobJSON(filepath.Join(dir, JobFile), &rec) == nil {
 			inst.State = sched.Busy
 			inst.StateSince = now
 			inst.Job = jobInfo(rec, now)
