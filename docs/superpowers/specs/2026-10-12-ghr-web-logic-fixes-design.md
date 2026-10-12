@@ -1,7 +1,7 @@
 # ghr: web logic fixes
 
 **Date:** 2026-10-12
-**Status:** design presented in chat and approved by the owner on 2026-10-12, with the rulings on job results (row 78), the unscheduled backend rows (sub-project 7) and the execution strategy made the same day.
+**Status:** design presented in chat and approved by the owner on 2026-10-12, with the rulings on job results (row 78), the unscheduled backend rows (sub-project 7) and the execution strategy made the same day. Amended the same day while the plan was drafted (§2.3, §2.5, §3.1, §3.2, §3.3, §3.4, §3.6, §4.1, §4.2 and §5.1): each amendment records what the code had to decide, and is reported to the owner with the plan.
 **Execution strategy:** sequential — the fixes are small, but many share `api/hooks.ts`, `api/client.ts`, `pages/run.tsx`, `pages/repository.tsx` and `lib/settings-form.ts`, and the dev host is the limit: concurrent vitest runs are what makes the web suite time out (register rows 109 and 225) and `/tmp` is a nearly full tmpfs (row 224).
 **Register:** docs/superpowers/registers/2026-10-11-ghr-comprehensive-review.md (rows 33, 75 to 109, 225 and 279 to 284). This is sub-project 4 of 7.
 **Code:** `web/` (sources, tests, `vite.config.ts`, `tsconfig.json`, `package.json`), `.github/workflows/ci.yml` (one test step), and `internal/model` with the tests of `internal/history` and `internal/activity` (row 78). No other daemon change.
@@ -70,6 +70,7 @@ A draft entry is written on every edit and removed only for keys a save sent. An
 - An edit whose value equals the loaded value removes the key from the draft. One helper in `lib/draft.ts` serves the settings form and the repository page.
 - When a config read brings a value equal to a draft entry, that entry is removed.
 - Equality is of the stored values: `60s` typed over `1m` is a change.
+- Pruning pauses while a save is in flight. The loaded value is then the one being replaced, and an edit back to it is a real edit that must survive the save.
 
 ### 2.4 The read after a save (row 97)
 
@@ -78,7 +79,7 @@ The read that confirms a save can join a poll that left before the save, and the
 ### 2.5 The setup wizard's Settings step (row 82)
 
 - Back and Skip the rest go through the same "Save your changes?" dialog as Next when settings are unsaved.
-- A reload or a closed tab warns while settings are unsaved, as the Settings page does.
+- A reload or a closed tab warns while settings are unsaved, as the Settings page does. The step mounts the existing `UnsavedGuard` unchanged for this, so the guard also asks before the browser's Back button leaves the wizard.
 - Skip the rest asks for confirmation, shows a busy state and cannot be pressed twice.
 - Skip the rest sends the toolchain choice Finish would send: the popular set when it is pending or was picked, none otherwise. The confirmation says which. Today it always sends none and so declines a pending set.
 - A failed config read shows the error with Retry and keeps Back, Next and Skip the rest. Today the step shows "loading…" with no way on until a retry succeeds.
@@ -101,26 +102,26 @@ The daemon cancels a removal when the repository is resumed, but the web UI lock
 
 ### 3.1 Error bodies (rows 81 and 102)
 
-- **Row 81:** a failed response's whole body becomes the error message unless it is JSON with an `error` field, so a proxy's HTML page fills a toast. The message is the JSON `error` when there is one, the body when the response is `text/plain` (cut at 200 characters), and otherwise the status code and status text.
+- **Row 81:** a failed response's whole body becomes the error message unless it is JSON with an `error` field, so a proxy's HTML page fills a toast. The message is the JSON `error` when there is one, the body when the response is `text/plain` (cut at 200 characters, counted in UTF-16 units; the daemon's plain-text errors are ASCII), and otherwise the status code and status text.
 - **Row 102:** only `202` and `204` count as bodiless. Any successful response with an empty body is accepted.
 
 ### 3.2 Silence and timeouts (row 85)
 
 Nothing in the browser notices a change stream that has gone silent, and no request has a timeout; a hung poll also blocks that query's later polls, which reuse the request in flight.
 
-- The stream reader ends its attempt after 45 seconds without a byte. The server writes a ping every 15 seconds when idle. The ended attempt takes the existing path: polls return to their fast interval, the stream retries, and the next hello refetches (§3.4).
-- A request fails after 70 seconds with a plain "the daemon did not answer" error; the web listener cuts a response after 60. Stop runner gets 110 seconds, because its route allows a stop 100. The raw-log download uses the default.
+- The stream reader ends its attempt after 45 seconds without a byte, the wait for the response's headers included: a connection that never answers is the same silence. The server writes a ping every 15 seconds when idle. The ended attempt takes the existing path: polls return to their fast interval, the stream retries, and the next hello refetches (§3.4).
+- A request fails after 70 seconds with a plain "the daemon did not answer" error, an `Error` and not an `ApiError`, since no status code fits it; the web listener cuts a response after 60. Stop runner gets 110 seconds, because its route allows a stop 100. The raw-log download uses the default.
 
 ### 3.3 Polls that hide data (row 84)
 
-Runner steps, the History table, registrations and the repository picker test for an error before they test for data, so one failed poll replaces what is on screen; the History table offers no Retry. Each keeps its data and shows the error line with Retry above it, as the run page does.
+Runner steps, the History table, registrations and the repository picker test for an error before they test for data, so one failed poll replaces what is on screen; the History table offers no Retry. Each keeps its data and shows the error line with Retry above it, as the run page does. The runner panel's containers have the same fault in the same file and get the same fix.
 
 ### 3.4 Stream gaps and double fetches (rows 33 and 86)
 
 The stream's hello carries no snapshot and no sequence number. Today only a hello after an earlier hello refetches, so a first attempt that fails (the daemon restarting, 32 subscribers) is followed by a hello that refetches nothing, although the data may be a poll interval old. Re-showing a tab fetches every stream-backed query twice: the query library's focus refetch and the hello's invalidation.
 
 - The stream hook keeps a "missed" flag: set when the page loads hidden, when an attempt ends and when the stream is stopped for a hidden tab. A hello refetches everything when the flag is set, then clears it.
-- The eight stream-backed queries stop refetching on window focus and on network return. The hello is the one trigger. When the stream cannot connect, the fast interval polls carry the page, as today; the setup wizard, which opens no stream, is carried the same way.
+- The eight stream-backed queries stop refetching on window focus and on network return. This is set once, in the query client's defaults for the stream's topics, not on each hook, so it follows the list of topics. The hello is the one trigger. When the stream cannot connect, the fast interval polls carry the page, as today; the setup wizard, which opens no stream, is carried the same way.
 
 Known limit: a change in the milliseconds between a page's first fetch and the hub's subscription is announced by the 60-second safety poll. Closing it means fetching every query twice on each page load or holding the first paint until the stream answers.
 
@@ -131,7 +132,7 @@ Runner steps and containers poll whichever tab of the runner panel is shown; ste
 ### 3.6 Lists that show the previous answer (rows 93 and 96)
 
 - **Row 93:** reopening Add or Watch shows the previous repository list while the new one loads. The available-repositories query keeps no cache between openings.
-- **Row 96:** the History table blanks when its time window moves to the next bucket boundary. The previous rows stay when the repository and result filters are unchanged and only the window moved.
+- **Row 96:** the History table blanks when its time window moves to the next bucket boundary. The previous rows stay when the repository and result filters are unchanged and only the window moved, that is when the chart's start slid to its next bucket; after a click on 24h, 7d or 30d the old rows are hidden while loading, as today. The rule is in the History page, not in `useHistory`: the query library hands a placeholder function the last query that had data, not the previous key's, so the hook cannot tell a slide from a change of window.
 
 ### 3.7 A log that is not there yet (row 280)
 
@@ -147,11 +148,11 @@ Each `useNow` caller owns a one-second interval. One module-level ticker serves 
 
 The job page re-renders once a second for its clock, and with it every rendered log line; nothing is memoised. Each render regroups all lines of every open step and tokenises each rendered line's ANSI again. A search keystroke strips ANSI from every line of every step. `useJobLog` has no `staleTime`, so each window focus downloads the whole log again. A step renders its last 5000 lines; search or "Show N earlier lines" can mount a whole step, and the daemon serves logs up to 4 MiB.
 
-- The log component and each line are memoised, and the page passes the open step and line as plain values, so the clock's tick stops at the job page.
+- The job page's log section (`JobLogs`) and each line (`Line`) are memoised, and the page passes the open step and line as plain values, so the clock's tick stops at the job page. `LogViewer` itself is not memoised: its heading and toolbar are elements made anew on every render, so a memo around it could never skip one.
 - A line's ANSI segments and plain text are computed once and cached by the line object.
 - The search input is deferred, so typing stays ahead of the matching.
 - A log that has steps is never stale. A "no log" answer stays refetchable (§3.7).
-- Line rows use `content-visibility: auto` with a fixed intrinsic size, so the browser skips lines that are off screen.
+- Line rows use `content-visibility: auto` with the intrinsic size `auto 1.25rem`, one line's height, so the browser skips lines that are off screen; `auto` lets it keep the real height of a wrapped line it has already drawn, so the scrollbar and the jump to a line do not shift.
 - The 5000-line window stays.
 
 ### 4.2 Results (row 78)
@@ -172,7 +173,7 @@ Three places map a conclusion to an icon, a pill or a word, and each sends every
 - The run pill shows `unknown` as Unknown, as the other two places do.
 - `model.Failed` answers false for the three new names, so the History filter and the chart tallies stop counting them as failures.
 - The chart tally keeps its existing default: a result that is neither succeeded, failed nor unknown is counted with cancelled, as skipped is today. No count is added to the API.
-- The lanes chart draws a segment of one of the three results in the muted style with its word; its style and word maps gain the three names.
+- The lanes chart draws a segment of one of the three results in the muted style with its word; its style and word maps gain the three names, and so does its list of job states, without which a job with one of these results is not counted as a job.
 
 ### 4.3 ANSI (row 104)
 
@@ -211,7 +212,7 @@ Until the config has loaded, Actions filters by the repository named in the addr
 
 ### 5.1 The web suite under load (rows 109 and 225)
 
-`vite.config.ts` sets a 15-second test timeout and caps workers at half the CPUs. This is the plan's first task.
+`vite.config.ts` sets a 15-second test timeout and caps workers at half the CPUs. This is the plan's first task. Eighteen tests carry a per-test timeout of 10 seconds from the time the default was 5; a per-test timeout wins over the default, so those overrides are removed and no test has less time than the default.
 
 ### 5.2 Time zones and the config file (row 100)
 
