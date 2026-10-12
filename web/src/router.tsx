@@ -6,9 +6,10 @@ import {
   redirect,
   type RouterHistory,
 } from "@tanstack/react-router"
+import { authQuery } from "./api/auth"
 import { api } from "./api/client"
-import { keys } from "./api/hooks"
-import type { SetupState } from "./api/types"
+import { keys, POLL_SLOW } from "./api/hooks"
+import type { AuthState, SetupState } from "./api/types"
 import { RootLayout } from "./components/root-layout"
 import { RouteError } from "./components/route-error"
 import type { DetailTab } from "./components/runner-panel"
@@ -30,21 +31,28 @@ import { RunnerPage, RunnersPage } from "./pages/runners"
 import { SettingsPage } from "./pages/settings"
 import { SetupPage } from "./pages/setup"
 
-// staleTime 0: every navigation into or out of the gated pages asks the
-// daemon again, so a logout or an expired session is seen at once.
-function authState(queryClient: QueryClient) {
-  return queryClient.fetchQuery({ queryKey: keys.auth, queryFn: ({ signal }) => api.authState(signal), staleTime: 0 })
+// A failed read does not undo a session the cache still holds: the navigation
+// goes on and the Shell's status poll reports the daemon. With no such answer
+// the read's error reaches the route error page.
+async function authState(queryClient: QueryClient): Promise<AuthState> {
+  try {
+    return await queryClient.fetchQuery(authQuery)
+  } catch (err) {
+    const cached = queryClient.getQueryData(authQuery.queryKey)
+    if (cached?.authenticated) return cached
+    throw err
+  }
 }
 
 async function requireSession(queryClient: QueryClient, href: string) {
   if (!(await authState(queryClient)).authenticated) throw redirect({ to: "/login", search: loginSearch(href) })
 }
 
-// staleTime 0, like authState. A failed read does not redirect: the page
+// Fresh as long as the auth answer. A failed read does not redirect: the page
 // loads, and the Shell's status poll or the wizard reports the daemon.
 async function setupState(queryClient: QueryClient): Promise<SetupState | undefined> {
   try {
-    return await queryClient.fetchQuery({ queryKey: keys.setup, queryFn: ({ signal }) => api.setupState(signal), staleTime: 0 })
+    return await queryClient.fetchQuery({ queryKey: keys.setup, queryFn: ({ signal }) => api.setupState(signal), staleTime: POLL_SLOW })
   } catch {
     return undefined
   }

@@ -1,6 +1,7 @@
-import { screen, waitFor } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
-import { json, mockApi } from "@/test/api"
+import { act, screen, waitFor } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { api } from "@/api/client"
+import { json, mockApi, type Call } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
@@ -11,7 +12,15 @@ function renderAt(path: string) {
   return renderApp(path).router
 }
 
+function asked(calls: Call[], path: string): number {
+  return calls.filter((c) => c.path === path).length
+}
+
 describe("routes", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it("sends a visitor without a session to /login", async () => {
     mockApi(anonymous)
     const router = renderAt("/runners")
@@ -67,9 +76,10 @@ describe("routes", () => {
     expect(await screen.findByRole("heading", { name: "Runners" })).toBeInTheDocument()
   })
 
-  it("offers a retry when the auth check fails while moving between pages", async () => {
+  it("keeps the page when the auth check fails and the cache holds a session", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
     let down = false
-    mockApi(
+    const { calls } = mockApi(
       authedRoutes({
         "GET /auth/state": () => (down ? json({ error: "connection refused" }, 502) : authed["GET /auth/state"]),
         "GET /api/history": [],
@@ -78,11 +88,11 @@ describe("routes", () => {
     const { user } = renderApp("/runners")
     expect(await screen.findByRole("heading", { name: "Runners" })).toBeInTheDocument()
     down = true
+    vi.setSystemTime(Date.now() + 5000)
     await user.click(screen.getByRole("link", { name: "History" }))
-    expect(await screen.findByText("cannot load the page: connection refused")).toBeInTheDocument()
-    down = false
-    await user.click(screen.getByRole("button", { name: "Retry" }))
     expect(await screen.findByRole("heading", { name: "History" })).toBeInTheDocument()
+    expect(screen.queryByText(/cannot load the page/)).toBeNull()
+    expect(asked(calls, "/auth/state")).toBe(2)
   })
 
   it("serves a settings section under /settings", async () => {
@@ -156,6 +166,40 @@ describe("routes", () => {
     expect(await screen.findByText("First-run setup is not finished.")).toBeInTheDocument()
     await view.user.click(screen.getByRole("link", { name: "Finish setup" }))
     await waitFor(() => expect(view.router.state.location.pathname).toBe("/setup"))
+  })
+
+  it("asks who is logged in and whether setup is done again only after five seconds", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    const { calls } = mockApi(authedRoutes({ "GET /api/setup": setupState({}), "GET /api/history": [] }))
+    const router = renderAt("/history")
+    expect(await screen.findByRole("heading", { name: "History" })).toBeInTheDocument()
+    await act(() => router.navigate({ to: "/history", search: { result: "failure" } }))
+    expect(router.state.location.search).toEqual({ result: "failure" })
+    expect(asked(calls, "/auth/state")).toBe(1)
+    expect(asked(calls, "/api/setup")).toBe(1)
+    vi.setSystemTime(Date.now() + 5000)
+    await act(() => router.navigate({ to: "/history", search: {} }))
+    expect(router.state.location.search).toEqual({})
+    expect(asked(calls, "/auth/state")).toBe(2)
+    expect(asked(calls, "/api/setup")).toBe(2)
+  })
+
+  it("shows the login form when a session ends while the auth answer is fresh", async () => {
+    let authenticated = true
+    mockApi(
+      authedRoutes({
+        "GET /auth/state": () => ({ setup_required: false, authenticated }),
+        "GET /api/status": () => (authenticated ? fixtures.status : json({ error: "not logged in" }, 401)),
+      }),
+    )
+    const router = renderAt("/")
+    expect(await screen.findByRole("heading", { name: "Dashboard" })).toBeInTheDocument()
+    authenticated = false
+    await act(async () => {
+      await api.status().catch(() => undefined)
+    })
+    expect(await screen.findByRole("button", { name: "Log in" })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/login")
   })
 
   it("loads the app when the setup state cannot be read", async () => {
