@@ -115,6 +115,12 @@ describe("log palette", () => {
     expect(contrast(t["--log-fg"], t["--log-match-bg"])).toBeGreaterThanOrEqual(4.5)
     expect(contrast(t["--log-current"], t["--log-bg"])).toBeGreaterThanOrEqual(3)
   })
+
+  it("declares each log colour once, in :root", () => {
+    const declared = [...css.matchAll(/(--log-[\w-]+):/g)].map((m) => m[1])
+    expect(declared).toHaveLength(new Set(declared).size)
+    expect(Object.keys(block(":root")).filter((k) => k.startsWith("--log-"))).toEqual(declared)
+  })
 })
 
 describe("ghr chrome styles", () => {
