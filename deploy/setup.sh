@@ -77,7 +77,7 @@ export_docker_key() {
 # gpg, which writes exactly the pinned key and nothing else.
 install_docker_key() {
   local work status=0
-  work=$(mktemp -d)
+  work=$(mktemp -d) || die "could not create a temporary directory"
   export_docker_key "$work" || status=1
   # gpg --import starts a gpg-agent for the throwaway keyring.
   gpgconf --homedir "$work/gnupg" --kill all >/dev/null 2>&1 || true
