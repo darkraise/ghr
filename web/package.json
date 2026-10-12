@@ -8,7 +8,8 @@
     "build": "vite build && tsc --noEmit && node -e \"require('fs').writeFileSync('dist/.gitkeep','')\"",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src public --max-warnings 0",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:tz": "GHR_TEST_TZ=Europe/Berlin vitest run"
   },
   "dependencies": {
     "@fontsource-variable/mona-sans": "^5.3.0",
