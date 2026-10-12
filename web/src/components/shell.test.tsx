@@ -129,14 +129,27 @@ describe("shell", () => {
     expect(router.state.location.pathname).toBe("/")
   })
 
-  it("logs out past unsaved edits", async () => {
-    mockApi(logoutRoutes(noContent))
+  it("asks before logging out past unsaved edits", async () => {
+    const { calls } = mockApi(logoutRoutes(noContent))
     const { user, router } = renderApp("/settings")
     const poll = await screen.findByLabelText("Poll interval")
     await user.clear(poll)
-    await user.type(poll, "15s")
+    await user.type(poll, "15")
     await user.click(screen.getByRole("button", { name: "Log out" }))
-    await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
+    const first = await screen.findByRole("alertdialog", { name: "Log out and discard 1 unsaved change?" })
+    await user.click(within(first).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(calls.some((c) => c.path === "/auth/logout")).toBe(false)
+    expect(router.state.location.pathname).toBe("/settings")
+    expect(screen.getByLabelText("Poll interval")).toHaveValue("15")
+
+    await user.clear(screen.getByLabelText("Max concurrent runners"))
+    await user.type(screen.getByLabelText("Max concurrent runners"), "3")
+    await user.click(screen.getByRole("button", { name: "Log out" }))
+    const second = await screen.findByRole("alertdialog", { name: "Log out and discard 2 unsaved changes?" })
+    await user.click(within(second).getByRole("button", { name: "Log out" }))
+    expect(await screen.findByRole("button", { name: "Log in" })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/login")
     expect(screen.queryByText("Unsaved changes")).toBeNull()
   })
 

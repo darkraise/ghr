@@ -4,20 +4,23 @@ import { Alert, AlertDescription, AlertTitle } from "darkraise-ui/components/ale
 import { Button } from "darkraise-ui/components/button"
 import { toast } from "darkraise-ui/components/sonner"
 import { Archive, Boxes, GitBranch, HistoryIcon, LayoutDashboard, LogOut, Settings, Timer, Workflow, type LucideIcon } from "lucide-react"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useEvents, useMetrics, useStatus } from "@/api/hooks"
 import { useChangeStream } from "@/api/use-change-stream"
 import type { Config, Status } from "@/api/types"
 import { Brand } from "@/components/brand"
 import { CapacitySegments } from "@/components/capacity-bar"
+import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { GhrUpdateCard } from "@/components/ghr-update-card"
 import { ModeControl } from "@/components/mode-control"
 import { QuotaBanner } from "@/components/quota-banner"
 import { ListenErrorBanner, RestartBanner } from "@/components/restart-banner"
 import { UpdateCard } from "@/components/update-card"
 import { capacity } from "@/lib/capacity"
+import { plural } from "@/lib/format"
 import { running } from "@/lib/status"
+import { unsavedCount } from "@/lib/unsaved"
 import { errorText } from "@/query"
 
 function count(n: number | undefined): string | undefined {
@@ -56,6 +59,7 @@ export function Shell() {
   const navigate = useNavigate()
   const epoch = status.data?.epoch
   const seenEpoch = useRef<string | undefined>(undefined)
+  const [confirm, setConfirm] = useState<Confirm | null>(null)
   // Mounted here, not per page, so config, metrics and the event feed poll
   // on every page, and the Dashboard opens with them warm.
   useMetrics()
@@ -82,6 +86,17 @@ export function Shell() {
     }
     queryClient.clear()
     await navigate({ to: "/login", ignoreBlocker: true })
+  }
+
+  function askLogout() {
+    const unsaved = unsavedCount()
+    if (unsaved === 0) return void logout()
+    setConfirm({
+      title: `Log out and discard ${plural(unsaved, "unsaved change")}?`,
+      action: "Log out",
+      destructive: true,
+      run: () => void logout(),
+    })
   }
 
   const st = status.data
@@ -111,7 +126,7 @@ export function Shell() {
             </span>
           )}
           <ModeControl />
-          <Button size="sm" variant="ghost" aria-label="Log out" onClick={() => void logout()}>
+          <Button size="sm" variant="ghost" aria-label="Log out" onClick={askLogout}>
             <LogOut size={15} aria-hidden="true" />
             <span className="hidden sm:inline">Log out</span>
           </Button>
@@ -168,6 +183,7 @@ export function Shell() {
         )}
         <Outlet />
       </main>
+      <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
   )
 }
