@@ -1,0 +1,81 @@
+# Installation
+
+## Requirements
+
+**Host.** A dedicated LXC or VM running Debian 13 or Ubuntu 22.04, 24.04 or 26.04 on x86-64, with root access. On Proxmox, the LXC needs `features: nesting=1,keyctl=1` so Docker can run inside it. The host should run nothing else: any job can become root on it through Docker.
+
+**Repositories.** ghr serves private repositories. It serves a public one only when `allow_public` is set for it. Any repository it serves must **not** enable "Run workflows from fork pull requests", because a fork's pull request could then run its code on your host.
+
+**Token.** A fine-grained personal access token scoped to exactly the repositories ghr serves, with an expiry:
+
+| Permission | Needed for |
+|---|---|
+| Administration: read/write | running jobs (required) |
+| Actions: read/write | running jobs (required) |
+| Contents: read (optional) | drawing a run's job graph from the workflow file; without it the web UI shows a jobs timeline |
+
+The Artifacts page also covers every other repository of the owner the token can reach, and uses more:
+
+| Permission | Needed for |
+|---|---|
+| Actions: write | deleting artifacts and caches |
+| Administration: write | changing artifact retention |
+| Plan: read (account permission) | reading the month's storage use |
+
+For an organization, reading storage use needs an organization admin's token with **Administration: read** on the organization. The quota can only be read when the token belongs to the owner. Without these permissions ghr runs jobs as usual, and the Artifacts page says which permission is missing.
+
+## Install
+
+As root on the host:
+
+```bash
+curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh | bash
+# or
+wget -qO- https://github.com/darkraise/ghr/releases/latest/download/setup.sh | bash
+```
+
+`setup.sh` installs Docker Engine from Docker's apt repository, then the GitHub Actions runner and ghr after checking their checksums, starts the `ghr` service and prints the address that finishes setup in the browser.
+
+Piped like this, the script asks nothing. To answer its prompts in the terminal instead, run:
+
+```bash
+bash <(curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh)
+```
+
+or `bash deploy/setup.sh` from a checkout. The prompts ask for the GitHub owner (a user or organization), the token (without echo) and the web UI password; press Enter at any prompt to skip it.
+
+Finish whatever you skipped at `http://<host>:8080/setup`: the first visitor sets the web password, then enters the owner and token, adds repositories, adjusts settings and chooses toolchains.
+
+### Unattended install
+
+Scripts set these variables instead of answering prompts:
+
+| Variable | Effect |
+|---|---|
+| `GHR_VERSION` | ghr release to install, such as `v0.1.22`; `latest` by default |
+| `RUNNER_VERSION` | actions/runner version, such as `2.337.0`; `latest` by default |
+| `GHR_OWNER`, `GHR_TOKEN` | configure GitHub; `GHR_TOKEN` is ignored without an owner |
+| `GHR_WEB_PASSWORD` | web UI password, on a first install |
+| `GHR_TOOLCHAINS` | `popular` or `none`; by default `popular` on a first install, `none` on an upgrade |
+
+Then run `ghr setup finish` to end first-run setup without the browser.
+
+```bash
+curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh |
+  GHR_OWNER=my-org GHR_TOKEN="$(cat token.txt)" GHR_WEB_PASSWORD='a long password' bash
+ghr setup finish
+```
+
+Each release publishes its own `setup.sh`, at `https://github.com/darkraise/ghr/releases/download/<version>/setup.sh`, which installs that release unless `GHR_VERSION` says otherwise.
+
+## Upgrade
+
+Re-run `setup.sh` the same way to upgrade Docker, the runner and ghr. It never overwrites `/etc/ghr/config.yaml` or `/etc/ghr/token`, and while ghr is not configured it asks for the owner and token again.
+
+Prefer upgrading while no jobs run: a Docker upgrade restarts the Docker daemon, which stops the containers of running jobs. `setup.sh` stops ghr while it installs the runner, so a queued runner update cannot run at the same time; running runners are separate systemd units and keep their jobs. If `setup.sh` fails after that, it starts ghr again.
+
+## Older releases
+
+- A first install needs v0.1.17 or later, the first release that ships its example config.
+- A config that lists `watch_repos` is refused by any ghr older than v0.1.18, the first release with the Actions page. Remove the `watch_repos` key before installing an older release.
+- A config with a `github_storage` block is refused by any ghr older than the first release with the Artifacts page. Remove the block first.
