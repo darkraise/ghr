@@ -16,11 +16,17 @@ function draw(quota: Partial<GitHubQuota> | null, over: Partial<GitHubStorage> =
   return screen.getByRole("region", { name: "Quota" })
 }
 
+const tile = (card: HTMLElement, name: string) => within(card).getByRole("region", { name })
+
 describe("QuotaCard", () => {
   it("shows the billed use against the allowance, with the estimate and projection marked", () => {
     const card = draw({})
-    expect(within(card).getByText("72%")).toBeInTheDocument()
-    expect(within(card).getByText("261 GB-h of 363 GB-h used in October")).toBeInTheDocument()
+    expect(within(tile(card, "Used")).getByText("72%")).toBeInTheDocument()
+    expect(within(tile(card, "Used")).getByText("261 GB-h of 363 GB-h")).toBeInTheDocument()
+    expect(within(tile(card, "Estimated now")).getByText("263 GB-h")).toBeInTheDocument()
+    expect(within(tile(card, "Projected by Nov 1")).getByText("397 GB-h")).toBeInTheDocument()
+    expect(within(tile(card, "Resets")).getByText("Nov 1")).toBeInTheDocument()
+    expect(within(tile(card, "Resets")).getByText("in 29 days")).toBeInTheDocument()
     const meter = within(card).getByRole("img", { name: "Used 261 GB-h of 363 GB-h, estimated 263 GB-h, projected 397 GB-h by Nov 1" })
     expect(meter.querySelector("[data-part=used]")).toHaveStyle({ width: "71.7%" })
     expect(meter.querySelector("[data-part=used]")).toHaveClass("bg-warning")
@@ -43,6 +49,23 @@ describe("QuotaCard", () => {
     const card = draw(quota)
     expect(within(card).getByText(outlook)).toBeInTheDocument()
     expect(within(card).getByRole("img").querySelector("[data-part=used]")).toHaveClass(tint)
+  })
+
+  it.each<[string, string | null]>([
+    ["exhausted", "text-destructive"],
+    ["critical", "text-destructive"],
+    ["warn", "text-warning"],
+    ["projected", "text-warning"],
+    ["", null],
+  ])("tints the used share at level %j", (level, tint) => {
+    const card = draw({ level })
+    const value = within(tile(card, "Used")).getByText("72%")
+    expect(value.className.split(" ").find((c) => c === "text-destructive" || c === "text-warning") ?? null).toBe(tint)
+  })
+
+  it("counts a reset tomorrow as one day", () => {
+    const card = draw({ resets_at: "2026-10-04T00:00:00Z" })
+    expect(within(tile(card, "Resets")).getByText("in 1 day")).toBeInTheDocument()
   })
 
   it("shows the billing error and keeps the last quota", () => {

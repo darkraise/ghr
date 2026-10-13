@@ -1,8 +1,9 @@
 import type { GitHubQuota, GitHubStorage } from "@/api/types"
 import { ErrorLine } from "@/components/page/error-line"
 import { Section } from "@/components/page/section"
+import { StatCard } from "@/components/stat-card"
 import { shortWhen } from "@/lib/format"
-import { gbh, monthName, utcDay } from "@/lib/quota"
+import { gbh, utcDay } from "@/lib/quota"
 import { useNow } from "@/lib/use-now"
 
 const TINT: Record<string, string> = {
@@ -10,6 +11,23 @@ const TINT: Record<string, string> = {
   critical: "bg-destructive",
   warn: "bg-warning",
   projected: "bg-warning",
+}
+
+const VALUE_TINT: Record<string, string> = {
+  exhausted: "text-destructive",
+  critical: "text-destructive",
+  warn: "text-warning",
+  projected: "text-warning",
+}
+
+// The Dashboard's tile grid, with a rule below in place of its frame.
+const TILES =
+  "grid grid-cols-2 divide-border border-b border-border [&>*:nth-child(-n+2)]:border-b [&>*:nth-child(odd)]:border-r min-[641px]:grid-cols-4 min-[641px]:divide-x min-[641px]:[&>*:nth-child(-n+2)]:border-b-0"
+
+// Calendar days in UTC; the reset is midnight UTC on a later day.
+function untilReset(iso: string, now: number): string {
+  const n = Math.floor(Date.parse(iso) / 86_400_000) - Math.floor(now / 86_400_000)
+  return n === 1 ? "in 1 day" : `in ${n} days`
 }
 
 // A share of the allowance as a bar position, capped at the bar's end.
@@ -40,15 +58,27 @@ export function QuotaCard({ storage }: { storage: GitHubStorage }) {
   const q = storage.quota
   const aside = q && <span className="ml-auto font-mono text-sm text-muted-foreground">{`Billing read ${shortWhen(q.read_at, now)}`}</span>
   return (
-    <Section id="quota" title="Quota" aside={aside}>
-      <div className="flex flex-col gap-3">
-        {storage.quota_error && <ErrorLine>{storage.quota_error}</ErrorLine>}
+    <Section id="quota" title="Quota" aside={aside} flush>
+      {storage.quota_error && (
+        <div className="border-b border-border p-4">
+          <ErrorLine>{storage.quota_error}</ErrorLine>
+        </div>
+      )}
+      {q && (
+        <div className={TILES}>
+          <StatCard
+            label="Used"
+            value={<span className={VALUE_TINT[q.level] ?? ""}>{`${Math.round((q.used_gb_hours / q.included_gb_hours) * 100)}%`}</span>}
+            unit={`${gbh(q.used_gb_hours)} of ${gbh(q.included_gb_hours)}`}
+          />
+          <StatCard label="Estimated now" value={gbh(q.estimated_gb_hours)} />
+          <StatCard label={`Projected by ${utcDay(q.resets_at)}`} value={gbh(q.projected_gb_hours)} />
+          <StatCard label="Resets" value={utcDay(q.resets_at)} unit={untilReset(q.resets_at, now)} />
+        </div>
+      )}
+      <div className="flex flex-col gap-3 p-4">
         {q ? (
           <>
-            <p className="flex flex-wrap items-baseline gap-x-2">
-              <span className="font-mono text-2xl font-semibold">{`${Math.round((q.used_gb_hours / q.included_gb_hours) * 100)}%`}</span>
-              <span className="text-sm text-muted-foreground">{`${gbh(q.used_gb_hours)} of ${gbh(q.included_gb_hours)} used in ${monthName(q.month)}`}</span>
-            </p>
             <QuotaMeter q={q} />
             <ul className="flex flex-col gap-0.5 text-sm">
               <li className="flex items-center gap-2">
@@ -60,8 +90,8 @@ export function QuotaCard({ storage }: { storage: GitHubStorage }) {
                 {`Projected by ${utcDay(q.resets_at)} ${gbh(q.projected_gb_hours)}`}
               </li>
             </ul>
-            <p className="text-sm">{`Actions ${gbh(q.actions_gb_hours)}, Packages ${gbh(q.packages_gb_hours)}`}</p>
             <p className="text-sm font-semibold">{outlook(q)}</p>
+            <p className="text-sm">{`Actions ${gbh(q.actions_gb_hours)}, Packages ${gbh(q.packages_gb_hours)}`}</p>
           </>
         ) : (
           !storage.quota_error && <p className="text-sm text-muted-foreground">No billing read yet.</p>
