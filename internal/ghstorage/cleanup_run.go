@@ -134,9 +134,12 @@ func (s *Service) cleanup(cfg *config.Config, gen uint64) {
 		s.Events.Add("info", repo, "cleanup deleted %d artifacts (%s)", t.n, sizeText(t.bytes))
 	}
 	if len(order) > 0 {
+		cur := s.Config()
 		s.mu.Lock()
-		s.recompute(cfg)
-		s.bump()
+		if s.keep(gen) {
+			s.recompute(cur)
+			s.bump()
+		}
 		s.mu.Unlock()
 	}
 }

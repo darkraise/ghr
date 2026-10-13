@@ -339,13 +339,14 @@ func (s *Service) readBilling(cfg *config.Config, gen uint64) {
 		}
 		b.Over = &over
 	}
+	cur := s.Config()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.keep(gen) {
 		return
 	}
 	s.billing, s.quotaErr = &b, ""
-	s.recompute(cfg)
+	s.recompute(cur)
 	s.bump()
 }
 
@@ -437,6 +438,7 @@ func (s *Service) inventory(cfg *config.Config, gen uint64) {
 	}
 	wg.Wait()
 
+	cur := s.Config()
 	s.mu.Lock()
 	if !s.keep(gen) {
 		s.mu.Unlock()
@@ -444,7 +446,7 @@ func (s *Service) inventory(cfg *config.Config, gen uint64) {
 	}
 	s.merge(ls, now)
 	s.checkedAt, s.listErr = now, ""
-	s.recompute(cfg)
+	s.recompute(cur)
 	s.bump()
 	s.mu.Unlock()
 	s.cleanup(cfg, gen)

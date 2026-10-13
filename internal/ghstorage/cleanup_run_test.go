@@ -1,6 +1,7 @@
 package ghstorage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -210,5 +211,32 @@ func TestSizeAndAgeTexts(t *testing.T) {
 		if got := ageText(in); got != want {
 			t.Errorf("ageText(%v) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestCleanupKeepsAPolicySavedDuringIt(t *testing.T) {
+	gh := newFakeGH()
+	gh.usage = october()
+	cur := cleanupConfig()
+	s, clock := newTestService(t, gh, cur)
+	s.Config = func() *config.Config { return cur }
+	s.pass(false, true)
+	before := s.Snapshot().Quota.IncludedGBHours
+	gh.addRepo("darkmem", true, ghArt(1, 10, clock.Now(), 30*time.Hour, 5))
+	var want float64
+	gh.onDelete = func(context.Context, string, int64) error {
+		next := cleanupConfig()
+		next.GitHubStorage.IncludedMB = 1000
+		cur = next
+		s.PolicyChanged()
+		want = s.Snapshot().Quota.IncludedGBHours
+		return nil
+	}
+	s.pass(true, false)
+	if got := gh.callsLike("Delete"); len(got) != 1 {
+		t.Fatalf("deletes %v, want one", got)
+	}
+	if got := s.Snapshot().Quota.IncludedGBHours; got != want || want == before {
+		t.Fatalf("included %v after the pass, %v when saved, %v before: the pass wrote its old config back", got, want, before)
 	}
 }
