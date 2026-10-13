@@ -1,0 +1,9 @@
+{
+  "level": "critical",
+  "month": "2026-10",
+  "used_gb_hours": 330.5,
+  "included_gb_hours": 363.28125,
+  "used_pct": 91,
+  "runs_out_at": "2026-10-06T02:05:00Z",
+  "resets_at": "2026-11-01T00:00:00Z"
+}

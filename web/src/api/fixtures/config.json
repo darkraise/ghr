@@ -41,5 +41,13 @@
     "hosts": [
       "ghr.lan"
     ]
+  },
+  "github_storage": {
+    "cleanup_max_age": "2d",
+    "repos": {
+      "darkmem": {
+        "cleanup": "6h"
+      }
+    }
   }
 }

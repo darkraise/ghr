@@ -107,6 +107,7 @@ export interface Status {
   setup_pending?: boolean
   restart: RestartStatus
   web_listen_error?: WebListenError
+  github_storage?: StorageAlert
 }
 
 export interface SetupState {
@@ -200,6 +201,7 @@ export interface Config {
   repos: RepoConfig[] | null
   watch_repos?: string[]
   web?: WebConfig
+  github_storage?: GitHubStorageConfig
 }
 
 export interface TokenStatus {
@@ -372,6 +374,7 @@ export interface ConfigPatch {
   runner_limits?: RunnerLimitsPatch
   repos?: Record<string, RepoPatch>
   web?: WebPatch
+  github_storage?: GitHubStoragePatch
 }
 
 export interface AddRepoRequest {
@@ -601,4 +604,128 @@ export interface JobLog {
 
 export interface DownloadURL {
   url: string
+}
+
+// The quota levels; the snapshot sends them as plain strings.
+export type QuotaLevel = "" | "projected" | "warn" | "critical" | "exhausted"
+
+export interface GitHubQuota {
+  month: string
+  read_at: string
+  included_gb_hours: number
+  used_gb_hours: number
+  actions_gb_hours: number
+  packages_gb_hours: number
+  rate_gb_hours_per_hour: number
+  estimated_gb_hours: number
+  over_allowance_gb_hours?: number
+  projected_gb_hours: number
+  runs_out_at?: string
+  level: string
+  resets_at: string
+}
+
+export interface ArtifactItem {
+  id: number
+  name: string
+  bytes: number
+  created_at: string
+  expires_at?: string
+  run_id: number
+  branch: string
+}
+
+export interface CacheItem {
+  id: number
+  key: string
+  ref: string
+  bytes: number
+  last_used_at: string
+}
+
+export interface RepoStorage {
+  name: string
+  visibility: string
+  covered: boolean
+  artifact_count: number
+  artifact_bytes: number
+  cache_count: number
+  cache_bytes: number
+  retention_days: number
+  retention_max_days: number
+  cleanup: string
+  cleanup_source: string
+  artifacts: ArtifactItem[]
+  caches: CacheItem[]
+  error?: string
+}
+
+export interface OperationFailure {
+  repo: string
+  id?: number
+  error: string
+}
+
+export interface GitHubOperation {
+  id: string
+  kind: string
+  repo?: string
+  total: number
+  done: number
+  bytes: number
+  failed: OperationFailure[]
+  started_at: string
+  finished_at?: string
+}
+
+export interface Deletion {
+  at: string
+  repo: string
+  kind: string
+  name: string
+  bytes: number
+  age: string
+  by: string
+}
+
+export interface GitHubStorage {
+  checked_at?: string
+  quota?: GitHubQuota
+  quota_error?: string
+  error?: string
+  repos: RepoStorage[]
+  operation?: GitHubOperation
+  deletions: Deletion[]
+}
+
+export interface StorageAlert {
+  level: string
+  month: string
+  used_gb_hours: number
+  included_gb_hours: number
+  used_pct: number
+  runs_out_at?: string
+  resets_at: string
+}
+
+export interface GitHubStorageConfig {
+  included_mb?: number
+  warn_pct?: number[]
+  cleanup_max_age?: string
+  repos?: Record<string, { cleanup: string }>
+}
+
+// An empty cleanup_max_age turns the cleanup off; a null repository value
+// removes that repository's override.
+export interface GitHubStoragePatch {
+  included_mb?: number
+  warn_pct?: number[]
+  cleanup_max_age?: string
+  repos?: Record<string, string | null>
+}
+
+export interface StoragePreview {
+  repo: string
+  count: number
+  bytes: number
 }

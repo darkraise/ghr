@@ -5,6 +5,7 @@ import availableReposJson from "@/api/fixtures/available-repos.json"
 import configJson from "@/api/fixtures/config.json"
 import containersJson from "@/api/fixtures/containers.json"
 import eventsJson from "@/api/fixtures/events.json"
+import githubStorageJson from "@/api/fixtures/github-storage.json"
 import historyJson from "@/api/fixtures/history.json"
 import jobLogJson from "@/api/fixtures/job-log.json"
 import labelCheckJson from "@/api/fixtures/label-check.json"
@@ -16,6 +17,7 @@ import runDetailJson from "@/api/fixtures/run-detail.json"
 import statusJson from "@/api/fixtures/status.json"
 import stepsJson from "@/api/fixtures/steps.json"
 import storageJson from "@/api/fixtures/storage.json"
+import storageAlertJson from "@/api/fixtures/storage-alert.json"
 import tokenJson from "@/api/fixtures/token.json"
 import choicesJson from "@/api/fixtures/toolchain-choices.json"
 import type {
@@ -25,6 +27,7 @@ import type {
   Config,
   Container,
   GhrEvent,
+  GitHubStorage,
   HistoryEntry,
   JobLog,
   LabelCheck,
@@ -36,6 +39,7 @@ import type {
   Status,
   Step,
   Storage,
+  StorageAlert,
   TokenStatus,
   ToolchainChoice,
 } from "@/api/types"
@@ -60,6 +64,8 @@ const actions: Actions = actionsJson
 const runDetail: RunDetail = runDetailJson
 const runAnnotations: RunAnnotations = runAnnotationsJson
 const jobLog: JobLog = jobLogJson
+const githubStorage: GitHubStorage = githubStorageJson
+const storageAlert: StorageAlert = storageAlertJson
 
 export const fixtures = {
   status,
@@ -82,6 +88,8 @@ export const fixtures = {
   runDetail,
   runAnnotations,
   jobLog,
+  githubStorage,
+  storageAlert,
 }
 
 export function authedRoutes(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -95,6 +103,7 @@ export function authedRoutes(over: Record<string, unknown> = {}): Record<string,
       ["1h", "3h"].includes(url.searchParams.get("window") ?? "") ? fixtures.activityLanes : fixtures.activityBuckets,
     "GET /api/storage": fixtures.storage,
     "GET /api/actions": fixtures.actions,
+    "GET /api/github-storage": fixtures.githubStorage,
     ...over,
   }
 }

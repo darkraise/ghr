@@ -1,0 +1,140 @@
+{
+  "checked_at": "2026-10-03T14:00:00Z",
+  "quota": {
+    "month": "2026-10",
+    "read_at": "2026-10-03T13:45:00Z",
+    "included_gb_hours": 363.28125,
+    "used_gb_hours": 260.5,
+    "actions_gb_hours": 250.25,
+    "packages_gb_hours": 10.25,
+    "rate_gb_hours_per_hour": 0.2,
+    "estimated_gb_hours": 262.9,
+    "over_allowance_gb_hours": 0,
+    "projected_gb_hours": 396.95,
+    "runs_out_at": "2026-10-24T11:45:00Z",
+    "level": "warn",
+    "resets_at": "2026-11-01T00:00:00Z"
+  },
+  "repos": [
+    {
+      "name": "darkmem",
+      "visibility": "private",
+      "covered": true,
+      "artifact_count": 2,
+      "artifact_bytes": 209715200,
+      "cache_count": 1,
+      "cache_bytes": 71431401,
+      "retention_days": 90,
+      "retention_max_days": 400,
+      "cleanup": "6h",
+      "cleanup_source": "override",
+      "artifacts": [
+        {
+          "id": 9001,
+          "name": "frontend-dist",
+          "bytes": 157286400,
+          "created_at": "2026-10-02T14:05:00Z",
+          "expires_at": "2026-12-31T14:05:00Z",
+          "run_id": 102,
+          "branch": "master"
+        },
+        {
+          "id": 9002,
+          "name": "coverage",
+          "bytes": 52428800,
+          "created_at": "2026-10-03T11:05:00Z",
+          "expires_at": "2027-01-01T11:05:00Z",
+          "run_id": 103,
+          "branch": "feature/x"
+        }
+      ],
+      "caches": [
+        {
+          "id": 8787967584,
+          "key": "node-cache-Linux-x64-npm-a4cc85d3",
+          "ref": "refs/heads/master",
+          "bytes": 71431401,
+          "last_used_at": "2026-10-03T13:05:00Z"
+        }
+      ]
+    },
+    {
+      "name": "darkcloud",
+      "visibility": "private",
+      "covered": true,
+      "artifact_count": 1,
+      "artifact_bytes": 20971520,
+      "cache_count": 0,
+      "cache_bytes": 0,
+      "retention_days": 7,
+      "retention_max_days": 90,
+      "cleanup": "2d",
+      "cleanup_source": "global",
+      "artifacts": [
+        {
+          "id": 9101,
+          "name": "dist",
+          "bytes": 20971520,
+          "created_at": "2026-10-02T08:05:00Z",
+          "expires_at": "2026-10-09T08:05:00Z",
+          "run_id": 501,
+          "branch": "main"
+        }
+      ],
+      "caches": []
+    },
+    {
+      "name": "sandbox",
+      "visibility": "public",
+      "covered": false,
+      "artifact_count": 0,
+      "artifact_bytes": 0,
+      "cache_count": 0,
+      "cache_bytes": 0,
+      "retention_days": 0,
+      "retention_max_days": 0,
+      "cleanup": "2d",
+      "cleanup_source": "global",
+      "artifacts": [],
+      "caches": [],
+      "error": "token lacks actions=read on darkraise/sandbox: grant it in the PAT settings"
+    }
+  ],
+  "operation": {
+    "id": "op-1",
+    "kind": "delete-artifacts",
+    "repo": "darkmem",
+    "total": 3,
+    "done": 3,
+    "bytes": 52428800,
+    "failed": [
+      {
+        "repo": "darkmem",
+        "id": 9003,
+        "error": "not in the last inventory"
+      }
+    ],
+    "started_at": "2026-10-03T13:55:00Z",
+    "finished_at": "2026-10-03T13:56:00Z"
+  },
+  "deletions": [
+    {
+      "at": "2026-10-03T13:56:00Z",
+      "repo": "darkmem",
+      "kind": "artifact",
+      "name": "coverage-old",
+      "bytes": 52428800,
+      "age": "3d",
+      "by": "cleanup"
+    },
+    {
+      "at": "2026-10-03T12:05:00Z",
+      "repo": "darkcloud",
+      "kind": "cache",
+      "name": "node-cache-Linux-x64-npm-0b1c",
+      "bytes": 31457280,
+      "age": "5d",
+      "by": "manual"
+    }
+  ]
+}

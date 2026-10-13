@@ -8,6 +8,7 @@ import choicesJson from "./fixtures/toolchain-choices.json"
 import configJson from "./fixtures/config.json"
 import containersJson from "./fixtures/containers.json"
 import eventsJson from "./fixtures/events.json"
+import githubStorageJson from "./fixtures/github-storage.json"
 import historyJson from "./fixtures/history.json"
 import jobLogJson from "./fixtures/job-log.json"
 import labelCheckJson from "./fixtures/label-check.json"
@@ -18,6 +19,7 @@ import runAnnotationsJson from "./fixtures/run-annotations.json"
 import runDetailJson from "./fixtures/run-detail.json"
 import statusDegradedJson from "./fixtures/status-degraded.json"
 import statusJson from "./fixtures/status.json"
+import storageAlertJson from "./fixtures/storage-alert.json"
 import stepsJson from "./fixtures/steps.json"
 import storageJson from "./fixtures/storage.json"
 import tokenJson from "./fixtures/token.json"
@@ -28,6 +30,7 @@ import type {
   Config,
   Container,
   GhrEvent,
+  GitHubStorage,
   HistoryEntry,
   JobLog,
   LabelCheck,
@@ -39,6 +42,7 @@ import type {
   Status,
   Step,
   Storage,
+  StorageAlert,
   TokenStatus,
   ToolchainChoice,
 } from "./types"
@@ -167,6 +171,54 @@ describe("type fixtures", () => {
       ["new-repo", false],
     ])
     expect(fixtures.actions.repos).toHaveLength(4)
+  })
+})
+
+describe("GitHub storage fixtures", () => {
+  const snap: GitHubStorage = githubStorageJson
+  const alert: StorageAlert = storageAlertJson
+
+  it("the snapshot carries the quota, the rows, the operation and the deletions", () => {
+    expect(snap.quota?.level).toBe("warn")
+    expect(snap.quota?.over_allowance_gb_hours).toBe(0)
+    expect(snap.quota?.runs_out_at).toBe("2026-10-24T11:45:00Z")
+    expect(snap.repos.map((r) => [r.name, r.covered, r.cleanup, r.cleanup_source])).toEqual([
+      ["darkmem", true, "6h", "override"],
+      ["darkcloud", true, "2d", "global"],
+      ["sandbox", false, "2d", "global"],
+    ])
+    expect(snap.repos[0]?.artifacts[0]).toEqual({
+      id: 9001,
+      name: "frontend-dist",
+      bytes: 157286400,
+      created_at: "2026-10-02T14:05:00Z",
+      expires_at: "2026-12-31T14:05:00Z",
+      run_id: 102,
+      branch: "master",
+    })
+    expect(snap.repos[0]?.caches[0]?.last_used_at).toBe("2026-10-03T13:05:00Z")
+    expect(snap.repos[2]?.error).toContain("token lacks actions=read")
+    expect(snap.repos[0]).not.toHaveProperty("error")
+    expect(snap.operation?.failed[0]?.id).toBe(9003)
+    expect(snap.deletions.map((d) => [d.kind, d.by])).toEqual([
+      ["artifact", "cleanup"],
+      ["cache", "manual"],
+    ])
+    expect(snap).not.toHaveProperty("quota_error")
+  })
+
+  it("the alert and the config block keep their names", () => {
+    expect(alert).toEqual({
+      level: "critical",
+      month: "2026-10",
+      used_gb_hours: 330.5,
+      included_gb_hours: 363.28125,
+      used_pct: 91,
+      runs_out_at: "2026-10-06T02:05:00Z",
+      resets_at: "2026-11-01T00:00:00Z",
+    })
+    expect(fixtures.config.github_storage).toEqual({ cleanup_max_age: "2d", repos: { darkmem: { cleanup: "6h" } } })
+    expect(fixtures.status).not.toHaveProperty("github_storage")
   })
 })
 

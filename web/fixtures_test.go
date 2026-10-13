@@ -158,6 +158,8 @@ func fixtureValues() map[string]any {
 			},
 			WatchRepos: []string{"docs", "old-docs"},
 			Web:        config.Web{Listen: "0.0.0.0:8080", Hosts: []string{"ghr.lan"}},
+			GitHubStorage: config.GitHubStorage{CleanupMaxAge: config.Duration(48 * time.Hour),
+				Repos: map[string]config.StorageOverride{"darkmem": {Cleanup: "6h"}}},
 		},
 		"storage": model.Storage{
 			Toolchains: []model.Toolchain{{Tool: "node", Version: "22.11.0", Arch: "x64",
@@ -223,6 +225,9 @@ func fixtureValues() map[string]any {
 				{Repo: "old-docs", Watched: true, Error: "GitHub rate limit; API calls are paused", RetryAt: ptr(at(25 * time.Minute))},
 			},
 		},
+		"github-storage": githubStorageFixture(),
+		"storage-alert": model.StorageAlert{Level: "critical", Month: "2026-10", UsedGBHours: 330.5, IncludedGBHours: 363.28125,
+			UsedPct: 91, RunsOutAt: ptr(at(60 * time.Hour)), ResetsAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)},
 		"toolchain-choices": []model.ToolchainChoice{{Spec: "22.11.0", Version: "22.11.0", LTS: true}, {Spec: "24.9.0", Version: "24.9.0"}},
 		"run-detail":        runDetailFixture(),
 		"run-annotations":   runAnnotationsFixture(),
@@ -329,4 +334,44 @@ func jobLogFixture() model.JobLog {
 		{Number: 4, Name: "Test", Lines: []model.LogLine{}},
 		{Number: 5, Name: "Complete job", Lines: []model.LogLine{line(1, "", "Cleaning up orphan processes")}},
 	}}
+}
+
+// githubStorageFixture is a snapshot at the warn level: one repository with
+// an override, one on the global age, and one the token cannot read.
+func githubStorageFixture() model.GitHubStorage {
+	return model.GitHubStorage{
+		CheckedAt: ptr(at(-5 * time.Minute)),
+		Quota: &model.GitHubQuota{Month: "2026-10", ReadAt: at(-20 * time.Minute), IncludedGBHours: 363.28125,
+			UsedGBHours: 260.5, ActionsGBHours: 250.25, PackagesGBHours: 10.25, RateGBHoursPerHour: 0.2,
+			EstimatedGBHours: 262.9, OverAllowanceGBHours: ptr(0.0), ProjectedGBHours: 396.95,
+			RunsOutAt: ptr(time.Date(2026, 10, 24, 11, 45, 0, 0, time.UTC)), Level: "warn",
+			ResetsAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)},
+		Repos: []model.RepoStorage{
+			{Name: "darkmem", Visibility: "private", Covered: true, ArtifactCount: 2, ArtifactBytes: 209_715_200,
+				CacheCount: 1, CacheBytes: 71_431_401, RetentionDays: 90, RetentionMaxDays: 400, Cleanup: "6h", CleanupSource: "override",
+				Artifacts: []model.ArtifactItem{
+					{ID: 9001, Name: "frontend-dist", Bytes: 157_286_400, CreatedAt: at(-24 * time.Hour),
+						ExpiresAt: ptr(at(89 * 24 * time.Hour)), RunID: 102, Branch: "master"},
+					{ID: 9002, Name: "coverage", Bytes: 52_428_800, CreatedAt: at(-3 * time.Hour),
+						ExpiresAt: ptr(at(90*24*time.Hour - 3*time.Hour)), RunID: 103, Branch: "feature/x"},
+				},
+				Caches: []model.CacheItem{{ID: 8787967584, Key: "node-cache-Linux-x64-npm-a4cc85d3", Ref: "refs/heads/master",
+					Bytes: 71_431_401, LastUsedAt: at(-time.Hour)}}},
+			{Name: "darkcloud", Visibility: "private", Covered: true, ArtifactCount: 1, ArtifactBytes: 20_971_520,
+				RetentionDays: 7, RetentionMaxDays: 90, Cleanup: "2d", CleanupSource: "global",
+				Artifacts: []model.ArtifactItem{{ID: 9101, Name: "dist", Bytes: 20_971_520, CreatedAt: at(-30 * time.Hour),
+					ExpiresAt: ptr(at(7*24*time.Hour - 30*time.Hour)), RunID: 501, Branch: "main"}},
+				Caches: []model.CacheItem{}},
+			{Name: "sandbox", Visibility: "public", Cleanup: "2d", CleanupSource: "global",
+				Artifacts: []model.ArtifactItem{}, Caches: []model.CacheItem{},
+				Error: "token lacks actions=read on darkraise/sandbox: grant it in the PAT settings"},
+		},
+		Operation: &model.GitHubOperation{ID: "op-1", Kind: "delete-artifacts", Repo: "darkmem", Total: 3, Done: 3, Bytes: 52_428_800,
+			Failed:    []model.OperationFailure{{Repo: "darkmem", ID: 9003, Error: "not in the last inventory"}},
+			StartedAt: at(-10 * time.Minute), FinishedAt: ptr(at(-9 * time.Minute))},
+		Deletions: []model.Deletion{
+			{At: at(-9 * time.Minute), Repo: "darkmem", Kind: "artifact", Name: "coverage-old", Bytes: 52_428_800, Age: "3d", By: "cleanup"},
+			{At: at(-2 * time.Hour), Repo: "darkcloud", Kind: "cache", Name: "node-cache-Linux-x64-npm-0b1c", Bytes: 31_457_280, Age: "5d", By: "manual"},
+		},
+	}
 }
