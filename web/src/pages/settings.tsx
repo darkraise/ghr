@@ -4,6 +4,7 @@ import { PageHeader } from "darkraise-ui/layout"
 import { useEffect, type ReactNode } from "react"
 import { AccountSection } from "@/components/account-section"
 import { ErrorLine } from "@/components/page/error-line"
+import { GitHubStorageSection } from "@/components/github-storage-section"
 import { SideGroup, SideLayout } from "@/components/page/side-layout"
 import { RunnerSection } from "@/components/runner-section"
 import { SaveBar } from "@/components/save-bar"
@@ -18,6 +19,7 @@ import { ToolchainsPage } from "@/pages/toolchains"
 const CONFIG = [
   { id: "", title: "General" },
   { id: "token", title: "GitHub token" },
+  { id: "github-storage", title: "GitHub storage" },
   { id: "runner", title: "Runner software" },
   { id: "account", title: "Account" },
 ] as const
@@ -88,6 +90,8 @@ function SectionContent({ section }: { section: string }) {
           <TokenSection />
         </Titled>
       )
+    case "github-storage":
+      return <GitHubStorageSection />
     case "runner":
       return (
         <Titled title="Runner software">

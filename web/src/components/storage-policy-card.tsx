@@ -6,31 +6,13 @@ import { useState } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys } from "@/api/hooks"
 import type { Config, GitHubStorage, GitHubStoragePatch, StoragePreview } from "@/api/types"
+import { CleanupPreview } from "@/components/cleanup-preview"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { ErrorLine } from "@/components/page/error-line"
 import { Field, FieldGroup } from "@/components/page/field"
 import { FIELD_WIDTH } from "@/lib/field-width"
-import { humanBytes, plural } from "@/lib/format"
 import { CLEANUP_WARNING, RETENTION_WARNING } from "@/lib/quota"
 import { errorText } from "@/query"
-
-// What a cleanup age would delete now, for the confirmation it gets before it
-// is saved, globally or for one repository.
-export function CleanupPreview({ age, previews }: { age: string; previews: StoragePreview[] }) {
-  const count = previews.reduce((n, p) => n + p.count, 0)
-  const bytes = previews.reduce((n, p) => n + p.bytes, 0)
-  if (count === 0) return <p className="text-sm">{`No artifact is older than ${age} now.`}</p>
-  return (
-    <div className="flex flex-col gap-1 text-sm">
-      <p>{`Up to ${plural(count, "artifact")} (${humanBytes(bytes)}) older than ${age} would go at the next check.`}</p>
-      <ul className="flex flex-col gap-0.5">
-        {previews.map((p) => (
-          <li key={p.repo}>{`${p.repo}: up to ${plural(p.count, "artifact")}, ${humanBytes(p.bytes)}`}</li>
-        ))}
-      </ul>
-    </div>
-  )
-}
 
 const repositories = (n: number) => (n === 1 ? "1 repository" : `${n} repositories`)
 

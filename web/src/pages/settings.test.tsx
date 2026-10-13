@@ -364,6 +364,7 @@ describe("Settings sections", () => {
     expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual([
       "General",
       "GitHub token",
+      "GitHub storage",
       "Runner software",
       "Account",
       "Toolchains",
@@ -379,6 +380,7 @@ describe("Settings sections", () => {
 
   it.each([
     ["token", "GitHub token"],
+    ["github-storage", "GitHub storage"],
     ["runner", "Runner software"],
     ["account", "Account"],
     ["toolchains", "Toolchains"],
