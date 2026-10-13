@@ -618,7 +618,6 @@ export interface GitHubQuota {
   packages_gb_hours: number
   rate_gb_hours_per_hour: number
   estimated_gb_hours: number
-  over_allowance_gb_hours?: number
   projected_gb_hours: number
   runs_out_at?: string
   level: string

@@ -38,7 +38,6 @@ function QuotaMeter({ q }: { q: GitHubQuota }) {
 export function QuotaCard({ storage }: { storage: GitHubStorage }) {
   const now = useNow()
   const q = storage.quota
-  const over = q?.over_allowance_gb_hours
   const aside = q && <span className="ml-auto font-mono text-sm text-muted-foreground">{`Billing read ${shortWhen(q.read_at, now)}`}</span>
   return (
     <Section id="quota" title="Quota" aside={aside}>
@@ -62,9 +61,6 @@ export function QuotaCard({ storage }: { storage: GitHubStorage }) {
               </li>
             </ul>
             <p className="text-sm">{`Actions ${gbh(q.actions_gb_hours)}, Packages ${gbh(q.packages_gb_hours)}`}</p>
-            {over !== undefined && over > 0.001 && (
-              <p className="text-sm text-destructive">{`GitHub reports use past its free allowance: ${over < 0.1 ? "under 0.1 GB-h" : gbh(over)}.`}</p>
-            )}
             <p className="text-sm font-semibold">{outlook(q)}</p>
           </>
         ) : (

@@ -36,22 +36,13 @@ describe("QuotaCard", () => {
   })
 
   it.each<[string, Partial<GitHubQuota>, string, string]>([
-    ["exhausted", { level: "exhausted", used_gb_hours: 373.3, over_allowance_gb_hours: 0.0016, runs_out_at: undefined }, "Uploads fail until Nov 1 unless a budget is set.", "bg-destructive"],
+    ["exhausted", { level: "exhausted", used_gb_hours: 373.3, runs_out_at: undefined }, "Uploads fail until Nov 1 unless a budget is set.", "bg-destructive"],
     ["critical past the estimate", { level: "critical", estimated_gb_hours: 370, runs_out_at: undefined }, "Uploads may fail before GitHub's next recalculation.", "bg-destructive"],
     ["calm", { level: "", projected_gb_hours: 300, runs_out_at: undefined }, "Lasts until the month resets on Nov 1.", "bg-primary"],
   ])("words the outlook when %s", (_name, quota, outlook, tint) => {
     const card = draw(quota)
     expect(within(card).getByText(outlook)).toBeInTheDocument()
     expect(within(card).getByRole("img").querySelector("[data-part=used]")).toHaveClass(tint)
-  })
-
-  it.each<[number, string | null]>([
-    [0.0016, "GitHub reports use past its free allowance: under 0.1 GB-h."],
-    [9.5, "GitHub reports use past its free allowance: 9.5 GB-h."],
-    [0, null],
-  ])("shows GitHub's own figure past the free allowance (%s)", (over, text) => {
-    const card = draw({ level: "exhausted", over_allowance_gb_hours: over })
-    expect(within(card).queryByText(/past its free allowance/)?.textContent ?? null).toBe(text)
   })
 
   it("shows the billing error and keeps the last quota", () => {
