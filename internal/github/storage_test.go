@@ -58,15 +58,9 @@ const usageBody = `{"usageItems":[
 {"date":"2026-10-02T00:00:00Z","product":"git_lfs","sku":"Git LFS storage","quantity":1.6,"unitType":"GigabyteHours","repositoryName":"darkfoto"},
 {"date":"2026-10-02T00:00:00Z","product":"actions","sku":"Actions Linux","quantity":120,"unitType":"Minutes","repositoryName":"darkmem"}]}`
 
-const summaryBody = `{"timePeriod":{"year":2026,"month":10},"user":"darkraise","usageItems":[
-{"product":"Actions","sku":"actions_linux","grossQuantity":1538.0,"discountQuantity":1538.0,"netQuantity":0.0,"unitType":"minutes"},
-{"product":"Actions","sku":"actions_storage","grossQuantity":373.317530205,"discountQuantity":373.315932471,"netQuantity":0.001597734,"unitType":"gigabyte-hours"},
-{"product":"Git LFS","sku":"git_lfs_storage","grossQuantity":26.5,"discountQuantity":26.5,"netQuantity":0.0,"unitType":"gigabyte-hours"},
-{"product":"Packages","sku":"packages_storage","grossQuantity":11.155870203,"discountQuantity":11.155870203,"netQuantity":0.0,"unitType":"gigabyte-hours"}]}`
-
 // A user owner's billing lives under /users, an organization's under
 // /organizations; only Actions and Packages storage are kept.
-func TestStorageUsageAndSummary(t *testing.T) {
+func TestStorageUsage(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		isOrg  bool
@@ -80,8 +74,6 @@ func TestStorageUsageAndSummary(t *testing.T) {
 				switch r.URL.Path {
 				case tc.prefix:
 					fmt.Fprint(w, usageBody)
-				case tc.prefix + "/summary":
-					fmt.Fprint(w, summaryBody)
 				default:
 					http.NotFound(w, r)
 				}
@@ -103,18 +95,7 @@ func TestStorageUsageAndSummary(t *testing.T) {
 					t.Fatalf("item %d = %+v, want %+v", i, items[i], want[i])
 				}
 			}
-			sum, err := c.StorageSummary(ctx, tc.isOrg, 2026, time.October)
-			if err != nil {
-				t.Fatal(err)
-			}
-			wantSum := []SummaryItem{
-				{SKU: SKUActionsStorage, Gross: 373.317530205, Discount: 373.315932471, Net: 0.001597734},
-				{SKU: SKUPackagesStorage, Gross: 11.155870203, Discount: 11.155870203, Net: 0},
-			}
-			if len(sum) != 2 || sum[0] != wantSum[0] || sum[1] != wantSum[1] {
-				t.Fatalf("summary %+v", sum)
-			}
-			wantReq := "GET " + tc.prefix + "?year=2026&month=10|GET " + tc.prefix + "/summary?year=2026&month=10"
+			wantReq := "GET " + tc.prefix + "?year=2026&month=10"
 			if got := strings.Join(f.requests, "|"); got != wantReq {
 				t.Fatalf("requests %q, want %q", got, wantReq)
 			}

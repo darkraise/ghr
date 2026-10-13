@@ -12,14 +12,14 @@ import (
 )
 
 // The storage SKUs, normalized. The usage endpoint spells them "Actions
-// storage", the summary "actions_storage".
+// storage" and "Packages storage".
 const (
 	SKUActionsStorage  = "actions_storage"
 	SKUPackagesStorage = "packages_storage"
 )
 
 // NormalizeSKU lower-cases s, turns spaces into underscores and drops
-// hyphens, so both endpoints' spellings of a SKU or a unit compare equal.
+// hyphens, so a SKU or a unit compares equal however GitHub spells it.
 func NormalizeSKU(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(s), " ", "_"), "-", "")
 }
@@ -43,13 +43,6 @@ type UsageItem struct {
 	SKU      string
 	Repo     string
 	Quantity float64
-}
-
-// SummaryItem is the month's storage of one SKU, split into the part the
-// plan's allowance covers (Discount) and the part over it (Net).
-type SummaryItem struct {
-	SKU                  string
-	Gross, Discount, Net float64
 }
 
 type Retention struct {
@@ -83,12 +76,12 @@ func (c *Client) TokenLogin(ctx context.Context) (string, error) {
 	return u.Login, nil
 }
 
-func (c *Client) billingURL(isOrg bool, rest string, year int, month time.Month) string {
+func (c *Client) billingURL(isOrg bool, year int, month time.Month) string {
 	kind := "users"
 	if isOrg {
 		kind = "organizations"
 	}
-	return fmt.Sprintf("%s/%s/%s/settings/billing/usage%s?year=%d&month=%d", c.BaseURL, kind, url.PathEscape(c.Owner), rest, year, int(month))
+	return fmt.Sprintf("%s/%s/%s/settings/billing/usage?year=%d&month=%d", c.BaseURL, kind, url.PathEscape(c.Owner), year, int(month))
 }
 
 // StorageUsage lists the month's daily Actions and Packages storage in
@@ -103,7 +96,7 @@ func (c *Client) StorageUsage(ctx context.Context, isOrg bool, year int, month t
 			RepositoryName string    `json:"repositoryName"`
 		} `json:"usageItems"`
 	}
-	if err := c.getJSON(ctx, c.billingURL(isOrg, "", year, month), &body); err != nil {
+	if err := c.getJSON(ctx, c.billingURL(isOrg, year, month), &body); err != nil {
 		return nil, err
 	}
 	var out []UsageItem
@@ -113,29 +106,6 @@ func (c *Client) StorageUsage(ctx context.Context, isOrg bool, year int, month t
 			continue
 		}
 		out = append(out, UsageItem{Date: it.Date, SKU: sku, Repo: it.RepositoryName, Quantity: it.Quantity})
-	}
-	return out, nil
-}
-
-// StorageSummary reads the month's Actions and Packages storage totals.
-// The endpoint is a public preview.
-func (c *Client) StorageSummary(ctx context.Context, isOrg bool, year int, month time.Month) ([]SummaryItem, error) {
-	var body struct {
-		UsageItems []struct {
-			SKU      string  `json:"sku"`
-			Gross    float64 `json:"grossQuantity"`
-			Discount float64 `json:"discountQuantity"`
-			Net      float64 `json:"netQuantity"`
-		} `json:"usageItems"`
-	}
-	if err := c.getJSON(ctx, c.billingURL(isOrg, "/summary", year, month), &body); err != nil {
-		return nil, err
-	}
-	var out []SummaryItem
-	for _, it := range body.UsageItems {
-		if sku := NormalizeSKU(it.SKU); storageSKU(sku) {
-			out = append(out, SummaryItem{SKU: sku, Gross: it.Gross, Discount: it.Discount, Net: it.Net})
-		}
 	}
 	return out, nil
 }
