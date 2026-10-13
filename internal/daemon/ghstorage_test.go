@@ -4,15 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/darkraise/ghr/internal/api"
+	"github.com/darkraise/ghr/internal/changes"
 	"github.com/darkraise/ghr/internal/ghstorage"
+	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 )
 
@@ -262,5 +266,65 @@ func TestTokenReloadAndPolicyReachTheStorageService(t *testing.T) {
 	want := []string{"token-changed", "kick", "token-changed", "policy"}
 	if got := f.recorded(); !slices.Equal(got, want) {
 		t.Fatalf("calls %q", got)
+	}
+}
+
+func TestFingerprintsCountGitHubStorage(t *testing.T) {
+	b, _, f := newGHSBackend(t)
+	prev := b.fingerprints()
+	if _, ok := prev["github-storage"]; !ok {
+		t.Fatalf("no github-storage topic in %v", prev)
+	}
+	f.version.Add(1)
+	cur := b.fingerprints()
+	if got := changed(prev, cur); !slices.Equal(got, []string{"github-storage"}) {
+		t.Fatalf("a snapshot change changed %v", got)
+	}
+	f.alert = &model.StorageAlert{Level: "warn", Month: "2026-10", UsedPct: 72}
+	if got := changed(cur, b.fingerprints()); !slices.Equal(got, []string{"status"}) {
+		t.Fatalf("an alert change changed %v", got)
+	}
+}
+
+func TestStorageErrText(t *testing.T) {
+	text := storageErrText("darkraise")
+	lacks := &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible", Permissions: "actions=read"}
+	if got := text(lacks, "darkmem"); got != "token lacks actions=read on darkraise/darkmem: grant it in the PAT settings" {
+		t.Fatalf("repository error %q", got)
+	}
+	missing := &github.APIError{Status: 404, Kind: github.ErrNotFound, Message: "Not Found"}
+	if got := text(missing, ""); got != "github: 404 Not Found" {
+		t.Fatalf("listing error %q", got)
+	}
+}
+
+// The daemon starts the storage service and counts its topic: with an
+// hour-long tick only wakes publish, and the pass a reload asks for changes
+// the snapshot after the stream's baseline.
+func TestRunStreamsGHStorage(t *testing.T) {
+	old := hubOptions
+	hubOptions = changes.Options{Tick: time.Hour}
+	t.Cleanup(func() { hubOptions = old })
+	o := testOptions(t, cfgYAML)
+	reload := make(chan os.Signal, 1)
+	o.Reload = reload
+	startRun(t, o)
+	c := api.NewUnixClient(o.Socket)
+	waitFor(t, "the socket to serve status", func() bool { _, err := c.Status(context.Background()); return err == nil })
+	req, err := http.NewRequest(http.MethodGet, "http://ghr/changes", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := (&http.Client{Transport: c.HTTP.Transport}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	frames := readFrames(resp.Body)
+	if f := nextFrame(t, frames, "hello"); f != "event: hello\ndata: {}\n" {
+		t.Fatalf("first frame %q", f)
+	}
+	reload <- os.Interrupt
+	for !strings.Contains(nextFrame(t, frames, `a change naming "github-storage"`), `"github-storage"`) {
 	}
 }

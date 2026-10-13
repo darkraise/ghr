@@ -22,6 +22,7 @@ import (
 	"github.com/darkraise/ghr/internal/changes"
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/events"
+	"github.com/darkraise/ghr/internal/ghstorage"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/history"
 	"github.com/darkraise/ghr/internal/metrics"
@@ -167,6 +168,7 @@ func (s *swapHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type running struct {
 	m       *runner.Manager
 	space   *storage.Service
+	ghs     *ghstorage.Service
 	b       *Backend
 	sampled chan struct{}
 	wake    chan struct{}
@@ -234,9 +236,12 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 	sampled := make(chan struct{})
 	go func() { sampler.Run(ctx, time.Minute); close(sampled) }()
 
+	ghs := &ghstorage.Service{GH: gh, Config: store.Config, Events: ev, Wake: hub.Wake, Describe: storageErrText(owner)}
+	ghs.Start()
+
 	wake := make(chan struct{}, 1)
 	b := &Backend{
-		Store: store, M: m, GH: gh, Events: ev, Hist: hist, Space: space,
+		Store: store, M: m, GH: gh, Events: ev, Hist: hist, Space: space, GHS: ghs,
 		CheckToken: func(ctx context.Context, token, repo string) error {
 			c := github.New(owner, func() string { return token })
 			c.BaseURL = gh.BaseURL
@@ -264,7 +269,20 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 		},
 	}
 	hub.SetSources(b.fingerprints, b.staleActivity)
-	return &running{m: m, space: space, b: b, sampled: sampled, wake: wake}, nil
+	return &running{m: m, space: space, ghs: ghs, b: b, sampled: sampled, wake: wake}, nil
+}
+
+// storageErrText words a repository's GitHub storage error as the Actions
+// page words a repository's; an error about no one repository, such as a
+// failed listing of them, keeps GitHub's text.
+func storageErrText(owner string) func(err error, repo string) string {
+	return func(err error, repo string) string {
+		if repo == "" {
+			return err.Error()
+		}
+		msg, _ := actionsErr(err, owner, repo)
+		return msg
+	}
 }
 
 // loadMetrics restores the metrics rings; an unreadable file starts them
@@ -457,6 +475,7 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	defer rt.space.Close()
+	defer rt.ghs.Close()
 	// Handler first: GET /setup reports configured only once the full API serves.
 	handler.Store(su.routes(api.NewServer(rt.b)))
 	su.backend.Store(rt.b)
@@ -486,12 +505,14 @@ func Run(ctx context.Context, o Options) error {
 			hub.Close()
 			m.Close()
 			rt.space.Close()
+			rt.ghs.Close()
 			rt.b.Close()
 			<-rt.sampled
 			done := make(chan struct{})
 			go func() {
 				m.Wait()
 				rt.space.Wait()
+				rt.ghs.Wait()
 				close(done)
 			}()
 			select {

@@ -56,7 +56,7 @@ func (b *Backend) fingerprints() map[string]uint64 {
 		return b.GH.TokenMeta()
 	})
 	token := func() model.TokenStatus { return tokenStatus(meta(), status()) }
-	out := make(map[string]uint64, 8)
+	out := make(map[string]uint64, 9)
 	hash := func(topic string, v func() any) {
 		defer func() { _ = recover() }()
 		if fp, err := changes.Fingerprint(v()); err == nil {
@@ -71,6 +71,9 @@ func (b *Backend) fingerprints() map[string]uint64 {
 		st := status()
 		st.WebSetupRequired, st.SetupPending = b.setupFlags()
 		st.Restart, st.WebListenError = b.restartStatus(st), b.WebListenErr
+		if b.GHS != nil {
+			st.GitHubStorage = b.GHS.Alert()
+		}
 		st.Now, st.RateRemaining, st.RateLimit, st.DiskUsedBytes, st.DiskTotalBytes = time.Time{}, 0, 0, 0, 0
 		return st
 	})
@@ -91,5 +94,8 @@ func (b *Backend) fingerprints() map[string]uint64 {
 	hash("storage", func() any { return b.storageFrom(status()) })
 	count("history", b.Hist.Writes)
 	hash("metrics", func() any { return b.Metrics() })
+	if b.GHS != nil {
+		count("github-storage", b.GHS.Version)
+	}
 	return out
 }
