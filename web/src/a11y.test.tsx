@@ -215,6 +215,20 @@ describe("Settings accessibility", () => {
   )
 })
 
+describe("GitHub storage settings accessibility", () => {
+  it(
+    "has no axe violations at 1280px",
+    async () => {
+      setViewport(1280)
+      mockApi(authedRoutes())
+      renderApp("/settings/github-storage")
+      await screen.findByRole("region", { name: "Policy" })
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})
+
 describe("Run details accessibility", () => {
   it.each([
     [1280, "the side rail"],
