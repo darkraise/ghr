@@ -328,6 +328,9 @@ func printStatus(out io.Writer, st model.Status) {
 	}
 	fmt.Fprintf(out, "mode %s  global %s  api %d  disk %d%%\n", st.Mode, global, st.RateRemaining, st.DiskPct)
 	fmt.Fprintln(out, runnerLine(st))
+	if a := st.GitHubStorage; a != nil {
+		fmt.Fprintln(out, artifactsLine(*a))
+	}
 	if st.Degraded {
 		fmt.Fprintf(out, "DEGRADED: %s\n", st.DegradedReason)
 	}
@@ -397,6 +400,24 @@ func runnerLine(st model.Status) string {
 	}
 	if u.CheckError != "" {
 		s += "  last check failed: " + u.CheckError
+	}
+	return s
+}
+
+// artifactsLine is the status line about the month's GitHub artifact
+// storage. Dates are UTC, as GitHub's month is.
+func artifactsLine(a model.StorageAlert) string {
+	s := fmt.Sprintf("artifacts  %.0f / %.0f GB-h this month (%d%%)", a.UsedGBHours, a.IncludedGBHours, a.UsedPct)
+	switch a.Level {
+	case "exhausted":
+		return s + ", exhausted until " + a.ResetsAt.UTC().Format("Jan 2")
+	case "critical":
+		s += ", critical"
+	case "warn":
+		s += ", warning"
+	}
+	if a.RunsOutAt != nil {
+		s += ", runs out around " + a.RunsOutAt.UTC().Format("Jan 2")
 	}
 	return s
 }

@@ -537,3 +537,36 @@ func TestStatusWhileUnconfigured(t *testing.T) {
 		t.Fatalf("a status without the field must print as configured:\n%s", out.String())
 	}
 }
+
+func TestStatusPrintsTheArtifactQuota(t *testing.T) {
+	resets := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	runsOut := time.Date(2026, 10, 24, 6, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		alert *model.StorageAlert
+		want  string
+	}{
+		{&model.StorageAlert{Level: "exhausted", UsedGBHours: 373.3, IncludedGBHours: 363.28, UsedPct: 103, ResetsAt: resets},
+			"artifacts  373 / 363 GB-h this month (103%), exhausted until Nov 1"},
+		{&model.StorageAlert{Level: "critical", UsedGBHours: 330.2, IncludedGBHours: 363.28, UsedPct: 91, RunsOutAt: &runsOut, ResetsAt: resets},
+			"artifacts  330 / 363 GB-h this month (91%), critical, runs out around Oct 24"},
+		{&model.StorageAlert{Level: "warn", UsedGBHours: 260, IncludedGBHours: 363.28, UsedPct: 72, RunsOutAt: &runsOut, ResetsAt: resets},
+			"artifacts  260 / 363 GB-h this month (72%), warning, runs out around Oct 24"},
+		{&model.StorageAlert{Level: "projected", UsedGBHours: 120, IncludedGBHours: 363.28, UsedPct: 33, RunsOutAt: &runsOut, ResetsAt: resets},
+			"artifacts  120 / 363 GB-h this month (33%), runs out around Oct 24"},
+		{&model.StorageAlert{UsedGBHours: 20.4, IncludedGBHours: 363.28, UsedPct: 6, ResetsAt: resets},
+			"artifacts  20 / 363 GB-h this month (6%)"},
+		{nil, ""},
+	} {
+		var out bytes.Buffer
+		printStatus(&out, model.Status{Mode: "queue", GlobalMax: 1, GitHubStorage: tc.alert})
+		got := ""
+		for _, line := range strings.Split(out.String(), "\n") {
+			if strings.HasPrefix(line, "artifacts") {
+				got = line
+			}
+		}
+		if got != tc.want {
+			t.Errorf("artifacts line %q, want %q in:\n%s", got, tc.want, out.String())
+		}
+	}
+}
