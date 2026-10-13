@@ -18,6 +18,7 @@ import { parseHistorySearch, type HistorySearch } from "./lib/history"
 import { loginSearch, safeRedirect } from "./lib/redirect"
 import { parseJobSearch, parseRunSearch, type JobSearch, type RunSearch } from "./lib/run-details"
 import { ActionsPage } from "./pages/actions"
+import { ArtifactsPage } from "./pages/artifacts"
 import { DashboardPage } from "./pages/dashboard"
 import { HistoryPage } from "./pages/history"
 import { LoginPage } from "./pages/login"
@@ -154,6 +155,7 @@ const jobRoute = createRoute({
   component: JobPage,
   errorComponent: RunNotFound,
 })
+const artifactsRoute = createRoute({ getParentRoute: () => appRoute, path: "/artifacts", component: ArtifactsPage })
 const toolchainsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/toolchains",
@@ -192,6 +194,7 @@ const routeTree = rootRoute.addChildren([
     runRoute,
     jobRoute,
     historyRoute,
+    artifactsRoute,
     toolchainsRoute,
     storageRoute,
     settingsRoute,
