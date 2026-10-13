@@ -10,6 +10,7 @@ import type {
   Container,
   DownloadURL,
   GhrEvent,
+  GitHubStorage,
   HistoryEntry,
   JobLog,
   LabelCheck,
@@ -23,6 +24,7 @@ import type {
   Status,
   Step,
   Storage,
+  StoragePreview,
   TokenStatus,
   ToolchainChoice,
 } from "./types"
@@ -168,4 +170,17 @@ export const api = {
   removeToolchain: (tool: string, version: string) => send("DELETE", `/api/toolchains/${seg(tool)}/${seg(version)}`),
   clearCache: (name: string) => send("POST", `/api/caches/${seg(name)}/clear`),
   prune: (scope: PruneScope) => send("POST", scope === "standard" ? "/api/prune" : `/api/prune/${seg(scope)}`),
+  githubStorage: (signal?: AbortSignal) => request<GitHubStorage>("GET", "/api/github-storage", undefined, signal),
+  refreshGitHubStorage: () => send("POST", "/api/github-storage/refresh"),
+  storagePreview: (cleanup: string, repo?: string, signal?: AbortSignal) =>
+    request<StoragePreview[]>("GET", `/api/github-storage/preview?${query({ cleanup, ...(repo ? { repo } : {}) })}`, undefined, signal),
+  deleteArtifact: (repo: string, id: number) => send("DELETE", `/api/github-storage/${seg(repo)}/artifacts/${id}`),
+  deleteCache: (repo: string, id: number) => send("DELETE", `/api/github-storage/${seg(repo)}/caches/${id}`),
+  // The bulk deletes answer 202; their progress shows in the snapshot.
+  deleteArtifacts: (repo: string, body: { ids: number[] } | { older_than: string }) =>
+    send("POST", `/api/github-storage/${seg(repo)}/artifacts/delete`, body),
+  deleteCaches: (repo: string, body: { ids: number[] } | { all: true }) =>
+    send("POST", `/api/github-storage/${seg(repo)}/caches/delete`, body),
+  setRetention: (repo: string, days: number) => send("PUT", `/api/github-storage/${seg(repo)}/retention`, { days }),
+  setRetentionAll: (days: number) => send("POST", "/api/github-storage/retention", { days }),
 }

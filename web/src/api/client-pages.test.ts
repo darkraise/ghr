@@ -26,6 +26,15 @@ describe("api for the later pages", () => {
     ["clearCache", () => api.clearCache("nuget"), "POST", "/api/caches/nuget/clear", undefined],
     ["prune standard", () => api.prune("standard"), "POST", "/api/prune", undefined],
     ["prune a scope", () => api.prune("unused-volumes"), "POST", "/api/prune/unused-volumes", undefined],
+    ["refreshGitHubStorage", () => api.refreshGitHubStorage(), "POST", "/api/github-storage/refresh", undefined],
+    ["deleteArtifact", () => api.deleteArtifact("dark mem", 9001), "DELETE", "/api/github-storage/dark%20mem/artifacts/9001", undefined],
+    ["deleteCache", () => api.deleteCache("darkmem", 77), "DELETE", "/api/github-storage/darkmem/caches/77", undefined],
+    ["deleteArtifacts by id", () => api.deleteArtifacts("darkmem", { ids: [9001, 9002] }), "POST", "/api/github-storage/darkmem/artifacts/delete", { ids: [9001, 9002] }],
+    ["deleteArtifacts by age", () => api.deleteArtifacts("darkmem", { older_than: "2d" }), "POST", "/api/github-storage/darkmem/artifacts/delete", { older_than: "2d" }],
+    ["deleteCaches by id", () => api.deleteCaches("darkmem", { ids: [77] }), "POST", "/api/github-storage/darkmem/caches/delete", { ids: [77] }],
+    ["deleteCaches all", () => api.deleteCaches("darkmem", { all: true }), "POST", "/api/github-storage/darkmem/caches/delete", { all: true }],
+    ["setRetention", () => api.setRetention("darkmem", 7), "PUT", "/api/github-storage/darkmem/retention", { days: 7 }],
+    ["setRetentionAll", () => api.setRetentionAll(5), "POST", "/api/github-storage/retention", { days: 5 }],
   ])("%s sends its request", async (_name, call, method, path, body) => {
     const { calls } = mockApi({ [`${method} ${path}`]: ok })
     await call()
@@ -39,6 +48,15 @@ describe("api for the later pages", () => {
     await api.activity("24h", "UTC", "darkmem")
     expect(calls[0]?.search).toBe("?window=3h&tz=Asia%2FHo_Chi_Minh")
     expect(calls[1]?.search).toBe("?window=24h&tz=UTC&repo=darkmem")
+  })
+
+  it("reads the GitHub storage snapshot and a cleanup preview", async () => {
+    const preview = [{ repo: "darkmem", count: 2, bytes: 209715200 }]
+    const { calls } = mockApi({ "GET /api/github-storage": fixtures.githubStorage, "GET /api/github-storage/preview": preview })
+    expect((await api.githubStorage()).repos).toHaveLength(3)
+    expect(await api.storagePreview("2d")).toEqual(preview)
+    await api.storagePreview("off", "dark mem")
+    expect(calls.map((c) => c.search)).toEqual(["", "?cleanup=2d", "?cleanup=off&repo=dark+mem"])
   })
 
   it("sends a replacement token as plain text, unchanged", async () => {
