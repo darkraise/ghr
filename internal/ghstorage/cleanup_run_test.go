@@ -240,3 +240,33 @@ func TestCleanupKeepsAPolicySavedDuringIt(t *testing.T) {
 		t.Fatalf("included %v after the pass, %v when saved, %v before: the pass wrote its old config back", got, want, before)
 	}
 }
+
+func TestCleanupStopsDeletingAfterATokenChange(t *testing.T) {
+	gh := newFakeGH()
+	s, clock := newTestService(t, gh, cleanupConfig())
+	gh.addRepo("darkmem", true, ghArt(1, 10, clock.Now(), 40*time.Hour, 5), ghArt(2, 20, clock.Now(), 30*time.Hour, 5))
+	gh.onDelete = func(context.Context, string, int64) error {
+		gh.mu.Lock()
+		gh.gen++
+		gh.mu.Unlock()
+		return nil
+	}
+	s.pass(true, false)
+	if got := gh.callsLike("Delete"); !reflect.DeepEqual(got, []string{"DeleteArtifact darkmem 1"}) {
+		t.Fatalf("deletes %v, want only the first: the token changed during it", got)
+	}
+}
+
+func TestCleanupStopsDeletingWhenTheServiceCloses(t *testing.T) {
+	gh := newFakeGH()
+	s, clock := newTestService(t, gh, cleanupConfig())
+	gh.addRepo("darkmem", true, ghArt(1, 10, clock.Now(), 40*time.Hour, 5), ghArt(2, 20, clock.Now(), 30*time.Hour, 5))
+	gh.onDelete = func(context.Context, string, int64) error {
+		s.Close()
+		return nil
+	}
+	s.pass(true, false)
+	if got := gh.callsLike("Delete"); !reflect.DeepEqual(got, []string{"DeleteArtifact darkmem 1"}) {
+		t.Fatalf("deletes %v, want only the first: the service closed during it", got)
+	}
+}
