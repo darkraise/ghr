@@ -16,7 +16,7 @@ export function utcDay(iso: string): string {
   return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
 }
 
-function monthName(month: string): string {
+export function monthName(month: string): string {
   return new Date(`${month}-01T00:00:00Z`).toLocaleString("en-US", { month: "long", timeZone: "UTC" })
 }
 

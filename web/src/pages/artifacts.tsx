@@ -6,6 +6,7 @@ import { PageHeader } from "darkraise-ui/layout"
 import { api } from "@/api/client"
 import { keys, useGitHubStorage, useStatus } from "@/api/hooks"
 import { ErrorLine } from "@/components/page/error-line"
+import { QuotaCard } from "@/components/quota-card"
 import { shortWhen } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
@@ -38,6 +39,7 @@ export function ArtifactsPage() {
       {storage.isError && <ErrorLine onRetry={() => void storage.refetch()}>{errorText(storage.error)}</ErrorLine>}
       {data?.error && <ErrorLine>{`Could not list the repositories: ${data.error}`}</ErrorLine>}
       {!data && !storage.isError && <Spinner label="Loading" />}
+      {data && <QuotaCard storage={data} />}
     </div>
   )
 }
