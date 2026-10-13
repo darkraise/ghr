@@ -76,6 +76,7 @@ type fakeBackend struct {
 	restartErr    error          // returned by RequestRestart
 	restartRun    func()         // RequestRestart's run; nil runs nothing
 	restarts      int            // RequestRestart calls
+	ghs           ghsFake        // the GitHub storage methods' state
 }
 
 func (f *fakeBackend) AvailableRepos(context.Context) ([]model.AvailableRepo, error) {

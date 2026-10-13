@@ -106,6 +106,15 @@ type Backend interface {
 	ClearCache(name string) error
 	PruneScope(scope string) error
 	Subscribe() (*changes.Sub, error)
+	GitHubStorage() model.GitHubStorage
+	RefreshGitHubStorage() error
+	GitHubStoragePreview(cleanup, repo string) ([]model.StoragePreview, error)
+	DeleteGitHubArtifact(ctx context.Context, repo string, id int64) error
+	DeleteGitHubCache(ctx context.Context, repo string, id int64) error
+	DeleteGitHubArtifacts(repo string, req model.DeleteArtifactsRequest) (model.OperationStarted, error)
+	DeleteGitHubCaches(repo string, req model.DeleteCachesRequest) (model.OperationStarted, error)
+	SetGitHubRetention(ctx context.Context, repo string, days int) error
+	SetGitHubRetentionAll(days int) (model.OperationStarted, error)
 }
 
 func NewServer(b Backend) http.Handler {
@@ -386,6 +395,64 @@ func NewServer(b Backend) http.Handler {
 	// A route of its own, so a daemon older than the scopes answers a
 	// plain-text 404 instead of running a standard prune.
 	mux.HandleFunc("POST /prune/{scope}", accepted(func(r *http.Request) error { return b.PruneScope(r.PathValue("scope")) }))
+	mux.HandleFunc("GET /github-storage", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.GitHubStorage()) })
+	mux.HandleFunc("POST /github-storage/refresh", accepted(func(*http.Request) error { return b.RefreshGitHubStorage() }))
+	mux.HandleFunc("GET /github-storage/preview", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		ps, err := b.GitHubStoragePreview(q.Get("cleanup"), q.Get("repo"))
+		if ps == nil {
+			ps = []model.StoragePreview{}
+		}
+		respond(w, ps, err)
+	})
+	mux.HandleFunc("POST /github-storage/retention", func(w http.ResponseWriter, r *http.Request) {
+		var req model.RetentionRequest
+		if err := decode(r, &req); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		started(w)(b.SetGitHubRetentionAll(req.Days))
+	})
+	mux.HandleFunc("POST /github-storage/{repo}/artifacts/delete", func(w http.ResponseWriter, r *http.Request) {
+		var req model.DeleteArtifactsRequest
+		if err := decode(r, &req); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		started(w)(b.DeleteGitHubArtifacts(r.PathValue("repo"), req))
+	})
+	mux.HandleFunc("DELETE /github-storage/{repo}/artifacts/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := positive(r.PathValue("id"), "artifact id")
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		respond(w, nil, b.DeleteGitHubArtifact(r.Context(), r.PathValue("repo"), id))
+	})
+	mux.HandleFunc("POST /github-storage/{repo}/caches/delete", func(w http.ResponseWriter, r *http.Request) {
+		var req model.DeleteCachesRequest
+		if err := decode(r, &req); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		started(w)(b.DeleteGitHubCaches(r.PathValue("repo"), req))
+	})
+	mux.HandleFunc("DELETE /github-storage/{repo}/caches/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := positive(r.PathValue("id"), "cache id")
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		respond(w, nil, b.DeleteGitHubCache(r.Context(), r.PathValue("repo"), id))
+	})
+	mux.HandleFunc("PUT /github-storage/{repo}/retention", func(w http.ResponseWriter, r *http.Request) {
+		var req model.RetentionRequest
+		if err := decode(r, &req); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		respond(w, nil, b.SetGitHubRetention(r.Context(), r.PathValue("repo"), req.Days))
+	})
 	return mux
 }
 
@@ -432,6 +499,19 @@ func accepted(fn func(r *http.Request) error) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
+	}
+}
+
+// started answers 202 with the id of the operation a call started.
+func started(w http.ResponseWriter) func(op model.OperationStarted, err error) {
+	return func(op model.OperationStarted, err error) {
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(op)
 	}
 }
 
