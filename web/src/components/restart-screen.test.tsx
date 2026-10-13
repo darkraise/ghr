@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest"
 import { keys } from "@/api/hooks"
 import { liveConfig, setLive } from "@/api/live"
@@ -9,9 +9,10 @@ import { RestartScreen } from "./restart-screen"
 
 function stubLocation() {
   const assign = vi.fn()
+  const reload = vi.fn()
   const { href, origin, protocol, host, hostname, port, pathname, search, hash } = window.location
-  vi.stubGlobal("location", { href, origin, protocol, host, hostname, port, pathname, search, hash, assign })
-  return assign
+  vi.stubGlobal("location", { href, origin, protocol, host, hostname, port, pathname, search, hash, assign, reload })
+  return { assign, reload }
 }
 
 async function tick(ms: number) {
@@ -24,6 +25,9 @@ const down = () => {
   throw new TypeError("Failed to fetch")
 }
 
+const oldProcess = () => ({ setup_required: false, authenticated: true })
+const failedStatus = (failed?: string) => ({ ...fixtures.status, restart: { available: true, failed } })
+
 describe("RestartScreen", () => {
   afterEach(() => {
     vi.useRealTimers()
@@ -32,10 +36,13 @@ describe("RestartScreen", () => {
   it("asks ghr every second on the page's origin until the new process answers logged out", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
     // Down, then the old process with this session, then the new one.
-    const answers = [down, () => ({ setup_required: false, authenticated: true }), () => ({ setup_required: false, authenticated: false })]
+    const answers = [down, oldProcess, () => ({ setup_required: false, authenticated: false })]
     let polls = 0
-    const { calls } = mockApi({ "GET /auth/state": () => (answers[polls++] ?? down)() })
-    const assign = stubLocation()
+    const { calls } = mockApi({
+      "GET /auth/state": () => (answers[polls++] ?? down)(),
+      "GET /api/status": failedStatus(),
+    })
+    const { assign } = stubLocation()
     render(<RestartScreen url="http://localhost" same />)
     expect(screen.getByText("Restarting ghr…")).toBeInTheDocument()
     await tick(999)
@@ -43,23 +50,61 @@ describe("RestartScreen", () => {
     await tick(1)
     expect(calls.map((c) => c.path)).toEqual(["/auth/state"])
     await tick(1000)
-    await vi.waitFor(() => expect(calls).toHaveLength(2))
+    await vi.waitFor(() => expect(calls.map((c) => c.path)).toEqual(["/auth/state", "/auth/state", "/api/status"]))
     expect(assign).not.toHaveBeenCalled()
     await tick(1000)
     await vi.waitFor(() => expect(assign).toHaveBeenCalledWith("http://localhost/login"))
-    expect(calls).toHaveLength(3)
+    expect(calls).toHaveLength(4)
   })
 
-  it("waits 10 seconds before loading another origin, which it cannot ask", async () => {
+  it("says why an accepted restart did not happen, stops asking, and reloads on request", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
-    const { calls } = mockApi({})
-    const assign = stubLocation()
+    const { calls } = mockApi({
+      "GET /auth/state": oldProcess,
+      "GET /api/status": failedStatus("installing node 24 started"),
+    })
+    const { assign, reload } = stubLocation()
+    render(<RestartScreen url="http://localhost" same />)
+    await tick(1000)
+    await vi.waitFor(() => expect(screen.getByText("ghr did not restart: installing node 24 started")).toBeInTheDocument())
+    expect(screen.queryByText("Restarting ghr…")).toBeNull()
+    await tick(60_000)
+    expect(calls).toHaveLength(2)
+    expect(screen.queryByText("ghr has not answered yet.")).toBeNull()
+    expect(assign).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Back to ghr" }))
+    expect(reload).toHaveBeenCalled()
+  })
+
+  it("does not load another origin when the restart did not happen", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    mockApi({
+      "GET /auth/state": oldProcess,
+      "GET /api/status": failedStatus("systemctl restart: exit status 5: Unit ghr.service not loaded."),
+    })
+    const { assign } = stubLocation()
+    render(<RestartScreen url="http://192.168.0.99:9090" same={false} />)
+    await tick(1000)
+    await vi.waitFor(() =>
+      expect(screen.getByText("ghr did not restart: systemctl restart: exit status 5: Unit ghr.service not loaded.")).toBeInTheDocument(),
+    )
+    await tick(20_000)
+    expect(assign).not.toHaveBeenCalled()
+  })
+
+  it("waits 10 seconds before loading another origin, which it cannot ask, asking only its own meanwhile", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    const { calls } = mockApi({ "GET /auth/state": oldProcess, "GET /api/status": failedStatus() })
+    const { assign } = stubLocation()
     render(<RestartScreen url="http://192.168.0.99:9090" same={false} />)
     await tick(9_999)
     expect(assign).not.toHaveBeenCalled()
     await tick(1)
     expect(assign).toHaveBeenCalledWith("http://192.168.0.99:9090/login")
-    expect(calls).toEqual([])
+    expect(new Set(calls.map((c) => c.path))).toEqual(new Set(["/auth/state", "/api/status"]))
+    const asked = calls.length
+    await tick(5000)
+    expect(calls).toHaveLength(asked)
   })
 
   it("promises nothing after loading another origin", async () => {
@@ -75,7 +120,7 @@ describe("RestartScreen", () => {
   it("keeps asking its own origin, and says so with a link after 60 seconds", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
     const { calls } = mockApi({ "GET /auth/state": down })
-    const assign = stubLocation()
+    const { assign } = stubLocation()
     render(<RestartScreen url="http://localhost" same />)
     await tick(59_999)
     expect(screen.queryByText("ghr has not answered yet.")).toBeNull()
@@ -159,7 +204,7 @@ describe("restarting from the app", () => {
     void queryClient.refetchQueries({ queryKey: keys.status })
     await waitFor(() => expect(calls.filter((c) => c.path === "/api/status")).toHaveLength(statusReads + 1))
 
-    const assign = stubLocation()
+    const { assign } = stubLocation()
     await waitFor(() => expect(button).toBeEnabled())
     await user.click(button)
     const dialog = await screen.findByRole("alertdialog", { name: "Restart ghr?" })

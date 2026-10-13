@@ -1,3 +1,4 @@
+import { Button } from "darkraise-ui/components/button"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { useEffect, useState } from "react"
 import { api } from "@/api/client"
@@ -13,6 +14,7 @@ const LATE_MS = 60_000
 
 export function RestartScreen({ url, same }: { url: string; same: boolean }) {
   const [late, setLate] = useState(false)
+  const [failed, setFailed] = useState("")
 
   useEffect(() => {
     if (!same) return
@@ -21,29 +23,46 @@ export function RestartScreen({ url, same }: { url: string; same: boolean }) {
   }, [same])
 
   useEffect(() => {
-    const login = () => window.location.assign(`${url}/login`)
-    if (!same) {
-      const timer = window.setTimeout(login, MOVE_WAIT_MS)
-      return () => window.clearTimeout(timer)
-    }
     const ctrl = new AbortController()
-    let timer = 0
-    const poll = () => {
-      timer = window.setTimeout(() => {
-        // The old process may answer for a moment, still holding this
-        // session; sessions live in memory, so the new one answers logged out.
-        api.authState(ctrl.signal).then((state) => (state.authenticated ? again() : login()), again)
-      }, POLL_MS)
+    let poll = 0
+    let move = 0
+    const stop = () => {
+      ctrl.abort()
+      window.clearTimeout(poll)
+      window.clearTimeout(move)
+    }
+    const login = () => {
+      stop()
+      window.location.assign(`${url}/login`)
+    }
+    // The old process may answer for a moment, still holding this session;
+    // sessions live in memory, so the new one answers logged out. While the
+    // old one answers, its status says whether the restart was called off.
+    const ask = async () => {
+      const state = await api.authState(ctrl.signal)
+      if (!state.authenticated) return same ? login() : again()
+      const { restart } = await api.status(ctrl.signal)
+      if (!restart.failed) return again()
+      stop()
+      setFailed(restart.failed)
     }
     const again = () => {
-      if (!ctrl.signal.aborted) poll()
+      if (!ctrl.signal.aborted) poll = window.setTimeout(() => void ask().catch(again), POLL_MS)
     }
-    poll()
-    return () => {
-      ctrl.abort()
-      window.clearTimeout(timer)
-    }
+    if (!same) move = window.setTimeout(login, MOVE_WAIT_MS)
+    again()
+    return stop
   }, [url, same])
+
+  if (failed) {
+    return (
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-background p-6 text-center text-foreground">
+        <Brand />
+        <p className="text-sm">ghr did not restart: {failed}</p>
+        <Button onClick={() => window.location.reload()}>Back to ghr</Button>
+      </main>
+    )
+  }
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-background p-6 text-center text-foreground">

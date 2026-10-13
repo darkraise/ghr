@@ -76,6 +76,7 @@ export interface RestartStatus {
   blocked_by?: string[]
   available: boolean
   web_listen?: string
+  failed?: string
 }
 
 export interface WebListenError {
