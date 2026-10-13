@@ -23,11 +23,25 @@ export function RetentionAll({ count, offline, busy, ask }: { count: number; off
   })
   const n = /^\d+$/.test(days.trim()) ? Number(days.trim()) : Number.NaN
   const ok = n >= 1 && n <= 400
+  const invalid = days !== "" && !ok
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
         <Label htmlFor="retention_all">Retention for all</Label>
-        <Input id="retention_all" type="number" min={1} max={400} suffix="days" groupClassName="w-36" className="min-w-0" value={days} disabled={offline} onChange={(e) => setDays(e.target.value)} />
+        <Input
+          id="retention_all"
+          type="number"
+          min={1}
+          max={400}
+          suffix="days"
+          groupClassName="w-36"
+          className="min-w-0"
+          value={days}
+          disabled={offline}
+          aria-invalid={invalid}
+          aria-describedby={invalid ? "retention_all_error" : undefined}
+          onChange={(e) => setDays(e.target.value)}
+        />
         <Button
           variant="outline"
           disabled={offline || busy || !ok || count === 0 || retention.isPending}
@@ -43,7 +57,11 @@ export function RetentionAll({ count, offline, busy, ask }: { count: number; off
           Set retention
         </Button>
       </div>
-      {days !== "" && !ok && <p className="text-xs text-destructive">Enter a whole number of days from 1 to 400</p>}
+      {invalid && (
+        <p id="retention_all_error" className="text-xs text-destructive">
+          Enter a whole number of days from 1 to 400
+        </p>
+      )}
     </div>
   )
 }

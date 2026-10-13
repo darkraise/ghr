@@ -128,6 +128,16 @@ describe("ArtifactRepoTable", () => {
     expect((await screen.findAllByText("Retention change started")).length).toBeGreaterThan(0)
   })
 
+  it("ties the days field to its error", async () => {
+    mockApi({})
+    const { user } = await draw()
+    const input = screen.getByRole("spinbutton", { name: "Retention for all" })
+    expect(input).not.toHaveAttribute("aria-invalid", "true")
+    await user.type(input, "500")
+    expect(input).toHaveAttribute("aria-invalid", "true")
+    expect(input).toHaveAccessibleDescription("Enter a whole number of days from 1 to 400")
+  })
+
   it("holds Set retention while an operation runs", async () => {
     mockApi({})
     const operation = fixtures.githubStorage.operation && { ...fixtures.githubStorage.operation, finished_at: undefined }
