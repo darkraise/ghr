@@ -107,6 +107,11 @@ func (s *Service) cleanup(cfg *config.Config, gen uint64) {
 		if !s.keep(gen) {
 			break
 		}
+		// The policy may have been saved since the pass read it. A pick that
+		// no longer qualifies by age is skipped, not replaced.
+		if age, _ := s.Config().GitHubStorage.CleanupFor(p.Repo); len(Candidates([]model.ArtifactItem{p.Item}, age, s.now(), nil)) == 0 {
+			continue
+		}
 		deleted, err := s.deleteArtifact(ctx, p.Repo, p.Item, "cleanup")
 		var be *BudgetError
 		if errors.As(err, &be) {

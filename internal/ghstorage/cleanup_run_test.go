@@ -270,3 +270,60 @@ func TestCleanupStopsDeletingWhenTheServiceCloses(t *testing.T) {
 		t.Fatalf("deletes %v, want only the first: the service closed during it", got)
 	}
 }
+
+// The cleanup picks from the config the pass read at its start and re-reads
+// the policy before each delete, so a policy saved mid-pass can stop deletes
+// but never add them. "list" saves while the inventory lists, before the
+// picks; "delete" saves at the first delete.
+func TestCleanupRechecksThePolicyBeforeEachDelete(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		repo   string
+		ages   [2]time.Duration
+		when   string
+		change func(*config.GitHubStorage)
+		want   []string
+	}{
+		{"turned off", "darkmem", [2]time.Duration{50 * time.Hour, 30 * time.Hour}, "delete",
+			func(g *config.GitHubStorage) { g.CleanupMaxAge = 0 }, []string{"DeleteArtifact darkmem 1"}},
+		{"lengthened past the second", "darkmem", [2]time.Duration{50 * time.Hour, 30 * time.Hour}, "delete",
+			func(g *config.GitHubStorage) { g.CleanupMaxAge = config.Duration(40 * time.Hour) }, []string{"DeleteArtifact darkmem 1"}},
+		{"override removed, global longer", "chicken-farm", [2]time.Duration{30 * time.Hour, 10 * time.Hour}, "delete",
+			func(g *config.GitHubStorage) { delete(g.Repos, "chicken-farm") }, []string{"DeleteArtifact chicken-farm 1"}},
+		{"turned off before the picks", "darkmem", [2]time.Duration{50 * time.Hour, 30 * time.Hour}, "list",
+			func(g *config.GitHubStorage) { g.CleanupMaxAge = 0 }, []string{}},
+		{"turned on mid-pass", "homelab", [2]time.Duration{50 * time.Hour, 30 * time.Hour}, "list",
+			func(g *config.GitHubStorage) { g.Repos["homelab"] = config.StorageOverride{Cleanup: "1h"} }, []string{}},
+		{"shortened mid-pass", "darkmem", [2]time.Duration{50 * time.Hour, 20 * time.Hour}, "list",
+			func(g *config.GitHubStorage) { g.CleanupMaxAge = config.Duration(10 * time.Hour) }, []string{"DeleteArtifact darkmem 1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gh := newFakeGH()
+			cur := cleanupConfig()
+			s, clock := newTestService(t, gh, cur)
+			s.Config = func() *config.Config { return cur }
+			gh.addRepo(tc.repo, true, ghArt(1, 10, clock.Now(), tc.ages[0], 5), ghArt(2, 20, clock.Now(), tc.ages[1], 5))
+			save := func() {
+				next := cleanupConfig()
+				tc.change(&next.GitHubStorage)
+				cur = next
+			}
+			if tc.when == "list" {
+				gh.onList = func(context.Context, string) error { save(); return nil }
+			} else {
+				gh.onDelete = func(context.Context, string, int64) error { save(); return nil }
+			}
+			s.pass(true, false)
+			if got := gh.callsLike("Delete"); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("deletes %v, want %v", got, tc.want)
+			}
+			st := s.Snapshot()
+			if len(st.Deletions) != len(tc.want) || len(s.writes) != len(tc.want) {
+				t.Fatalf("%d deletions and %d writes, want %d: a skipped pick writes and records nothing", len(st.Deletions), len(s.writes), len(tc.want))
+			}
+			if got := eventsLike(s.Events, "cleanup deleted"); len(got) != min(len(tc.want), 1) {
+				t.Fatalf("events %q", got)
+			}
+		})
+	}
+}
