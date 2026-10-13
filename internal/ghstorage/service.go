@@ -83,8 +83,10 @@ type Service struct {
 	level     string // the level the last event was written for
 	isOrg     *bool  // read once; the owner does not change while the daemon runs
 	retention map[string]retentionRead
-	deleted   map[string]time.Time // "artifact:<id>" or "cache:<id>" → when deleted
-	deletions []model.Deletion     // newest first
+	deleted   map[string]time.Time   // "artifact:<id>" or "cache:<id>" → when deleted
+	deletions []model.Deletion       // newest first
+	op        *model.GitHubOperation // the running or last finished operation
+	opRunning bool
 
 	writeMu sync.Mutex
 	writes  []time.Time // guarded by writeMu: the writes of the last hour
@@ -603,6 +605,11 @@ func (s *Service) Snapshot() model.GitHubStorage {
 	if s.quota != nil {
 		q := *s.quota
 		out.Quota = &q
+	}
+	if s.op != nil {
+		op := *s.op
+		op.Failed = append([]model.OperationFailure{}, s.op.Failed...)
+		out.Operation = &op
 	}
 	for _, r := range s.repos {
 		r.Artifacts = append([]model.ArtifactItem{}, r.Artifacts...)
