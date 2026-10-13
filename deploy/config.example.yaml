@@ -14,6 +14,12 @@ runner_limits:
 web:                          # browser UI; the first visitor sets its password (setup.sh can set it first); Settings → Web access edits it
   listen: 0.0.0.0:8080
   # hosts: [ghr.lan]          # names a proxy serves it under; IPs and localhost always work
+# github_storage:             # the Artifacts page's quota and cleanup; its Policy card edits it
+#   included_mb: 500          # the plan's artifact + Packages allowance
+#   warn_pct: [70, 90]
+#   cleanup_max_age: 2d       # absent is off; at least 24h
+#   repos:
+#     my-repo: { cleanup: 6h }  # at least 1h, or off
 repos: []
 # A repository entry, as `ghr repo add` and the web UI write it:
 #   - name: my-repo

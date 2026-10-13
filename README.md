@@ -19,8 +19,15 @@ configured caps:
   for it. Any repo it serves must **not** enable "Run workflows from fork pull requests",
   because a fork's pull request could then run its code on this host.
 - A fine-grained PAT scoped to exactly those repos, with **Administration: read/write** and
-  **Actions: read**, and an expiry. **Contents: read** is optional: with it, a run's page in
+  **Actions: read/write**, and an expiry. **Contents: read** is optional: with it, a run's page in
   the web UI draws the job graph from the workflow file; without it, a jobs timeline.
+  The Artifacts page also covers every other repository of the owner the PAT can reach: it
+  deletes artifacts and caches with **Actions: write** and changes retention with
+  **Administration: write**. It reads the month's storage use with the account permission
+  **Plan: read**; for an organization owner, the token must be an organization admin's, with
+  **Administration: read** on the organization. The quota can only be read when the token
+  belongs to the owner. Without these permissions ghr runs jobs as before, and the Artifacts
+  page says which permission is missing.
 
 ## Install / upgrade
 
@@ -54,7 +61,7 @@ while it installs the runner, so a queued runner update cannot run at the same t
 running runners are separate units and keep their jobs. If setup.sh fails after that, it
 starts ghr again.
 
-**Downgrading.** A config that lists `watch_repos` (the repositories the web UI's Actions page watches) is refused by any ghr older than v0.1.18, the first release with that page. Remove the `watch_repos` key from the config file before installing an older release.
+**Downgrading.** A config that lists `watch_repos` (the repositories the web UI's Actions page watches) is refused by any ghr older than v0.1.18, the first release with that page. Remove the `watch_repos` key from the config file before installing an older release. Likewise, a config with a `github_storage` block is refused by any ghr older than the first release with the Artifacts page; remove the block first.
 
 ## Use
 
@@ -112,6 +119,25 @@ ghr serves a browser UI with every page and action ghr offers. The example confi
 web:
   listen: 0.0.0.0:8080
   hosts: [ghr.lan]
+```
+
+## GitHub artifact storage
+
+A GitHub plan includes a monthly allowance of storage for Actions artifacts and Packages, 500 MB on the Free plan. GitHub counts it in GB-hours over the month, so an artifact kept for days keeps using the allowance long after its upload, and deleting artifacts once the allowance is spent does not let uploads through again before the next month. The **Artifacts** tab shows the month's use against the allowance, each repository's artifacts, caches and retention, and the cleanup policy. A banner on every page warns before the allowance runs out.
+
+1. Lower the retention to a few days on repositories whose artifacts are only used within their own run: a repository's Retention on the Artifacts page, or **Set retention** for all of them. GitHub's retention also limits how long it keeps runs and logs, which the Actions and log pages read.
+2. Set a cleanup age for the rest. At the end of each inventory, every 15 minutes, ghr deletes the artifacts older than it, oldest first and at most 100 at a time, skipping the artifacts of runs that have not completed. The global age is at least 24 hours; a repository's override may go down to 1 hour, or turn cleanup off for it. Cleanup does not protect an artifact that a different run downloads later, such as one a `workflow_run` workflow, a download by run ID or a nightly job reading the last build needs.
+3. `included_mb` is the plan's allowance in MB, 500 unless set. The month is taken to be the calendar month in UTC.
+4. The Actions cache does not count against the allowance and is never cleaned automatically. A repository's caches can be deleted from its row.
+
+```yaml
+github_storage:
+  included_mb: 500
+  warn_pct: [70, 90]          # the estimate's warning and critical levels
+  cleanup_max_age: 2d         # absent is off; at least 24h
+  repos:
+    my-repo: { cleanup: 6h }  # at least 1h
+    other-repo: { cleanup: off }
 ```
 
 ## Migrating from the compose runners
