@@ -54,9 +54,6 @@ func TestComputeQuota(t *testing.T) {
 		q.RateGBHoursPerHour != 0.75 || q.EstimatedGBHours != 109 || q.ProjectedGBHours != 435.25 {
 		t.Fatalf("quota %+v", q)
 	}
-	if q.OverAllowanceGBHours != nil {
-		t.Fatalf("over %v without a summary", *q.OverAllowanceGBHours)
-	}
 
 	q = ComputeQuota(Billing{Month: "2026-10", ReadAt: readAt, Actions: 100}, model.GiB, 500, [2]int{70, 90})
 	// (363.28125 - 112) / 1 = 251.28125 hours after the read.
@@ -83,7 +80,6 @@ func TestComputeQuota(t *testing.T) {
 
 func TestQuotaLevel(t *testing.T) {
 	readAt := time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)
-	over := func(v float64) *float64 { return &v }
 	for _, tc := range []struct {
 		name  string
 		b     Billing
@@ -92,8 +88,6 @@ func TestQuotaLevel(t *testing.T) {
 		want  string
 	}{
 		{"billed at the allowance", Billing{Actions: 363.28125}, 0, [2]int{70, 90}, "exhausted"},
-		{"GitHub bills past its allowance", Billing{Actions: 100, Over: over(0.0016)}, 0, [2]int{70, 90}, "exhausted"},
-		{"rounding noise in net", Billing{Actions: 100, Over: over(0.0005)}, 0, [2]int{70, 90}, ""},
 		{"estimate past 90%", Billing{Actions: 320}, model.GiB, [2]int{70, 90}, "critical"},
 		{"estimate past 70%", Billing{Actions: 250}, model.GiB, [2]int{70, 90}, "warn"},
 		{"own thresholds", Billing{Actions: 200}, 0, [2]int{50, 60}, "warn"},

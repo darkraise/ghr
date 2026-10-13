@@ -23,7 +23,6 @@ type GitHub interface {
 	OwnerType(ctx context.Context) (bool, error)
 	TokenLogin(ctx context.Context) (string, error)
 	StorageUsage(ctx context.Context, isOrg bool, year int, month time.Month) ([]github.UsageItem, error)
-	StorageSummary(ctx context.Context, isOrg bool, year int, month time.Month) ([]github.SummaryItem, error)
 	ListRepoArtifacts(ctx context.Context, repo string) ([]github.Artifact, error)
 	ListCaches(ctx context.Context, repo string) ([]github.Cache, error)
 	DeleteArtifact(ctx context.Context, repo string, id int64) (bool, error)
@@ -333,14 +332,6 @@ func (s *Service) readBilling(cfg *config.Config, gen uint64) {
 	}
 	b := Billing{Month: now.UTC().Format("2006-01"), ReadAt: now}
 	b.Actions, b.Packages, b.PackagesDaily = SumUsage(items, now)
-	// The summary is a public preview: its failure never fails the read.
-	if sum, err := s.GH.StorageSummary(ctx, isOrg, year, month); err == nil {
-		over := 0.0
-		for _, it := range sum {
-			over += it.Net
-		}
-		b.Over = &over
-	}
 	cur := s.Config()
 	s.mu.Lock()
 	defer s.mu.Unlock()

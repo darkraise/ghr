@@ -280,7 +280,6 @@ func october() []github.UsageItem {
 func TestBillingReadsTheQuota(t *testing.T) {
 	gh := newFakeGH()
 	gh.usage = october()
-	gh.summary = []github.SummaryItem{{SKU: github.SKUActionsStorage, Net: 0.25}, {SKU: github.SKUPackagesStorage, Net: 0.25}}
 	gh.addRepo("darkmem", true, ghArt(1, 10, time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC), time.Hour, model.GiB))
 	s, clock := newTestService(t, gh, testConfig())
 	s.pass(true, true)
@@ -292,15 +291,16 @@ func TestBillingReadsTheQuota(t *testing.T) {
 	if q.Month != "2026-10" || !q.ReadAt.Equal(clock.Now()) || q.UsedGBHours != 310 || q.ActionsGBHours != 300 || q.PackagesGBHours != 10 {
 		t.Errorf("quota %+v", q)
 	}
-	// 1 GiB of artifacts plus 4 GB-hours of Packages a day.
-	if q.RateGBHoursPerHour != 1+4.0/24 || q.OverAllowanceGBHours == nil || *q.OverAllowanceGBHours != 0.5 || q.Level != "exhausted" {
-		t.Errorf("rate %v, over %v, level %q", q.RateGBHoursPerHour, q.OverAllowanceGBHours, q.Level)
+	// 1 GiB of artifacts plus 4 GB-hours of Packages a day; the estimate,
+	// 310 + 14 = 324, is past 70% of 363.28 but short of 90%.
+	if q.RateGBHoursPerHour != 1+4.0/24 || q.Level != "warn" {
+		t.Errorf("rate %v, level %q", q.RateGBHoursPerHour, q.Level)
 	}
-	if a := s.Alert(); a == nil || a.Level != "exhausted" || a.UsedPct != 85 {
+	if a := s.Alert(); a == nil || a.Level != "warn" || a.UsedPct != 85 {
 		t.Errorf("alert %+v", a)
 	}
 	s.pass(false, true)
-	if got := eventsLike(s.Events, "github storage: quota"); len(got) != 1 || got[0] != "github storage: quota exhausted: 310.0 of 363.3 GB-hours used in 2026-10" {
+	if got := eventsLike(s.Events, "github storage: quota"); len(got) != 1 || got[0] != "github storage: quota warn: 310.0 of 363.3 GB-hours used in 2026-10" {
 		t.Errorf("level events %q, want one", got)
 	}
 	if n := len(gh.callsLike("OwnerType")); n != 1 {
@@ -354,12 +354,6 @@ func TestAFailedBillingReadKeepsTheLastQuota(t *testing.T) {
 	st := s.Snapshot()
 	if st.Quota == nil || !st.Quota.ReadAt.Equal(read) || st.QuotaError == "" {
 		t.Fatalf("quota %+v, error %q; want the last read kept with the error", st.Quota, st.QuotaError)
-	}
-	gh.usageErr = nil
-	gh.sumErr = errors.New("preview gone")
-	s.pass(false, true)
-	if q := s.Snapshot().Quota; q == nil || q.OverAllowanceGBHours != nil || !q.ReadAt.Equal(clock.Now()) {
-		t.Fatalf("quota %+v: a failed summary must not fail the read", q)
 	}
 }
 
@@ -415,7 +409,8 @@ func TestTheMonthChangeClearsTheQuota(t *testing.T) {
 func TestTheMonthChangeWritesTheNewMonthsLevel(t *testing.T) {
 	gh := newFakeGH()
 	gh.usage = october()
-	gh.summary = []github.SummaryItem{{SKU: github.SKUActionsStorage, Net: 0.5}}
+	// 370 GB-hours: past October's 363.28 and November's 351.56.
+	gh.usage = append(gh.usage, github.UsageItem{Date: time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC), SKU: github.SKUActionsStorage, Repo: "darkcloud", Quantity: 60})
 	s, clock := newTestService(t, gh, testConfig())
 	clock.Add(18*24*time.Hour + 11*time.Hour) // 2026-10-31 23:00
 	s.pass(false, true)

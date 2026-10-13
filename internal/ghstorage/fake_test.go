@@ -23,8 +23,6 @@ type fakeGH struct {
 	login     string
 	usage     []github.UsageItem
 	usageErr  error
-	summary   []github.SummaryItem
-	sumErr    error
 	repos     []github.UserRepo
 	reposErr  error
 	artifacts map[string][]github.Artifact
@@ -105,13 +103,6 @@ func (f *fakeGH) StorageUsage(ctx context.Context, isOrg bool, year int, month t
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.usage), f.usageErr
-}
-
-func (f *fakeGH) StorageSummary(context.Context, bool, int, time.Month) ([]github.SummaryItem, error) {
-	f.call("StorageSummary")
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Clone(f.summary), f.sumErr
 }
 
 func (f *fakeGH) ListUserRepos(context.Context) ([]github.UserRepo, error) {

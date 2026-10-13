@@ -16,13 +16,11 @@ import (
 const LagHours = 12
 
 // Billing is one billing read. PackagesDaily is the Packages GB-hours of the
-// last full UTC day before ReadAt; Over is the summary's net Actions and
-// Packages storage, nil when the summary could not be read.
+// last full UTC day before ReadAt.
 type Billing struct {
 	Month                            string
 	ReadAt                           time.Time
 	Actions, Packages, PackagesDaily float64
-	Over                             *float64
 }
 
 // MonthBounds is the start of t's UTC month and the start of the next.
@@ -65,10 +63,6 @@ func ComputeQuota(b Billing, artifactBytes int64, includedMB int, warn [2]int) m
 		RateGBHoursPerHour: float64(artifactBytes)/model.GiB + b.PackagesDaily/24,
 		ResetsAt:           resets,
 	}
-	if b.Over != nil {
-		v := *b.Over
-		q.OverAllowanceGBHours = &v
-	}
 	left := resets.Sub(b.ReadAt).Hours()
 	q.EstimatedGBHours = q.UsedGBHours + q.RateGBHoursPerHour*LagHours
 	q.ProjectedGBHours = q.UsedGBHours + q.RateGBHoursPerHour*left
@@ -86,9 +80,12 @@ func ComputeQuota(b Billing, artifactBytes int64, includedMB int, warn [2]int) m
 
 // level compares the thresholds with the estimate, because the billed figure
 // trails; exhausted uses what GitHub billed, because it promises failures.
+// GitHub's billing summary is no second test: on an account without a
+// payment method it counts the blocked usage as discounted, so its net stays
+// near zero while uploads are refused.
 func level(q model.GitHubQuota, warn [2]int) string {
 	switch {
-	case q.UsedGBHours >= q.IncludedGBHours, q.OverAllowanceGBHours != nil && *q.OverAllowanceGBHours > 0.001:
+	case q.UsedGBHours >= q.IncludedGBHours:
 		return "exhausted"
 	case q.EstimatedGBHours >= float64(warn[1])/100*q.IncludedGBHours:
 		return "critical"
