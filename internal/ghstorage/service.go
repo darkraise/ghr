@@ -250,7 +250,7 @@ func (s *Service) pass(inventory, billing bool) {
 	s.running = true
 	// Last month's numbers are never shown as this month's.
 	if s.quota != nil && !s.now().Before(s.quota.ResetsAt) {
-		s.quota, s.billing = nil, nil
+		s.quota, s.billing, s.level = nil, nil, ""
 		s.bump()
 	}
 	s.mu.Unlock()

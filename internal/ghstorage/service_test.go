@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -408,6 +409,21 @@ func TestTheMonthChangeClearsTheQuota(t *testing.T) {
 				t.Fatalf("last usage read %q", got[len(got)-1])
 			}
 		})
+	}
+}
+
+func TestTheMonthChangeWritesTheNewMonthsLevel(t *testing.T) {
+	gh := newFakeGH()
+	gh.usage = october()
+	gh.summary = []github.SummaryItem{{SKU: github.SKUActionsStorage, Net: 0.5}}
+	s, clock := newTestService(t, gh, testConfig())
+	clock.Add(18*24*time.Hour + 11*time.Hour) // 2026-10-31 23:00
+	s.pass(false, true)
+	clock.Add(time.Hour + time.Minute)
+	s.pass(false, true)
+	got := eventsLike(s.Events, "github storage: quota exhausted")
+	if len(got) != 2 || !strings.HasSuffix(got[1], "in 2026-11") {
+		t.Fatalf("level events %q, want October's and November's", got)
 	}
 }
 
