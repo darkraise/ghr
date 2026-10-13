@@ -3,11 +3,12 @@ import { Button } from "darkraise-ui/components/button"
 import { Input } from "darkraise-ui/components/input"
 import { toast } from "darkraise-ui/components/sonner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "darkraise-ui/components/table"
-import { Pencil } from "lucide-react"
-import { useState } from "react"
+import { ChevronRight, Pencil } from "lucide-react"
+import { Fragment, useState } from "react"
 import { api } from "@/api/client"
-import { keys } from "@/api/hooks"
+import { githubStorageBusy, keys } from "@/api/hooks"
 import type { Config, GitHubStorage, RepoStorage } from "@/api/types"
+import { ArtifactRepoDetail } from "@/components/artifact-repo-detail"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { Section } from "@/components/page/section"
 import { CleanupPreview } from "@/components/storage-policy-card"
@@ -168,7 +169,9 @@ function CleanupCell({ repo, globalAge, offline, ask }: { repo: RepoStorage; glo
 
 export function ArtifactRepoTable({ storage, config, offline }: { storage: GitHubStorage; config: Config | undefined; offline: boolean }) {
   const [confirm, setConfirm] = useState<Confirm | null>(null)
-  const globalAge = config?.github_storage?.cleanup_max_age ?? ""
+  const [open, setOpen] = useState<string[]>([])
+  const busy = githubStorageBusy(storage)
+  const globalAge =config?.github_storage?.cleanup_max_age ?? ""
   const warned = (storage.quota?.level ?? "") !== ""
   return (
     <Section id="repositories" title="Repositories" flush>
@@ -187,32 +190,52 @@ export function ArtifactRepoTable({ storage, config, offline }: { storage: GitHu
               </TableRow>
             </TableHeader>
             <TableBody>
-              {storage.repos.map((r) => (
-                <TableRow key={r.name}>
-                  <th scope="row" className="py-2 pl-4 text-left align-top font-normal">
-                    <span className="flex items-center gap-2">
-                      {r.name}{" "}
-                      {r.visibility === "public" && <span className="text-xs text-muted-foreground">public</span>}
-                    </span>
-                    {warned && r.retention_days === 90 && (
-                      <p className="text-xs text-warning">At GitHub's 90-day default: lowering it saves storage.</p>
+              {storage.repos.map((r) => {
+                const expanded = open.includes(r.name)
+                return (
+                  <Fragment key={r.name}>
+                    <TableRow>
+                      <th scope="row" className="py-2 pl-4 text-left align-top font-normal">
+                        <span className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            aria-expanded={expanded}
+                            className="flex items-center gap-1 hover:text-primary"
+                            onClick={() => setOpen((o) => (expanded ? o.filter((n) => n !== r.name) : [...o, r.name]))}
+                          >
+                            <ChevronRight size={14} aria-hidden="true" className={expanded ? "rotate-90" : ""} />
+                            {r.name}
+                          </button>{" "}
+                          {r.visibility === "public" && <span className="text-xs text-muted-foreground">public</span>}
+                        </span>
+                        {warned && r.retention_days === 90 && (
+                          <p className="text-xs text-warning">At GitHub's 90-day default: lowering it saves storage.</p>
+                        )}
+                        {r.error && <p className="text-xs whitespace-normal text-destructive">{r.error}</p>}
+                      </th>
+                      <TableCell className={`align-top ${NUM}`}>
+                        <Sized bytes={r.artifact_bytes} count={r.artifact_count} word="artifact" />
+                      </TableCell>
+                      <TableCell className={`align-top ${NUM} ${WIDE}`}>
+                        <Sized bytes={r.cache_bytes} count={r.cache_count} word="cache" />
+                      </TableCell>
+                      <TableCell className="text-right align-top">
+                        <RetentionCell repo={r} offline={offline} ask={setConfirm} />
+                      </TableCell>
+                      <TableCell className="pr-4 align-top">
+                        <CleanupCell repo={r} globalAge={globalAge} offline={offline} ask={setConfirm} />
+                      </TableCell>
+                    </TableRow>
+                    {expanded && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="bg-background p-0 whitespace-normal">
+                          <ArtifactRepoDetail repo={r} owner={config?.owner ?? ""} busy={busy} offline={offline} ask={setConfirm} />
+                        </TableCell>
+                      </TableRow>
                     )}
-                    {r.error && <p className="text-xs whitespace-normal text-destructive">{r.error}</p>}
-                  </th>
-                  <TableCell className={`align-top ${NUM}`}>
-                    <Sized bytes={r.artifact_bytes} count={r.artifact_count} word="artifact" />
-                  </TableCell>
-                  <TableCell className={`align-top ${NUM} ${WIDE}`}>
-                    <Sized bytes={r.cache_bytes} count={r.cache_count} word="cache" />
-                  </TableCell>
-                  <TableCell className="text-right align-top">
-                    <RetentionCell repo={r} offline={offline} ask={setConfirm} />
-                  </TableCell>
-                  <TableCell className="pr-4 align-top">
-                    <CleanupCell repo={r} globalAge={globalAge} offline={offline} ask={setConfirm} />
-                  </TableCell>
-                </TableRow>
-              ))}
+                  </Fragment>
+                )
+              })}
             </TableBody>
           </Table>
         </div>
