@@ -65,6 +65,32 @@ func TestPythonResolveUsesUbuntu2404X64Files(t *testing.T) {
 	}
 }
 
+func TestPythonResolveUsesTheHostsUbuntuFiles(t *testing.T) {
+	f := pythonFixture(t)
+	f.Env.PythonPlatform = "22.04"
+	rel, err := newPython(f.Env).Resolve(context.Background(), "3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel.Version != "3.14.0" || rel.URL != f.url+"/old.tar.gz" {
+		t.Fatalf("resolved %+v, want 3.14.0's 22.04 file", rel)
+	}
+}
+
+func TestPythonPlatform(t *testing.T) {
+	for _, tc := range []struct{ osRelease, want string }{
+		{"ID=ubuntu\nVERSION_ID=\"22.04\"\n", "22.04"},
+		{"NAME=\"Ubuntu\"\nID=ubuntu\nVERSION_ID=26.04\n", "26.04"},
+		{"ID=debian\nVERSION_ID=\"13\"\n", "24.04"},
+		{"ID=linuxmint\nID_LIKE=ubuntu\nVERSION_ID=\"22\"\n", "24.04"},
+		{"", "24.04"},
+	} {
+		if got := pythonPlatform(tc.osRelease); got != tc.want {
+			t.Errorf("pythonPlatform(%q) = %q, want %q", tc.osRelease, got, tc.want)
+		}
+	}
+}
+
 func TestPythonInstallRunsSetupShAsTheRunnerUser(t *testing.T) {
 	f := pythonFixture(t)
 	var env map[string]string

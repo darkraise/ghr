@@ -55,6 +55,9 @@ type Env struct {
 	Run     func(ctx context.Context, name string, args ...string) ([]byte, error)
 	Extract func(ctx context.Context, archive, dir string) error
 	OpID    func() string
+	// PythonPlatform is the Ubuntu release whose python-versions builds this
+	// host runs; empty means 24.04.
+	PythonPlatform string
 }
 
 // Release is one resolved toolchain version, ready to install.

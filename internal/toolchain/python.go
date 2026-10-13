@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // pythonReleases is where every download_url of the python-versions manifest
@@ -15,10 +16,39 @@ const pythonReleases = "https://github.com/actions/python-versions/releases/down
 type python struct{ manifestTool }
 
 func newPython(e *Env) Installer {
+	platform := e.PythonPlatform
+	if platform == "" {
+		platform = defaultPythonPlatform
+	}
 	return python{manifestTool{e: e, tool: "python", dir: "Python", label: "Python", url: e.Sources.PythonManifest,
 		fileOK: func(f manifestFile) bool {
-			return f.Platform == "linux" && f.PlatformVersion == "24.04" && f.Arch == arch
+			return f.Platform == "linux" && f.PlatformVersion == platform && f.Arch == arch
 		}}}
+}
+
+// Builds for a newer Ubuntu link a newer glibc, so an Ubuntu host takes its
+// own release's. Every build targets Ubuntu, and 24.04's run on Debian 13.
+const defaultPythonPlatform = "24.04"
+
+func pythonPlatform(osRelease string) string {
+	var id, version string
+	for line := range strings.Lines(osRelease) {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		v = strings.Trim(v, `"'`)
+		switch k {
+		case "ID":
+			id = v
+		case "VERSION_ID":
+			version = v
+		}
+	}
+	if id == "ubuntu" && version != "" {
+		return version
+	}
+	return defaultPythonPlatform
 }
 
 func (p python) Resolve(ctx context.Context, spec string) (Release, error) {

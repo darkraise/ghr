@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -48,8 +49,14 @@ func NewEnv(root, home, user string, run system.Runner, fetch func(ctx context.C
 			_, err := run(ctx, "tar", "--no-same-owner", "-xzf", archive, "-C", dir)
 			return err
 		},
-		OpID: newOpID,
+		OpID:           newOpID,
+		PythonPlatform: hostPythonPlatform(),
 	}
+}
+
+func hostPythonPlatform() string {
+	b, _ := os.ReadFile("/etc/os-release")
+	return pythonPlatform(string(b))
 }
 
 // httpsFrom is the download check the daemon uses. It passes rawURL only when
