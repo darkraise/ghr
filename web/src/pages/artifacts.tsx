@@ -8,6 +8,7 @@ import { githubStorageBusy, keys, useConfig, useGitHubStorage, useStatus } from 
 import { ArtifactRepoTable } from "@/components/artifact-repo-table"
 import { ErrorLine } from "@/components/page/error-line"
 import { QuotaCard } from "@/components/quota-card"
+import { OperationProgress, RecentDeletions } from "@/components/storage-operations"
 import { StoragePolicyCard } from "@/components/storage-policy-card"
 import { shortWhen } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
@@ -45,7 +46,9 @@ export function ArtifactsPage() {
       {!data && !storage.isError && <Spinner label="Loading" />}
       {data && <QuotaCard storage={data} />}
       {data && <StoragePolicyCard storage={data} config={config.data} offline={offline} busy={busy} />}
+      {data && <OperationProgress operation={data.operation} />}
       {data && <ArtifactRepoTable storage={data} config={config.data} offline={offline} />}
+      {data && <RecentDeletions deletions={data.deletions} />}
     </div>
   )
 }

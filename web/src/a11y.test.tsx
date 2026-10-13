@@ -170,6 +170,23 @@ describe("Storage accessibility", () => {
   )
 })
 
+describe("Artifacts accessibility", () => {
+  it(
+    "has no axe violations with every card shown",
+    async () => {
+      mockApi(authedRoutes())
+      const { user } = renderApp("/artifacts")
+      for (const name of ["Quota", "Policy", "Operation", "Repositories", "Recent deletions"]) {
+        await screen.findByRole("region", { name })
+      }
+      await user.click(screen.getByRole("button", { name: "darkmem" }))
+      await screen.findByRole("region", { name: "Artifacts of darkmem" })
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})
+
 describe("Settings accessibility", () => {
   it(
     "has no axe violations at 1280px",
