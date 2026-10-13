@@ -53,6 +53,9 @@ type RestartStatus struct {
 	// WebListen is the listen value the running web listener serves,
 	// WebApplied.Listen; empty when none runs.
 	WebListen string `json:"web_listen,omitempty"`
+	// Failed says why the last accepted restart did not happen; a new
+	// accepted request clears it.
+	Failed string `json:"failed,omitempty"`
 }
 
 type WebListenError struct {
@@ -69,6 +72,7 @@ type WebListenError struct {
   - `"pruning"` while a prune of either kind runs. The automatic disk prune sets only the manager's `pruning` flag, not `maint.Running`, so the `daemon.Manager` interface gains `Pruning() bool`, true while `m.pruning` is set and `m.upd.running` is not;
   - `"updating the runner software"` while `RunnerUpdate.Running` is true.
 - **Available** is worked out once at start through an `Options.SelfUnit` seam. The default is true when `INVOCATION_ID` is set and `systemctl show -p MainPID --value ghr.service` prints this process's PID. `INVOCATION_ID` alone is not enough: every process a systemd unit starts inherits it, including a job's processes on a runner unit.
+- **Failed** is kept by `Backend` in memory, so a new process starts without it. Section 1.3 sets and clears it (register row 4, 2026-10-13).
 - **Live updates.** `Backend.fingerprints()` hashes the manager's status for the `status` topic. It also hashes `Restart` and `WebListenError`, so a change in either publishes a `status` change at once rather than at the next 60-second poll.
 
 ### 1.3 `POST /api/restart`
@@ -76,10 +80,10 @@ type WebListenError struct {
 - 409 with `"ghr is not running as ghr.service; restart it by hand"` when `Available` is false.
 - 409 with `"waits for: " + strings.Join(BlockedBy, ", ")` while `BlockedBy` is not empty.
 - Otherwise:
-  1. Write the event `restart requested`, with `from the web UI` when the request carries the browser mark of section 2.1.
+  1. Clear `Restart.Failed`, then write the event `restart requested`, with `from the web UI` when the request carries the browser mark of section 2.1.
   2. `w.WriteHeader(http.StatusAccepted)`, then `http.NewResponseController(w).Flush()`.
-  3. Check the blockers again; when work started since the first check, write `restart cancelled: <blockers> started` as a warning and stop. Otherwise run `Options.Restart(ctx)` with `context.WithoutCancel(r.Context())`. The default runs `systemctl restart --no-block ghr.service` through `system.Exec`. It is its own seam, not a method on `runner.Systemd`, whose fakes stay as they are.
-  4. A failure of the command is written as an error event; the daemon keeps running.
+  3. Check the blockers again; when work started since the first check, write `restart cancelled: <blockers> started` as a warning, set `Restart.Failed` to `<blockers> started`, and stop. Otherwise run `Options.Restart(ctx)` with `context.WithoutCancel(r.Context())`. The default runs `systemctl restart --no-block ghr.service` through `system.Exec`. It is its own seam, not a method on `runner.Systemd`, whose fakes stay as they are.
+  4. A failure of the command is written as an error event `restart failed: <error>` and sets `Restart.Failed` to the error's text; the daemon keeps running.
 - The route is on the socket API, so the web listener serves it under `/api/restart` with its session, `X-GHR` and Origin checks. The CLI client gains no method for it.
 
 ### 1.4 Events and messages
@@ -154,7 +158,8 @@ A `FieldGroup` titled "Web access" after "Runner defaults", note "Changes apply 
 - **The new URL**, for a direct page: the scheme and hostname are the page's own unless the new listen host is a specific IP, which then replaces the hostname; the port is the new listen port. Behind a proxy, or with `web.listen` not pending, the URL is the page's own origin.
 - **Restarting screen.** On the 202 the app clears its query cache (`queryClient.clear()`), which aborts its polls and change stream, and renders a full-page "Restarting ghr…" screen from the root route, outside `appRoute` and its guards. A late 401 from a request already in flight may still move the route to `/login`; the restarting screen stays in place.
   - When the URL is the page's own origin, it polls `GET /auth/state` every second until it answers `authenticated: false`, then loads `<url>/login` with `window.location.assign`. Sessions live in memory, so that answer comes from the new process; an error or `authenticated: true` (the old process, not yet stopped) keeps it polling.
-  - When it differs, the page cannot reach it (the CSP's `default-src 'self'` limits fetches to the page's own origin; navigation is not limited), so it waits 10 seconds and then loads `<url>/login`.
+  - When it differs, the page cannot reach it (the CSP's `default-src 'self'` limits fetches to the page's own origin; navigation is not limited), so it waits 10 seconds and then loads `<url>/login`. Meanwhile it polls its own origin as above, for the failed state only.
+  - **A restart that did not happen.** Whenever its own origin answers `authenticated: true`, the screen also reads `GET /api/status`. When `restart.failed` is set it stops polling, cancels the 10-second move, and replaces the spinner with "ghr did not restart: <failed>" and a **Back to ghr** button that reloads the page. No 60-second message follows.
   - After 60 seconds without an answer on the page's own origin it reads "ghr has not answered yet." with a link to it: a failed bind serves the UI on the last working address instead (section 2.2). For another origin the page has already been replaced; when that address does not answer, the browser shows its own error page.
 - **Listener error.** While `web_listen_error` is present, an error banner in the same place: "ghr could not listen on 10.0.0.5:8080: cannot assign requested address. Serving on 0.0.0.0:8080." with a link to Settings → Web access.
 
@@ -183,7 +188,7 @@ A `FieldGroup` titled "Web access" after "Runner defaults", note "Changes apply 
 - `BlockedBy` for a storage operation, queued operations, a manual prune, an automatic prune and a runner update.
 - `Available` through the `SelfUnit` seam.
 - The `status` fingerprint changes when `Restart` or `WebListenError` does.
-- `POST /api/restart`: 202 is flushed before the `Restart` seam runs, with an uncancelled context; 409 while blocked; 409 when not available; a seam failure writes an error event.
+- `POST /api/restart`: 202 is flushed before the `Restart` seam runs, with an uncancelled context; 409 while blocked; 409 when not available; a seam failure writes an error event; a cancel and a seam failure each set `Restart.Failed`, and the next accepted request clears it.
 - Reload: the response lists the warning on every reload while pending; the event is written once per change of the pending list and again after it empties and returns.
 - Start: the address is recorded after the first authenticated request, not after the bind; a failing `web.listen` falls back, serves through `limitConns`, and sets `WebListenError`; without a fallback the daemon runs without a listener and the socket API answers; an unreadable fallback file is absent; an empty `WebListenPath` records nothing.
 
@@ -193,7 +198,7 @@ A `FieldGroup` titled "Web access" after "Runner defaults", note "Changes apply 
 - Web access: its values, the client shape checks, hosts reordered is no change, a `web.listen:` rejection under its field, another rejection in the alert, the empty-listen note.
 - The banners: pending, blocked, unavailable and listener error.
 - The confirmation's text and URL: a wildcard, a specific IP, a proxy in front, an empty listen, nothing pending for listen.
-- The restarting screen: the cache is cleared, the stream is aborted, and a late 401 does not replace the screen; polling for the page's origin; the 10-second wait for another origin; the 60-second message.
+- The restarting screen: the cache is cleared, the stream is aborted, and a late 401 does not replace the screen; polling for the page's origin; the 10-second wait for another origin; the 60-second message; `restart.failed` from the old process shows the reason and the reload button, stops polling, and cancels a move.
 
 ### 5.3 On the runner LXC, with the owner's yes
 
