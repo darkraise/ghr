@@ -543,6 +543,11 @@ func (b *Backend) PatchConfig(ctx context.Context, p model.ConfigPatch) error {
 				c.Web.Hosts = *w.Hosts
 			}
 		}
+		if p.GitHubStorage != nil {
+			if err := applyStoragePatch(c, p.GitHubStorage); err != nil {
+				return err
+			}
+		}
 		// Sorted, so the unknown repository reported is always the same one.
 		for _, name := range slices.Sorted(maps.Keys(p.Repos)) {
 			rp := p.Repos[name]
