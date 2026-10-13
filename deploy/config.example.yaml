@@ -7,7 +7,7 @@ idle_timeout: 5m
 disk_high_water: 80         # percent of the Docker data-root filesystem
 build_cache_keep: 20GB
 history_retention: 30d
-labels: [homelab, docker]   # added to every runner; keeps existing workflows matching
+labels: [docker]            # added to every runner, besides self-hosted, linux and x64
 runner_limits:
   memory_max: 6G
   cpu_quota: 200%
