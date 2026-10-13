@@ -9,7 +9,6 @@
     "packages_gb_hours": 10.25,
     "rate_gb_hours_per_hour": 0.2,
     "estimated_gb_hours": 262.9,
-    "over_allowance_gb_hours": 0,
     "projected_gb_hours": 396.95,
     "runs_out_at": "2026-10-24T11:45:00Z",
     "level": "warn",

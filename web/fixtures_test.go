@@ -343,7 +343,7 @@ func githubStorageFixture() model.GitHubStorage {
 		CheckedAt: ptr(at(-5 * time.Minute)),
 		Quota: &model.GitHubQuota{Month: "2026-10", ReadAt: at(-20 * time.Minute), IncludedGBHours: 363.28125,
 			UsedGBHours: 260.5, ActionsGBHours: 250.25, PackagesGBHours: 10.25, RateGBHoursPerHour: 0.2,
-			EstimatedGBHours: 262.9, OverAllowanceGBHours: ptr(0.0), ProjectedGBHours: 396.95,
+			EstimatedGBHours: 262.9, ProjectedGBHours: 396.95,
 			RunsOutAt: ptr(time.Date(2026, 10, 24, 11, 45, 0, 0, time.UTC)), Level: "warn",
 			ResetsAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)},
 		Repos: []model.RepoStorage{

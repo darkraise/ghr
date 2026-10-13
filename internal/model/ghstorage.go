@@ -22,17 +22,16 @@ type GitHubStorage struct {
 // GitHubQuota is the month's storage against the plan's allowance, in
 // GB-hours.
 type GitHubQuota struct {
-	Month                string     `json:"month"`
-	ReadAt               time.Time  `json:"read_at"`
-	IncludedGBHours      float64    `json:"included_gb_hours"`
-	UsedGBHours          float64    `json:"used_gb_hours"`
-	ActionsGBHours       float64    `json:"actions_gb_hours"`
-	PackagesGBHours      float64    `json:"packages_gb_hours"`
-	RateGBHoursPerHour   float64    `json:"rate_gb_hours_per_hour"`
-	EstimatedGBHours     float64    `json:"estimated_gb_hours"`
-	OverAllowanceGBHours *float64   `json:"over_allowance_gb_hours,omitempty"`
-	ProjectedGBHours     float64    `json:"projected_gb_hours"`
-	RunsOutAt            *time.Time `json:"runs_out_at,omitempty"`
+	Month              string     `json:"month"`
+	ReadAt             time.Time  `json:"read_at"`
+	IncludedGBHours    float64    `json:"included_gb_hours"`
+	UsedGBHours        float64    `json:"used_gb_hours"`
+	ActionsGBHours     float64    `json:"actions_gb_hours"`
+	PackagesGBHours    float64    `json:"packages_gb_hours"`
+	RateGBHoursPerHour float64    `json:"rate_gb_hours_per_hour"`
+	EstimatedGBHours   float64    `json:"estimated_gb_hours"`
+	ProjectedGBHours   float64    `json:"projected_gb_hours"`
+	RunsOutAt          *time.Time `json:"runs_out_at,omitempty"`
 	// Level is "", "projected", "warn", "critical" or "exhausted".
 	Level    string    `json:"level"`
 	ResetsAt time.Time `json:"resets_at"`

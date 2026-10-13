@@ -9,11 +9,10 @@ import (
 
 func TestGitHubStorageJSON(t *testing.T) {
 	now := time.Date(2026, 10, 13, 9, 0, 0, 0, time.UTC)
-	over := 0.0016
 	st := GitHubStorage{
 		CheckedAt: &now,
 		Quota: &GitHubQuota{Month: "2026-10", ReadAt: now, IncludedGBHours: 363.28, UsedGBHours: 384.5, ActionsGBHours: 373.3,
-			PackagesGBHours: 11.2, RateGBHoursPerHour: 0.17, EstimatedGBHours: 386.54, OverAllowanceGBHours: &over,
+			PackagesGBHours: 11.2, RateGBHoursPerHour: 0.17, EstimatedGBHours: 386.54,
 			ProjectedGBHours: 474.5, Level: "exhausted", ResetsAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)},
 		QuotaError: "q",
 		Error:      "e",
@@ -32,7 +31,7 @@ func TestGitHubStorageJSON(t *testing.T) {
 	}
 	const want = `{"checked_at":"2026-10-13T09:00:00Z",` +
 		`"quota":{"month":"2026-10","read_at":"2026-10-13T09:00:00Z","included_gb_hours":363.28,"used_gb_hours":384.5,"actions_gb_hours":373.3,` +
-		`"packages_gb_hours":11.2,"rate_gb_hours_per_hour":0.17,"estimated_gb_hours":386.54,"over_allowance_gb_hours":0.0016,` +
+		`"packages_gb_hours":11.2,"rate_gb_hours_per_hour":0.17,"estimated_gb_hours":386.54,` +
 		`"projected_gb_hours":474.5,"level":"exhausted","resets_at":"2026-11-01T00:00:00Z"},` +
 		`"quota_error":"q","error":"e",` +
 		`"repos":[{"name":"darkmem","visibility":"private","covered":true,"artifact_count":1,"artifact_bytes":2,"cache_count":1,"cache_bytes":3,` +
@@ -50,7 +49,7 @@ func TestGitHubStorageJSON(t *testing.T) {
 		t.Fatalf("empty snapshot %s", b)
 	}
 	b, _ = json.Marshal(GitHubQuota{})
-	if !strings.Contains(string(b), `"level":""`) || strings.Contains(string(b), "runs_out_at") || strings.Contains(string(b), "over_allowance") {
+	if !strings.Contains(string(b), `"level":""`) || strings.Contains(string(b), "runs_out_at") {
 		t.Fatalf("zero quota %s", b)
 	}
 }

@@ -180,7 +180,6 @@ describe("GitHub storage fixtures", () => {
 
   it("the snapshot carries the quota, the rows, the operation and the deletions", () => {
     expect(snap.quota?.level).toBe("warn")
-    expect(snap.quota?.over_allowance_gb_hours).toBe(0)
     expect(snap.quota?.runs_out_at).toBe("2026-10-24T11:45:00Z")
     expect(snap.repos.map((r) => [r.name, r.covered, r.cleanup, r.cleanup_source])).toEqual([
       ["darkmem", true, "6h", "override"],
