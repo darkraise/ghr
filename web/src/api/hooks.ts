@@ -1,7 +1,7 @@
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "./client"
 import { useLive } from "./live"
-import type { ActivityWindow, GhrEvent, LogChunk, RunAnnotations, RunDetail, Status, Storage } from "./types"
+import type { ActivityWindow, GhrEvent, GitHubStorage, LogChunk, RunAnnotations, RunDetail, Status, Storage } from "./types"
 
 export const POLL_FAST = 1000
 export const POLL_SLOW = 5000
@@ -37,6 +37,7 @@ export const keys = {
   log: (id: string) => ["log", id] as const,
   token: ["token"] as const,
   storage: ["storage"] as const,
+  githubStorage: ["github-storage"] as const,
   availableRepos: ["available-repos"] as const,
   labelCheck: (name: string) => ["label-check", name] as const,
   registrations: (name: string) => ["registrations", name] as const,
@@ -237,6 +238,21 @@ export function useStorage(status: Status | undefined) {
     queryKey: keys.storage,
     queryFn: ({ signal }) => api.storage(signal),
     refetchInterval: (q) => livePoll(live, storageBusy(q.state.data, status) ? POLL_FAST : POLL_SLOW),
+  })
+}
+
+// A bulk delete or retention change reports its progress only in the
+// snapshot, so the snapshot is read every second while one runs.
+export function githubStorageBusy(storage?: GitHubStorage): boolean {
+  return storage?.operation !== undefined && storage.operation.finished_at === undefined
+}
+
+export function useGitHubStorage() {
+  const live = useLive()
+  return useQuery({
+    queryKey: keys.githubStorage,
+    queryFn: ({ signal }) => api.githubStorage(signal),
+    refetchInterval: (q) => livePoll(live, githubStorageBusy(q.state.data) ? POLL_FAST : POLL_SLOW),
   })
 }
 

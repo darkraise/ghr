@@ -14,6 +14,7 @@ const seeded = [
   keys.metrics,
   keys.token,
   keys.storage,
+  keys.githubStorage,
   keys.activity("1h", "UTC", ""),
   keys.history("", "", ""),
   keys.events("e1"),
@@ -33,16 +34,17 @@ function invalidated(qc: QueryClient): string[] {
     .sort()
 }
 
-const ALL = ["activity", "config", "events", "history", "metrics", "status", "storage", "token"]
+const ALL = ["activity", "config", "events", "github-storage", "history", "metrics", "status", "storage", "token"]
 
 describe("invalidateTopics", () => {
   it.each<[string, string[]]>([
     ["status", ["activity", "status"]],
     ["gauges", ["status", "token"]],
     ["events", ["events"]],
-    ["config", ["activity", "config"]],
+    ["config", ["activity", "config", "github-storage"]],
     ["token", ["token"]],
     ["storage", ["storage"]],
+    ["github-storage", ["github-storage"]],
     ["history", ["activity", "history"]],
     ["metrics", ["activity", "metrics"]],
   ])("%s invalidates exactly its queries", (topic, want) => {
@@ -60,7 +62,17 @@ describe("invalidateTopics", () => {
   })
 
   it("names every topic", () => {
-    expect(Object.keys(TOPIC_QUERIES).sort()).toEqual(["config", "events", "gauges", "history", "metrics", "status", "storage", "token"])
+    expect(Object.keys(TOPIC_QUERIES).sort()).toEqual([
+      "config",
+      "events",
+      "gauges",
+      "github-storage",
+      "history",
+      "metrics",
+      "status",
+      "storage",
+      "token",
+    ])
   })
 })
 

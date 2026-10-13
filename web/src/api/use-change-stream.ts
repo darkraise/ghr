@@ -9,9 +9,11 @@ export const TOPIC_QUERIES: Record<string, readonly QueryKey[]> = {
   status: [keys.status, ["activity"]],
   gauges: [keys.status, keys.token],
   events: [["events"]],
-  config: [keys.config, ["activity"]],
+  // The snapshot's cleanup and covered columns follow the config.
+  config: [keys.config, ["activity"], keys.githubStorage],
   token: [keys.token],
   storage: [keys.storage],
+  "github-storage": [keys.githubStorage],
   history: [["history"], ["activity"]],
   metrics: [keys.metrics, ["activity"]],
 }

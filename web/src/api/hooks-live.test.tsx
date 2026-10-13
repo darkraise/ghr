@@ -17,6 +17,7 @@ import {
   useConfig,
   useContainers,
   useEvents,
+  useGitHubStorage,
   useHistory,
   useLogTail,
   useMetrics,
@@ -63,6 +64,7 @@ describe("daemon-state hooks", () => {
     { name: "useActivity", key: keys.activity("1h", browserZone(), ""), want: POLL_SLOW, use: () => useActivity("1h") },
     { name: "useHistory", key: keys.history("", "", SINCE), want: POLL_SLOW, use: () => useHistory("", "", SINCE) },
     { name: "useStorage", key: keys.storage, want: POLL_SLOW, use: () => useStorage(undefined) },
+    { name: "useGitHubStorage", key: keys.githubStorage, want: POLL_SLOW, use: () => useGitHubStorage() },
   ]
 
   it.each(cases)("$name polls every 60 s while live", async ({ key, want, use }) => {
@@ -84,6 +86,18 @@ describe("daemon-state hooks", () => {
     await waitFor(() => expect(interval(queryClient, keys.storage)).toBe(POLL_FAST))
     act(() => setLive(true))
     await waitFor(() => expect(interval(queryClient, keys.storage)).toBe(POLL_SAFETY))
+  })
+})
+
+describe("useGitHubStorage", () => {
+  it("polls every second while a bulk operation runs, and every 60 s while live", async () => {
+    const running = { id: "op-2", kind: "delete-caches", repo: "darkmem", total: 4, done: 1, bytes: 0, failed: [], started_at: "2026-10-03T14:04:00Z" }
+    mockApi(authedRoutes({ "GET /api/github-storage": { ...fixtures.githubStorage, operation: running } }))
+    const { queryClient, wrapper } = withQuery()
+    renderHook(() => useGitHubStorage(), { wrapper })
+    await waitFor(() => expect(interval(queryClient, keys.githubStorage)).toBe(POLL_FAST))
+    act(() => setLive(true))
+    await waitFor(() => expect(interval(queryClient, keys.githubStorage)).toBe(POLL_SAFETY))
   })
 })
 
