@@ -152,6 +152,9 @@ type Backend struct {
 	// list the warning was last written for.
 	pendingMu     sync.Mutex
 	pendingWarned []string
+
+	restartMu     sync.Mutex
+	restartFailed string
 }
 
 var _ api.Backend = (*Backend)(nil)

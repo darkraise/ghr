@@ -22,7 +22,20 @@ func (b *Backend) restartStatus(st model.Status) model.RestartStatus {
 		BlockedBy: b.blockedBy(st),
 		Available: b.RestartAvailable,
 		WebListen: b.WebApplied.Listen,
+		Failed:    b.lastRestartFailure(),
 	}
+}
+
+func (b *Backend) lastRestartFailure() string {
+	b.restartMu.Lock()
+	defer b.restartMu.Unlock()
+	return b.restartFailed
+}
+
+func (b *Backend) setRestartFailure(why string) {
+	b.restartMu.Lock()
+	b.restartFailed = why
+	b.restartMu.Unlock()
 }
 
 // webPending names the web settings whose saved value differs from the one
@@ -137,6 +150,7 @@ func (b *Backend) RequestRestart(ctx context.Context) (run func(), err error) {
 	if blocked := b.blockedBy(b.M.Status()); len(blocked) > 0 {
 		return nil, api.Conflict("waits for: " + strings.Join(blocked, ", "))
 	}
+	b.setRestartFailure("")
 	if _, ok := api.Browser(ctx); ok {
 		b.Events.Add("info", "", "restart requested from the web UI")
 	} else {
@@ -146,11 +160,14 @@ func (b *Backend) RequestRestart(ctx context.Context) (run func(), err error) {
 	detached := context.WithoutCancel(ctx)
 	return func() {
 		if blocked := b.blockedBy(b.M.Status()); len(blocked) > 0 {
-			b.Events.Add("warn", "", "restart cancelled: %s started", strings.Join(blocked, ", "))
+			why := strings.Join(blocked, ", ") + " started"
+			b.Events.Add("warn", "", "restart cancelled: %s", why)
+			b.setRestartFailure(why)
 			return
 		}
 		if err := b.Restart(detached); err != nil {
 			b.Events.Add("error", "", "restart failed: %v", err)
+			b.setRestartFailure(err.Error())
 		}
 	}, nil
 }

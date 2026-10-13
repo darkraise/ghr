@@ -48,6 +48,9 @@ type RestartStatus struct {
 	// WebListen is the listen value the running web listener serves; empty
 	// when none runs.
 	WebListen string `json:"web_listen,omitempty"`
+	// Failed says why the last accepted restart did not happen; a new
+	// accepted request clears it.
+	Failed string `json:"failed,omitempty"`
 }
 
 type WebListenError struct {

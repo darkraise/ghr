@@ -283,11 +283,21 @@ func TestRequestRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	run()
+	if got := b.Status().Restart.Failed; got != "systemctl restart: exit status 5: Unit ghr.service not loaded." {
+		t.Fatalf("failed after a failed restart: %q", got)
+	}
+	if _, err := b.RequestRestart(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.Status().Restart.Failed; got != "" {
+		t.Fatalf("an accepted request kept the last failure: %q", got)
+	}
 	want := []string{
 		"info restart requested from the web UI",
 		"info restart requested",
 		"info restart requested",
 		"error restart failed: systemctl restart: exit status 5: Unit ghr.service not loaded.",
+		"info restart requested",
 	}
 	if evs := restartEvents(); !slices.Equal(evs, want) {
 		t.Fatalf("events %q, want %q", evs, want)
@@ -315,6 +325,9 @@ func TestRestartCancelledWhenWorkStarts(t *testing.T) {
 	last := evs[len(evs)-1]
 	if last.Level != "warn" || last.Msg != "restart cancelled: installing node 24, pruning started" {
 		t.Fatalf("last event %s %q", last.Level, last.Msg)
+	}
+	if got := b.Status().Restart.Failed; got != "installing node 24, pruning started" {
+		t.Fatalf("failed after a cancelled restart: %q", got)
 	}
 }
 
