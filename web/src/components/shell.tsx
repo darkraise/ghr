@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { Link, Outlet, useNavigate } from "@tanstack/react-router"
 import { Alert, AlertDescription, AlertTitle } from "darkraise-ui/components/alert"
 import { Button } from "darkraise-ui/components/button"
-import { Boxes, GitBranch, HistoryIcon, LayoutDashboard, LogOut, Settings, Workflow, type LucideIcon } from "lucide-react"
+import { Archive, Boxes, GitBranch, HistoryIcon, LayoutDashboard, LogOut, Settings, Workflow, type LucideIcon } from "lucide-react"
 import { useEffect, useRef } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useEvents, useMetrics, useStatus } from "@/api/hooks"
@@ -11,6 +11,7 @@ import type { Config, Status } from "@/api/types"
 import { Brand } from "@/components/brand"
 import { CapacitySegments } from "@/components/capacity-bar"
 import { ModeControl } from "@/components/mode-control"
+import { QuotaBanner } from "@/components/quota-banner"
 import { ListenErrorBanner, RestartBanner } from "@/components/restart-banner"
 import { UpdateCard } from "@/components/update-card"
 import { capacity } from "@/lib/capacity"
@@ -23,7 +24,7 @@ function count(n: number | undefined): string | undefined {
 
 interface Tab {
   label: string
-  to: "/" | "/runners" | "/actions" | "/history" | "/repositories" | "/settings"
+  to: "/" | "/runners" | "/actions" | "/history" | "/artifacts" | "/repositories" | "/settings"
   icon: LucideIcon
   badge?: string
   divided?: boolean
@@ -35,6 +36,7 @@ function tabs(status: Status | undefined, config: Config | undefined): Tab[] {
     { label: "Runners", to: "/runners", icon: Boxes, badge: count(status && running(status)) },
     { label: "Actions", to: "/actions", icon: Workflow },
     { label: "History", to: "/history", icon: HistoryIcon },
+    { label: "Artifacts", to: "/artifacts", icon: Archive },
     { label: "Repositories", to: "/repositories", icon: GitBranch, badge: count(config?.repos?.length), divided: true },
     { label: "Settings", to: "/settings", icon: Settings },
   ]
@@ -152,6 +154,7 @@ export function Shell() {
         {st && (
           <div className="mb-4 flex flex-col gap-2 empty:hidden">
             {st.web_listen_error ? <ListenErrorBanner error={st.web_listen_error} /> : <RestartBanner status={st} offline={offline} />}
+            {st.github_storage && <QuotaBanner alert={st.github_storage} />}
             <UpdateCard update={st.runner_update} offline={offline} />
           </div>
         )}
