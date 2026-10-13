@@ -25,7 +25,7 @@ import { RejectedAlert, SaveBar } from "@/components/save-bar"
 import { TagField } from "@/components/tag-field"
 import { UnsavedGuard } from "@/components/unsaved-guard"
 import { changedKeys, sameValue, settle, type Values } from "@/lib/draft"
-import { repoDescription } from "@/lib/repos"
+import { PUBLIC_HELP, repoDescription, servePublicConfirm } from "@/lib/repos"
 import { SIDE_LINK } from "@/lib/side-link"
 import { repoStateWord } from "@/lib/status"
 import { useNow } from "@/lib/use-now"
@@ -51,7 +51,6 @@ function repoValues(r: RepoConfig | undefined): Values {
   }
 }
 
-const PUBLIC_HELP = "A job in a public repository can come from anyone's pull request and runs on this host."
 
 function publicNote(isPublic: boolean | undefined, on: boolean): string {
   if (!isPublic) return ""
@@ -199,7 +198,7 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
     if (!changed.includes("allow_public") || draft.allow_public !== true) return send()
     return new Promise((resolve) => {
       setQuestion({
-        confirm: { title: `Serve ${name} while it is public?`, body: PUBLIC_HELP, action: "Serve when public", run: () => resolve(send()) },
+        confirm: servePublicConfirm(name, () => resolve(send())),
         cancel: () => resolve(false),
       })
     })

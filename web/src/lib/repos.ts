@@ -1,5 +1,12 @@
 import type { ActivityWeek, RepoStatus, Status } from "@/api/types"
+import type { Confirm } from "@/components/confirm-dialog"
 import { plural } from "./format"
+
+export const PUBLIC_HELP = "A job in a public repository can come from anyone's pull request and runs on this host."
+
+export function servePublicConfirm(name: string, run: () => void): Confirm {
+  return { title: `Serve ${name} while it is public?`, body: PUBLIC_HELP, action: "Serve when public", run }
+}
 
 // Cancelled, skipped and unknown runs say nothing about health, so the rate
 // leaves them out.
