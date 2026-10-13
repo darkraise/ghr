@@ -176,7 +176,7 @@ describe("Artifacts accessibility", () => {
     async () => {
       mockApi(authedRoutes())
       const { user } = renderApp("/artifacts")
-      for (const name of ["Quota", "Policy", "Operation", "Repositories", "Recent deletions"]) {
+      for (const name of ["Quota", "Operation", "Repositories", "Recent deletions"]) {
         await screen.findByRole("region", { name })
       }
       await user.click(screen.getByRole("button", { name: "darkmem" }))

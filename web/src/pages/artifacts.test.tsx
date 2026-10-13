@@ -4,18 +4,20 @@ import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
+const SUMMARY = " · cleanup 2d (1 repository override) · warnings at 70% and 90%"
+
 describe("Artifacts page", () => {
   it("is served at /artifacts and says when GitHub was last checked", async () => {
     mockApi(authedRoutes())
     renderApp("/artifacts")
     expect(await screen.findByRole("heading", { level: 1, name: "Artifacts" })).toBeInTheDocument()
-    expect(await screen.findByText("Checked 14:00")).toBeInTheDocument()
+    expect(await screen.findByText(`Checked 14:00${SUMMARY}`)).toBeInTheDocument()
   })
 
   it("says when nothing has been checked yet", async () => {
     mockApi(authedRoutes({ "GET /api/github-storage": { repos: [], deletions: [] } }))
     renderApp("/artifacts")
-    expect(await screen.findByText("Not checked yet")).toBeInTheDocument()
+    expect(await screen.findByText(`Not checked yet${SUMMARY}`)).toBeInTheDocument()
   })
 
   it("shows a failed read with a retry", async () => {
@@ -26,7 +28,7 @@ describe("Artifacts page", () => {
     expect(alert).toHaveTextContent("daemon busy")
     fail = false
     await user.click(screen.getByRole("button", { name: "Try again" }))
-    expect(await screen.findByText("Checked 14:00")).toBeInTheDocument()
+    expect(await screen.findByText(`Checked 14:00${SUMMARY}`)).toBeInTheDocument()
     expect(screen.queryByRole("alert")).toBeNull()
   })
 
@@ -51,5 +53,14 @@ describe("Artifacts page", () => {
     await user.click(screen.getByRole("button", { name: "Check now" }))
     expect((await screen.findAllByText("a GitHub storage check is already running")).length).toBeGreaterThan(0)
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(2)
+  })
+
+  it("sums up a policy without overrides and links to it in Settings, without a policy form", async () => {
+    mockApi(authedRoutes({ "GET /api/config": { ...fixtures.config, github_storage: { included_mb: 1024, warn_pct: [60, 85] } } }))
+    renderApp("/artifacts")
+    expect(await screen.findByText("Checked 14:00 · cleanup off · warnings at 60% and 85%")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Policy" })).toHaveAttribute("href", "/settings/github-storage")
+    expect(screen.queryByRole("region", { name: "Policy" })).toBeNull()
+    expect(screen.queryByRole("spinbutton", { name: "Included storage" })).toBeNull()
   })
 })
