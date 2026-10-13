@@ -91,6 +91,9 @@ type Backend struct {
 	Hist   *history.Store
 	// Space is the storage service: the snapshot, toolchains and caches.
 	Space StorageService
+	// GHS is the GitHub artifact storage service; nil in tests that do not
+	// use it.
+	GHS GitHubStorageService
 	// CheckToken validates a candidate token by reading repo, its runners and its runs with it.
 	CheckToken func(ctx context.Context, token, repo string) error
 	// CheckTokenOwner validates a candidate token when there is no runner
@@ -290,6 +293,9 @@ func (b *Backend) Status() model.Status {
 	}
 	st.Restart = b.restartStatus(st)
 	st.WebListenError = b.WebListenErr
+	if b.GHS != nil {
+		st.GitHubStorage = b.GHS.Alert()
+	}
 	return st
 }
 func (b *Backend) EventsAfter(seq int64) []model.Event { return b.Events.After(seq) }
@@ -589,6 +595,9 @@ func (b *Backend) PatchConfig(ctx context.Context, p model.ConfigPatch) error {
 	if p.Web != nil {
 		b.warnPending()
 	}
+	if p.GitHubStorage != nil && b.GHS != nil {
+		b.GHS.PolicyChanged()
+	}
 	return nil
 }
 
@@ -820,6 +829,9 @@ func (b *Backend) SetToken(ctx context.Context, token string) error {
 		return err
 	}
 	b.GH.ForgetCache()
+	if b.GHS != nil {
+		b.GHS.TokenChanged()
+	}
 	b.dropLabelChecks()
 	b.M.ClearDegraded()
 	b.Events.Add("ok", "", "GitHub token replaced")
@@ -918,6 +930,13 @@ func (b *Backend) Reload() ([]string, error) {
 	b.dropLabelChecks()
 	b.M.ClearDegraded()
 	b.Events.Add("info", "", "config and token reloaded")
+	if b.GHS != nil {
+		if tokenChanged {
+			b.GHS.TokenChanged()
+		} else {
+			b.GHS.Kick()
+		}
+	}
 	if b.Wake != nil {
 		b.Wake()
 	}
