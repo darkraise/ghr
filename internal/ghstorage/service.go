@@ -86,6 +86,9 @@ type Service struct {
 	deleted   map[string]time.Time // "artifact:<id>" or "cache:<id>" → when deleted
 	deletions []model.Deletion     // newest first
 
+	writeMu sync.Mutex
+	writes  []time.Time // guarded by writeMu: the writes of the last hour
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	kick   chan struct{}
@@ -435,14 +438,16 @@ func (s *Service) inventory(cfg *config.Config, gen uint64) {
 	wg.Wait()
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.keep(gen) {
+		s.mu.Unlock()
 		return
 	}
 	s.merge(ls, now)
 	s.checkedAt, s.listErr = now, ""
 	s.recompute(cfg)
 	s.bump()
+	s.mu.Unlock()
+	s.cleanup(cfg, gen)
 }
 
 func (s *Service) list(ctx context.Context, l *listing, readRetention bool, now time.Time) {
