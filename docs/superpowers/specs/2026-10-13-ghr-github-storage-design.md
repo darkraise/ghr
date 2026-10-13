@@ -1,9 +1,9 @@
 # ghr: GitHub artifact storage management
 
 **Date:** 2026-10-13
-**Status:** design presented in chat in three sections and approved by the owner on 2026-10-13, with the rulings on scope, coverage, the cleanup rule, the approach and the execution strategy made the same day. Amended the same day after a Fable review of the first draft (notes/2026-10-13-ghr-github-storage-fable-review.md, findings F1 to F35): the owner ruled on the age floor, bulk retention, public repositories and dismissable banners; the rest are the author's rulings, recorded below and in the review note's numbering.
+**Status:** design presented in chat in three sections and approved by the owner on 2026-10-13, with the rulings on scope, coverage, the cleanup rule, the approach and the execution strategy made the same day. Amended the same day after a Fable review of the first draft (notes/2026-10-13-ghr-github-storage-fable-review.md, findings F1 to F35): the owner ruled on the age floor, bulk retention, public repositories and dismissable banners; the rest are the author's rulings, recorded below and in the review note's numbering. Amended again the same day after the live check and the final review (register rows 5 and 6, approved by the owner): the billing summary and the over-allowance test are removed (§1, §2.2, §2.4), and the cleanup re-checks the policy before each delete (§2.3).
 **Execution strategy:** sequential — the cleanup deletes data and runs alone, and the web tasks consume the daemon's new API types, so the work is one chain.
-**Register:** docs/superpowers/registers/2026-10-13-ghr-github-storage.md (rows 1 to 4).
+**Register:** docs/superpowers/registers/2026-10-13-ghr-github-storage.md (rows 1 to 4; the amendment, rows 5 and 6).
 **Code:** `internal/github` (new calls), new `internal/ghstorage`, `internal/config`, `internal/model`, `internal/daemon`, `internal/api`, `cmd/ghr` (`ghr status` line), `web/src` (API types, an Artifacts tab, a quota banner, the change-topic map), `deploy/config.example.yaml`, `README.md`.
 
 ## Problem
@@ -17,6 +17,7 @@ What was measured that day:
 - `GET /users/darkraise/settings/billing/usage?year=2026&month=10` reports 373.3 GB-hours of "Actions storage" and 11.2 of "Packages storage". About 330 of those came on 2026-10-05 and 2026-10-06 (darkmem 204, darkcloud 128 for the month). Since 2026-10-07 about 4 GB-hours a day accrue, roughly 175 MB stored, yet uploads were still refused on 2026-10-11 and 2026-10-12. So GitHub enforces the month's accumulated GB-hours, not the bytes stored now. This is inferred from the data, not stated in GitHub's docs.
 - darkrouter, public since it was created on 2026-08-21, accrues "Actions storage" GB-hours every day in September and October. GitHub's docs say Actions *minutes* are free for public repositories and say nothing of their storage, so public repositories are treated as counting.
 - Every affected repository keeps artifacts and logs for 90 days (the default; `maximum_allowed_days` 400).
+- GitHub's billing summary (`.../settings/billing/usage/summary`) does not show the allowance running out. For October on 2026-10-13, `actions_storage` was gross 373.34 GB-h, discount 373.34, net 0.0016 (net amount $0), with Packages fully discounted too, while used storage (384.7 GB-h) was above the prorated 500 MB allowance (363.3) and darkcloud run 38267451928 (2026-10-12) failed with the quota annotation. The account is on the Free plan (`GET /user`: `plan.name` `free`); the figures indicate, though GitHub's docs do not say, that it discounts all usage and refuses uploads instead of billing them, so the summary's net is rounding noise and cannot confirm or correct the configured allowance. ghr does not read it.
 - The Actions cache (6 GB in darkmem, 3.4 GB in chicken-farm, 3.3 GB in darkcloud) does not count: it has its own 10 GB per repository (same docs page).
 
 Deleting artifacts after the allowance is spent does not unblock the month. Prevention means keeping artifacts from accruing GB-hours, mainly through a short retention and an age-based cleanup, and warning before the month's allowance runs out.
@@ -45,7 +46,6 @@ New calls in `internal/github`, each with a fake-server test in the `client_test
 | `OwnerType(ctx)` | `GET /users/{owner}` (`type`: `User` or `Organization`) | none |
 | `TokenLogin(ctx)` | `GET /user` (`login`) | none |
 | `StorageUsage(ctx, isOrg, year, month)` | `GET /users/{owner}/settings/billing/usage?year=&month=` or `GET /organizations/{owner}/settings/billing/usage?year=&month=` | user account "Plan: read"; organization "Administration: read" |
-| `StorageSummary(ctx, isOrg, year, month)` | `GET /users/{owner}/settings/billing/usage/summary?year=&month=` or the `/organizations/{owner}/...` form (public preview) | as above |
 | `ListRepoArtifacts(ctx, repo)` | `GET /repos/{o}/{r}/actions/artifacts?per_page=100`, all pages | Actions: read |
 | `DeleteArtifact(ctx, repo, id)` | `DELETE /repos/{o}/{r}/actions/artifacts/{id}` | Actions: write |
 | `ListCaches(ctx, repo)` | `GET /repos/{o}/{r}/actions/caches?per_page=100`, all pages | Actions: read |
@@ -55,7 +55,6 @@ New calls in `internal/github`, each with a fake-server test in the `client_test
 - `Artifact` gains `CreatedAt time.Time` and `WorkflowRun struct{ ID int64; HeadBranch string }`. The existing per-run `ListArtifacts` keeps working with the extra fields.
 - `StorageUsage` returns only the items whose `unitType` is `GigabyteHours` and whose `sku` is `Actions storage` or `Packages storage`: date, sku, repository name and quantity. `quantity` is decoded as `float64`: GitHub's schema says integer, but the measured values are fractional (F27). Git LFS storage is billed separately and is ignored.
 - `DeleteArtifact` and `DeleteCache` return `(deleted bool, err error)`: `true` on 204, `false` with no error on 404 (someone else deleted it first). Deletes go through the client's existing `mutate`, one second apart.
-- `StorageSummary` returns, for the skus `actions_storage` and `packages_storage`, `grossQuantity`, `discountQuantity` and `netQuantity` as `float64`. Measured for October 2026 on 2026-10-13: `actions_storage` gross 373.310, discount 373.316, net 0.0016 GB-h, while uploads were refused. The endpoint is a public preview, so its failure never fails a billing read.
 - `getAll`'s 50-page limit stays. A repository with more than 5,000 live artifacts or caches gets a row error naming the limit, and the row's hint points to retention (F29).
 
 ## 2. The `ghstorage` package
@@ -64,7 +63,7 @@ New calls in `internal/github`, each with a fake-server test in the `client_test
 
 ### 2.1 Passes
 
-- **Billing**, hourly, at start, and at `ResetsAt`. It reads the current UTC month's usage, sums Actions and Packages GB-hours, and keeps per-repository and per-day totals. It then reads the summary (§1) as a cross-check: GitHub's own split of the month's storage into the part its free allowance covers (discount) and the part over it (net). The owner type is read once at start; the owner cannot change while the daemon runs (F14).
+- **Billing**, hourly, at start, and at `ResetsAt`. It reads the current UTC month's usage, sums Actions and Packages GB-hours, and keeps per-repository and per-day totals. The owner type is read once at start; the owner cannot change while the daemon runs (F14).
 - **Quota only for the token's own account** (F15). For a user owner, the billing endpoint reads the token user's own billing. When `TokenLogin` differs from the owner, there is no billing read, and `QuotaError` says "the quota can only be read with a token of <owner>". For an organization owner, the token must belong to an organization admin.
 - **Inventory**, every 15 minutes and at start. It lists the token's repositories of the owner (`ListUserRepos` filtered as `AvailableRepos` does), then for each one, 4 at a time, lists artifacts and caches. Expired artifacts are dropped from the snapshot entirely and never deleted (F16). Retention is read for a repository at most once a day.
 - **Cleanup** runs at the end of each inventory pass (§2.3).
@@ -101,7 +100,6 @@ type Quota struct {
 	PackagesGBHours  float64
 	RateGBHoursPerHour float64  // artifact bytes now / 2^30 + last full UTC day's Packages GB-h / 24
 	EstimatedGBHours float64    // UsedGBHours + RateGBHoursPerHour × 12 (GitHub's recalculation lag)
-	OverAllowanceGBHours *float64 // net actions_storage + packages_storage from the summary; nil when the summary could not be read
 	ProjectedGBHours float64    // UsedGBHours + RateGBHoursPerHour × hours until ResetsAt
 	RunsOutAt        *time.Time // see below
 	Level            string     // "", "projected", "warn", "critical", "exhausted"
@@ -167,6 +165,8 @@ For each repository whose effective cleanup is a duration:
 3. Drop the candidates whose `WorkflowRun.ID` belongs to one of those runs.
 4. Add the rest to the pass's delete list.
 
+The candidates come from the config the pass read at its start. Just before each delete, the pass re-reads the config and skips the artifact unless it still qualifies under the repository's current effective cleanup, measured against the clock at that moment. A cleanup turned off or lengthened while a pass runs therefore deletes nothing more. The not-completed runs are not listed again.
+
 The pass then deletes up to 100 artifacts from that list, oldest first (§2.1):
 - Each delete that returns `deleted == true` is recorded in `Deletions` and logged (`github storage: deleted artifact <name> (<size>) in <repo>, age <age>`). A 404 records nothing (F17).
 - One event per repository per pass goes to the events ring, e.g. `cleanup deleted 12 artifacts (340 MB)` (F28).
@@ -180,7 +180,7 @@ The pass then deletes up to 100 artifacts from that list, oldest first (§2.1):
 
 Computed with the projection (§2.2), highest first:
 
-- `exhausted`: `Used` ≥ `Included`, or `OverAllowanceGBHours` > 0.001 (GitHub reports usage past its free allowance). Uploads are failing now. The second test needs no configured allowance, so it also catches a wrong `included_mb`; the quota card shows both figures.
+- `exhausted`: `Used` ≥ `Included`. Uploads are failing now. The billing summary's net is not a second test: on the Free plan it stays at rounding noise while uploads are refused (Problem). Nothing in ghr catches a wrong `included_mb`.
 - `critical` / `warn`: `Estimated` ≥ the second / first `warn_pct` of `Included`.
 - `projected`: `Projected` ≥ `Included`.
 - otherwise none.
@@ -313,9 +313,9 @@ A new top tab **Artifacts** after History (`/artifacts`; the shell's tab union g
 
 **Tests**
 
-- `internal/github`: each new call against a fake server, including pagination, the org/user endpoint switch, fractional quantities, the summary's discount and net fields, and `deleted == false` on 404.
+- `internal/github`: each new call against a fake server, including pagination, the org/user endpoint switch, fractional quantities, and `deleted == false` on 404.
 - `internal/ghstorage`, on a fake clock and a fake client:
-  - cleanup: the age rule, the skip for each of the five not-completed statuses, the override (age, off) and the global fallback, the 100-delete cap oldest first, and the rolling write cap;
+  - cleanup: the age rule, the skip for each of the five not-completed statuses, the override (age, off) and the global fallback, the 100-delete cap oldest first, the rolling write cap, and a cleanup turned off or lengthened mid-pass deleting nothing more;
   - the passes: the rate-budget skip, the token-generation drop, the manual-delete generation, the 409 while busy, keeping the last quota on a failed read, clearing it at the month change, and the token-login mismatch;
   - the numbers: rate, estimate, projection and `RunsOutAt`, including a zero rate and binary units, and each warning level.
 - `internal/config`: defaults, validation, and that a default block is not written.
@@ -327,9 +327,9 @@ A new top tab **Artifacts** after History (`/artifacts`; the shell's tab union g
 
 - per-repository artifact bytes match `gh api repos/darkraise/<repo>/actions/artifacts`;
 - the month's used GB-hours match the billing endpoint;
-- whether the summary's discount stops growing at the configured allowance (500 / 1024 × hours, prorated to the day) or elsewhere. If elsewhere, the allowance formula is amended to match GitHub's discount;
+- the level is `exhausted` while GitHub refuses uploads with "Artifact storage quota has been hit" (shown for October by darkcloud run 38267451928 on 2026-10-12, with used 384.7 GB-h above 363.3);
 - the allowance shows 500 / 1024 × hours in the month;
-- on or after 2026-11-01, the billing read drops to near zero on the 1st. If it does not, the billing cycle is not the calendar month, and this spec is amended (F13).
+- on or after 2026-11-01, the quota clears at the month change, the billing read starts near zero, and uploads work again. If it does not, the billing cycle is not the calendar month, and this spec is amended (F13).
 
 Cleanup and retention changes are made there only with the owner's go-ahead, starting with one repository.
 
