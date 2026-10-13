@@ -4,9 +4,10 @@ import { toast } from "darkraise-ui/components/sonner"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { api } from "@/api/client"
-import { keys, useGitHubStorage, useStatus } from "@/api/hooks"
+import { githubStorageBusy, keys, useConfig, useGitHubStorage, useStatus } from "@/api/hooks"
 import { ErrorLine } from "@/components/page/error-line"
 import { QuotaCard } from "@/components/quota-card"
+import { StoragePolicyCard } from "@/components/storage-policy-card"
 import { shortWhen } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
@@ -14,6 +15,7 @@ import { errorText } from "@/query"
 export function ArtifactsPage() {
   const storage = useGitHubStorage()
   const status = useStatus()
+  const config = useConfig()
   const queryClient = useQueryClient()
   const now = useNow()
   const refresh = useMutation({
@@ -25,6 +27,7 @@ export function ArtifactsPage() {
   })
   const data = storage.data
   const offline = status.isError
+  const busy = githubStorageBusy(data)
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
@@ -40,6 +43,7 @@ export function ArtifactsPage() {
       {data?.error && <ErrorLine>{`Could not list the repositories: ${data.error}`}</ErrorLine>}
       {!data && !storage.isError && <Spinner label="Loading" />}
       {data && <QuotaCard storage={data} />}
+      {data && <StoragePolicyCard storage={data} config={config.data} offline={offline} busy={busy} />}
     </div>
   )
 }
