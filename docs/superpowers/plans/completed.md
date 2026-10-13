@@ -33,3 +33,4 @@
 - 2026-10-13 `docs/superpowers/plans/2026-10-13-ghr-ui-config-items.md` — merged into `master` at 8c44519
 - 2026-10-13 `docs/superpowers/plans/2026-10-13-ghr-github-storage.md` — merged into `master` at cb1536f
 - 2026-10-13 `docs/superpowers/plans/2026-10-13-ghr-github-storage-amendment.md` — merged into `master` at e4fa8f9
+- 2026-10-13 `docs/superpowers/plans/2026-10-13-ghr-artifacts-revamp.md` — merged into `master` at f37abae
