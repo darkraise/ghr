@@ -24,9 +24,11 @@ const VALUE_TINT: Record<string, string> = {
 const TILES =
   "grid grid-cols-2 divide-border border-b border-border [&>*:nth-child(-n+2)]:border-b [&>*:nth-child(odd)]:border-r min-[641px]:grid-cols-4 min-[641px]:divide-x min-[641px]:[&>*:nth-child(-n+2)]:border-b-0"
 
-// Calendar days in UTC; the reset is midnight UTC on a later day.
-function untilReset(iso: string, now: number): string {
+// Calendar days in UTC. A kept quota whose billing read now fails can be from
+// last month, so a reset that is not ahead has no count to show.
+function untilReset(iso: string, now: number): string | undefined {
   const n = Math.floor(Date.parse(iso) / 86_400_000) - Math.floor(now / 86_400_000)
+  if (n < 1) return undefined
   return n === 1 ? "in 1 day" : `in ${n} days`
 }
 

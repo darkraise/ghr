@@ -68,6 +68,15 @@ describe("QuotaCard", () => {
     expect(within(tile(card, "Resets")).getByText("in 1 day")).toBeInTheDocument()
   })
 
+  it.each<[string, string]>([
+    ["2026-10-03T00:00:00Z", "Oct 3"],
+    ["2026-09-01T00:00:00Z", "Sep 1"],
+  ])("shows no day count when the reset on %s is not ahead", (resets_at, day) => {
+    const card = draw({ resets_at })
+    expect(within(tile(card, "Resets")).getByText(day)).toBeInTheDocument()
+    expect(within(tile(card, "Resets")).queryByText(/^in /)).toBeNull()
+  })
+
   it("shows the billing error and keeps the last quota", () => {
     const error = "the token cannot read darkraise's billing: grant the account permission Plan: read"
     const card = draw({}, { quota_error: error })
