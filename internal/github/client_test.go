@@ -888,6 +888,8 @@ func TestListingStopsAfter50Pages(t *testing.T) {
 		{"attempt jobs", 60, func(c *Client) (int, error) { v, err := c.ListAttemptJobs(ctx, "r", 5, 1); return len(v), err }, 0, tooLong},
 		{"artifacts", 60, func(c *Client) (int, error) { v, err := c.ListArtifacts(ctx, "r", 5); return len(v), err }, 0, tooLong},
 		{"user repositories", 60, func(c *Client) (int, error) { v, err := c.ListUserRepos(ctx); return len(v), err }, 0, tooLong},
+		{"repository artifacts", 60, func(c *Client) (int, error) { v, err := c.ListRepoArtifacts(ctx, "r"); return len(v), err }, 0, tooLong},
+		{"caches", 60, func(c *Client) (int, error) { v, err := c.ListCaches(ctx, "r"); return len(v), err }, 0, tooLong},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var base string
@@ -901,7 +903,7 @@ func TestListingStopsAfter50Pages(t *testing.T) {
 					fmt.Fprint(w, `[{"name":"r"}]`)
 					return
 				}
-				fmt.Fprint(w, `{"workflow_runs":[{"id":1}],"jobs":[{"id":1}],"runners":[{"id":1}],"artifacts":[{"id":1}]}`)
+				fmt.Fprint(w, `{"workflow_runs":[{"id":1}],"jobs":[{"id":1}],"runners":[{"id":1}],"artifacts":[{"id":1}],"actions_caches":[{"id":1}]}`)
 			})
 			base = c.BaseURL
 			n, err := tc.list(c)
@@ -911,7 +913,7 @@ func TestListingStopsAfter50Pages(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || err.Error() != tc.wantErr || n != 0 {
+			if err == nil || err.Error() != tc.wantErr || !IsTooManyPages(err) || n != 0 {
 				t.Fatalf("%d items, err %v", n, err)
 			}
 			if len(f.requests) != 50 {

@@ -17,11 +17,19 @@ type PullRequest struct {
 }
 
 type Artifact struct {
-	ID          int64      `json:"id"`
-	Name        string     `json:"name"`
-	SizeInBytes int64      `json:"size_in_bytes"`
-	Expired     bool       `json:"expired"`
-	ExpiresAt   *time.Time `json:"expires_at"`
+	ID          int64       `json:"id"`
+	Name        string      `json:"name"`
+	SizeInBytes int64       `json:"size_in_bytes"`
+	Expired     bool        `json:"expired"`
+	ExpiresAt   *time.Time  `json:"expires_at"`
+	CreatedAt   time.Time   `json:"created_at"`
+	WorkflowRun ArtifactRun `json:"workflow_run"`
+}
+
+// ArtifactRun is the run that uploaded an artifact.
+type ArtifactRun struct {
+	ID         int64  `json:"id"`
+	HeadBranch string `json:"head_branch"`
 }
 
 func (c *Client) getJSON(ctx context.Context, u string, v any) error {
