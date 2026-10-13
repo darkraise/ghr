@@ -171,7 +171,7 @@ export function ArtifactRepoTable({ storage, config, offline }: { storage: GitHu
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   const [open, setOpen] = useState<string[]>([])
   const busy = githubStorageBusy(storage)
-  const globalAge =config?.github_storage?.cleanup_max_age ?? ""
+  const globalAge = config?.github_storage?.cleanup_max_age ?? ""
   const warned = (storage.quota?.level ?? "") !== ""
   return (
     <Section id="repositories" title="Repositories" flush>
@@ -223,7 +223,7 @@ export function ArtifactRepoTable({ storage, config, offline }: { storage: GitHu
                         <RetentionCell repo={r} offline={offline} ask={setConfirm} />
                       </TableCell>
                       <TableCell className="pr-4 align-top">
-                        <CleanupCell repo={r} globalAge={globalAge} offline={offline} ask={setConfirm} />
+                        <CleanupCell repo={r} globalAge={globalAge} offline={offline || !config} ask={setConfirm} />
                       </TableCell>
                     </TableRow>
                     {expanded && (

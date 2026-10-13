@@ -97,6 +97,13 @@ describe("ArtifactRepoTable", () => {
     expect(calls.some((c) => c.path === "/api/github-storage/preview")).toBe(false)
   })
 
+  it("keeps the cleanup edit disabled until the config has loaded", async () => {
+    mockApi({})
+    renderRoutes({ "/": () => <ArtifactRepoTable storage={fixtures.githubStorage} config={undefined} offline={false} /> }, "/")
+    await screen.findByRole("region", { name: "Repositories" })
+    expect(screen.getByRole("button", { name: "Edit cleanup of darkcloud" })).toBeDisabled()
+  })
+
   it("shows a refused preview and saves nothing", async () => {
     const { calls } = mockApi({ "GET /api/github-storage/preview": json({ error: "invalid duration \"1x\"" }, 400) })
     const { user } = await draw()
