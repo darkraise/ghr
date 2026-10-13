@@ -90,8 +90,17 @@ describe("GitHub storage section", () => {
     expect(calls.some((c) => c.path === "/api/github-storage/preview")).toBe(false)
   })
 
+  it("pulls Included storage 0 up to 1 once the field is left", async () => {
+    const { user } = await draw()
+    await user.clear(field("Included storage"))
+    await user.type(field("Included storage"), "0")
+    expect(await screen.findByText("Enter a whole number of MB, at least 1")).toBeInTheDocument()
+    await user.tab()
+    expect(field("Included storage")).toHaveValue("1")
+    expect(screen.queryByText("Enter a whole number of MB, at least 1")).toBeNull()
+  })
+
   it.each<[string, string, string]>([
-    ["Included storage", "0", "Enter a whole number of MB, at least 1"],
     ["Warning at", "95", "Enter two whole percentages from 1 to 100, the first lower"],
   ])("refuses %s %s before sending", async (name, value, error) => {
     const { user, calls } = await draw()

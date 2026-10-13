@@ -1,6 +1,7 @@
 import { Input } from "darkraise-ui/components/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "darkraise-ui/components/select"
 import { useStatus } from "@/api/hooks"
+import { NumberField } from "@/components/number-field"
 import { Field, FieldGroup } from "@/components/page/field"
 import { RestartControl } from "@/components/restart-banner"
 import { RejectedAlert } from "@/components/save-bar"
@@ -20,8 +21,7 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
   const { values, changed, errors, offline, set } = form
   const restart = useStatus().data?.restart
   const text = (key: string) => String(values[key] ?? "")
-  const num = (key: string) => (Number.isNaN(values[key]) ? "" : String(values[key]))
-  const toNum = (s: string) => (s === "" ? Number.NaN : Number(s))
+  const num = (key: string) => (typeof values[key] === "number" ? values[key] : Number.NaN)
   const is = (key: string) => changed.includes(key)
 
   // A value the unit cannot show stays as the daemon's text, in the placeholder.
@@ -29,17 +29,15 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
     const v = values[key]
     return (
       <Field label={label} htmlFor={key} help={help} changed={is(key)} error={errors[key]}>
-        <Input
+        <NumberField
           id={key}
-          type="number"
           min={0}
           suffix={UNIT_SETTINGS[key]?.unit}
-          groupClassName={FIELD_WIDTH}
-          className="min-w-0"
+          className={FIELD_WIDTH}
           placeholder={typeof v === "string" ? v : empty}
-          value={typeof v === "number" && !Number.isNaN(v) ? String(v) : ""}
+          value={num(key)}
           disabled={offline}
-          onChange={(e) => set(key)(toNum(e.target.value))}
+          onValueChange={set(key)}
         />
       </Field>
     )
@@ -70,16 +68,15 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
           changed={is("global_max")}
           error={errors.global_max}
         >
-          <Input
+          <NumberField
             id="global_max"
-            type="number"
             min={1}
             max={99}
-            step={1}
+            precision={0}
             className={FIELD_WIDTH}
             value={num("global_max")}
             disabled={offline}
-            onChange={(e) => set("global_max")(toNum(e.target.value))}
+            onValueChange={set("global_max")}
           />
         </Field>
         <Field label="Owner" help="Change it in config.yaml and restart the daemon">
@@ -93,18 +90,17 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
       </FieldGroup>
       <FieldGroup id="disk" title="Disk and retention">
         <Field label="Disk high-water" htmlFor="disk_high_water" help="Disk use that triggers pruning" changed={is("disk_high_water")} error={errors.disk_high_water}>
-          <Input
+          <NumberField
             id="disk_high_water"
-            type="number"
             min={1}
             max={100}
             step={5}
+            precision={0}
             suffix="%"
-            groupClassName={FIELD_WIDTH}
-            className="min-w-0"
+            className={FIELD_WIDTH}
             value={num("disk_high_water")}
             disabled={offline}
-            onChange={(e) => set("disk_high_water")(toNum(e.target.value))}
+            onValueChange={set("disk_high_water")}
           />
         </Field>
         {unitField("build_cache_keep", "Build cache keep", "Build cache kept when pruning")}

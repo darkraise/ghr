@@ -8,7 +8,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "darkraise-ui/components/dialog"
-import { Input } from "darkraise-ui/components/input"
 import { Label } from "darkraise-ui/components/label"
 import { toast } from "darkraise-ui/components/sonner"
 import { Switch } from "darkraise-ui/components/switch"
@@ -17,9 +16,12 @@ import { api } from "@/api/client"
 import { keys, useAvailableRepos, useStatus } from "@/api/hooks"
 import type { AddRepoRequest } from "@/api/types"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
+import { NumberField } from "@/components/number-field"
 import { ErrorLine } from "@/components/page/error-line"
 import { RepoPicker } from "@/components/repo-picker"
 import { TagField } from "@/components/tag-field"
+import { FIELD_WIDTH } from "@/lib/field-width"
+import { numberFromText, textFromNumber } from "@/lib/number-text"
 import { PUBLIC_HELP, servePublicConfirm } from "@/lib/repos"
 import { errorText } from "@/query"
 
@@ -99,14 +101,15 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
         <RepoPicker picked={picked} onPick={pick} />
         <div className="flex flex-col gap-1">
           <Label htmlFor="add-max">Max</Label>
-          <Input
+          <NumberField
             id="add-max"
-            type="number"
             min={0}
             max={99}
+            precision={0}
+            className={FIELD_WIDTH}
             placeholder={status.data?.mode === "all" ? "No limit (default)" : "1 (default)"}
-            value={max}
-            onChange={(e) => setMax(e.target.value)}
+            value={numberFromText(max)}
+            onValueChange={(n) => setMax(textFromNumber(n))}
           />
         </div>
         <div className="flex flex-col gap-1">

@@ -28,8 +28,8 @@ describe("repository page", () => {
   it("shows the repo's state, settings and the labels its runners get", async () => {
     mockApi(routes())
     renderApp("/repositories/darkmem/settings")
-    expect(await screen.findByLabelText("Max")).toHaveValue(2)
-    expect(screen.getByLabelText("Warm")).toHaveValue(1)
+    expect(await screen.findByLabelText("Max")).toHaveValue("2")
+    expect(screen.getByLabelText("Warm")).toHaveValue("1")
     expect(screen.getByText("Running 1 of 2 runners, 3 jobs waiting")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Remove gpu" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Remove darkmem-" })).toBeInTheDocument()
@@ -67,7 +67,7 @@ describe("repository page", () => {
     expect(screen.queryByText(/unsaved change/)).toBeNull()
     await router.navigate({ to: "/repositories/$name/$section", params: { name: "darkcloud", section: "settings" } })
     expect(await screen.findByRole("heading", { name: "darkcloud" })).toBeInTheDocument()
-    expect(screen.getByLabelText("Max")).toHaveValue(null)
+    expect(screen.getByLabelText("Max")).toHaveValue("")
     expect(screen.queryByText(/unsaved change/)).toBeNull()
   })
 
@@ -134,7 +134,7 @@ describe("repository page", () => {
     const { user } = renderApp("/repositories/darkmem/settings")
     const max = await screen.findByLabelText("Max")
     await user.clear(max)
-    expect(max).toHaveValue(null)
+    expect(max).toHaveValue("")
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
     expect(screen.queryByText("Enter a number from 0 to 99")).toBeNull()
     await user.click(screen.getByRole("button", { name: "Save changes" }))
@@ -142,7 +142,7 @@ describe("repository page", () => {
     await waitFor(() => expect(screen.queryByText("1 unsaved change")).toBeNull())
     // Toasts of earlier tests stay on screen, so this names the field.
     expect(screen.queryAllByText(/Daemon did not apply darkmem\.max/)).toHaveLength(0)
-    expect(screen.getByLabelText("Max")).toHaveValue(null)
+    expect(screen.getByLabelText("Max")).toHaveValue("")
   })
 
   it("stops checking warm against max once max is emptied", async () => {
@@ -172,7 +172,7 @@ describe("repository page", () => {
     await user.clear(max)
     await user.type(max, "5")
     await user.click(screen.getByRole("button", { name: "Discard" }))
-    expect(screen.getByLabelText("Max")).toHaveValue(2)
+    expect(screen.getByLabelText("Max")).toHaveValue("2")
     expect(screen.queryByText("1 unsaved change")).toBeNull()
   })
 
@@ -310,7 +310,7 @@ describe("repository page", () => {
     expect(screen.queryByText("Unsaved changes")).toBeNull()
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument()
     await user.click(nav.getByRole("link", { name: "Capacity and labels" }))
-    expect(await screen.findByLabelText("Max")).toHaveValue(3)
+    expect(await screen.findByLabelText("Max")).toHaveValue("3")
   })
 
   it.each(["/repositories", "/repositories/darkmem-2/settings"])("guards an unsaved change when the repository is left for %s", async (to) => {

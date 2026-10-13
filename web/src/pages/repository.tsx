@@ -2,7 +2,6 @@ import { useQueryClient } from "@tanstack/react-query"
 import { Link, useParams } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "darkraise-ui/components/dropdown-menu"
-import { Input } from "darkraise-ui/components/input"
 import { toast } from "darkraise-ui/components/sonner"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { Switch } from "darkraise-ui/components/switch"
@@ -15,6 +14,7 @@ import { keys, useConfig, useStatus } from "@/api/hooks"
 import type { Config, RepoConfig, RepoPatch, RepoStatus } from "@/api/types"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { LabelCheckGroup } from "@/components/label-check-group"
+import { NumberField } from "@/components/number-field"
 import { ErrorLine } from "@/components/page/error-line"
 import { Field, FieldGroup } from "@/components/page/field"
 import { SideLayout } from "@/components/page/side-layout"
@@ -176,10 +176,8 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
   const warmError = maxValue !== undefined && maxValue > 0 && warmValue > maxValue ? "Warm must be <= max" : ""
   const locked = Boolean(repoStatus?.removing) || status.isError
 
-  function setNumber(key: "max" | "warm", text: string) {
-    const n = Number(text)
-    if (text.trim() !== "" && !Number.isFinite(n)) return
-    setDraft((d) => ({ ...d, [key]: text.trim() === "" ? undefined : Math.min(99, Math.max(0, Math.trunc(n))) }))
+  function setNumber(key: "max" | "warm", n: number) {
+    setDraft((d) => ({ ...d, [key]: Number.isNaN(n) ? undefined : Math.min(99, Math.max(0, Math.trunc(n))) }))
   }
 
   function discard() {
@@ -318,27 +316,27 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
                 help="Leave empty for the default: 1 in queue mode, no limit in all mode."
                 changed={is("max")}
               >
-                <Input
+                <NumberField
                   id="repo-max"
-                  type="number"
                   min={0}
                   max={99}
-                  className="w-24"
+                  precision={0}
+                  className="w-28"
                   disabled={locked}
-                  value={typeof values.max === "number" ? String(values.max) : ""}
-                  onChange={(e) => setNumber("max", e.target.value)}
+                  value={typeof values.max === "number" ? values.max : Number.NaN}
+                  onValueChange={(n) => setNumber("max", n)}
                 />
               </Field>
               <Field label="Warm" htmlFor="repo-warm" help="Runners kept ready in all mode. Leave empty for the default of 1." error={warmError} changed={is("warm")}>
-                <Input
+                <NumberField
                   id="repo-warm"
-                  type="number"
                   min={0}
                   max={99}
-                  className="w-24"
+                  precision={0}
+                  className="w-28"
                   disabled={locked}
-                  value={typeof values.warm === "number" ? String(values.warm) : ""}
-                  onChange={(e) => setNumber("warm", e.target.value)}
+                  value={typeof values.warm === "number" ? values.warm : Number.NaN}
+                  onValueChange={(n) => setNumber("warm", n)}
                 />
               </Field>
             </FieldGroup>

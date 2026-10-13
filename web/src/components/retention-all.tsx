@@ -1,13 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Button } from "darkraise-ui/components/button"
-import { Input } from "darkraise-ui/components/input"
 import { Label } from "darkraise-ui/components/label"
 import { toast } from "darkraise-ui/components/sonner"
 import { useState } from "react"
 import { api } from "@/api/client"
 import { keys } from "@/api/hooks"
 import type { Confirm } from "@/components/confirm-dialog"
+import { NumberField } from "@/components/number-field"
 import { repositories } from "@/lib/format"
+import { numberFromText, textFromNumber } from "@/lib/number-text"
 import { RETENTION_WARNING } from "@/lib/quota"
 
 export function RetentionAll({ count, offline, busy, ask }: { count: number; offline: boolean; busy: boolean; ask: (c: Confirm) => void }) {
@@ -28,19 +29,18 @@ export function RetentionAll({ count, offline, busy, ask }: { count: number; off
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
         <Label htmlFor="retention_all">Retention for all</Label>
-        <Input
+        <NumberField
           id="retention_all"
-          type="number"
           min={1}
           max={400}
+          precision={0}
           suffix="days"
-          groupClassName="w-36"
-          className="min-w-0"
-          value={days}
+          className="w-40"
+          value={numberFromText(days)}
           disabled={offline}
           aria-invalid={invalid}
           aria-describedby={invalid ? "retention_all_error" : undefined}
-          onChange={(e) => setDays(e.target.value)}
+          onValueChange={(v) => setDays(textFromNumber(v))}
         />
         <Button
           variant="outline"

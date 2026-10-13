@@ -4,11 +4,13 @@ import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { CleanupPreview } from "@/components/cleanup-preview"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
+import { NumberField } from "@/components/number-field"
 import { ErrorLine } from "@/components/page/error-line"
 import { Field, FieldGroup } from "@/components/page/field"
 import { SaveBar } from "@/components/save-bar"
 import { UnsavedGuard } from "@/components/unsaved-guard"
 import { FIELD_WIDTH } from "@/lib/field-width"
+import { numberFromText, textFromNumber } from "@/lib/number-text"
 import { CLEANUP_WARNING } from "@/lib/quota"
 import { type PolicyKey, useStoragePolicyForm } from "@/lib/storage-policy-form"
 
@@ -39,11 +41,11 @@ export function GitHubStorageSection() {
             {form.rejection && <ErrorLine>{form.rejection}</ErrorLine>}
             <FieldGroup id="storage-policy" title="Policy">
               <Field label="Included storage" htmlFor="included_mb" help="The plan's allowance for artifacts and Packages, in MB." error={errors.included} changed={changed("included")}>
-                <Input id="included_mb" type="number" min={1} suffix="MB" groupClassName={FIELD_WIDTH} className="min-w-0" value={values.included} disabled={offline} onChange={(e) => form.set("included")(e.target.value)} />
+                <NumberField id="included_mb" min={1} precision={0} suffix="MB" className={FIELD_WIDTH} value={numberFromText(values.included)} disabled={offline} onValueChange={(n) => form.set("included")(textFromNumber(n))} />
               </Field>
               <Field label="Warning levels" help="Warn, then warn louder, when the estimate reaches these shares of the allowance." error={errors.critical} changed={changed("warn", "critical")}>
-                <Input aria-label="Warning at" type="number" min={1} max={100} suffix="%" groupClassName="w-28" className="min-w-0" value={values.warn} disabled={offline} onChange={(e) => form.set("warn")(e.target.value)} />
-                <Input aria-label="Critical at" type="number" min={1} max={100} suffix="%" groupClassName="w-28" className="min-w-0" value={values.critical} disabled={offline} onChange={(e) => form.set("critical")(e.target.value)} />
+                <NumberField aria-label="Warning at" min={1} max={100} precision={0} suffix="%" className="w-32" value={numberFromText(values.warn)} disabled={offline} onValueChange={(n) => form.set("warn")(textFromNumber(n))} />
+                <NumberField aria-label="Critical at" min={1} max={100} precision={0} suffix="%" className="w-32" value={numberFromText(values.critical)} disabled={offline} onValueChange={(n) => form.set("critical")(textFromNumber(n))} />
               </Field>
               <Field label="Cleanup age" htmlFor="cleanup_max_age" help={`Delete artifacts older than this, such as 2d; empty is off, and at least 24h. ${CLEANUP_WARNING}`} changed={changed("age")}>
                 <Input id="cleanup_max_age" className={`${FIELD_WIDTH} font-mono`} placeholder="off" value={values.age} disabled={offline} onChange={(e) => form.set("age")(e.target.value)} />

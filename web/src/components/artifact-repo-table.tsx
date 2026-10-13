@@ -13,9 +13,11 @@ import type { Config, GitHubStorage, RepoStorage } from "@/api/types"
 import { ArtifactRepoDetail } from "@/components/artifact-repo-detail"
 import { CleanupPreview } from "@/components/cleanup-preview"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
+import { NumberField } from "@/components/number-field"
 import { Section } from "@/components/page/section"
 import { RetentionAll } from "@/components/retention-all"
 import { humanBytes, plural, repositories } from "@/lib/format"
+import { numberFromText, textFromNumber } from "@/lib/number-text"
 import { CLEANUP_WARNING, RETENTION_WARNING } from "@/lib/quota"
 import { errorText } from "@/query"
 
@@ -60,7 +62,7 @@ function RetentionCell({ repo, offline, ask }: { repo: RepoStorage; offline: boo
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-1">
-        <Input aria-label={`Retention of ${repo.name}`} type="number" min={1} max={max} suffix="days" groupClassName="w-32" className="min-w-0" value={days} onChange={(e) => setDays(e.target.value)} />
+        <NumberField aria-label={`Retention of ${repo.name}`} min={1} max={max} precision={0} suffix="days" className="w-36" value={numberFromText(days)} onValueChange={(v) => setDays(textFromNumber(v))} />
         <Button
           size="sm"
           aria-label={`Save retention of ${repo.name}`}
