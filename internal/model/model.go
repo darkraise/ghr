@@ -35,6 +35,9 @@ type Status struct {
 	// WebListenError is set when the configured web.listen failed to bind at
 	// start.
 	WebListenError *WebListenError `json:"web_listen_error,omitempty"`
+	// GitHubStorage is the artifact storage quota's level, absent until the
+	// first billing read.
+	GitHubStorage *StorageAlert `json:"github_storage,omitempty"`
 }
 
 type RestartStatus struct {
@@ -224,6 +227,7 @@ type ConfigPatch struct {
 	Labels           *[]string            `json:"labels,omitempty"`
 	RunnerLimits     *RunnerLimitsPatch   `json:"runner_limits,omitempty"`
 	Web              *WebPatch            `json:"web,omitempty"`
+	GitHubStorage    *GitHubStoragePatch  `json:"github_storage,omitempty"`
 	Repos            map[string]RepoPatch `json:"repos,omitempty"`
 }
 
