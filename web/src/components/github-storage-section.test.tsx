@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { type Call, json, mockApi, noContent } from "@/test/api"
-import { authedRoutes } from "@/test/fixtures"
+import { authedRoutes, fixtures } from "@/test/fixtures"
 import { renderApp } from "@/test/render"
 
 async function draw(routes: Record<string, unknown> = {}) {
@@ -14,6 +14,12 @@ async function draw(routes: Record<string, unknown> = {}) {
 const field = (name: string) => screen.getByRole("spinbutton", { name }) as HTMLInputElement
 const age = () => screen.getByRole("textbox", { name: "Cleanup age" }) as HTMLInputElement
 const patches = (calls: Call[]) => calls.filter((c) => c.method === "PATCH")
+// The alerts on the page itself, not the toasts that repeat them.
+const pageAlerts = () =>
+  screen
+    .queryAllByRole("alert")
+    .filter((a) => !a.closest("[data-sonner-toaster]"))
+    .map((a) => a.textContent)
 
 describe("GitHub storage section", () => {
   it("shows the saved policy with the defaults filled in", async () => {
@@ -105,8 +111,43 @@ describe("GitHub storage section", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     const dialog = await screen.findByRole("alertdialog", { name: "Clean artifacts after 12h?" })
     await user.click(within(dialog).getByRole("button", { name: "Save" }))
-    expect((await screen.findAllByText(msg)).length).toBeGreaterThan(0)
+    await waitFor(() => expect(pageAlerts()).toContain(msg))
     expect(age().value).toBe("12h")
+  })
+
+  it("shows a failed preview read on the page and sends nothing", async () => {
+    const { user, calls } = await draw({ "GET /api/github-storage/preview": () => json({ error: "preview broke" }, 500) })
+    await user.clear(age())
+    await user.type(age(), "12h")
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(pageAlerts()).toContain("preview broke"))
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+    expect(patches(calls)).toHaveLength(0)
+    expect(age().value).toBe("12h")
+  })
+
+  it("keeps the saved values when the config cannot be read back", async () => {
+    let fail = false
+    const { user } = await draw({ "GET /api/config": () => (fail ? json({ error: "config gone" }, 500) : fixtures.config) })
+    fail = true
+    await user.clear(field("Included storage"))
+    await user.type(field("Included storage"), "1024")
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    expect((await screen.findAllByText(/Saved, but re-reading the config failed/)).length).toBeGreaterThan(0)
+    await waitFor(() => expect(screen.queryByText(/unsaved change/)).toBeNull())
+    expect(field("Included storage").value).toBe("1024")
+  })
+
+  it("previews a changed cleanup age when Save is chosen on the leave prompt, and stays", async () => {
+    const { user, router, calls } = await draw({ "GET /api/github-storage/preview": [] })
+    await user.clear(age())
+    await user.type(age(), "1d")
+    await user.click(screen.getAllByRole("link", { name: "Dashboard" })[0] as HTMLElement)
+    const prompt = await screen.findByRole("alertdialog", { name: "Unsaved changes" })
+    await user.click(within(prompt).getByRole("button", { name: "Save" }))
+    expect(await screen.findByRole("alertdialog", { name: "Clean artifacts after 1d?" })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe("/settings/github-storage")
+    expect(patches(calls)).toHaveLength(0)
   })
 
   it("asks before leaving with unsaved changes", async () => {

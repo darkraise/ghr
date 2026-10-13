@@ -52,6 +52,7 @@ export function useStoragePolicyForm() {
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState<Draft>({})
   const [saving, setSaving] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
   const [rejection, setRejection] = useState("")
   const [pending, setPending] = useState<PendingCleanup | null>(null)
 
@@ -84,8 +85,26 @@ export function useStoragePolicyForm() {
     }
     toast.success("Storage policy saved")
     // Settled only after the config is read back, so the fields never flash
-    // the values from before the save.
-    await queryClient.invalidateQueries({ queryKey: keys.config })
+    // the values from before the save. When the read fails, the sent values go
+    // into the cache instead, or the save would look lost.
+    try {
+      await queryClient.fetchQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), staleTime: 0 })
+    } catch (err) {
+      toast.error(`Saved, but re-reading the config failed: ${errorText(err)}`)
+      queryClient.setQueryData<Config>(
+        keys.config,
+        (c) =>
+          c && {
+            ...c,
+            github_storage: {
+              ...c.github_storage,
+              included_mb: patch.included_mb ?? c.github_storage?.included_mb,
+              warn_pct: patch.warn_pct ?? c.github_storage?.warn_pct,
+              cleanup_max_age: patch.cleanup_max_age ?? c.github_storage?.cleanup_max_age,
+            },
+          },
+      )
+    }
     void queryClient.invalidateQueries({ queryKey: keys.githubStorage })
     setDraft((d) => settle(d, sent, equal) as Draft)
     setSaving(false)
@@ -94,7 +113,7 @@ export function useStoragePolicyForm() {
 
   async function save(): Promise<boolean> {
     if (changed.length === 0) return true
-    if (saving || pending) return false
+    if (saving || previewing || pending) return false
     if (Object.keys(errors).length > 0) {
       toast.error("Fix the highlighted settings first")
       return false
@@ -104,12 +123,14 @@ export function useStoragePolicyForm() {
     const age = patch.cleanup_max_age
     if (age === undefined || age === "") return send(sent, patch)
     setRejection("")
+    setPreviewing(true)
     try {
       setPending({ age, previews: await api.storagePreview(age), sent, patch })
     } catch (err) {
       setRejection(errorText(err))
       toast.error("Storage policy not saved")
     }
+    setPreviewing(false)
     // The preview's confirmation sends the save, so a leave prompt that asked
     // for this one keeps the page.
     return false
@@ -130,7 +151,7 @@ export function useStoragePolicyForm() {
     changed,
     errors,
     offline: status.isError,
-    saving,
+    saving: saving || previewing,
     rejection,
     pending,
     set,
