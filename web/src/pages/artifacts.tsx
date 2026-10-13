@@ -5,6 +5,7 @@ import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { api } from "@/api/client"
 import { githubStorageBusy, keys, useConfig, useGitHubStorage, useStatus } from "@/api/hooks"
+import { ArtifactRepoTable } from "@/components/artifact-repo-table"
 import { ErrorLine } from "@/components/page/error-line"
 import { QuotaCard } from "@/components/quota-card"
 import { StoragePolicyCard } from "@/components/storage-policy-card"
@@ -44,6 +45,7 @@ export function ArtifactsPage() {
       {!data && !storage.isError && <Spinner label="Loading" />}
       {data && <QuotaCard storage={data} />}
       {data && <StoragePolicyCard storage={data} config={config.data} offline={offline} busy={busy} />}
+      {data && <ArtifactRepoTable storage={data} config={config.data} offline={offline} />}
     </div>
   )
 }
