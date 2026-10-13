@@ -17,7 +17,7 @@ What was measured that day:
 - `GET /users/darkraise/settings/billing/usage?year=2026&month=10` reports 373.3 GB-hours of "Actions storage" and 11.2 of "Packages storage". About 330 of those came on 2026-10-05 and 2026-10-06 (darkmem 204, darkcloud 128 for the month). Since 2026-10-07 about 4 GB-hours a day accrue, roughly 175 MB stored, yet uploads were still refused on 2026-10-11 and 2026-10-12. So GitHub enforces the month's accumulated GB-hours, not the bytes stored now. This is inferred from the data, not stated in GitHub's docs.
 - darkrouter, public since it was created on 2026-08-21, accrues "Actions storage" GB-hours every day in September and October. GitHub's docs say Actions *minutes* are free for public repositories and say nothing of their storage, so public repositories are treated as counting.
 - Every affected repository keeps artifacts and logs for 90 days (the default; `maximum_allowed_days` 400).
-- GitHub's billing summary (`.../settings/billing/usage/summary`) does not show the allowance running out. For October on 2026-10-13, `actions_storage` was gross 373.34 GB-h, discount 373.34, net 0.0016 (net amount $0), with Packages fully discounted too, while used storage (384.7 GB-h) was above the prorated 500 MB allowance (363.3) and darkcloud run 38267451928 (2026-10-12) failed with the quota annotation. The account is on the Free plan (`GET /user`: `plan.name` `free`); the figures indicate, though GitHub's docs do not say, that it discounts all usage and refuses uploads instead of billing them, so the summary's net is rounding noise and cannot confirm or correct the configured allowance. ghr does not read it.
+- GitHub's billing summary (`.../settings/billing/usage/summary`) does not show the allowance running out. For October on 2026-10-13, `actions_storage` was gross 373.34 GB-h, discount 373.34, net 0.0016 (net amount $0), with Packages fully discounted too, while used storage (384.7 GB-h on a later read that day) was above the prorated 500 MB allowance (363.3) and darkcloud run 38267451928 (2026-10-12) failed with the quota annotation. The account is on the Free plan (`GET /user`: `plan.name` `free`) and, judging by the refused uploads, has no payment method on file. GitHub's docs say that "if your account does not have a valid payment method on file, usage is blocked once you use up your quota" (same page, read 2026-10-13). What they do not say, and the figures show, is that the summary still counts the blocked usage as discounted: the net was a few thousandths of a GB-hour, far below the 21 GB-h by which used exceeded the allowance. The net therefore cannot confirm or correct the configured allowance, and ghr does not read it.
 - The Actions cache (6 GB in darkmem, 3.4 GB in chicken-farm, 3.3 GB in darkcloud) does not count: it has its own 10 GB per repository (same docs page).
 
 Deleting artifacts after the allowance is spent does not unblock the month. Prevention means keeping artifacts from accruing GB-hours, mainly through a short retention and an age-based cleanup, and warning before the month's allowance runs out.
@@ -67,7 +67,7 @@ New calls in `internal/github`, each with a fake-server test in the `client_test
 - **Quota only for the token's own account** (F15). For a user owner, the billing endpoint reads the token user's own billing. When `TokenLogin` differs from the owner, there is no billing read, and `QuotaError` says "the quota can only be read with a token of <owner>". For an organization owner, the token must belong to an organization admin.
 - **Inventory**, every 15 minutes and at start. It lists the token's repositories of the owner (`ListUserRepos` filtered as `AvailableRepos` does), then for each one, 4 at a time, lists artifacts and caches. Expired artifacts are dropped from the snapshot entirely and never deleted (F16). Retention is read for a repository at most once a day.
 - **Cleanup** runs at the end of each inventory pass (§2.3).
-- **Reading config.** A pass reads the config once, at its start (F30). The one exception is the cleanup's re-check before each delete (§2.3).
+- **Reading config.** A pass takes its repository list, coverage and cleanup candidates from the config read at its start (F30). The quota recompute at the end of a billing read or an inventory pass, and the cleanup's re-check before each delete (§2.3), use the config current at that moment, so a policy saved mid-pass is not overwritten.
 - **Token generation** (F19). A pass records the token generation it started under. If the generation changed by the time the pass finishes, its result is dropped. `SetToken` and `Reload` call `Refresh()`, which also clears the rows' errors.
 - **Rate budget** (F3). A pass is skipped, and the last snapshot kept, while the client is suspended for a rate limit or while the token has fewer than 500 calls left this hour.
   - At 36 repositories an inventory pass costs about 75 calls, plus 5 per repository that has cleanup candidates (§2.3), plus up to 36 retention reads once a day: 300 to 600 of the 5,000 an hour.
@@ -165,9 +165,8 @@ For each repository whose effective cleanup is a duration:
 3. Drop the candidates whose `WorkflowRun.ID` belongs to one of those runs.
 4. Add the rest to the pass's delete list.
 
-The candidates come from the config the pass read at its start. Just before each delete, the pass re-reads the config and skips the artifact unless it still qualifies under the repository's current effective cleanup, measured against the clock at that moment. A cleanup turned off or lengthened while a pass runs therefore deletes nothing more. The not-completed runs are not listed again.
-
-The pass then deletes up to 100 artifacts from that list, oldest first (§2.1):
+The pass then takes the 100 oldest picks from that list (§2.1) and deletes them in that order:
+- **Re-check.** Just before each delete, the pass re-reads the config and skips the artifact unless it is still older than the repository's current effective cleanup age. The re-check is by age only; the run skip uses the runs listed at step 2, which are not listed again (the check-to-delete gap, register row 10). A cleanup turned off or lengthened while a pass runs therefore deletes nothing more. A cleanup turned on or shortened, or an override added, adds nothing to this pass; it takes effect at the next inventory. A skipped pick makes no write, records nothing and is not replaced; the rest wait for the next pass.
 - Each delete that returns `deleted == true` is recorded in `Deletions` and logged (`github storage: deleted artifact <name> (<size>) in <repo>, age <age>`). A 404 records nothing (F17).
 - One event per repository per pass goes to the events ring, e.g. `cleanup deleted 12 artifacts (340 MB)` (F28).
 - A repository's cleanup stops at its first error other than 404, and the error is recorded on the repository.
@@ -180,7 +179,7 @@ The pass then deletes up to 100 artifacts from that list, oldest first (§2.1):
 
 Computed with the projection (§2.2), highest first:
 
-- `exhausted`: `Used` ≥ `Included`. Uploads are failing now. The billing summary's net is not a second test: on the Free plan it stays at rounding noise while uploads are refused (Problem). Nothing in ghr catches a wrong `included_mb`.
+- `exhausted`: `Used` ≥ `Included`. On an account with no payment method uploads are failing now; with one on file GitHub bills the overage instead. The billing summary's net is not a second test: it stays near zero while uploads are refused (Problem). Nothing in ghr catches a wrong `included_mb` (register row 13).
 - `critical` / `warn`: `Estimated` ≥ the second / first `warn_pct` of `Included`.
 - `projected`: `Projected` ≥ `Included`.
 - otherwise none.
@@ -315,9 +314,10 @@ A new top tab **Artifacts** after History (`/artifacts`; the shell's tab union g
 
 - `internal/github`: each new call against a fake server, including pagination, the org/user endpoint switch, fractional quantities, and `deleted == false` on 404.
 - `internal/ghstorage`, on a fake clock and a fake client:
-  - cleanup: the age rule, the skip for each of the five not-completed statuses, the override (age, off) and the global fallback, the 100-delete cap oldest first, the rolling write cap, and a cleanup turned off or lengthened mid-pass deleting nothing more;
+  - cleanup: the age rule, the skip for each of the five not-completed statuses, the override (age, off) and the global fallback, the 100-delete cap oldest first, the rolling write cap, and the per-delete re-check: a config changed in the delete hook after the first delete skips the second when cleanup is turned off or lengthened, or when an override is removed and the global age no longer covers it; a cleanup shortened, turned on or overridden mid-pass deletes nothing beyond the start candidates; a skipped pick makes no write, records no `Deletion`, and a pass whose picks are all skipped adds no event;
   - the passes: the rate-budget skip, the token-generation drop, the manual-delete generation, the 409 while busy, keeping the last quota on a failed read, clearing it at the month change, and the token-login mismatch;
   - the numbers: rate, estimate, projection and `RunsOutAt`, including a zero rate and binary units, and each warning level.
+- No test or fixture references `StorageSummary` or `over_allowance_gb_hours`.
 - `internal/config`: defaults, validation, and that a default block is not written.
 - `internal/api`: each route, the body rules, the 404 for an unknown repository, the 409s, and the preview cases.
 - `internal/daemon`: the alert in `Status` and in the `status` fingerprint, and the `github-storage` counter.
