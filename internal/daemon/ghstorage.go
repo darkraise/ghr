@@ -7,6 +7,7 @@ import (
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/ghstorage"
+	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 )
 
@@ -48,14 +49,14 @@ func (b *Backend) DeleteGitHubArtifact(ctx context.Context, repo string, id int6
 	if err := b.githubErr(); err != nil {
 		return err
 	}
-	return ghsErr(b.GHS.DeleteArtifact(ctx, repo, id))
+	return b.ghsWriteErr(b.GHS.DeleteArtifact(ctx, repo, id), repo)
 }
 
 func (b *Backend) DeleteGitHubCache(ctx context.Context, repo string, id int64) error {
 	if err := b.githubErr(); err != nil {
 		return err
 	}
-	return ghsErr(b.GHS.DeleteCache(ctx, repo, id))
+	return b.ghsWriteErr(b.GHS.DeleteCache(ctx, repo, id), repo)
 }
 
 func (b *Backend) DeleteGitHubArtifacts(repo string, req model.DeleteArtifactsRequest) (model.OperationStarted, error) {
@@ -78,7 +79,7 @@ func (b *Backend) SetGitHubRetention(ctx context.Context, repo string, days int)
 	if err := b.githubErr(); err != nil {
 		return err
 	}
-	return ghsErr(b.GHS.SetRetention(ctx, repo, days))
+	return b.ghsWriteErr(b.GHS.SetRetention(ctx, repo, days), repo)
 }
 
 func (b *Backend) SetGitHubRetentionAll(days int) (model.OperationStarted, error) {
@@ -87,6 +88,16 @@ func (b *Backend) SetGitHubRetentionAll(days int) (model.OperationStarted, error
 	}
 	id, err := b.GHS.SetRetentionAll(days)
 	return model.OperationStarted{ID: id}, ghsErr(err)
+}
+
+// ghsWriteErr is ghsErr for a write GitHub answers at once: a refused token
+// gets the repository rows' wording, which names a missing PAT permission.
+func (b *Backend) ghsWriteErr(err error, repo string) error {
+	if !github.IsKind(err, github.ErrAuth) {
+		return ghsErr(err)
+	}
+	msg, _ := actionsErr(err, b.Store.Config().Owner, repo)
+	return &api.Error{Status: http.StatusForbidden, Msg: msg}
 }
 
 // ghsErr gives the storage service's refusals their HTTP statuses. Other

@@ -192,6 +192,24 @@ func TestGitHubStorageErrorsMapToStatuses(t *testing.T) {
 	}
 }
 
+// A single write GitHub refuses for a missing PAT permission names the
+// permission, as the repository rows do, instead of GitHub's raw text.
+func TestGitHubStorageWritesNameTheMissingPermission(t *testing.T) {
+	b, _, f := newGHSBackend(t)
+	ctx := context.Background()
+	f.err = &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible by personal access token", Permissions: "actions=write"}
+	const want = "token lacks actions=write on darkraise/darkmem: grant it in the PAT settings"
+	for name, call := range map[string]func() error{
+		"delete-artifact": func() error { return b.DeleteGitHubArtifact(ctx, "darkmem", 7) },
+		"delete-cache":    func() error { return b.DeleteGitHubCache(ctx, "darkmem", 8) },
+		"retention":       func() error { return b.SetGitHubRetention(ctx, "darkmem", 7) },
+	} {
+		if err := call(); apiStatus(err) != 403 || apiMsg(err) != want {
+			t.Errorf("%s: status %d message %q", name, apiStatus(err), apiMsg(err))
+		}
+	}
+}
+
 // Every call that reaches GitHub waits while the token is rejected or a
 // rate limit pauses the API; reading the snapshot or a preview does not.
 func TestGitHubStorageWaitsForGitHub(t *testing.T) {
