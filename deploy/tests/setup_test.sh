@@ -9,6 +9,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source-path=SCRIPTDIR/.. source=setup.sh
 . "$HERE/../setup.sh" || { echo "cannot source setup.sh" >&2; exit 1; }
 set +e
+# Case (c) stubs check_host out; case (o) tests the real one.
+REAL_CHECK_HOST=$(declare -f check_host)
 
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
@@ -823,6 +825,45 @@ for line in "Types: deb" "URIs: https://download.docker.com/linux/debian" "Suite
   check "e: docker.sources has $line" contains "$src" "$line"
 done
 check "e: Docker's key goes to /etc/apt/keyrings by default" [ "$DEFAULT_KEYRING_DIR" = /etc/apt/keyrings ]
+
+# (o) Supported hosts: Debian 13 and Ubuntu 22.04, 24.04 and 26.04. Each picks
+# its Docker repository, and 22.04 the library names from before the t64 renames.
+eval "$REAL_CHECK_HOST"
+probe_host() {
+  id() { echo 0; }
+  check_host
+  echo "$DOCKER_DISTRO $VERSION_CODENAME ${PYTHON_RUNTIME_LIBS[*]}"
+}
+host() {
+  OS_RELEASE="$T/os-release-$1-$2"
+  printf 'PRETTY_NAME="%s %s"\nID=%s\nVERSION_ID="%s"\nVERSION_CODENAME=%s\n' "$1" "$2" "$1" "$2" "$3" > "$OS_RELEASE"
+  out=$(run probe_host 2>&1)
+  rc=$?
+}
+T64="libssl3t64 libffi8 libsqlite3-0 liblzma5 libbz2-1.0 libgdbm6t64 libncursesw6 libreadline8t64 libtcl8.6 libtk8.6"
+for h in "debian 13 trixie" "ubuntu 24.04 noble" "ubuntu 26.04 resolute"; do
+  read -r id ver code <<<"$h"
+  host "$id" "$ver" "$code"
+  check "o: $id $ver is accepted" [ "$rc" -eq 0 ]
+  check "o: $id $ver uses Docker's $id repository and the t64 libraries" [ "$out" = "$id $code $T64" ]
+done
+host ubuntu 22.04 jammy
+check "o: ubuntu 22.04 is accepted" [ "$rc" -eq 0 ]
+check "o: ubuntu 22.04 uses Docker's ubuntu repository and the libraries before the t64 renames" \
+  [ "$out" = "ubuntu jammy libssl3 libffi8 libsqlite3-0 liblzma5 libbz2-1.0 libgdbm6 libncursesw6 libreadline8 libtcl8.6 libtk8.6" ]
+for h in "ubuntu 20.04 focal" "debian 12 bookworm" "fedora 42 x"; do
+  read -r id ver code <<<"$h"
+  host "$id" "$ver" "$code"
+  check "o: $id $ver is refused" [ "$rc" -ne 0 ]
+  check "o: $id $ver names the supported hosts" contains "$out" "Debian 13 or Ubuntu 22.04, 24.04 or 26.04 required (found $id $ver)"
+done
+
+DOCKER_DISTRO=ubuntu
+VERSION_CODENAME=jammy
+out=$(run write_docker_source 2>&1)
+src=$(cat "$APT_SOURCES_DIR/docker.sources" 2>/dev/null)
+check "o: on Ubuntu docker.sources names Docker's ubuntu repository" contains "$src" "URIs: https://download.docker.com/linux/ubuntu"
+check "o: on Ubuntu docker.sources names the host's codename" contains "$src" "Suites: jammy"
 
 echo
 if [ "$FAILS" -gt 0 ]; then

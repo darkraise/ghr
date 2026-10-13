@@ -1,7 +1,7 @@
 # ghr
 
 Native GitHub Actions runners for private repos, managed by [ghr](https://github.com/darkraise/ghr)
-on a dedicated Debian 13 LXC. Runners are not containers: jobs see the real filesystem,
+on a dedicated Debian 13 or Ubuntu 22.04, 24.04 or 26.04 LXC. Runners are not containers: jobs see the real filesystem,
 network and Docker daemon, so compose and Testcontainers work without workarounds.
 
 `ghr` polls each repo for queued jobs and starts single-use (JIT) runners within the
@@ -13,7 +13,7 @@ configured caps:
 
 ## Requirements
 
-- Proxmox LXC, Debian 13, `features: nesting=1,keyctl=1`. It should host nothing else:
+- Proxmox LXC, Debian 13 or Ubuntu 22.04, 24.04 or 26.04 (x86-64), `features: nesting=1,keyctl=1`. It should host nothing else:
   any job can become root on it through Docker.
 - ghr serves private repositories. It serves a public one only when `allow_public` is set
   for it. Any repo it serves must **not** enable "Run workflows from fork pull requests",
@@ -99,7 +99,7 @@ Installs, removals and clears queue and run one at a time; follow them with `ghr
 
 `setup.sh` queues the popular set on a first install once ghr is configured, and returns without waiting; until then (the owner and PAT are skipped) the set stays pending and is offered in the setup wizard, or queue it with `ghr toolchain install --preset popular`. If the first run fails before the set is queued, the next run queues it. `GHR_TOOLCHAINS=popular` or `GHR_TOOLCHAINS=none` overrides that either way. On an LXC installed before this version, run `ghr toolchain install --preset popular` once.
 
-Python must come from the tool cache on Debian: without a cached version, `setup-python` matches its download against `VERSION_ID` in `/etc/os-release`, and every build it offers targets Ubuntu, so on Debian 13 it finds none. The apt step installs the libraries those builds link.
+Python must come from the tool cache on Debian: without a cached version, `setup-python` matches its download against `VERSION_ID` in `/etc/os-release`, and every build it offers targets Ubuntu, so on Debian 13 it finds none. The apt step installs the libraries those builds link. On Ubuntu, ghr installs the builds made for the host's release, as `setup-python` itself would; on Debian it installs 24.04's.
 
 Removing the last .NET SDK of a major version also removes that major's runtimes and packs, so a job that builds with a newer SDK but runs `net8.0` tests loses them.
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Installs or upgrades ghr and native GitHub Actions runners on a Debian 13 LXC.
+# Installs or upgrades ghr and native GitHub Actions runners on a Debian 13 or
+# Ubuntu 22.04, 24.04 or 26.04 LXC.
 # Idempotent: re-run to upgrade Docker, the runner and ghr. Never overwrites config or token.
 #   bash setup.sh   (asks for the GitHub owner, the PAT and the web password; Enter skips any)
 #   curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh | bash
@@ -18,6 +19,8 @@ RUNNER_VERSION="${RUNNER_VERSION:-latest}"
 GHR_TOOLCHAINS="${GHR_TOOLCHAINS:-}"
 # The python-versions builds setup-python installs link these at run time.
 PYTHON_RUNTIME_LIBS=(libssl3t64 libffi8 libsqlite3-0 liblzma5 libbz2-1.0 libgdbm6t64 libncursesw6 libreadline8t64 libtcl8.6 libtk8.6)
+# Docker's repository for this distribution; check_host sets it from os-release.
+DOCKER_DISTRO=debian
 RUNNER_USER=ghrunner
 # The daemon hard-codes these paths; they are variables only so tests can redirect them.
 OPT_DIR=/opt/ghr
@@ -28,6 +31,7 @@ ETC_DIR=/etc/ghr
 APT_SOURCES_DIR=/etc/apt/sources.list.d
 SYSTEMD_DIR=/etc/systemd/system
 KEYRING_DIR=/etc/apt/keyrings
+OS_RELEASE=/etc/os-release
 DOCKER_KEY_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 READY_TIMEOUT=60
 
@@ -37,9 +41,15 @@ warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 
 check_host() {
   [ "$(id -u)" -eq 0 ] || die "run as root"
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  { [ "${ID:-}" = debian ] && [ "${VERSION_ID:-}" = 13 ]; } || die "Debian 13 required (found ${PRETTY_NAME:-unknown})"
+  # shellcheck disable=SC1090,SC1091
+  . "$OS_RELEASE"
+  case "${ID:-}:${VERSION_ID:-}" in
+    debian:13 | ubuntu:24.04 | ubuntu:26.04) ;;
+    # 22.04 predates the 64-bit time_t renames.
+    ubuntu:22.04) PYTHON_RUNTIME_LIBS=(libssl3 libffi8 libsqlite3-0 liblzma5 libbz2-1.0 libgdbm6 libncursesw6 libreadline8 libtcl8.6 libtk8.6) ;;
+    *) die "Debian 13 or Ubuntu 22.04, 24.04 or 26.04 required (found ${PRETTY_NAME:-unknown})" ;;
+  esac
+  DOCKER_DISTRO=$ID
 }
 
 # write_docker_source writes Docker's repository in the deb822 form Docker's
@@ -48,7 +58,7 @@ check_host() {
 write_docker_source() {
   cat > "$APT_SOURCES_DIR/docker.sources" <<EOF
 Types: deb
-URIs: https://download.docker.com/linux/debian
+URIs: https://download.docker.com/linux/${DOCKER_DISTRO}
 Suites: ${VERSION_CODENAME}
 Components: stable
 Architectures: $(dpkg --print-architecture)
@@ -63,7 +73,7 @@ EOF
 export_docker_key() {
   local work="$1" home="$1/gnupg" records fpr
   mkdir -m 0700 "$home" &&
-    curl -fsSL https://download.docker.com/linux/debian/gpg -o "$work/download.asc" &&
+    curl -fsSL "https://download.docker.com/linux/$DOCKER_DISTRO/gpg" -o "$work/download.asc" &&
     gpg --homedir "$home" --batch --no-tty --quiet --import "$work/download.asc" &&
     records=$(gpg --homedir "$home" --batch --no-tty --with-colons --list-keys "$DOCKER_KEY_FINGERPRINT") &&
     fpr=$(awk -F: '$1 == "pub" { n++ } prev == "pub" && $1 == "fpr" { f = $10 } { prev = $1 } END { if (n == 1) print f }' <<<"$records") &&
