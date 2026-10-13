@@ -134,6 +134,29 @@ func TestCleanupStopsARepositoryAtItsFirstError(t *testing.T) {
 	}
 }
 
+// A failing delete warns once per failure, not on every pass that repeats
+// it; a delete that succeeds lets the next failure warn again.
+func TestCleanupWarnsOnceWhileADeleteKeepsFailing(t *testing.T) {
+	gh := newFakeGH()
+	s, clock := newTestService(t, gh, cleanupConfig())
+	now := clock.Now()
+	gh.addRepo("darkmem", true, ghArt(1, 10, now, 50*time.Hour, 5), ghArt(2, 20, now, 40*time.Hour, 5))
+	gh.delErr[1], gh.delErr[2] = forbidden, forbidden
+	want := "cleanup stopped: " + forbidden.Error()
+	s.pass(true, false)
+	s.pass(true, false)
+	if got := eventsLike(s.Events, "cleanup stopped"); !reflect.DeepEqual(got, []string{want}) {
+		t.Fatalf("after two failing passes, events %q", got)
+	}
+	gh.mu.Lock()
+	delete(gh.delErr, 1)
+	gh.mu.Unlock()
+	s.pass(true, false)
+	if got := eventsLike(s.Events, "cleanup stopped"); !reflect.DeepEqual(got, []string{want, want}) {
+		t.Fatalf("after a delete succeeded and the next failed, events %q", got)
+	}
+}
+
 func TestCleanupSkipsARepositoryWhoseRunsCannotBeListed(t *testing.T) {
 	gh := newFakeGH()
 	s, clock := newTestService(t, gh, cleanupConfig())

@@ -87,6 +87,8 @@ type Service struct {
 	op        *model.GitHubOperation // the running or last finished operation
 	opRunning bool
 
+	cleanupErr map[string]string // lower-case repo → the failure the last cleanup event was written for; only the pass touches it
+
 	writeMu sync.Mutex
 	writes  []time.Time // guarded by writeMu: the writes of the last hour
 
@@ -129,6 +131,7 @@ func (s *Service) init() {
 	s.kick = make(chan struct{}, 1)
 	s.retention = map[string]retentionRead{}
 	s.deleted = map[string]time.Time{}
+	s.cleanupErr = map[string]string{}
 }
 
 // Start runs a full pass at once, then the inventory every

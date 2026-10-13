@@ -121,9 +121,12 @@ func (s *Service) cleanup(cfg *config.Config, gen uint64) {
 		}
 		if err != nil {
 			stopped[p.Repo] = true
-			s.setRowError(p.Repo, s.describe(err, p.Repo), gen)
+			msg := s.describe(err, p.Repo)
+			s.setRowError(p.Repo, msg, gen)
+			s.cleanupFailed(p.Repo, msg)
 			continue
 		}
+		delete(s.cleanupErr, strings.ToLower(p.Repo))
 		if deleted {
 			t := tallies[p.Repo]
 			if t == nil {
@@ -148,6 +151,19 @@ func (s *Service) cleanup(cfg *config.Config, gen uint64) {
 		}
 		s.mu.Unlock()
 	}
+}
+
+// cleanupFailed logs every failed cleanup delete but writes an event only
+// when the repository's failure changes: a pass that keeps failing repeats
+// every InventoryInterval and would flood the event ring.
+func (s *Service) cleanupFailed(repo, msg string) {
+	log.Printf("github storage: cleanup stopped in %s: %s", repo, msg)
+	key := strings.ToLower(repo)
+	if s.cleanupErr[key] == msg {
+		return
+	}
+	s.cleanupErr[key] = msg
+	s.Events.Add("warn", repo, "cleanup stopped: %s", msg)
 }
 
 func (s *Service) setRowError(repo, msg string, gen uint64) {
