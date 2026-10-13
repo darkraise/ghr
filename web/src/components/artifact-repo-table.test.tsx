@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import type { GitHubStorage } from "@/api/types"
+import type { GitHubStorage, RepoStorage } from "@/api/types"
 import { json, mockApi, noContent } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { renderRoutes } from "@/test/routes"
@@ -14,11 +14,37 @@ async function draw(storage: GitHubStorage = fixtures.githubStorage) {
 
 const row = (name: string) => screen.getByRole("row", { name: new RegExp(`^${name}\\b`) })
 
+function repo(name: string, over: Partial<RepoStorage> = {}): RepoStorage {
+  return {
+    name,
+    visibility: "private",
+    covered: true,
+    artifact_count: 0,
+    artifact_bytes: 0,
+    cache_count: 0,
+    cache_bytes: 0,
+    retention_days: 7,
+    retention_max_days: 400,
+    cleanup: "off",
+    cleanup_source: "none",
+    artifacts: [],
+    caches: [],
+    ...over,
+  }
+}
+
+// The body rows' repository names; the first row is the header, the last the totals.
+const listed = () =>
+  screen
+    .getAllByRole("row")
+    .slice(1, -1)
+    .map((r) => within(r).getByRole("rowheader").textContent?.trim().split(" ")[0])
+
 describe("ArtifactRepoTable", () => {
   it("lists each repository's artifacts, caches, retention and cleanup", async () => {
     mockApi({})
     await draw()
-    const rows = screen.getAllByRole("row").slice(1)
+    const rows = screen.getAllByRole("row").slice(1, -1)
     expect(rows.map((r) => within(r).getByRole("rowheader").textContent)).toEqual([
       expect.stringMatching(/^darkmem/),
       expect.stringMatching(/^darkcloud/),
@@ -35,15 +61,79 @@ describe("ArtifactRepoTable", () => {
     expect(within(sandbox).getByText("token lacks actions=read on darkraise/sandbox: grant it in the PAT settings")).toBeInTheDocument()
   })
 
-  it.each<[string, string, boolean]>([
-    ["warn", "darkmem", true],
-    ["warn", "darkcloud", false],
-    ["", "darkmem", false],
-  ])("at level %j, hints %s to lower its 90-day retention: %s", async (level, name, hinted) => {
+  it.each<[string, string | null]>([
+    ["warn", "1 repository keeps GitHub's 90-day default; lowering retention saves storage."],
+    ["", null],
+  ])("at level %j, the retention line reads %j", async (level, line) => {
     mockApi({})
     const quota = fixtures.githubStorage.quota && { ...fixtures.githubStorage.quota, level }
     await draw({ ...fixtures.githubStorage, quota })
-    expect(within(row(name)).queryByText("At GitHub's 90-day default: lowering it saves storage.") !== null).toBe(hinted)
+    expect(screen.queryByText(/90-day default/)?.textContent ?? null).toBe(line)
+  })
+
+  it("hides empty repositories behind a switch, largest artifacts first, then caches, then name", async () => {
+    mockApi({})
+    const { user } = await draw({
+      ...fixtures.githubStorage,
+      repos: [
+        repo("Beta"),
+        repo("alpha"),
+        repo("beta", { cache_count: 1, cache_bytes: 500 }),
+        repo("gamma", { artifact_count: 1, artifact_bytes: 10 }),
+        repo("delta", { cache_count: 2, cache_bytes: 900 }),
+        repo("epsilon", { artifact_count: 1, artifact_bytes: 10, cache_count: 1, cache_bytes: 5 }),
+      ],
+    })
+    expect(listed()).toEqual(["epsilon", "gamma", "delta", "beta"])
+    await user.click(screen.getByRole("switch", { name: "Show 2 empty repositories" }))
+    expect(listed()).toEqual(["epsilon", "gamma", "delta", "beta", "alpha", "Beta"])
+  })
+
+  it("filters by name ignoring case, showing a matching empty repository", async () => {
+    mockApi({})
+    const { user } = await draw({
+      ...fixtures.githubStorage,
+      repos: [repo("Alpha"), repo("alpine", { artifact_count: 1, artifact_bytes: 10 }), repo("beta", { artifact_count: 1, artifact_bytes: 20 })],
+    })
+    const filter = screen.getByRole("textbox", { name: "Filter repositories" })
+    await user.type(filter, "ALP")
+    expect(listed()).toEqual(["alpine", "Alpha"])
+    await user.clear(filter)
+    await user.type(filter, "nope")
+    expect(screen.getByText("No repository matches.")).toBeInTheDocument()
+  })
+
+  it("totals every repository whatever the filter shows", async () => {
+    mockApi({})
+    const { user } = await draw()
+    await user.type(screen.getByRole("textbox", { name: "Filter repositories" }), "darkcloud")
+    const total = screen.getByRole("row", { name: /^All 3 repositories/ })
+    for (const text of ["230.7 MB", "3 artifacts", "71.4 MB", "1 cache"]) {
+      expect(within(total).getByText(text)).toBeInTheDocument()
+    }
+  })
+
+  it("sets retention on every repository after a warning", async () => {
+    const { calls } = mockApi({ "POST /api/github-storage/retention": () => json({ id: "op-2" }, 202) })
+    const { user } = await draw()
+    await user.type(screen.getByRole("spinbutton", { name: "Retention for all" }), "7")
+    await user.click(screen.getByRole("button", { name: "Set retention" }))
+    const dialog = await screen.findByRole("alertdialog", { name: "Set retention to 7 days on 3 repositories?" })
+    expect(calls.some((c) => c.method === "POST")).toBe(false)
+    expect(dialog).toHaveTextContent(
+      "GitHub's retention also limits how long it keeps runs and logs, which ghr's Actions and log pages read. A repository whose maximum is lower is skipped.",
+    )
+    await user.click(within(dialog).getByRole("button", { name: "Set retention" }))
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ days: 7 }))
+    expect((await screen.findAllByText("Retention change started")).length).toBeGreaterThan(0)
+  })
+
+  it("holds Set retention while an operation runs", async () => {
+    mockApi({})
+    const operation = fixtures.githubStorage.operation && { ...fixtures.githubStorage.operation, finished_at: undefined }
+    const { user } = await draw({ ...fixtures.githubStorage, operation })
+    await user.type(screen.getByRole("spinbutton", { name: "Retention for all" }), "7")
+    expect(screen.getByRole("button", { name: "Set retention" })).toBeDisabled()
   })
 
   it("sets one repository's retention after a warning", async () => {

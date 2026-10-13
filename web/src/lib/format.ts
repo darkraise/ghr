@@ -99,3 +99,7 @@ export function shortWhen(iso: string, now: number): string {
 export function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`
 }
+
+export function repositories(n: number): string {
+  return n === 1 ? "1 repository" : `${n} repositories`
+}
