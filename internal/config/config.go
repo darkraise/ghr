@@ -62,6 +62,8 @@ type Config struct {
 	WatchRepos []string `yaml:"watch_repos,omitempty" json:"watch_repos,omitempty"`
 	// Web is read at daemon start only; changing it needs a restart.
 	Web Web `yaml:"web,omitempty" json:"web,omitzero"`
+	// GitHubStorage sets the artifact storage allowance, warnings and cleanup.
+	GitHubStorage GitHubStorage `yaml:"github_storage,omitempty" json:"github_storage,omitzero"`
 }
 
 type RunnerLimits struct {
@@ -578,6 +580,7 @@ func (c *Config) Validate() ([]string, error) {
 			errs = append(errs, "web.hosts entries must be bare hostnames such as ghr.lan")
 		}
 	}
+	errs = append(errs, c.GitHubStorage.validate()...)
 	if len(errs) > 0 {
 		return nil, errors.New(strings.Join(sortedUnique(errs), "; "))
 	}
