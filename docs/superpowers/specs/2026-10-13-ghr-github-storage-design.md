@@ -67,7 +67,7 @@ New calls in `internal/github`, each with a fake-server test in the `client_test
 - **Quota only for the token's own account** (F15). For a user owner, the billing endpoint reads the token user's own billing. When `TokenLogin` differs from the owner, there is no billing read, and `QuotaError` says "the quota can only be read with a token of <owner>". For an organization owner, the token must belong to an organization admin.
 - **Inventory**, every 15 minutes and at start. It lists the token's repositories of the owner (`ListUserRepos` filtered as `AvailableRepos` does), then for each one, 4 at a time, lists artifacts and caches. Expired artifacts are dropped from the snapshot entirely and never deleted (F16). Retention is read for a repository at most once a day.
 - **Cleanup** runs at the end of each inventory pass (§2.3).
-- **Reading config.** A pass reads the config once, at its start (F30).
+- **Reading config.** A pass reads the config once, at its start (F30). The one exception is the cleanup's re-check before each delete (§2.3).
 - **Token generation** (F19). A pass records the token generation it started under. If the generation changed by the time the pass finishes, its result is dropped. `SetToken` and `Reload` call `Refresh()`, which also clears the rows' errors.
 - **Rate budget** (F3). A pass is skipped, and the last snapshot kept, while the client is suspended for a rate limit or while the token has fewer than 500 calls left this hour.
   - At 36 repositories an inventory pass costs about 75 calls, plus 5 per repository that has cleanup candidates (§2.3), plus up to 36 retention reads once a day: 300 to 600 of the 5,000 an hour.
