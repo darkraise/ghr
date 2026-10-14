@@ -78,6 +78,13 @@ describe("GitHub token section", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
+  it("asks for Actions: read/write in the replace dialog", async () => {
+    mockApi(authedRoutes({ "GET /api/token": token() }))
+    const { user } = renderApp("/settings/token")
+    await user.click(await screen.findByRole("button", { name: "Replace token" }))
+    expect(within(await screen.findByRole("dialog")).getByText(/Actions: read\/write/)).toBeInTheDocument()
+  })
+
   it("shows a rejected token inside the dialog", async () => {
     mockApi(
       authedRoutes({

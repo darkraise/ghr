@@ -49,6 +49,13 @@ describe("setup wizard", () => {
     expect(calls.find((c) => c.path === "/api/setup/github")?.body).toEqual({ owner: "darkraise", token: "tok" })
   })
 
+  it("asks for Actions: read/write on the GitHub step", async () => {
+    mockApi(authedRoutes({ "GET /api/setup": base }))
+    renderApp("/setup")
+    await screen.findByRole("heading", { name: "Set up ghr" })
+    expect(screen.getByText(/Actions: read\/write/)).toBeInTheDocument()
+  })
+
   it("shows GitHub's refusal inline", async () => {
     mockApi(
       authedRoutes({

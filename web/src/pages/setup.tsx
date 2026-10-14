@@ -25,6 +25,7 @@ import { SettingsSections } from "@/components/settings-form"
 import { ToolchainActions } from "@/components/toolchain-actions"
 import { InstalledSection } from "@/components/toolchain-sections"
 import { useSettingsForm } from "@/lib/settings-form"
+import { TOKEN_PERMISSIONS } from "@/lib/token"
 import { errorText } from "@/query"
 
 const STEPS = ["Password", "GitHub", "Repositories", "Settings", "Toolchains", "Finish"]
@@ -88,7 +89,7 @@ function GitHubStep({ owner, onSaved }: { owner: string; onSaved: () => void }) 
         <Label htmlFor="token">Token</Label>
         <Input id="token" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} />
         <p className="text-xs text-muted-foreground">
-          A fine-grained PAT with access to the repositories ghr serves: Administration read/write, Actions read.
+          A fine-grained PAT with {TOKEN_PERMISSIONS}
         </p>
       </div>
       {error && (

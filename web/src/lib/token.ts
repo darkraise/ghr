@@ -4,6 +4,9 @@ import { hhmm, monthDay, plural } from "./format"
 
 const SOON = 14 * DAY_MS
 
+export const TOKEN_PERMISSIONS =
+  "Administration: read/write and Actions: read/write on every repository ghr serves; Contents: read is optional and draws job graphs."
+
 export function tokenWord(t: TokenStatus, now: number): string {
   if (t.state !== "ok") return t.state
   return t.expires_at && Date.parse(t.expires_at) - now < SOON ? "expires soon" : "valid"

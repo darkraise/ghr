@@ -20,7 +20,7 @@ import { ErrorLine } from "@/components/page/error-line"
 import { Field, FieldGroup } from "@/components/page/field"
 import { StatusPill } from "@/components/page/status-pill"
 import { ago } from "@/lib/format"
-import { expiryText, rateText, tokenWord } from "@/lib/token"
+import { TOKEN_PERMISSIONS, expiryText, rateText, tokenWord } from "@/lib/token"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
@@ -110,7 +110,7 @@ function ReplaceTokenForm({ onClose }: { onClose: () => void }) {
       <DialogHeader>
         <DialogTitle>Replace GitHub token</DialogTitle>
         <DialogDescription>
-          Paste a fine-grained token with Administration: read/write and Actions: read on every configured repository.
+          Paste a fine-grained token with {TOKEN_PERMISSIONS}
         </DialogDescription>
       </DialogHeader>
       <DialogBody className="flex flex-col gap-2">
