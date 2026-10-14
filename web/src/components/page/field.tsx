@@ -67,6 +67,8 @@ export function Field({
   )
 }
 
-export function FieldInput(props: ComponentProps<typeof Input>) {
-  return <Input {...useFieldAria()} {...props} />
+export function FieldInput({ "aria-describedby": describedBy, ...props }: ComponentProps<typeof Input>) {
+  const field = useFieldAria()
+  const linked = [field["aria-describedby"], describedBy].filter(Boolean).join(" ")
+  return <Input {...field} {...props} aria-describedby={linked || undefined} />
 }

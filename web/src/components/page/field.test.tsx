@@ -47,6 +47,16 @@ describe("Field", () => {
     expect(input).toHaveAccessibleDescription("How often GitHub is checked Enter a duration")
   })
 
+  it("keeps the field links when the caller adds its own description", () => {
+    render(
+      <Field label="Poll interval" htmlFor="poll" help="How often GitHub is checked">
+        <FieldInput id="poll" aria-describedby="extra" />
+        <p id="extra">At least 5s</p>
+      </Field>,
+    )
+    expect(screen.getByLabelText("Poll interval")).toHaveAccessibleDescription("How often GitHub is checked At least 5s")
+  })
+
   it("describes its control by the help alone while there is no error", () => {
     render(
       <Field label="Poll interval" htmlFor="poll" help="How often GitHub is checked">
