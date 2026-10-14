@@ -37,6 +37,11 @@ type Jobs struct {
 	StorageMeasure    Job `yaml:"storage_measure" json:"storage_measure"`
 }
 
+// IsZero lets yaml's omitempty leave out a schedule that is the defaults:
+// releases before the jobs block reject the key, and a rollback must still
+// start on a config nobody customised.
+func (j Jobs) IsZero() bool { return j == DefaultJobs() }
+
 // DefaultJobs is the schedule of a config without a jobs block: every task
 // on, at the intervals ghr used before the block existed.
 func DefaultJobs() Jobs {

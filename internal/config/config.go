@@ -74,7 +74,7 @@ type Config struct {
 	// GitHubStorage sets the artifact storage allowance, warnings and cleanup.
 	GitHubStorage GitHubStorage `yaml:"github_storage,omitempty" json:"github_storage,omitzero"`
 	// Jobs schedules ghr's background tasks.
-	Jobs Jobs `yaml:"jobs" json:"jobs"`
+	Jobs Jobs `yaml:"jobs,omitempty" json:"jobs"`
 }
 
 type RunnerLimits struct {
@@ -479,6 +479,7 @@ func (c *Config) Clone() *Config {
 	if err := yaml.Unmarshal(data, out); err != nil {
 		panic(err)
 	}
+	out.Jobs = c.Jobs // default jobs are not marshalled, and out starts without defaults
 	return out
 }
 

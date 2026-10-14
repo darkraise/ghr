@@ -150,3 +150,45 @@ func TestExampleConfigDocumentsTheJobsBlock(t *testing.T) {
 		t.Fatalf("the jobs block reads %+v, want the defaults %+v", c.Jobs, DefaultJobs())
 	}
 }
+
+// Releases before the jobs block refuse an unknown key, so a config that
+// keeps the defaults must not grow one: rolling ghr back would crash-loop.
+func TestSaveLeavesOutDefaultJobs(t *testing.T) {
+	c, _, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "jobs:") {
+		t.Fatalf("a default schedule was written:\n%s", data)
+	}
+
+	c.Jobs.Prune.Every = Duration(48 * time.Hour)
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	back, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Jobs != c.Jobs {
+		t.Fatalf("saved %+v, read back %+v", c.Jobs, back.Jobs)
+	}
+}
+
+func TestCloneKeepsDefaultJobs(t *testing.T) {
+	c, _, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Clone().Jobs; got != DefaultJobs() {
+		t.Fatalf("clone has %+v, want the defaults", got)
+	}
+}
