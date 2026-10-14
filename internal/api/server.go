@@ -97,6 +97,12 @@ type Backend interface {
 	DeleteRegistration(ctx context.Context, repo string, id int64) error
 	QueueRunnerUpdate(ctx context.Context) error
 	CancelRunnerUpdate() error
+	// RunJob runs a background task now.
+	RunJob(name string) error
+	// StartGhrUpdate starts installing the newest ghr release;
+	// CancelGhrUpdate stops it before its swap.
+	StartGhrUpdate() error
+	CancelGhrUpdate() error
 	AvailableRepos(ctx context.Context) ([]model.AvailableRepo, error)
 	Storage() model.Storage
 	RefreshStorage() error
@@ -371,6 +377,11 @@ func NewServer(b Backend) http.Handler {
 	})
 	mux.HandleFunc("DELETE /runner-update", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, b.CancelRunnerUpdate())
+	})
+	mux.HandleFunc("POST /jobs/{name}/run", accepted(func(r *http.Request) error { return b.RunJob(r.PathValue("name")) }))
+	mux.HandleFunc("POST /ghr-update", accepted(func(*http.Request) error { return b.StartGhrUpdate() }))
+	mux.HandleFunc("DELETE /ghr-update", func(w http.ResponseWriter, r *http.Request) {
+		respond(w, nil, b.CancelGhrUpdate())
 	})
 	mux.HandleFunc("GET /storage", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.Storage()) })
 	mux.HandleFunc("POST /storage/refresh", accepted(func(*http.Request) error { return b.RefreshStorage() }))

@@ -53,6 +53,10 @@ type fakeBackend struct {
 	activity      model.Activity
 	updates       []string
 	updateErr     error
+	jobRuns       []string
+	jobErr        error // returned by RunJob
+	ghrCalls      []string
+	ghrErr        error // returned by StartGhrUpdate and CancelGhrUpdate
 	avail         []model.AvailableRepo
 	availErr      error
 	storage       model.Storage
@@ -162,6 +166,21 @@ func (f *fakeBackend) QueueRunnerUpdate(context.Context) error {
 func (f *fakeBackend) CancelRunnerUpdate() error {
 	f.updates = append(f.updates, "cancel")
 	return f.updateErr
+}
+
+func (f *fakeBackend) RunJob(name string) error {
+	f.jobRuns = append(f.jobRuns, name)
+	return f.jobErr
+}
+
+func (f *fakeBackend) StartGhrUpdate() error {
+	f.ghrCalls = append(f.ghrCalls, "start")
+	return f.ghrErr
+}
+
+func (f *fakeBackend) CancelGhrUpdate() error {
+	f.ghrCalls = append(f.ghrCalls, "cancel")
+	return f.ghrErr
 }
 
 func (f *fakeBackend) Activity(_ context.Context, window, repo string, loc *time.Location) (model.Activity, error) {

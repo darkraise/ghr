@@ -268,6 +268,21 @@ func (c *Client) CancelRunnerUpdate(ctx context.Context) error {
 	return c.call(ctx, http.MethodDelete, "/runner-update", nil, nil)
 }
 
+// RunJob runs a background task now.
+func (c *Client) RunJob(ctx context.Context, name string) error {
+	return c.call(ctx, http.MethodPost, "/jobs/"+url.PathEscape(name)+"/run", nil, nil)
+}
+
+// StartGhrUpdate starts installing the newest ghr release.
+func (c *Client) StartGhrUpdate(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/ghr-update", nil, nil)
+}
+
+// CancelGhrUpdate stops a ghr install before it swaps the files.
+func (c *Client) CancelGhrUpdate(ctx context.Context) error {
+	return c.call(ctx, http.MethodDelete, "/ghr-update", nil, nil)
+}
+
 // AvailableRepos lists the owner's repositories the token can access.
 func (c *Client) AvailableRepos(ctx context.Context) ([]model.AvailableRepo, error) {
 	var rs []model.AvailableRepo
