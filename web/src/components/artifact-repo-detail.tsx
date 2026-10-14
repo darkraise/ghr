@@ -39,6 +39,7 @@ function RunLink({ repo, owner, artifact }: { repo: RepoStorage; owner: string; 
       </Link>
     )
   }
+  if (owner === "") return <>{text}</>
   return (
     <a href={`https://github.com/${owner}/${repo.name}/actions/runs/${artifact.run_id}`} target="_blank" rel="noreferrer" className="hover:text-primary hover:underline">
       {text}
