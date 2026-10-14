@@ -282,6 +282,7 @@ func logs(ctx context.Context, c *api.Client, args []string, out io.Writer) erro
 			if ctx.Err() != nil {
 				return flush()
 			}
+			flush()
 			return err
 		}
 		data := held + chunk.Data

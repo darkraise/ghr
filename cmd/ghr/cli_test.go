@@ -60,6 +60,13 @@ func fakeDaemon(t *testing.T) *[]recorded {
 				"s=2": {Data: "three\r", Next: "s=3"},
 			}
 			json.NewEncoder(w).Encode(chunks[r.URL.Query().Get("cursor")])
+		case r.URL.Path == "/runners/broken/log":
+			if r.URL.Query().Get("cursor") == "" {
+				json.NewEncoder(w).Encode(model.LogChunk{Data: "one\r", Next: "b=1"})
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "log store failed"})
 		case strings.HasSuffix(r.URL.Path, "/log"):
 			// Two chunks, then nothing new: an unknown cursor gets an empty chunk.
 			chunks := map[string]model.LogChunk{
@@ -352,6 +359,58 @@ func TestLogsHoldACarriageReturnAcrossChunks(t *testing.T) {
 	if code, out, _ := runCLI(t, "", "logs", "split"); code != 0 || out != "one\r\ntwo\rthree\r" {
 		t.Fatalf("logs in a pipe %d %q, want the raw bytes", code, out)
 	}
+}
+
+func TestLogsFlushAHeldCarriageReturnWhenTheDaemonFails(t *testing.T) {
+	fakeDaemon(t)
+	stubStdoutTerminal(t, true)
+	code, out, errOut := runCLI(t, "", "logs", "broken")
+	if code != 1 || out != "one\n" || !strings.Contains(errOut, "log store failed") {
+		t.Fatalf("logs %d out %q err %q, want exit 1, the held line break and the daemon's error", code, out, errOut)
+	}
+}
+
+// logPoller answers the polls of a followed log from a script and counts them.
+type logPoller struct {
+	chunks []model.LogChunk
+	polls  *int
+}
+
+func (p logPoller) RoundTrip(r *http.Request) (*http.Response, error) {
+	chunk := p.chunks[min(*p.polls, len(p.chunks)-1)]
+	*p.polls++
+	body, _ := json.Marshal(chunk)
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
+}
+
+func TestFollowKeepsACarriageReturnHeldThroughAnEmptyPoll(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stubStdoutTerminal(t, true)
+		polls := 0
+		client := &api.Client{Base: "http://ghr", HTTP: &http.Client{Transport: logPoller{
+			chunks: []model.LogChunk{{Data: "one\r", Next: "f=1"}, {Next: "f=1"}}, polls: &polls}}}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var out bytes.Buffer
+		var err error
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			err = logs(ctx, client, []string{"a3f9c1", "-f"}, &out)
+		}()
+		synctest.Wait()
+		time.Sleep(logPollInterval)
+		synctest.Wait()
+		if polls != 2 || out.String() != "one" {
+			t.Fatalf("after an empty poll: %d polls, output %q, want 2 polls and the CR still held", polls, out.String())
+		}
+		cancel()
+		synctest.Wait()
+		<-done
+		if err != nil || out.String() != "one\n" {
+			t.Errorf("after the cancellation: err %v, output %q, want the held CR flushed as a line break", err, out.String())
+		}
+	})
 }
 
 func TestLogsAreRawInAPipe(t *testing.T) {
