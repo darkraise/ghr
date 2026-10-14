@@ -855,7 +855,19 @@ echo '{"queued_at":"2026-10-05T12:00:00Z","warned_version":"2.338.0"}' > "$STATE
 out=$( (run stop_ghr) 2>&1)
 rc=$?
 check "c: stop_ghr succeeds with a queued runner update" [ "$rc" -eq 0 ]
-check "c: stop_ghr drops the queued runner update" [ ! -e "$STATE_DIR/runner-update.json" ]
+check "c: stop_ghr drops the queued runner update" [ "$(jq -c . "$STATE_DIR/runner-update.json")" = '{"warned_version":"2.338.0"}' ]
+check "c: stop_ghr leaves no temp file behind" absent "$STATE_DIR/runner-update.json.tmp"
+echo '{"queued_at":"2026-10-05T12:00:00Z"' > "$STATE_DIR/runner-update.json"
+out=$( (run stop_ghr) 2>&1)
+rc=$?
+check "c: stop_ghr succeeds with an unreadable runner update file" [ "$rc" -eq 0 ]
+check "c: stop_ghr removes an unreadable runner update file" absent "$STATE_DIR/runner-update.json"
+check "c: and its temp file" absent "$STATE_DIR/runner-update.json.tmp"
+rm -f "$STATE_DIR/runner-update.json"
+out=$( (run stop_ghr) 2>&1)
+rc=$?
+check "c: stop_ghr succeeds with no runner update file" [ "$rc" -eq 0 ]
+check "c: and creates none" absent "$STATE_DIR/runner-update.json"
 
 new_case c-main-not-ready
 echo 0 > "$MARK_DIR/restarts"

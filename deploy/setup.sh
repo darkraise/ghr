@@ -146,6 +146,7 @@ fetch_runner() {
 # If a later step fails, the exit trap starts the old daemon again.
 # A queued update is dropped while the daemon is down, so the restarted daemon
 # does not install a runner version over the one this script just installed.
+# The version it already warned about is kept, or it would warn again.
 stop_ghr() {
   trap 'systemctl start ghr.service 2>/dev/null || true' EXIT
   if systemctl cat ghr.service >/dev/null 2>&1; then
@@ -154,7 +155,10 @@ stop_ghr() {
       active | deactivating) die "could not stop ghr.service; stop it and re-run" ;;
     esac
   fi
-  rm -f "$STATE_DIR/runner-update.json"
+  local update="$STATE_DIR/runner-update.json"
+  if [ -e "$update" ]; then
+    jq 'del(.queued_at)' "$update" > "$update.tmp" && mv -f "$update.tmp" "$update" || rm -f "$update" "$update.tmp"
+  fi
 }
 
 # A version an older setup.sh extracted kept the tarball's owner ids (1001),
