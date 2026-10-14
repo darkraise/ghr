@@ -156,8 +156,7 @@ func TestRateLimitStopsTheRestOfTheTick(t *testing.T) {
 	}
 }
 
-// Below 1,000 remaining calls the demand poll runs on every second tick, and
-// the skipped tick does not spawn from the older answer.
+// Below 1,000 remaining calls the demand poll runs on every second tick.
 func TestLowRateHalvesTheDemandPoll(t *testing.T) {
 	h := newHarness(t)
 	polls := func() int { return strings.Count(h.gh.callsText(), "ListRuns darkcloud") }
@@ -174,18 +173,53 @@ func TestLowRateHalvesTheDemandPoll(t *testing.T) {
 	if got[0] == got[1] || got[1] == got[2] || got[2] == got[3] {
 		t.Fatalf("polled on ticks %v, want every second one", got)
 	}
+}
 
-	h = newHarness(t)
+// A tick that skips the demand poll plans no spawns from the older answer.
+func TestLowRateSkippedTickDoesNotSpawn(t *testing.T) {
+	h := newHarness(t)
 	h.gh.remaining = 999
+	h.cfg.GlobalMax = 30
+	uncapped := 0
+	h.cfg.Repos[1].Max = &uncapped
+	h.ids = nil
+	for i := 0; i < 40; i++ {
+		h.ids = append(h.ids, fmt.Sprintf("%06x", i+1))
+	}
+	var jobs []github.Job
+	for i := 0; i < maxSpawnsPerTick+5; i++ {
+		jobs = append(jobs, github.Job{ID: int64(i + 1), Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
+	}
+	queuedRun(h, "darkmem", 1, jobs...)
+	for tick, want := range []int{maxSpawnsPerTick, maxSpawnsPerTick, maxSpawnsPerTick + 5} {
+		h.m.Tick(context.Background())
+		if got := len(h.sd.started); got != want {
+			t.Fatalf("tick %d: started %d units, want %d", tick+1, got, want)
+		}
+		h.now = h.now.Add(10 * time.Second)
+	}
+}
+
+// A queued update does not start on a tick that skipped the demand poll, and
+// the skipped tick does not report a wait for an answer nobody asked for.
+func TestLowRateSkippedTickDoesNotStartUpdate(t *testing.T) {
+	h := newHarness(t)
+	h.gh.remaining = 999
+	preparedUpdate(t, h)
+	idleRunner(t, h)
+	h.m.ticks = 1 // the next tick is the second: it skips the poll
 	h.m.Tick(context.Background())
-	queuedRun(h, "darkcloud", 1, github.Job{ID: 1, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
-	h.m.Tick(context.Background())
-	if len(h.sd.started) != 0 {
-		t.Fatalf("spawned on the skipped tick: %d", len(h.sd.started))
+	h.m.Wait()
+	if current(t, h) == "2.338.0" || len(h.sd.stopped) != 0 || strings.Contains(h.eventText(), "runner update started") {
+		t.Fatalf("update started on the skipped tick\n%s", h.eventText())
+	}
+	if strings.Contains(h.eventText(), "runner update waiting") {
+		t.Fatalf("the skipped tick reported a wait\n%s", h.eventText())
 	}
 	h.m.Tick(context.Background())
-	if len(h.sd.started) != 1 {
-		t.Fatalf("spawned %d on the polled tick", len(h.sd.started))
+	h.m.Wait()
+	if current(t, h) != "2.338.0" {
+		t.Fatalf("current %s\n%s", current(t, h), h.eventText())
 	}
 }
 
