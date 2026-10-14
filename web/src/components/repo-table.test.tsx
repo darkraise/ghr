@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "darkraise-ui/components/tooltip"
 import { describe, expect, it, vi } from "vitest"
@@ -106,6 +106,18 @@ describe("RepoTable", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Edit" }))
     expect(onEdit).toHaveBeenCalledWith("darkmem")
     expect(onOpen).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    ["Ctrl", { ctrlKey: true }],
+    ["Cmd", { metaKey: true }],
+    ["Shift", { shiftKey: true }],
+    ["Alt", { altKey: true }],
+  ])("leaves a click with %s held on a repository's name to the browser", (_, modifier) => {
+    const { onOpen } = draw()
+    const proceeded = fireEvent.click(screen.getByRole("link", { name: "darkcloud" }), modifier)
+    expect(proceeded).toBe(true)
+    expect(onOpen).not.toHaveBeenCalled()
   })
 
   it("locks pause and remove while the daemon is unreachable", async () => {

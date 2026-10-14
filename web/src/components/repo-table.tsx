@@ -6,6 +6,7 @@ import { RepoRowMenu } from "@/components/repo-row-menu"
 import { ResultIcon } from "@/components/result-icon"
 import { RunnerMeter } from "@/components/runner-meter"
 import { ago } from "@/lib/format"
+import { plainClick } from "@/lib/plain-click"
 import { repoStateWord } from "@/lib/status"
 
 function RunnerCells({ repo }: { repo: RepoStatus }) {
@@ -61,8 +62,9 @@ export function RepoTable({
                   href={`/repositories/${encodeURIComponent(r.name)}`}
                   className="font-semibold hover:underline"
                   onClick={(e) => {
-                    e.preventDefault()
                     e.stopPropagation()
+                    if (!plainClick(e)) return
+                    e.preventDefault()
                     onOpen(r.name)
                   }}
                 >
