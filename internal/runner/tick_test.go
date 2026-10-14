@@ -156,6 +156,39 @@ func TestRateLimitStopsTheRestOfTheTick(t *testing.T) {
 	}
 }
 
+// Below 1,000 remaining calls the demand poll runs on every second tick, and
+// the skipped tick does not spawn from the older answer.
+func TestLowRateHalvesTheDemandPoll(t *testing.T) {
+	h := newHarness(t)
+	polls := func() int { return strings.Count(h.gh.callsText(), "ListRuns darkcloud") }
+	tick := func() int {
+		before := polls()
+		h.m.Tick(context.Background())
+		return polls() - before
+	}
+	if tick() == 0 || tick() == 0 {
+		t.Fatal("polls skipped with plenty of calls left")
+	}
+	h.gh.remaining = 999
+	got := []bool{tick() > 0, tick() > 0, tick() > 0, tick() > 0}
+	if got[0] == got[1] || got[1] == got[2] || got[2] == got[3] {
+		t.Fatalf("polled on ticks %v, want every second one", got)
+	}
+
+	h = newHarness(t)
+	h.gh.remaining = 999
+	h.m.Tick(context.Background())
+	queuedRun(h, "darkcloud", 1, github.Job{ID: 1, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
+	h.m.Tick(context.Background())
+	if len(h.sd.started) != 0 {
+		t.Fatalf("spawned on the skipped tick: %d", len(h.sd.started))
+	}
+	h.m.Tick(context.Background())
+	if len(h.sd.started) != 1 {
+		t.Fatalf("spawned %d on the polled tick", len(h.sd.started))
+	}
+}
+
 func TestNotFoundIsPerRepoWithBackoff(t *testing.T) {
 	h := newHarness(t)
 	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 404, Kind: github.ErrNotFound})

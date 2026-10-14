@@ -12,6 +12,16 @@ import (
 	"github.com/darkraise/ghr/internal/sched"
 )
 
+// lowRateRemaining is the remaining-calls count below which the demand poll
+// slows down.
+const lowRateRemaining = 1000
+
+// lowOnCalls reports whether the last seen quota is below lowRateRemaining;
+// RateRemaining is -1 before any request.
+func lowOnCalls(remaining int) bool {
+	return remaining >= 0 && remaining < lowRateRemaining
+}
+
 // Tick runs one poll → schedule → spawn → reap cycle. Every phase that calls
 // the GitHub API re-checks apiAllowed, because an earlier phase may have hit
 // a rate limit or an auth failure.
@@ -27,8 +37,12 @@ func (m *Manager) Tick(ctx context.Context) {
 	if m.apiAllowed(now) {
 		m.refreshRunners(ctx)
 	}
+	// A poll costs calls per active run, so with the quota running low it
+	// runs on every second tick; a skipped tick neither plans spawns nor
+	// starts an update, which both need a fresh answer.
+	slow := m.ticks%2 == 0 && lowOnCalls(m.GH.RateRemaining())
 	demandOK, unanswered := false, ""
-	if m.apiAllowed(now) {
+	if m.apiAllowed(now) && !slow {
 		demandOK, unanswered = m.gatherDemand(ctx, cfg, now)
 	}
 	m.noteBlocked(cfg)
@@ -41,9 +55,11 @@ func (m *Manager) Tick(ctx context.Context) {
 		m.stopDeregistered(ctx, now)
 	}
 	m.stopStartTimedOut(ctx, cfg, now)
-	m.startUpdateIfFree(ctx, cfg, now, demandOK, unanswered)
+	if !slow {
+		m.startUpdateIfFree(ctx, cfg, now, demandOK, unanswered)
+	}
 	m.prepareUpdate(now)
-	if m.apiAllowed(now) && !m.isDegraded() {
+	if m.apiAllowed(now) && !m.isDegraded() && !slow {
 		m.spawnPlanned(ctx, cfg, now)
 	}
 	if m.apiAllowed(now) && !m.isDegraded() && m.ticks%30 == 0 {
