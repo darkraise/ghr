@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +105,7 @@ func TestValidateErrors(t *testing.T) {
 		"darkmem: a repo being removed must stay paused":       func(c *Config) { c.Repos[1].Removing = true },
 		"runner_limits.memory_max":                             func(c *Config) { c.RunnerLimits.MemoryMax = "6 gigs" },
 		"runner_limits.cpu_quota":                              func(c *Config) { c.RunnerLimits.CPUQuota = "2" },
+		"darkmem: 101 labels; GitHub allows at most 100":       func(c *Config) { c.Labels = numberedLabels(98) },
 		"poll_interval must be >= 5s":                          func(c *Config) { c.PollInterval = Duration(time.Millisecond) },
 		"history_retention must be >= 1d":                      func(c *Config) { c.HistoryRetention = Duration(time.Second) },
 		"watch_repos must not contain an empty name":           func(c *Config) { c.WatchRepos = []string{" "} },
@@ -250,6 +252,39 @@ func TestDurationFloorsAreInclusive(t *testing.T) {
 	c.PollInterval, c.HistoryRetention = Duration(MinPollInterval), Duration(MinHistoryRetention)
 	if _, err := c.Validate(); err != nil {
 		t.Fatalf("floor values rejected: %v", err)
+	}
+}
+
+func numberedLabels(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = "label-" + strconv.Itoa(i)
+	}
+	return out
+}
+
+func TestLabelCountBound(t *testing.T) {
+	c, _, _ := Parse([]byte(sample))
+	c.Labels = numberedLabels(97)
+	c.Repos[0].Labels = []string{"darkcloud-linux"}
+	if _, err := c.Validate(); err == nil || !strings.Contains(err.Error(), "darkcloud: 101 labels") {
+		t.Fatalf("98 custom labels accepted: %v", err)
+	}
+
+	c, _, _ = Parse([]byte(sample))
+	c.Labels = numberedLabels(97)
+	c.Repos[0].Labels = nil
+	c.Repos[1].Labels = nil
+	if _, err := c.Validate(); err != nil {
+		t.Fatalf("97 custom labels rejected: %v", err)
+	}
+
+	c, _, _ = Parse([]byte(sample))
+	c.Labels = numberedLabels(97)
+	c.Repos[0].Labels = []string{"label-1", "label-96"}
+	c.Repos[1].Labels = nil
+	if _, err := c.Validate(); err != nil {
+		t.Fatalf("labels repeated across the global and repo lists counted twice: %v", err)
 	}
 }
 

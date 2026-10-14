@@ -16,7 +16,7 @@ idle_timeout: 5m            # idle runners beyond warm stop after this
 disk_high_water: 80         # percent of Docker's data-root filesystem that triggers pruning
 build_cache_keep: 20GB      # Docker build cache kept when pruning
 history_retention: 30d      # job history and logs older than this are removed; at least 1d
-labels: [docker]            # added to every runner, besides self-hosted, linux and x64
+labels: [docker]            # added to every runner, besides self-hosted, linux and x64; at most 97 custom labels per repository
 runner_limits:              # per runner
   memory_max: 6G            # empty for no limit
   cpu_quota: 200%           # 100% is one CPU core

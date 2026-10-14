@@ -44,6 +44,10 @@ var SystemLabels = []string{"self-hosted", "linux", "x64"}
 // MaxLabelLength is the longest a custom label may be, in characters.
 const MaxLabelLength = 100
 
+// maxJITLabels is the most labels GitHub accepts when generating a runner's
+// JIT configuration; the system labels count towards it.
+const maxJITLabels = 100
+
 type Config struct {
 	Owner            string       `yaml:"owner" json:"owner"`
 	Mode             string       `yaml:"mode" json:"mode"`
@@ -551,6 +555,9 @@ func (c *Config) Validate() ([]string, error) {
 		}
 		if len(c.CustomLabels(r)) == 0 {
 			errs = append(errs, r.Name+": needs at least one label in labels or repo labels")
+		}
+		if n := len(c.EffectiveLabels(r)); n > maxJITLabels {
+			errs = append(errs, fmt.Sprintf("%s: %d labels; GitHub allows at most %d including self-hosted, linux and x64", r.Name, n, maxJITLabels))
 		}
 		if len(r.CleanupNamePrefixes) > 0 && c.EffectiveMax(r) != 1 {
 			warnings = append(warnings, r.Name+": cleanup_name_prefixes can remove a concurrent job's containers when max is not 1")
