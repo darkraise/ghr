@@ -230,7 +230,8 @@ const LOG_HEADER = /^==> (?:Runner|Worker)_.*\.log <==$/gm
 function trimLog(text: string): string {
   const want = text.length - MAX_LOG
   const newline = text.indexOf("\n", want)
-  const cut = newline >= 0 ? newline + 1 : want
+  const code = text.charCodeAt(want)
+  const cut = newline >= 0 ? newline + 1 : code >= 0xdc00 && code <= 0xdfff ? want + 1 : want
   const kept = text.slice(cut)
   if (kept.search(LOG_HEADER) === 0) return kept
   const header = text.slice(0, cut).match(LOG_HEADER)?.at(-1)

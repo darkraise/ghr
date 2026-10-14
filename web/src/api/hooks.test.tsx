@@ -45,6 +45,13 @@ describe("appendLog", () => {
     expect(out.length).toBeLessThanOrEqual(MAX_LOG + 21)
   })
 
+  it("does not cut a surrogate pair when no line ends after the cut", () => {
+    const header = "==> Worker_1.log <==\n"
+    const text = `${header}${"a".repeat(79)}\u{1F600}${"b".repeat(MAX_LOG - 1)}`
+    expect(text.length).toBe(MAX_LOG + 101)
+    expect(appendLog({ text, next: "c1", drained: false }, { data: "", next: "c1" }).text).toBe(`${header}${"b".repeat(MAX_LOG - 1)}`)
+  })
+
   it("does not repeat a header the kept part opens with", () => {
     const front = `==> Runner_1.log <==\n${rows("r", 50)}\n`
     const kept = `==> Worker_2.log <==\n${"w".repeat(MAX_LOG - 23)}\n`
