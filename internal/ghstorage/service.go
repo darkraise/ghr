@@ -269,7 +269,7 @@ func (s *Service) pass(inventory, billing bool) {
 	if !s.GH.SuspendedUntil().IsZero() {
 		return
 	}
-	if n := s.GH.RateRemaining(); n >= 0 && n < MinRateLeft {
+	if s.rateLow() {
 		return
 	}
 	gen := s.GH.TokenMeta().Generation
@@ -279,6 +279,13 @@ func (s *Service) pass(inventory, billing bool) {
 	if billing {
 		s.readBilling(cfg, gen)
 	}
+}
+
+// rateLow reports whether the token has fewer than MinRateLeft calls left
+// this hour.
+func (s *Service) rateLow() bool {
+	n := s.GH.RateRemaining()
+	return n >= 0 && n < MinRateLeft
 }
 
 // keep reports whether a pass started under token generation gen may write
@@ -391,6 +398,7 @@ type listing struct {
 	artifacts []model.ArtifactItem
 	caches    []model.CacheItem
 	err       error
+	skipped   bool           // the rate limit reserve was reached before it was listed
 	retention *retentionRead // nil when not read this pass
 }
 
@@ -449,9 +457,17 @@ func (s *Service) inventory(cfg *config.Config, gen uint64) {
 }
 
 func (s *Service) list(ctx context.Context, l *listing, readRetention bool, now time.Time) {
+	if s.rateLow() {
+		l.skipped = true
+		return
+	}
 	arts, err := s.GH.ListRepoArtifacts(ctx, l.name)
 	if err != nil {
 		l.err = err
+		return
+	}
+	if s.rateLow() {
+		l.skipped = true
 		return
 	}
 	caches, err := s.GH.ListCaches(ctx, l.name)
@@ -482,9 +498,10 @@ func (s *Service) list(ctx context.Context, l *listing, readRetention bool, now 
 }
 
 // merge replaces the rows with the listings. A repository whose listing
-// failed keeps its last items with the error. Items deleted since the
-// listing started are left out, so a delete is never undone by a listing
-// that was already under way. Call with s.mu held.
+// failed keeps its last items with the error, and one that was skipped keeps
+// them without. Items deleted since the listing started are left out, so a
+// delete is never undone by a listing that was already under way. Call with
+// s.mu held.
 func (s *Service) merge(ls []*listing, now time.Time) {
 	for k, at := range s.deleted {
 		if now.Sub(at) >= deletedTTL {
@@ -507,12 +524,14 @@ func (s *Service) merge(ls []*listing, now time.Time) {
 		if l.private {
 			row.Visibility = "private"
 		}
-		if l.err != nil {
+		if l.err != nil || l.skipped {
 			old := prev[key]
 			row.Artifacts, row.Caches = old.Artifacts, old.Caches
-			row.Error = s.describe(l.err, l.name)
-			if github.IsTooManyPages(l.err) {
-				row.Error = l.name + " has more than 5,000 artifacts or caches, more than ghr lists: lower its retention"
+			if l.err != nil {
+				row.Error = s.describe(l.err, l.name)
+				if github.IsTooManyPages(l.err) {
+					row.Error = l.name + " has more than 5,000 artifacts or caches, more than ghr lists: lower its retention"
+				}
 			}
 		} else {
 			for _, a := range l.artifacts {
