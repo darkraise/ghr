@@ -519,9 +519,11 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 		return fmt.Errorf("remove %s: %w", dir, err)
 	}
 	m.removePrivate(id)
-	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil &&
-		!github.IsKind(err, github.ErrUnprocessable) && !github.IsKind(err, github.ErrNotFound) {
-		m.Events.Add("warn", i.Repo, "delete registration %s: %v (reconciliation retries)", i.RunnerName, err)
+	if !i.deregistered {
+		if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil &&
+			!github.IsKind(err, github.ErrUnprocessable) && !github.IsKind(err, github.ErrNotFound) {
+			m.Events.Add("warn", i.Repo, "delete registration %s: %v (reconciliation retries)", i.RunnerName, err)
+		}
 	}
 
 	if !hadJob {
@@ -773,22 +775,47 @@ func (m *Manager) deregisterIdle(ctx context.Context, i instance, now time.Time)
 	return idleStopped, true
 }
 
-// stopStartTimedOut stops runners that never came online; finish deletes their registration.
+// stopStartTimedOut deregisters and stops runners that never came online.
+// GitHub refuses to delete a busy runner (422), so a job handed to one at the
+// last moment is never killed by the stop.
 func (m *Manager) stopStartTimedOut(ctx context.Context, cfg *config.Config, now time.Time) {
 	for _, id := range sched.StartTimedOut(cfg, m.schedInstances(cfg), now) {
 		m.mu.Lock()
 		i, ok := m.insts[id]
-		repo, answered := "", false
+		var cur instance
 		if ok {
-			repo, answered = i.Repo, i.answered
+			cur = *i
 		}
 		m.mu.Unlock()
 		// A stop a person asked for can finish and remove a runner while this
-		// loop is stopping another one. A runner the runners API did not answer
-		// for in this tick is left alone: an API pause or a failed call says
-		// nothing about whether it came online.
-		if !ok || !answered {
+		// loop is stopping another one, and a job recorded meanwhile makes it
+		// busy. A runner the runners API did not answer for in this tick is
+		// left alone: an API pause or a failed call says nothing about whether
+		// it came online. One already deregistered can take no job.
+		if !ok || cur.State != sched.Starting || (!cur.answered && !cur.deregistered) {
 			continue
+		}
+		repo := cur.Repo
+		if !cur.deregistered {
+			if !m.apiAllowed(now) {
+				continue
+			}
+			// The runners API answered for it in this tick, so a 404 here
+			// means the registration is gone.
+			err := m.GH.DeleteRunner(ctx, repo, cur.RunnerID)
+			switch {
+			case github.IsKind(err, github.ErrUnprocessable):
+				m.move(id, sched.Busy, sched.Starting, sched.Idle)
+				continue
+			case err != nil && !github.IsKind(err, github.ErrNotFound):
+				m.apiErr(repo, err, now)
+				continue
+			}
+			m.mu.Lock()
+			if p := m.insts[id]; p != nil {
+				p.deregistered = true
+			}
+			m.mu.Unlock()
 		}
 		if err := m.SD.Stop(ctx, UnitPrefix+id); err != nil {
 			m.Events.Add("warn", repo, "stop %s: %v", id, err)

@@ -666,6 +666,15 @@ func TestStartTimeoutStopsUnit(t *testing.T) {
 	if len(h.sd.stopped) != 1 || !strings.Contains(h.eventText(), "did not come online within 2m0s") {
 		t.Fatalf("stopped %v events %s", h.sd.stopped, h.eventText())
 	}
+	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("deleted %v", h.gh.deleted)
+	}
+	// finish does not delete the registration a second time.
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if h.state("aaaaaa") != "gone" || !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("state %s deleted %v", h.state("aaaaaa"), h.gh.deleted)
+	}
 }
 
 func TestKill(t *testing.T) {
@@ -1154,6 +1163,75 @@ func TestStartTimeoutSkipsARunnerThatIsGone(t *testing.T) {
 	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
 	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) {
 		t.Fatalf("stopped %v, want only ghr-runner-aaaaaa", h.sd.stopped)
+	}
+}
+
+// A stop can block for a while, and a job recorded meanwhile (a maintenance
+// hold reads job.json from another goroutine) makes the next runner busy.
+func TestStartTimeoutSkipsARunnerThatTookAJobMeanwhile(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.refreshRunners(context.Background()) // the runners API answers: still offline
+	h.now = h.now.Add(3 * time.Minute)
+	h.writeJob(t, "bbbbbb", 55)
+	h.sd.stopGate, h.sd.stopEntered = make(chan struct{}), make(chan struct{}, 2)
+	go func() {
+		<-h.sd.stopEntered
+		h.m.readJobFiles()
+		close(h.sd.stopGate)
+	}()
+	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || h.state("bbbbbb") != "busy" {
+		t.Fatalf("stopped %v, bbbbbb %s", h.sd.stopped, h.state("bbbbbb"))
+	}
+	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("deleted %v, want only 101", h.gh.deleted)
+	}
+}
+
+// The registration goes before the unit stops. GitHub refuses to delete a
+// runner that took a job (422): it is busy and keeps running. Any other
+// failure leaves it for the next tick.
+func TestStartTimeoutDeregistersBeforeStopping(t *testing.T) {
+	for _, c := range []struct {
+		err   error
+		state string
+	}{
+		{&github.APIError{Status: 422, Kind: github.ErrUnprocessable}, "busy"},
+		{&github.APIError{Status: 502, Kind: github.ErrServer}, "starting"},
+	} {
+		h := newHarness(t)
+		h.m.spawn(context.Background(), h.cfg, "darkmem")
+		h.m.refreshRunners(context.Background())
+		h.now = h.now.Add(3 * time.Minute)
+		h.gh.setErr("DeleteRunner darkmem", c.err)
+		h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+		if len(h.sd.stopped) != 0 || h.state("aaaaaa") != c.state {
+			t.Fatalf("%v: stopped %v state %s", c.err, h.sd.stopped, h.state("aaaaaa"))
+		}
+	}
+}
+
+// A runner deregistered by a stop that then failed can take no job, so its
+// stop is retried without another delete, even during an API pause.
+func TestStartTimeoutRetriesOnlyTheUnitAfterDeregistering(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.refreshRunners(context.Background())
+	h.now = h.now.Add(3 * time.Minute)
+	h.sd.stopErr["ghr-runner-aaaaaa"] = errors.New("unit busy")
+	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+	if len(h.sd.stopped) != 0 || !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("stopped %v deleted %v", h.sd.stopped, h.gh.deleted)
+	}
+	delete(h.sd.stopErr, "ghr-runner-aaaaaa")
+	h.m.apiErr("darkmem", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Hour)}, h.now)
+	h.m.beginTick()
+	calls := h.gh.callCount()
+	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || h.gh.callCount() != calls {
+		t.Fatalf("stopped %v, GitHub calls %d→%d", h.sd.stopped, calls, h.gh.callCount())
 	}
 }
 

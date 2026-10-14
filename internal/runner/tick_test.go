@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -249,7 +250,7 @@ func TestAllModeSkipsWarmSpawnsForFailingRepo(t *testing.T) {
 		h.gh.setErr("ListRuns darkcloud", nil)
 		h.now = h.now.Add(maxBackoff)
 		h.m.Tick(context.Background())
-		if len(h.gh.jitCalls) != 2 {
+		if !slices.ContainsFunc(h.gh.jitCalls, func(c string) bool { return strings.Contains(c, "darkcloud") }) {
 			t.Fatalf("%v: no warm runner after recovery: %v", err, h.gh.jitCalls)
 		}
 	}
