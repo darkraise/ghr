@@ -955,3 +955,17 @@ func TestListingRefusesLinkToAnotherOrigin(t *testing.T) {
 		})
 	}
 }
+
+func TestListingNamesARelativeLinkAsRelative(t *testing.T) {
+	c, f := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Link", `</runs?access=hunter2>; rel="next"`)
+		fmt.Fprint(w, `{"workflow_runs":[{"id":7,"status":"queued"}]}`)
+	})
+	_, err := c.ListRuns(context.Background(), "darkcloud", "queued")
+	if err == nil || err.Error() != "github: pagination link to a relative address refused" {
+		t.Fatalf("err %v", err)
+	}
+	if len(f.requests) != 1 {
+		t.Errorf("%d requests, want 1", len(f.requests))
+	}
+}

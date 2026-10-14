@@ -425,6 +425,9 @@ func (c *Client) checkNext(next string) error {
 		host := "an unparsable address"
 		if err == nil {
 			host = n.Host
+			if host == "" {
+				host = "a relative address"
+			}
 		}
 		return fmt.Errorf("github: pagination link to %s refused", host)
 	}
