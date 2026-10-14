@@ -73,8 +73,12 @@ func (s *Service) activeRuns(ctx context.Context, repo string) (map[int64]bool, 
 
 // cleanup deletes the artifacts older than each repository's effective
 // cleanup age, oldest first across repositories and at most
-// MaxCleanupDeletes, skipping those of runs that have not completed.
+// MaxCleanupDeletes, skipping those of runs that have not completed. It does
+// nothing while the token is below the reserve kept for the runner manager.
 func (s *Service) cleanup(cfg *config.Config, gen uint64) {
+	if s.rateLow() {
+		return
+	}
 	ctx := s.ctx
 	now := s.now()
 	type due struct {

@@ -189,6 +189,28 @@ func TestCleanupSkipsARepositoryWithAFullPageOfActiveRuns(t *testing.T) {
 	}
 }
 
+func TestCleanupWaitsWhenTheInventoryHitTheRateReserve(t *testing.T) {
+	gh := newFakeGH()
+	cfg := testConfig()
+	s, clock := newTestService(t, gh, cfg)
+	gh.addRepo("darkmem", true, ghArt(1, 10, clock.Now(), 50*time.Hour, 5))
+	s.pass(true, false)
+	cfg.GitHubStorage = cleanupConfig().GitHubStorage
+	gh.onList = func(context.Context, string) error {
+		gh.mu.Lock()
+		gh.remaining = MinRateLeft - 1
+		gh.mu.Unlock()
+		return nil
+	}
+	s.pass(true, false)
+	if got := gh.callsLike("ListRuns"); len(got) != 0 {
+		t.Fatalf("listed runs %v after the rate fell below the reserve", got)
+	}
+	if got := gh.callsLike("Delete"); len(got) != 0 {
+		t.Fatalf("deleted %v after the rate fell below the reserve", got)
+	}
+}
+
 func TestWritesStayWithinTheHourlyBudget(t *testing.T) {
 	gh := newFakeGH()
 	s, clock := newTestService(t, gh, testConfig())
