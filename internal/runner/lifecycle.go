@@ -816,8 +816,9 @@ func (m *Manager) stopStartTimedOut(ctx context.Context, cfg *config.Config, now
 		// loop is stopping another one, and a job recorded meanwhile makes it
 		// busy. A runner the runners API did not answer for in this tick is
 		// left alone: an API pause or a failed call says nothing about whether
-		// it came online. One already deregistered can take no job.
-		if !ok || cur.State != sched.Starting || (!cur.answered && !cur.deregistered) {
+		// it came online. One already deregistered can take no job. One already
+		// stopped for its timeout waits for refreshUnits to see its unit exit.
+		if !ok || cur.State != sched.Starting || cur.startFailed || (!cur.answered && !cur.deregistered) {
 			continue
 		}
 		repo := cur.Repo

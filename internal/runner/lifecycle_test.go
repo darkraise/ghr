@@ -1381,6 +1381,21 @@ func TestStartTimeoutRetriesOnlyTheUnitAfterDeregistering(t *testing.T) {
 	}
 }
 
+// A runner stopped for its start timeout stays starting until a tick sees its
+// unit exit, which can take more than one tick when the unit state cannot be
+// read. A repeat stop must not count the same failed start again.
+func TestStartTimeoutCountsAFailedStartOnce(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.refreshRunners(context.Background())
+	h.now = h.now.Add(3 * time.Minute)
+	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+	if n := spawnFails(h, "darkmem"); n != 1 {
+		t.Fatalf("%d failed starts, want 1\n%s", n, h.eventText())
+	}
+}
+
 // The runners API is slow. A runner that took a job while its answer was on
 // the way must not be put back to idle by that answer.
 func TestRunnerMadeBusyDuringTheCheckStaysBusy(t *testing.T) {
