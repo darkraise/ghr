@@ -321,6 +321,36 @@ func TestSetRetentionBeatsAListingThatReadItEarlier(t *testing.T) {
 	}
 }
 
+// A repository with no retention entry yet (the token just changed) has no
+// read time to compare, so the write has to be told apart by its own time.
+func TestSetRetentionBeatsTheFirstReadOfARepository(t *testing.T) {
+	gh := newFakeGH()
+	gh.addRepo("darkmem", true)
+	s, clock := newTestService(t, gh, testConfig())
+	s.pass(true, false)
+	s.TokenChanged()
+	entered, release := make(chan struct{}), make(chan struct{})
+	gh.onRetention = func(ctx context.Context, repo string) {
+		close(entered)
+		<-release
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.pass(true, false)
+	}()
+	<-entered
+	clock.Add(time.Second)
+	if err := s.SetRetention(context.Background(), "darkmem", 7); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	<-done
+	if d := row(t, s.Snapshot(), "darkmem").RetentionDays; d != 7 {
+		t.Fatalf("retention %d after the first read finished, want the 7 that was set while it ran", d)
+	}
+}
+
 func TestSetRetentionClearsTheRetentionError(t *testing.T) {
 	gh := newFakeGH()
 	gh.addRepo("darkmem", true)

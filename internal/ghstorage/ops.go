@@ -361,17 +361,16 @@ func (s *Service) setRetention(ctx context.Context, repo string, days int) error
 }
 
 // publishRetention records a retention GitHub accepted. It runs inside the
-// write slot so two writes publish in the order they reached GitHub, and its
-// time is later than the start of any listing that read the old value.
+// write slot so two writes publish in the order they reached GitHub, and it
+// is stamped with a time later than the start of any listing that read the
+// old value.
 func (s *Service) publishRetention(repo string, days int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := strings.ToLower(repo)
-	rr, read := s.retention[key]
+	rr := s.retention[key]
 	rr.r.Days = days
-	if read {
-		rr.at = s.now()
-	}
+	rr.written = s.now()
 	old := rr.err
 	rr.err = ""
 	s.retention[key] = rr

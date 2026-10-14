@@ -99,9 +99,10 @@ type Service struct {
 }
 
 type retentionRead struct {
-	at  time.Time
-	r   github.Retention
-	err string
+	at      time.Time // when the read started
+	written time.Time // when a write last set r; a read that started before it is stale
+	r       github.Retention
+	err     string
 }
 
 func (s *Service) now() time.Time {
@@ -516,7 +517,7 @@ func (s *Service) merge(ls []*listing, now time.Time) {
 	for _, l := range ls {
 		key := strings.ToLower(l.name)
 		if l.retention != nil {
-			if cur, ok := s.retention[key]; !ok || !cur.at.After(l.retention.at) {
+			if cur := s.retention[key]; !cur.written.After(l.retention.at) {
 				s.retention[key] = *l.retention
 			}
 		}
