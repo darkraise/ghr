@@ -305,3 +305,17 @@ describe("Dialog accessibility", () => {
     30_000,
   )
 })
+
+describe("Jobs accessibility", () => {
+  it.each([[1280], [390]])(
+    "has no axe violations at %ipx",
+    async (width) => {
+      setViewport(width)
+      mockApi(authedRoutes())
+      renderApp("/jobs")
+      await screen.findByLabelText("Prune every")
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})

@@ -21,6 +21,7 @@ import { ActionsPage } from "./pages/actions"
 import { ArtifactsPage } from "./pages/artifacts"
 import { DashboardPage } from "./pages/dashboard"
 import { HistoryPage } from "./pages/history"
+import { JobsPage } from "./pages/jobs"
 import { LoginPage } from "./pages/login"
 import { RepositoriesPage } from "./pages/repositories"
 import { RepositoryPage } from "./pages/repository"
@@ -111,6 +112,7 @@ const historyRoute = createRoute({
   }),
   component: HistoryPage,
 })
+const jobsRoute = createRoute({ getParentRoute: () => appRoute, path: "/jobs", component: JobsPage })
 const actionsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/actions",
@@ -194,6 +196,7 @@ const routeTree = rootRoute.addChildren([
     runRoute,
     jobRoute,
     historyRoute,
+    jobsRoute,
     artifactsRoute,
     toolchainsRoute,
     storageRoute,

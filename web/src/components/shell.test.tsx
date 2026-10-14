@@ -28,6 +28,7 @@ describe("shell", () => {
       "Runners",
       "Actions",
       "History",
+      "Jobs",
       "Artifacts",
       "Repositories",
       "Settings",

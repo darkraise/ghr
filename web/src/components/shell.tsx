@@ -3,7 +3,7 @@ import { Link, Outlet, useNavigate } from "@tanstack/react-router"
 import { Alert, AlertDescription, AlertTitle } from "darkraise-ui/components/alert"
 import { Button } from "darkraise-ui/components/button"
 import { toast } from "darkraise-ui/components/sonner"
-import { Archive, Boxes, GitBranch, HistoryIcon, LayoutDashboard, LogOut, Settings, Workflow, type LucideIcon } from "lucide-react"
+import { Archive, Boxes, GitBranch, HistoryIcon, LayoutDashboard, LogOut, Settings, Timer, Workflow, type LucideIcon } from "lucide-react"
 import { useEffect, useRef } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, useConfig, useEvents, useMetrics, useStatus } from "@/api/hooks"
@@ -25,7 +25,7 @@ function count(n: number | undefined): string | undefined {
 
 interface Tab {
   label: string
-  to: "/" | "/runners" | "/actions" | "/history" | "/artifacts" | "/repositories" | "/settings"
+  to: "/" | "/runners" | "/actions" | "/history" | "/jobs" | "/artifacts" | "/repositories" | "/settings"
   icon: LucideIcon
   badge?: string
   divided?: boolean
@@ -37,6 +37,7 @@ function tabs(status: Status | undefined, config: Config | undefined): Tab[] {
     { label: "Runners", to: "/runners", icon: Boxes, badge: count(status && running(status)) },
     { label: "Actions", to: "/actions", icon: Workflow },
     { label: "History", to: "/history", icon: HistoryIcon },
+    { label: "Jobs", to: "/jobs", icon: Timer },
     { label: "Artifacts", to: "/artifacts", icon: Archive },
     { label: "Repositories", to: "/repositories", icon: GitBranch, badge: count(config?.repos?.length), divided: true },
     { label: "Settings", to: "/settings", icon: Settings },
