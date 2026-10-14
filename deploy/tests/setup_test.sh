@@ -104,12 +104,19 @@ ghr() {
   echo "daemon unreachable" >&2
   return 1
 }
+# STOP_RC makes `systemctl stop` fail; STOP_STAYS_ACTIVE keeps a stopped unit active.
 systemctl() {
-  [ "$1" != stop ] || { echo "$2" > "$MARK_DIR/stopped"; return 0; }
+  if [ "$1" = stop ]; then
+    [ "${STOP_RC:-0}" = 0 ] || return "$STOP_RC"
+    echo "$2" > "$MARK_DIR/stopped"
+    return 0
+  fi
   [ "$1" != start ] || { echo "$2" > "$MARK_DIR/started"; return 0; }
   [ "$1" = is-active ] || return 0
-  echo "$FAKE_STATE"
-  [ "$FAKE_STATE" = active ]
+  local state=$FAKE_STATE
+  [ ! -f "$MARK_DIR/stopped" ] || [ -n "${STOP_STAYS_ACTIVE:-}" ] || [ "$state" != active ] || state=inactive
+  echo "$state"
+  [ "$state" = active ]
 }
 timeout() { shift; "$@"; }
 sleep() { SECONDS=$((SECONDS + $1)); }
@@ -809,6 +816,29 @@ new_case c-first-install
 out=$( (systemctl() { return 5; }; run stop_ghr) 2>&1)
 rc=$?
 check "c: stop_ghr succeeds when ghr is not installed yet" [ "$rc" -eq 0 ]
+
+new_case c-stop-fails
+old_version 2.336.0
+ln -sfn "$DIST_DIR/2.336.0" "$DIST_DIR/current"
+out=$( (STOP_RC=1; run main) 2>&1)
+rc=$?
+check "c: main fails when ghr.service cannot be stopped" [ "$rc" -ne 0 ]
+check "c: the failed stop is explained" contains "$out" "could not stop ghr.service; stop it and re-run"
+check "c: no runner is fetched after a failed stop" [ "$(count fetches)" -eq 0 ]
+check "c: the old version is untouched after a failed stop" [ -d "$DIST_DIR/2.336.0" ]
+check "c: ghr started again after a failed stop" [ "$(cat "$MARK_DIR/started" 2>/dev/null)" = ghr.service ]
+
+new_case c-stop-stays-active
+out=$( (STOP_STAYS_ACTIVE=1; run main) 2>&1)
+rc=$?
+check "c: main fails when ghr.service is still active after the stop" [ "$rc" -ne 0 ]
+check "c: a unit that stays active is explained" contains "$out" "could not stop ghr.service; stop it and re-run"
+check "c: no runner is fetched while the unit stays active" [ "$(count fetches)" -eq 0 ]
+
+new_case c-stop-deactivating
+out=$( (FAKE_STATE=deactivating; run stop_ghr) 2>&1)
+rc=$?
+check "c: a unit still deactivating counts as not stopped" [ "$rc" -ne 0 ]
 
 new_case c-main-fetch-fails
 old_version 2.336.0
