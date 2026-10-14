@@ -59,11 +59,16 @@ export function runDescription(run: RunDetail): string {
   return run.branch ? `${where} on ${run.branch}.` : `${where}.`
 }
 
+// A run's path can carry the ref it was run from, as in
+// ".github/workflows/ci.yml@refs/heads/main"; the daemon strips it the same way.
+const PATH_REF = /^(\.github\/workflows\/[^@]+\.ya?ml)@.+$/
+
 export function githubLinks(owner: string, run: RunDetail): { commit: string; workflowFile: string | undefined; pull: (n: number) => string } {
   const base = `https://github.com/${owner}/${run.repo}`
+  const path = PATH_REF.exec(run.path)?.[1] ?? run.path
   return {
     commit: `${base}/commit/${run.head_sha}`,
-    workflowFile: run.path.startsWith(".github/workflows/") ? `${base}/blob/${run.head_sha}/${run.path.split("/").map(encodeURIComponent).join("/")}` : undefined,
+    workflowFile: path.startsWith(".github/workflows/") ? `${base}/blob/${run.head_sha}/${path.split("/").map(encodeURIComponent).join("/")}` : undefined,
     pull: (n) => `${base}/pull/${n}`,
   }
 }
