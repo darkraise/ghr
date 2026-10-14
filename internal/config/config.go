@@ -48,8 +48,8 @@ const MaxLabelLength = 100
 // JIT configuration; the system labels count towards it.
 const maxJITLabels = 100
 
-// maxCPUQuotaPercent is 10,000 CPUs; systemd keeps the quota as a 32-bit
-// count of parts per million of a CPU.
+// maxCPUQuotaPercent is 10,000 CPUs; systemd parses the percentage into a
+// signed 32-bit count of parts per ten thousand of a CPU.
 const maxCPUQuotaPercent = 1000000
 
 type Config struct {
