@@ -46,7 +46,7 @@ bash setup.sh
 
 Verify the release tarball the same way: download `ghr_linux_amd64.tar.gz` from the release and run `gh attestation verify ghr_linux_amd64.tar.gz -R darkraise/ghr`. Releases before attestations were added have none to verify. `setup.sh` checks the tarball against the release's `checksums.txt`, which comes from the same place as the tarball, so only the attestation proves where a file was built.
 
-Piped like this, the script asks nothing. To answer its prompts in the terminal instead, run:
+Piped from curl, the script asks nothing. To answer its prompts in the terminal instead, run:
 
 ```bash
 bash <(curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh)
