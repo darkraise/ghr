@@ -23,6 +23,15 @@ function applyingDaemon(initial: Config = fixtures.config) {
 }
 
 describe("Settings page", () => {
+  it("announces each number with its unit", async () => {
+    mockApi(routes())
+    renderApp("/settings")
+    expect(await screen.findByLabelText("Poll interval")).toHaveAttribute("aria-valuetext", "10 seconds")
+    expect(screen.getByLabelText("History retention")).toHaveAttribute("aria-valuetext", "30 days")
+    expect(screen.getByLabelText("Disk high-water")).toHaveAttribute("aria-valuetext", "80 %")
+    expect(screen.getByLabelText("Max concurrent runners")).not.toHaveAttribute("aria-valuetext")
+  })
+
   it("shows the loaded settings", async () => {
     mockApi(routes())
     renderApp("/settings")
@@ -116,6 +125,19 @@ describe("Settings page", () => {
     expect(calls.some((c) => c.method === "PATCH")).toBe(false)
   })
 
+  it("marks Max concurrent runners at 0 invalid and describes it by its error", async () => {
+    mockApi(routes())
+    const { user } = renderApp("/settings")
+    const globalMax = await screen.findByRole("spinbutton", { name: "Max concurrent runners" })
+    expect(globalMax).not.toHaveAttribute("aria-invalid")
+    await user.clear(globalMax)
+    await user.type(globalMax, "0")
+    expect(globalMax).toHaveAttribute("aria-invalid", "true")
+    expect(globalMax).toHaveAccessibleDescription(
+      "The most runners running at once across all repositories. Applies in queue mode. Enter a whole number from 1 to 99",
+    )
+  })
+
   it("lists the daemon's reasons when it rejects a save, and keeps the edits", async () => {
     mockApi(
       routes({
@@ -159,6 +181,44 @@ describe("Settings page", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ runner_limits: { memory_max: "infinity" } }))
     await waitFor(() => expect(screen.queryByText(/unsaved change/)).toBeNull())
     expect(screen.queryByText(/Daemon did not apply/)).toBeNull()
+  })
+
+  it("reads the saved config even when a poll started before the save answers last", async () => {
+    let hold = false
+    let release: () => void = () => {}
+    const old = new Promise<Config>((resolve) => {
+      release = () => resolve(fixtures.config)
+    })
+    let config = fixtures.config
+    const { calls } = mockApi(
+      routes({
+        "GET /api/config": () => {
+          if (!hold) return config
+          hold = false
+          return old
+        },
+        "PATCH /api/config": ({ body }: { body: unknown }) => {
+          config = { ...config, ...(body as Partial<Config>) }
+          return noContent()
+        },
+      }),
+    )
+    const { user, queryClient } = renderApp("/settings")
+    const poll = await screen.findByLabelText("Poll interval")
+    await user.clear(poll)
+    await user.type(poll, "15")
+    hold = true
+    void queryClient.refetchQueries({ queryKey: ["config"] })
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    // The held poll is the second read; the save's own read is the third, so
+    // the stale answer is released only after the save has asked again.
+    const configReads = () => calls.filter((c) => c.method === "GET" && c.path === "/api/config").length
+    await waitFor(() => expect(configReads()).toBe(3))
+    expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1)
+    release()
+    await waitFor(() => expect(screen.queryByText(/unsaved change/)).toBeNull())
+    expect(screen.queryByText(/Daemon did not apply/)).toBeNull()
+    expect(screen.getByLabelText("Poll interval")).toHaveValue("15")
   })
 
   it("says when the daemon did not apply a saved field", async () => {

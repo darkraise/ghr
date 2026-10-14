@@ -68,7 +68,7 @@ export function pruneActions(storage: Storage, config: Config | undefined): Prun
       action: "Remove unused volumes",
       destructive: true,
       title: "Remove unused volumes?",
-      body: `${frees(reclaimable(storage, "Local Volumes"))}Every volume no container uses is removed. It is refused while jobs run.`,
+      body: `${frees(reclaimable(storage, "Local Volumes"))}Every volume no container uses is removed. It is refused while a job runs or a runner starts, and idle runners stop while it runs.`,
     },
   ]
 }

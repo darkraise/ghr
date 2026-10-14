@@ -1,5 +1,6 @@
 import type { HistoryEntry } from "@/api/types"
-import { dur, hhmm, monthDay, plural } from "@/lib/format"
+import { dur, hhmm, isZeroTime, monthDay, plural } from "@/lib/format"
+import { ALL_REPOS } from "@/lib/repos"
 
 export const HISTORY_WINDOWS = ["24h", "7d", "30d"] as const
 export type HistoryWindow = (typeof HISTORY_WINDOWS)[number]
@@ -17,10 +18,11 @@ export interface HistorySearch {
   window?: HistoryWindow
 }
 
-// Unknown values are dropped, so the page falls back to its defaults.
+// Unknown values are dropped, so the page falls back to its defaults. The
+// selects' "all repositories" value is no repository, so it is dropped too.
 export function parseHistorySearch(search: Record<string, unknown>): HistorySearch {
   const out: HistorySearch = {}
-  if (typeof search.repo === "string" && search.repo !== "") out.repo = search.repo
+  if (typeof search.repo === "string" && search.repo !== "" && search.repo !== ALL_REPOS) out.repo = search.repo
   const result = RESULTS.find((r) => r.value === search.result)
   if (result) out.result = result.value
   const window = HISTORY_WINDOWS.find((w) => w === search.window)
@@ -64,8 +66,10 @@ export function groupByDay(rows: HistoryEntry[], now: number): DayGroup[] {
   return groupByDayOf(rows, (r) => r.finished_at, now)
 }
 
-export function took(entry: HistoryEntry): number {
-  return Date.parse(entry.finished_at) - Date.parse(entry.started_at)
+export function took(entry: HistoryEntry): number | undefined {
+  if (isZeroTime(entry.started_at)) return undefined
+  const ms = Date.parse(entry.finished_at) - Date.parse(entry.started_at)
+  return Number.isNaN(ms) ? undefined : ms
 }
 
 export function median(values: number[]): number | undefined {
@@ -89,7 +93,7 @@ export function resultWord(conclusion: string): string {
 export function historySummary(rows: HistoryEntry[]): string {
   if (rows.length === 0) return "No jobs"
   const failed = rows.filter((r) => resultWord(r.conclusion) === "Failed").length
-  const mid = median(rows.map(took)) ?? 0
+  const mid = median(rows.flatMap((r) => took(r) ?? [])) ?? 0
   return `${plural(rows.length, "job")}${failed > 0 ? `, ${failed} failed` : ""}, median ${dur(mid)}`
 }
 

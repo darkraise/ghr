@@ -1,8 +1,7 @@
-import { Input } from "darkraise-ui/components/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "darkraise-ui/components/select"
 import { useStatus } from "@/api/hooks"
 import { NumberField } from "@/components/number-field"
-import { Field, FieldGroup } from "@/components/page/field"
+import { Field, FieldGroup, FieldInput } from "@/components/page/field"
 import { RestartControl } from "@/components/restart-banner"
 import { RejectedAlert } from "@/components/save-bar"
 import { TagField } from "@/components/tag-field"
@@ -31,8 +30,10 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
       <Field label={label} htmlFor={key} help={help} changed={is(key)} error={errors[key]}>
         <NumberField
           id={key}
+          label={label}
           min={0}
           suffix={UNIT_SETTINGS[key]?.unit}
+          spokenSuffix={UNIT_SETTINGS[key]?.spoken}
           className={FIELD_WIDTH}
           placeholder={typeof v === "string" ? v : empty}
           value={num(key)}
@@ -70,6 +71,7 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
         >
           <NumberField
             id="global_max"
+            label="Max concurrent runners"
             min={1}
             max={99}
             precision={0}
@@ -92,6 +94,7 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
         <Field label="Disk high-water" htmlFor="disk_high_water" help="Disk use that triggers pruning" changed={is("disk_high_water")} error={errors.disk_high_water}>
           <NumberField
             id="disk_high_water"
+            label="Disk high-water"
             min={1}
             max={100}
             step={5}
@@ -122,7 +125,7 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
             changed={is("web_listen")}
             error={errors.web_listen ?? form.rejectedFields.web_listen}
           >
-            <Input
+            <FieldInput
               id="web_listen"
               className={`${FIELD_WIDTH} font-mono`}
               value={text("web_listen")}
@@ -136,7 +139,7 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
             changed={is("web_hosts")}
             error={errors.web_hosts ?? form.rejectedFields.web_hosts}
           >
-            <TagField label="Allowed hostnames" value={values.web_hosts as string[]} onChange={set("web_hosts")} disabled={offline} className={FIELD_WIDTH} />
+            <TagField label="Allowed hostnames" value={values.web_hosts as string[]} onChange={set("web_hosts")} disabled={offline} maxLength={253} className={FIELD_WIDTH} />
           </Field>
           {restart?.pending?.length ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 text-sm">

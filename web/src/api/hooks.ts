@@ -1,7 +1,8 @@
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
+import { useEffect, useRef } from "react"
 import { api } from "./client"
 import { useLive } from "./live"
-import type { ActivityWindow, GhrEvent, GitHubStorage, LogChunk, RunAnnotations, RunDetail, Status, Storage } from "./types"
+import type { ActivityWindow, Config, GhrEvent, GitHubStorage, LogChunk, RunAnnotations, RunDetail, Status, Storage } from "./types"
 
 export const POLL_FAST = 1000
 export const POLL_SLOW = 5000
@@ -68,6 +69,12 @@ export function useConfig() {
   return useQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), refetchInterval: livePoll(live, POLL_SLOW) })
 }
 
+// A poll started before the save may answer with the old config, and fetchQuery would join it.
+export async function readConfig(queryClient: QueryClient): Promise<Config> {
+  await queryClient.cancelQueries({ queryKey: keys.config })
+  return queryClient.fetchQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), staleTime: 0 })
+}
+
 export function useMetrics() {
   const live = useLive()
   return useQuery({ queryKey: keys.metrics, queryFn: ({ signal }) => api.metrics(signal), refetchInterval: livePoll(live, POLL_SLOW) })
@@ -112,8 +119,27 @@ export function useRunAnnotations(repo: string, id: number, attempt: number | un
   })
 }
 
-export function useJobLog(repo: string, jobId: number, enabled: boolean) {
-  return useQuery({ queryKey: keys.jobLog(repo, jobId), queryFn: ({ signal }) => api.jobLog(repo, jobId, signal), enabled })
+// GitHub may not have stored the log of a job that has only just completed.
+// The daemon keeps such a "no log" answer for 15 seconds, so asking again
+// at that pace for a few minutes finds the log once it is there. A clock
+// behind the completion time is no reason to ask for the length of the skew.
+const LOG_SETTLE = 3 * 60_000
+
+export function logSettling(completedAt: string | undefined, now: number): boolean {
+  if (completedAt === undefined) return false
+  const age = now - Date.parse(completedAt)
+  return age >= 0 && age < LOG_SETTLE
+}
+
+// now is the page's clock, so the polling and the page's message agree on
+// whether the log is still settling.
+export function useJobLog(repo: string, jobId: number, enabled: boolean, completedAt: string | undefined, now: number) {
+  return useQuery({
+    queryKey: keys.jobLog(repo, jobId),
+    queryFn: ({ signal }) => api.jobLog(repo, jobId, signal),
+    enabled,
+    refetchInterval: (q) => (q.state.data?.no_log && logSettling(completedAt, now) ? 15_000 : false),
+  })
 }
 
 export function browserZone(): string {
@@ -138,7 +164,8 @@ export function useActivity(window: ActivityWindow, repo = "") {
 export const HISTORY_LIMIT = 500
 
 // History passes the from of its activity response as since, so the table
-// and the chart cover one span; the query waits until it is known.
+// and the chart cover one span; the query waits until it is known. Rows are
+// kept across a roll of that span, never across a change of filter.
 export function useHistory(repo: string, conclusion: string, since: string | undefined) {
   const live = useLive()
   return useQuery({
@@ -146,7 +173,8 @@ export function useHistory(repo: string, conclusion: string, since: string | und
     queryFn: ({ signal }) => api.history(repo, conclusion, since ?? "", HISTORY_LIMIT, signal),
     enabled: since !== undefined,
     refetchInterval: livePoll(live, POLL_SLOW),
-    placeholderData: keepPreviousData,
+    placeholderData: (prev, prevQuery) =>
+      since !== undefined && prevQuery?.queryKey[1] === repo && prevQuery.queryKey[2] === conclusion ? prev : undefined,
   })
 }
 
@@ -196,27 +224,56 @@ export function useEvents(epoch: string | undefined): GhrEvent[] {
 export interface LogTail {
   text: string
   next: string
+  // The last read came back empty, so the daemon has nothing more to give.
+  drained: boolean
+}
+
+const LOG_HEADER = /^==> (?:Runner|Worker)_.*\.log <==$/gm
+
+// The daemon opens the text with a "==> file <==" header and writes another
+// at every switch of file. A text over MAX_LOG loses its start at a line
+// boundary, and the header that governed the cut stands in front of what
+// is left, so a line is never shown under the wrong file.
+function trimLog(text: string): string {
+  const want = text.length - MAX_LOG
+  const newline = text.indexOf("\n", want)
+  const code = text.charCodeAt(want)
+  const cut = newline >= 0 ? newline + 1 : code >= 0xdc00 && code <= 0xdfff ? want + 1 : want
+  const kept = text.slice(cut)
+  if (kept.search(LOG_HEADER) === 0) return kept
+  const header = text.slice(0, cut).match(LOG_HEADER)?.at(-1)
+  return header === undefined ? kept : `${header}\n${kept}`
 }
 
 export function appendLog(prev: LogTail, chunk: LogChunk): LogTail {
   const text = prev.text + chunk.data
-  return { text: text.length > MAX_LOG ? text.slice(-MAX_LOG) : text, next: chunk.next }
+  return { text: text.length > MAX_LOG ? trimLog(text) : text, next: chunk.next, drained: chunk.data === "" }
 }
 
 // A runner that has ended writes no more log, so the caller stops the polling
-// with poll=false while the text already read stays on screen.
+// with poll=false while the text already read stays on screen. An answer
+// holds at most one chunk, so the archive of an ended runner is still read
+// on until a read comes back empty. The runner may have flushed lines after
+// the last read of its live run, so the end itself always asks once more.
 export function useLogTail(id: string, enabled: boolean, poll = true) {
   const queryClient = useQueryClient()
   const key = keys.log(id)
-  return useQuery({
+  const query = useQuery({
     queryKey: key,
     queryFn: async ({ signal }) => {
-      const prev = queryClient.getQueryData<LogTail>(key) ?? { text: "", next: "" }
+      const prev = queryClient.getQueryData<LogTail>(key) ?? { text: "", next: "", drained: false }
       return appendLog(prev, await api.log(id, prev.next, signal))
     },
     enabled,
-    refetchInterval: enabled && poll ? POLL_FAST : false,
+    refetchInterval: (q) => (enabled && (poll || (q.state.status !== "error" && q.state.data?.drained === false)) ? POLL_FAST : false),
   })
+  const polled = useRef(poll)
+  const { refetch } = query
+  useEffect(() => {
+    if (polled.current && !poll && enabled) void refetch()
+    polled.current = poll
+  }, [poll, enabled, refetch])
+  return query
 }
 
 export function useToken() {

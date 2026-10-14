@@ -20,7 +20,8 @@ import { ErrorLine } from "@/components/page/error-line"
 import { Field, FieldGroup } from "@/components/page/field"
 import { StatusPill } from "@/components/page/status-pill"
 import { ago } from "@/lib/format"
-import { expiryText, rateText, tokenWord } from "@/lib/token"
+import { TOKEN_PERMISSIONS, expiryText, rateText, tokenWord } from "@/lib/token"
+import { useMounted } from "@/lib/use-mounted"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
@@ -79,6 +80,7 @@ export function TokenSection() {
 
 function ReplaceTokenForm({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient()
+  const mounted = useMounted()
   const [text, setText] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
@@ -88,7 +90,7 @@ function ReplaceTokenForm({ onClose }: { onClose: () => void }) {
     setBusy(true)
     try {
       await api.replaceToken(value)
-      onClose()
+      if (mounted.current) onClose()
       toast.success("GitHub token replaced")
       await queryClient.invalidateQueries({ queryKey: keys.token })
     } catch (err) {
@@ -110,7 +112,7 @@ function ReplaceTokenForm({ onClose }: { onClose: () => void }) {
       <DialogHeader>
         <DialogTitle>Replace GitHub token</DialogTitle>
         <DialogDescription>
-          Paste a fine-grained token with Administration: read/write and Actions: read on every configured repository.
+          Paste a fine-grained token with {TOKEN_PERMISSIONS}
         </DialogDescription>
       </DialogHeader>
       <DialogBody className="flex flex-col gap-2">

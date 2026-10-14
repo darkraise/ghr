@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { Link, useParams } from "@tanstack/react-router"
+import { Link, useNavigate, useParams } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "darkraise-ui/components/dropdown-menu"
 import { toast } from "darkraise-ui/components/sonner"
@@ -8,9 +8,9 @@ import { Switch } from "darkraise-ui/components/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "darkraise-ui/components/tooltip"
 import { PageHeader } from "darkraise-ui/layout"
 import { Ellipsis } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ApiError, api } from "@/api/client"
-import { keys, useConfig, useStatus } from "@/api/hooks"
+import { keys, readConfig, useConfig, useStatus } from "@/api/hooks"
 import type { Config, RepoConfig, RepoPatch, RepoStatus } from "@/api/types"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { LabelCheckGroup } from "@/components/label-check-group"
@@ -154,9 +154,10 @@ export function RepositoryPage() {
   return <RepositoryForm key={name} name={name} section={section} />
 }
 
-function RepositoryForm({ name, section }: { name: string; section: string }) {
+function RepositoryForm({ name: urlName, section }: { name: string; section: string }) {
   const status = useStatus()
   const config = useConfig()
+  const navigate = useNavigate()
   const now = useNow()
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState<Values>({})
@@ -165,7 +166,16 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
   const [question, setQuestion] = useState<{ confirm: Confirm; cancel: () => void } | null>(null)
 
   const cfg = config.data
-  const repoCfg = cfg?.repos?.find((r) => r.name === name)
+  const repoCfg = cfg?.repos?.find((r) => r.name.toLowerCase() === urlName.toLowerCase())
+  // The configured spelling keys the PATCH, so the page uses it whatever case the URL had.
+  const name = repoCfg?.name ?? urlName
+
+  useEffect(() => {
+    if (name === urlName) return
+    if (section === "") void navigate({ to: "/repositories/$name", params: { name }, search: true, replace: true })
+    else void navigate({ to: "/repositories/$name/$section", params: { name, section }, search: true, replace: true })
+  }, [name, urlName, section, navigate])
+
   const repoStatus = status.data?.repos.find((r) => r.name === name)
   const loaded = repoValues(repoCfg)
   const values: Values = { ...loaded, ...draft }
@@ -228,7 +238,7 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
     }
     toast.success("Repositories saved")
     try {
-      const fresh = await queryClient.fetchQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), staleTime: 0 })
+      const fresh = await readConfig(queryClient)
       const applied = repoValues(fresh.repos?.find((r) => r.name === name))
       const missed = Object.keys(sent).find((key) => !sameValue(applied[key], sent[key]))
       if (missed) toast.error(`Daemon did not apply ${name}.${missed}; is it older than this ghr?`)
@@ -313,11 +323,13 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
               <Field
                 label="Max"
                 htmlFor="repo-max"
-                help="Leave empty for the default: 1 in queue mode, no limit in all mode."
+                help="Leave empty for the default: 1 in queue mode, no limit in all mode. 0 means no limit."
                 changed={is("max")}
               >
                 <NumberField
                   id="repo-max"
+                  label="Max"
+                  emptyValue={cfg.mode === "all" ? 0 : 1}
                   min={0}
                   max={99}
                   precision={0}
@@ -330,6 +342,8 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
               <Field label="Warm" htmlFor="repo-warm" help="Runners kept ready in all mode. Leave empty for the default of 1." error={warmError} changed={is("warm")}>
                 <NumberField
                   id="repo-warm"
+                  label="Warm"
+                  emptyValue={1}
                   min={0}
                   max={99}
                   precision={0}

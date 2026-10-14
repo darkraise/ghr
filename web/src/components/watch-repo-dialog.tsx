@@ -7,6 +7,7 @@ import { api } from "@/api/client"
 import { keys } from "@/api/hooks"
 import { ErrorLine } from "@/components/page/error-line"
 import { RepoPicker } from "@/components/repo-picker"
+import { useMounted } from "@/lib/use-mounted"
 import { errorText } from "@/query"
 
 export function WatchRepoDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -24,6 +25,7 @@ export function WatchRepoDialog({ open, onClose }: { open: boolean; onClose: () 
 
 function WatchRepoForm({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient()
+  const mounted = useMounted()
   const [picked, setPicked] = useState("")
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
@@ -43,7 +45,7 @@ function WatchRepoForm({ onClose }: { onClose: () => void }) {
     toast.success(`Watching ${picked}`)
     void queryClient.invalidateQueries({ queryKey: keys.config })
     void queryClient.invalidateQueries({ queryKey: keys.actions })
-    onClose()
+    if (mounted.current) onClose()
   }
 
   return (

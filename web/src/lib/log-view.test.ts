@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { JobLog, LogLine } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
-import { containingGroup, findMatches, groupRows, LOG_WINDOW, windowStart } from "./log-view"
+import { containingGroup, findMatches, groupRows, LOG_WINDOW, logWindow } from "./log-view"
 
 const line = (n: number, kind = "", text = `line ${n}`): LogLine => ({ n, kind, text })
 const many = (count: number): LogLine[] => Array.from({ length: count }, (_, i) => line(i + 1))
@@ -42,19 +42,30 @@ describe("containingGroup", () => {
   })
 })
 
-describe("windowStart", () => {
+describe("logWindow", () => {
   it("renders every line of a step under the window", () => {
-    expect(windowStart(many(LOG_WINDOW))).toBe(0)
+    expect(logWindow(many(LOG_WINDOW))).toEqual({ start: 0, end: LOG_WINDOW })
   })
 
   it("renders the last 5,000 lines of a longer step", () => {
-    expect(windowStart(many(6000))).toBe(1000)
-    expect(windowStart(many(6000), 5500)).toBe(1000)
+    expect(logWindow(many(6000))).toEqual({ start: 1000, end: 6000 })
   })
 
-  it("reaches back to a line above the cut", () => {
-    expect(windowStart(many(6000), 10)).toBe(9)
-    expect(windowStart(many(6000), 99999)).toBe(1000)
+  it("keeps the last lines for a line inside them or one that is not there", () => {
+    expect(logWindow(many(6000), 5500)).toEqual({ start: 1000, end: 6000 })
+    expect(logWindow(many(6000), 1001)).toEqual({ start: 1000, end: 6000 })
+    expect(logWindow(many(6000), 99999)).toEqual({ start: 1000, end: 6000 })
+  })
+
+  it("centres a window on a line above them", () => {
+    const { start, end } = logWindow(many(100_000), 50_000)
+    expect(end - start).toBe(LOG_WINDOW)
+    expect(start).toBe(49_999 - LOG_WINDOW / 2)
+  })
+
+  it("starts at the first line for a line near the top", () => {
+    expect(logWindow(many(6000), 10)).toEqual({ start: 0, end: LOG_WINDOW })
+    expect(logWindow(many(100_000), 1)).toEqual({ start: 0, end: LOG_WINDOW })
   })
 })
 

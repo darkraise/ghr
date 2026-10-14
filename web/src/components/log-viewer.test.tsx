@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it } from "vitest"
 import type { JobLog, LogLine, Step } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
+import { LOG_WINDOW } from "@/lib/log-view"
 import { LogViewer } from "./log-viewer"
 
 const steps: Step[] = fixtures.runDetail.jobs[1]?.steps ?? []
@@ -164,6 +165,7 @@ describe("LogViewer", () => {
     const { container } = render(<LogViewer log={bigLog(6000)} steps={bigSteps} />)
     expect(container.querySelector('[data-line="1000"]')).toBeNull()
     expect(container.querySelector('[data-line="1001"]')).not.toBeNull()
+    expect(screen.queryByRole("button", { name: /later lines/ })).toBeNull()
     await user.click(screen.getByRole("button", { name: "Show 1000 earlier lines" }))
     expect(container.querySelector('[data-line="1"]')).not.toBeNull()
     expect(screen.queryByRole("button", { name: /earlier lines/ })).toBeNull()
@@ -178,19 +180,56 @@ describe("LogViewer", () => {
     expect(container.querySelector('[data-line="1001"]')).toBeNull()
   })
 
-  it("renders back to the URL's line when it is above the cut", { timeout: 20_000 }, () => {
+  it("renders a window around the URL's line when it is above the cut", { timeout: 20_000 }, () => {
     const { container } = render(<LogViewer log={bigLog(6000)} steps={bigSteps} step={1} line={10} />)
     expect(container.querySelector('[data-line="10"]')).toHaveAttribute("data-target", "true")
-    expect(container.querySelector('[data-line="9"]')).toBeNull()
-    expect(screen.getByRole("button", { name: "Show 9 earlier lines" })).toBeInTheDocument()
+    expect(container.querySelectorAll("[data-line]")).toHaveLength(LOG_WINDOW)
+    expect(screen.queryByRole("button", { name: /earlier lines/ })).toBeNull()
+    expect(screen.getByRole("button", { name: "Show 1000 later lines" })).toBeInTheDocument()
   })
 
-  it("renders back to the current match when it is above the cut", { timeout: 20_000 }, async () => {
+  it("renders a window around the current match when it is above the cut", { timeout: 20_000 }, async () => {
     const user = userEvent.setup()
     const { container } = render(<LogViewer log={bigLog(6000, { 3: "the needle is here" })} steps={bigSteps} />)
     expect(container.querySelector('[data-line="3"]')).toBeNull()
     await user.type(screen.getByRole("searchbox", { name: "Search logs" }), "needle")
     expect(screen.getByText("1 of 1")).toBeInTheDocument()
     expect(container.querySelector('[data-line="3"] mark')).toHaveAttribute("data-current", "true")
+  })
+
+  it("keeps the render bound for a match far from the end and moves it with the match", { timeout: 20_000 }, async () => {
+    const user = userEvent.setup()
+    const { container } = render(<LogViewer log={bigLog(20_000, { 1: "needle", 19_990: "needle" })} steps={bigSteps} />)
+    await user.type(screen.getByRole("searchbox", { name: "Search logs" }), "needle")
+    expect(screen.getByText("1 of 2")).toBeInTheDocument()
+    expect(container.querySelector('[data-line="1"] mark')).toHaveAttribute("data-current", "true")
+    expect(container.querySelectorAll("[data-line]")).toHaveLength(LOG_WINDOW)
+    expect(container.querySelector('[data-line="19990"]')).toBeNull()
+    expect(screen.getByRole("button", { name: "Show 15000 later lines" })).toBeInTheDocument()
+    await user.keyboard("{Enter}")
+    expect(screen.getByText("2 of 2")).toBeInTheDocument()
+    expect(container.querySelector('[data-line="19990"] mark')).toHaveAttribute("data-current", "true")
+    expect(container.querySelector('[data-line="1"]')).toBeNull()
+    expect(screen.getByRole("button", { name: "Show 15000 earlier lines" })).toBeInTheDocument()
+  })
+
+  it("shows the rest of a step on Show later lines", { timeout: 20_000 }, async () => {
+    const user = userEvent.setup()
+    const { container } = render(<LogViewer log={bigLog(6000)} steps={bigSteps} step={1} line={10} />)
+    expect(container.querySelector('[data-line="6000"]')).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Show 1000 later lines" }))
+    expect(container.querySelector('[data-line="6000"]')).not.toBeNull()
+    expect(screen.queryByRole("button", { name: /later lines/ })).toBeNull()
+  })
+
+  it("cuts a group at the end of the window and keeps its header", { timeout: 20_000 }, async () => {
+    const user = userEvent.setup()
+    const lines: LogLine[] = Array.from({ length: 20_000 }, (_, i) => ({ n: i + 1, kind: "", text: `row ${i + 1}` }))
+    lines[4989] = { n: 4990, kind: "group", text: "Straddling group" }
+    const log: JobLog = { job_id: 9, too_large: false, expired: false, no_log: false, steps: [{ number: 1, name: "Build", lines }] }
+    const { container } = render(<LogViewer log={log} steps={bigSteps} step={1} line={1} />)
+    await user.click(screen.getByRole("button", { name: "Straddling group" }))
+    expect(container.querySelector('[data-line="5000"]')).not.toBeNull()
+    expect(container.querySelector('[data-line="5001"]')).toBeNull()
   })
 })

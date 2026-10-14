@@ -11,18 +11,18 @@ import { ArtifactRepoTable } from "./artifact-repo-table"
 
 const darkmem = fixtures.githubStorage.repos[0] as RepoStorage
 
-function Detail({ repo, busy }: { repo: RepoStorage; busy: boolean }) {
+function Detail({ repo, busy, owner }: { repo: RepoStorage; busy: boolean; owner: string }) {
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   return (
     <>
-      <ArtifactRepoDetail repo={repo} owner="darkraise" busy={busy} offline={false} ask={setConfirm} />
+      <ArtifactRepoDetail repo={repo} owner={owner} busy={busy} offline={false} ask={setConfirm} />
       <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
     </>
   )
 }
 
-async function draw(repo: RepoStorage = darkmem, busy = false) {
-  const view = renderRoutes({ "/": () => <Detail repo={repo} busy={busy} />, "/actions/$repo/runs/$id": () => <p>run page</p> }, "/")
+async function draw(repo: RepoStorage = darkmem, busy = false, owner = "darkraise") {
+  const view = renderRoutes({ "/": () => <Detail repo={repo} busy={busy} owner={owner} />, "/actions/$repo/runs/$id": () => <p>run page</p> }, "/")
   await screen.findByRole("region", { name: `Artifacts of ${repo.name}` })
   return view
 }
@@ -41,6 +41,13 @@ describe("ArtifactRepoDetail", () => {
     expect(within(row(/frontend-dist/)).getByRole("link", { name: "Run 102" })).toHaveAttribute("href", href)
     expect(row(/frontend-dist/)).toHaveTextContent("157.3 MB")
     expect(row(/frontend-dist/)).toHaveTextContent("master")
+  })
+
+  it("does not link an uncovered artifact's run while the owner is unknown", async () => {
+    mockApi({})
+    await draw({ ...darkmem, covered: false }, false, "")
+    expect(within(row(/frontend-dist/)).queryByRole("link", { name: "Run 102" })).toBeNull()
+    expect(row(/frontend-dist/)).toHaveTextContent("Run 102")
   })
 
   it("deletes the selected artifacts after asking", async () => {
@@ -73,6 +80,17 @@ describe("ArtifactRepoDetail", () => {
     expect(calls.find((c) => c.path === "/api/github-storage/preview")?.search).toBe("?cleanup=1d&repo=darkmem")
     await user.click(within(dialog).getByRole("button", { name: "Delete" }))
     await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ older_than: "1d" }))
+  })
+
+  it("previews once when Delete older is double clicked", async () => {
+    let answer: (r: Response) => void = () => undefined
+    const { calls } = mockApi({ "GET /api/github-storage/preview": () => new Promise<Response>((resolve) => (answer = resolve)) })
+    const { user } = await draw()
+    await user.type(within(artifacts()).getByRole("textbox", { name: "Delete artifacts of darkmem older than" }), "1d")
+    await user.dblClick(within(artifacts()).getByRole("button", { name: "Delete older" }))
+    answer(json([{ repo: "darkmem", count: 2, bytes: 209715200 }]))
+    expect(await screen.findByRole("alertdialog", { name: "Delete darkmem's artifacts older than 1d?" })).toBeInTheDocument()
+    expect(calls.filter((c) => c.path === "/api/github-storage/preview")).toHaveLength(1)
   })
 
   it("says when nothing is older than the age", async () => {

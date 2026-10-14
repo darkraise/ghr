@@ -1,7 +1,8 @@
 import { Badge } from "darkraise-ui/components/badge"
 import { Button } from "darkraise-ui/components/button"
 import { Input } from "darkraise-ui/components/input"
-import { useState } from "react"
+import { useId, useState } from "react"
+import { useFieldAria } from "@/components/page/field-aria"
 
 const MAX_TAG = 100
 
@@ -10,19 +11,28 @@ export function TagField({
   value,
   onChange,
   disabled,
+  maxLength = MAX_TAG,
   className = "",
 }: {
   label: string
   value: string[]
   onChange: (next: string[]) => void
   disabled?: boolean
+  maxLength?: number
   className?: string
 }) {
   const [text, setText] = useState("")
+  const [tooLong, setTooLong] = useState(false)
+  const fieldAria = useFieldAria()
+  const errorId = useId()
 
   function add() {
     const tag = text.trim()
-    if (tag !== "" && tag.length <= MAX_TAG && !value.includes(tag)) onChange([...value, tag])
+    if ([...tag].length > maxLength) {
+      setTooLong(true)
+      return
+    }
+    if (tag !== "" && !value.includes(tag)) onChange([...value, tag])
     setText("")
   }
 
@@ -49,12 +59,18 @@ export function TagField({
       )}
       <div className="flex gap-2">
         <Input
+          {...fieldAria}
+          aria-describedby={[fieldAria["aria-describedby"], tooLong ? errorId : ""].filter(Boolean).join(" ") || undefined}
+          aria-invalid={fieldAria["aria-invalid"] || tooLong || undefined}
           aria-label={label}
           placeholder="+ add"
           className="min-w-0 flex-1"
           value={text}
           disabled={disabled}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value)
+            setTooLong(false)
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault()
@@ -66,6 +82,11 @@ export function TagField({
           Add
         </Button>
       </div>
+      {tooLong && (
+        <p id={errorId} role="alert" className="text-xs text-destructive">
+          At most {maxLength} characters
+        </p>
+      )}
     </div>
   )
 }

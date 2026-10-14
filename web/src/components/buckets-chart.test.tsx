@@ -96,6 +96,11 @@ describe("BucketsChart", () => {
     expect(screen.getByText("No jobs ran in the last 24 hours.")).toBeInTheDocument()
   })
 
+  it("does not say no jobs ran when the only outcomes are unknown", () => {
+    draw({ buckets: base.buckets.map((b, i) => ({ ...b, succeeded: 0, failed: 0, cancelled: 0, unknown: i === 0 ? 2 : 0 })) })
+    expect(screen.queryByText("No jobs ran in the last 24 hours.")).toBeNull()
+  })
+
   it("draws only busy time and finished jobs in jobs mode", () => {
     const { container } = draw({}, { tracks: "jobs" })
     expect(screen.getByRole("group", { name: "Jobs per bucket for the last 24 hours" })).toBeInTheDocument()

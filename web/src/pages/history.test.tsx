@@ -66,6 +66,18 @@ describe("History page", () => {
     expect(bar?.parentElement).toHaveClass("flex-col")
   })
 
+  it("shows a job with no start time without a duration or bar", async () => {
+    setViewport(1024)
+    const [first] = fixtures.history
+    if (!first) throw new Error("fixture is empty")
+    mockApi(authedRoutes({ "GET /api/history": [{ ...first, started_at: "0001-01-01T00:00:00Z" }] }))
+    renderApp("/history")
+    const row = (await screen.findByRole("link", { name: first.job_name })).closest("tr") as HTMLElement
+    expect(within(row).getByText(first.workflow)).toBeInTheDocument()
+    expect(row.querySelector("[data-duration-bar]")).toBeNull()
+    expect(row).not.toHaveTextContent(/\d+[ms]/)
+  })
+
   it("keys the chart's busy time in the series colour", async () => {
     mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
     renderApp("/history")
@@ -112,6 +124,52 @@ describe("History page", () => {
     await user.click(await screen.findByRole("option", { name: "darkmem" }))
     await waitFor(() => expect(screen.queryByText("#7")).toBeNull())
     expect(screen.queryByText("2 jobs, 1 failed, median 3m15s")).toBeNull()
+    release()
+    expect(await screen.findByText("#7")).toBeInTheDocument()
+  })
+
+  it("keeps the rows while the window rolls to the next bucket", { timeout: 10_000 }, async () => {
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    let rolled = false
+    mockApi(
+      authedRoutes({
+        "GET /api/activity": () => ({ ...fixtures.activityBuckets, from: rolled ? "2026-10-02T15:00:00Z" : fixtures.activityBuckets.from }),
+        "GET /api/history": async ({ url }: { url: URL }) => {
+          if (url.searchParams.get("since") === "2026-10-02T15:00:00Z") await gate
+          return fixtures.history
+        },
+      }),
+    )
+    const { queryClient } = renderApp("/history")
+    await screen.findByText("#7")
+    rolled = true
+    await queryClient.invalidateQueries({ queryKey: ["activity"] })
+    await waitFor(() => expect(queryClient.isFetching({ queryKey: ["history"] })).toBe(1))
+    expect(screen.getByText("#7")).toBeInTheDocument()
+    expect(screen.queryByText("Loading")).toBeNull()
+    release()
+    await waitFor(() => expect(queryClient.isFetching({ queryKey: ["history"] })).toBe(0))
+    expect(screen.getByText("#7")).toBeInTheDocument()
+  })
+
+  it("shows the spinner when the repository filter changes", { timeout: 10_000 }, async () => {
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    mockApi(
+      authedRoutes({
+        "GET /api/history": async ({ url }: { url: URL }) => {
+          if (url.searchParams.get("repo") === "darkmem") await gate
+          return fixtures.history
+        },
+      }),
+    )
+    const { user } = renderApp("/history")
+    await screen.findByText("#7")
+    await user.click(screen.getByRole("combobox", { name: "Repository" }))
+    await user.click(await screen.findByRole("option", { name: "darkmem" }))
+    await waitFor(() => expect(screen.queryByText("#7")).toBeNull())
+    expect(within(screen.getByRole("region", { name: "Finished jobs" })).getByText("Loading")).toBeInTheDocument()
     release()
     expect(await screen.findByText("#7")).toBeInTheDocument()
   })

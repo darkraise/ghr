@@ -112,12 +112,20 @@ describe("shell", () => {
     expect(calls.some((c) => c.method === "POST" && c.path === "/auth/logout")).toBe(true)
   })
 
-  it("lands on /login even when the logout request fails", async () => {
-    const { calls } = mockApi(logoutRoutes(() => json({ error: "session already ended" }, 500)))
+  it("lands on /login when the session had already ended", async () => {
+    const { calls } = mockApi(logoutRoutes(() => json({ error: "not logged in" }, 401)))
     const { user, router } = renderApp("/")
     await user.click(await screen.findByRole("button", { name: "Log out" }))
     await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
     expect(calls.some((c) => c.method === "POST" && c.path === "/auth/logout")).toBe(true)
+  })
+
+  it("stays and says so when logout fails", async () => {
+    mockApi(authedRoutes({ "POST /auth/logout": () => json({ error: "session store down" }, 500) }))
+    const { user, router } = renderApp("/")
+    await user.click(await screen.findByRole("button", { name: "Log out" }))
+    expect((await screen.findAllByText("Not logged out: session store down")).length).toBeGreaterThan(0)
+    expect(router.state.location.pathname).toBe("/")
   })
 
   it("logs out past unsaved edits", async () => {

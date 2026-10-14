@@ -5,6 +5,8 @@ import { DAY_MS, parseDuration } from "@/lib/duration"
 // cannot show, such as a memory_max of "50%" set in config.yaml.
 export interface UnitSetting {
   unit: string
+  // What a screen reader says for unit, when unit itself reads badly aloud.
+  spoken?: string
   read: (raw: string) => number | null
   write: (n: number) => string
   error: (n: number) => string
@@ -24,6 +26,7 @@ function whole(n: number | null): number | null {
 function seconds(floor: number): UnitSetting {
   return {
     unit: "s",
+    spoken: "seconds",
     read: (raw) => {
       const ms = parseDuration(raw.trim())
       return ms === null ? null : ms / 1000

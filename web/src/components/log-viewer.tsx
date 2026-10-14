@@ -5,7 +5,7 @@ import type { JobLog, LogLine, LogStep, Step } from "@/api/types"
 import { RunStatusIcon } from "@/components/run-status-icon"
 import { renderAnsi } from "@/lib/ansi"
 import { dur } from "@/lib/format"
-import { containingGroup, findMatches, groupRows, windowStart, type LogMatch, type LogRow } from "@/lib/log-view"
+import { containingGroup, findMatches, groupRows, logWindow, type LogMatch, type LogRow } from "@/lib/log-view"
 import { firstFailedStep } from "@/lib/run-details"
 
 const PREFIX: Record<string, string | undefined> = { error: "Error: ", warning: "Warning: ", notice: "Notice: " }
@@ -19,15 +19,19 @@ function stepMs(step: Step | undefined): number | undefined {
   return Date.parse(step.completed_at) - Date.parse(step.started_at)
 }
 
-// The rows from line index start on. A group that begins above the cut keeps
-// its header and the members below it, so they stay folded under it.
-function rowsFrom(lines: LogLine[], start: number): LogRow[] {
+// The rows for line indexes [start, end). A group that begins above the cut
+// keeps its header and the members inside the window, so they stay folded
+// under it; one that runs past the end keeps its header and the members
+// before it.
+function rowsIn(lines: LogLine[], start: number, end: number): LogRow[] {
+  if (start === 0 && end >= lines.length) return groupRows(lines)
   const from = lines[start]?.n ?? 0
+  const to = lines[end]?.n ?? Infinity
   return groupRows(lines).flatMap((row): LogRow[] => {
-    if (row.line.n >= from) return [row]
-    if (row.type === "line") return []
-    const kept = row.lines.filter((l) => l.n >= from)
-    return kept.length > 0 ? [{ ...row, lines: kept }] : []
+    if (row.line.n >= to) return []
+    if (row.type === "line") return row.line.n >= from ? [row] : []
+    const members = row.lines.filter((l) => l.n >= from && l.n < to)
+    return row.line.n >= from || members.length > 0 ? [{ ...row, lines: members }] : []
   })
 }
 
@@ -119,7 +123,8 @@ export function LogViewer({
 
   function renderLines(s: LogStep) {
     const keep = current?.step === s.number ? current.line : target?.step === s.number ? target.line : undefined
-    const start = showAll.has(s.number) ? 0 : windowStart(s.lines, keep)
+    const { start, end } = showAll.has(s.number) ? { start: 0, end: s.lines.length } : logWindow(s.lines, keep)
+    const showMore = () => setShowAll((all) => new Set(all).add(s.number))
     const lineProps = (l: LogLine) => ({
       line: l,
       query,
@@ -129,16 +134,12 @@ export function LogViewer({
     return (
       <div className="ghr-log overflow-x-auto py-2 font-mono text-xs leading-5">
         {start > 0 && (
-          <button
-            type="button"
-            className="ghr-log-command focus-ring-tight px-2 pb-1 hover:underline"
-            onClick={() => setShowAll((all) => new Set(all).add(s.number))}
-          >
+          <button type="button" className="ghr-log-command focus-ring-tight px-2 pb-1 hover:underline" onClick={showMore}>
             {`Show ${start} earlier lines`}
           </button>
         )}
         {s.lines.length === 0 && <p className="ghr-log-muted px-2">This step wrote no log lines.</p>}
-        {rowsFrom(s.lines, start).map((row) => {
+        {rowsIn(s.lines, start, end).map((row) => {
           if (row.type === "line") return <Line key={row.line.n} {...lineProps(row.line)} />
           const key = groupKey(s.number, row.line.n)
           const open = groupOpen(s.number, row.line.n)
@@ -163,6 +164,11 @@ export function LogViewer({
             </div>
           )
         })}
+        {end < s.lines.length && (
+          <button type="button" className="ghr-log-command focus-ring-tight px-2 pt-1 hover:underline" onClick={showMore}>
+            {`Show ${s.lines.length - end} later lines`}
+          </button>
+        )}
       </div>
     )
   }

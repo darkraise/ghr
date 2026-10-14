@@ -86,6 +86,12 @@ describe("run facts", () => {
     expect(githubLinks("darkraise", { ...run, path: "dynamic/dependabot/dependabot-updates" }).workflowFile).toBeUndefined()
   })
 
+  it("encodes each part of the workflow file's path", () => {
+    expect(githubLinks("darkraise", { ...run, path: ".github/workflows/ci#prod.yml" }).workflowFile).toBe(
+      "https://github.com/darkraise/darkmem/blob/a1f9c3e0d4b5c6a7b8c9d0e1f2a3b4c5d6e7f8a9/.github/workflows/ci%23prod.yml",
+    )
+  })
+
   it("labels attempts", () => {
     expect(attemptLabel(2, 2)).toBe("Attempt 2 (latest)")
     expect(attemptLabel(1, 2)).toBe("Attempt 1")

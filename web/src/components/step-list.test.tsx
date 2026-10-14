@@ -27,4 +27,16 @@ describe("StepList", () => {
     expect(bars[0]?.style.left).toBe("0%")
     expect(bars[2]?.style.left).toBe("50%")
   })
+
+  it("does not spin a step that was last seen running once the list is no longer live", () => {
+    const steps: Step[] = [
+      { number: 1, name: "checkout", status: "completed", conclusion: "success", started_at: t("14:00:00"), completed_at: t("14:01:00") },
+      { number: 2, name: "test", status: "in_progress", conclusion: "", started_at: t("14:01:00") },
+    ]
+    const { container } = render(<StepList steps={steps} now={Date.parse(t("14:03:00"))} live={false} />)
+    expect(screen.getByRole("img", { name: "Last seen running" })).toBeInTheDocument()
+    expect(screen.queryByText("Running")).toBeNull()
+    const bars = container.querySelectorAll<HTMLElement>("[data-bar]")
+    expect(bars[1]).toHaveClass("bg-primary/60")
+  })
 })

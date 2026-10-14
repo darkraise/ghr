@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import { mockApi } from "@/test/api"
+import { json, mockApi } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
 import { appendEvents, appendLog, browserZone, MAX_EVENTS, MAX_LOG, useActivity, useEvents, useHistory, useLogTail } from "./hooks"
@@ -24,8 +24,39 @@ describe("appendEvents", () => {
 
 describe("appendLog", () => {
   it("appends the data, advances the cursor and caps the text", () => {
-    expect(appendLog({ text: "a", next: "" }, { data: "b", next: "c1" })).toEqual({ text: "ab", next: "c1" })
-    expect(appendLog({ text: "x".repeat(MAX_LOG), next: "c1" }, { data: "yz", next: "c2" }).text).toHaveLength(MAX_LOG)
+    expect(appendLog({ text: "a", next: "", drained: false }, { data: "b", next: "c1" })).toEqual({ text: "ab", next: "c1", drained: false })
+    expect(appendLog({ text: "x".repeat(MAX_LOG), next: "c1", drained: false }, { data: "yz", next: "c2" }).text).toHaveLength(MAX_LOG)
+  })
+
+  const rows = (c: string, n: number) => `${c.repeat(99)}\n`.repeat(n)
+
+  it("is drained once a read comes back empty", () => {
+    expect(appendLog({ text: "a", next: "c1", drained: false }, { data: "", next: "c1" }).drained).toBe(true)
+    expect(appendLog({ text: "a", next: "c1", drained: true }, { data: "b", next: "c2" }).drained).toBe(false)
+  })
+
+  it("cuts an over-long text at a line and puts the header that governs the cut in front", () => {
+    const prev = { text: `==> Runner_1.log <==\n${rows("r", 100)}\n==> Worker_2.log <==\n${rows("w", 2800)}`, next: "c1", drained: false }
+    const out = appendLog(prev, { data: rows("x", 10), next: "c2" }).text
+    const lines = out.split("\n")
+    expect(lines[0]).toBe("==> Worker_2.log <==")
+    expect(lines.slice(1, -1).every((l) => l === "w".repeat(99) || l === "x".repeat(99))).toBe(true)
+    expect(out.endsWith(rows("x", 10))).toBe(true)
+    expect(out.length).toBeLessThanOrEqual(MAX_LOG + 21)
+  })
+
+  it("does not cut a surrogate pair when no line ends after the cut", () => {
+    const header = "==> Worker_1.log <==\n"
+    const text = `${header}${"a".repeat(79)}\u{1F600}${"b".repeat(MAX_LOG - 1)}`
+    expect(text.length).toBe(MAX_LOG + 101)
+    expect(appendLog({ text, next: "c1", drained: false }, { data: "", next: "c1" }).text).toBe(`${header}${"b".repeat(MAX_LOG - 1)}`)
+  })
+
+  it("does not repeat a header the kept part opens with", () => {
+    const front = `==> Runner_1.log <==\n${rows("r", 50)}\n`
+    const kept = `==> Worker_2.log <==\n${"w".repeat(MAX_LOG - 23)}\n`
+    const out = appendLog({ text: front, next: "c1", drained: false }, { data: kept, next: "c2" }).text
+    expect(out).toBe(kept)
   })
 })
 
@@ -77,6 +108,68 @@ describe("useLogTail", () => {
     await new Promise((r) => setTimeout(r, 1200))
     expect(result.current.data?.text).toBe("one\ntwo\n")
     expect(calls.map((c) => c.search).slice(0, 2)).toEqual(["?cursor=", "?cursor=c1"])
+  })
+
+  it("reads a finished runner's log on until a read comes back empty", { timeout: 10_000 }, async () => {
+    const chunks: Record<string, LogChunk> = {
+      "": { data: "one\n", next: "c1" },
+      c1: { data: "two\n", next: "c2" },
+      c2: { data: "", next: "c2" },
+    }
+    const { calls } = mockApi({
+      "GET /api/runners/aaaaaa/log": ({ url }: { url: URL }) => chunks[url.searchParams.get("cursor") ?? ""],
+    })
+    const { wrapper } = withQuery()
+    const { result } = renderHook(() => useLogTail("aaaaaa", true, false), { wrapper })
+    await waitFor(() => expect(result.current.data?.drained).toBe(true), { timeout: 4000 })
+    await new Promise((r) => setTimeout(r, 1200))
+    expect(result.current.data?.text).toBe("one\ntwo\n")
+    expect(calls.map((c) => c.search)).toEqual(["?cursor=", "?cursor=c1", "?cursor=c2"])
+  })
+
+  it("does not poll a finished runner's log it cannot read", { timeout: 10_000 }, async () => {
+    const { calls } = mockApi({})
+    const { wrapper } = withQuery()
+    renderHook(() => useLogTail("aaaaaa", true, false), { wrapper })
+    await new Promise((r) => setTimeout(r, 2500))
+    expect(calls).toHaveLength(1)
+  })
+
+  it("reads once more when the runner ends after an empty read", { timeout: 10_000 }, async () => {
+    let flushed = false
+    const { calls } = mockApi({
+      "GET /api/runners/aaaaaa/log": ({ url }: { url: URL }) => {
+        const cursor = url.searchParams.get("cursor")
+        if (cursor === "") return { data: "one\n", next: "c1" }
+        if (cursor === "c1" && flushed) return { data: "two\n", next: "c2" }
+        return { data: "", next: cursor }
+      },
+    })
+    const { wrapper } = withQuery()
+    const { result, rerender } = renderHook(({ poll }: { poll: boolean }) => useLogTail("aaaaaa", true, poll), {
+      wrapper,
+      initialProps: { poll: true },
+    })
+    await waitFor(() => expect(result.current.data?.drained).toBe(true), { timeout: 4000 })
+    flushed = true
+    rerender({ poll: false })
+    await waitFor(() => expect(result.current.data?.text).toBe("one\ntwo\n"), { timeout: 4000 })
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(result.current.data?.drained).toBe(true)
+    expect(calls.map((c) => c.search)).toEqual(["?cursor=", "?cursor=c1", "?cursor=c1", "?cursor=c2"])
+  })
+
+  it("stops reading a finished runner's log once a read fails", { timeout: 10_000 }, async () => {
+    const { calls } = mockApi({
+      "GET /api/runners/aaaaaa/log": ({ url }: { url: URL }) =>
+        url.searchParams.get("cursor") === "" ? { data: "one\n", next: "c1" } : json({ error: "log gone" }, 404),
+    })
+    const { wrapper } = withQuery()
+    const { result } = renderHook(() => useLogTail("aaaaaa", true, false), { wrapper })
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 4000 })
+    await new Promise((r) => setTimeout(r, 2500))
+    expect(result.current.data?.text).toBe("one\n")
+    expect(calls.map((c) => c.search)).toEqual(["?cursor=", "?cursor=c1"])
   })
 
   it("does not poll while the log is closed", { timeout: 10_000 }, async () => {

@@ -1,6 +1,7 @@
 import type { Activity, ActivityRun } from "@/api/types"
 import { GUTTER, hasJob, laneTicks, lineRuns, PAD_RIGHT, retentionText, runAria, runEnd, runLabel, scaleX, windowWords } from "@/lib/activity-view"
 import { fmtMem } from "@/lib/format"
+import { plainClick } from "@/lib/plain-click"
 
 const LANE_H = 20
 const LANE_GAP = 6
@@ -91,6 +92,7 @@ function RunMark({
         aria-label={label}
         className="ghr-mark"
         onClick={(e) => {
+          if (!plainClick(e)) return
           e.preventDefault()
           onOpenRunner(run.instance_id)
         }}

@@ -63,7 +63,7 @@ export function githubLinks(owner: string, run: RunDetail): { commit: string; wo
   const base = `https://github.com/${owner}/${run.repo}`
   return {
     commit: `${base}/commit/${run.head_sha}`,
-    workflowFile: run.path.startsWith(".github/workflows/") ? `${base}/blob/${run.head_sha}/${run.path}` : undefined,
+    workflowFile: run.path.startsWith(".github/workflows/") ? `${base}/blob/${run.head_sha}/${run.path.split("/").map(encodeURIComponent).join("/")}` : undefined,
     pull: (n) => `${base}/pull/${n}`,
   }
 }

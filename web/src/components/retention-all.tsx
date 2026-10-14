@@ -31,13 +31,14 @@ export function RetentionAll({ count, offline, busy, ask }: { count: number; off
         <Label htmlFor="retention_all">Retention for all</Label>
         <NumberField
           id="retention_all"
+          label="Retention for all"
           min={1}
           max={400}
           precision={0}
           suffix="days"
           className="w-40"
           value={numberFromText(days)}
-          disabled={offline}
+          disabled={offline || retention.isPending}
           aria-invalid={invalid}
           aria-describedby={invalid ? "retention_all_error" : undefined}
           onValueChange={(v) => setDays(textFromNumber(v))}

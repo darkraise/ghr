@@ -27,6 +27,7 @@ describe("parseActionsSearch", () => {
   it("keeps known values and drops the rest", () => {
     expect(parseActionsSearch({ repo: "darkmem", status: "failed" })).toEqual({ repo: "darkmem", status: "failed" })
     expect(parseActionsSearch({ repo: "", status: "bogus", other: 1 })).toEqual({})
+    expect(parseActionsSearch({ repo: "*" })).toEqual({})
   })
 })
 

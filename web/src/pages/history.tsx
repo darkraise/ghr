@@ -30,6 +30,7 @@ import {
   type HistorySearch,
   type HistoryWindow,
 } from "@/lib/history"
+import { ALL_REPOS } from "@/lib/repos"
 import { runCols } from "@/lib/run-cols"
 import { useMediaQuery } from "@/lib/use-media-query"
 import { useNow } from "@/lib/use-now"
@@ -85,10 +86,14 @@ function HistoryRow({ entry, longest, wide }: { entry: HistoryEntry; longest: nu
         <>
           <RunValue kind="time">{hhmm(new Date(entry.finished_at))}</RunValue>
           <span className="flex flex-col items-end gap-1">
-            <RunValue kind="duration">{dur(ms)}</RunValue>
-            <span data-duration-bar aria-hidden="true" className="block h-1.5 w-20 rounded-[2px] bg-muted">
-              <span className="block h-1.5 rounded-[2px] bg-foreground/40" style={{ width: `${Math.round((ms / longest) * 100)}%` }} />
-            </span>
+            {ms !== undefined && (
+              <>
+                <RunValue kind="duration">{dur(ms)}</RunValue>
+                <span data-duration-bar aria-hidden="true" className="block h-1.5 w-20 rounded-[2px] bg-muted">
+                  <span className="block h-1.5 rounded-[2px] bg-foreground/40" style={{ width: `${Math.round((ms / longest) * 100)}%` }} />
+                </span>
+              </>
+            )}
           </span>
         </>
       }
@@ -134,9 +139,9 @@ export function HistoryPage() {
   // response and starts at its from.
   const since = activity.data && !activity.isPlaceholderData ? activity.data.from : undefined
   const history = useHistory(repo, result, since)
-  // Rows kept from the previous filter while the next ones load would sit
-  // under the wrong controls.
-  const settled = history.isPlaceholderData ? undefined : history.data
+  // A placeholder only ever carries the current filter's rows from the
+  // previous span, so it is safe to show.
+  const settled = history.data
   const wide = useMediaQuery("(min-width: 768px)")
   const now = useNow()
   const [ref, width] = useWidth<HTMLDivElement>(960)
@@ -159,7 +164,7 @@ export function HistoryPage() {
   const picked = pick && activity.data?.buckets.some((b) => b.start === pick.start) ? pick : null
   const rows = picked ? inBucket(all, picked) : all
   const groups = groupByDay(rows, now)
-  const longest = Math.max(1, ...rows.map(took))
+  const longest = Math.max(1, ...rows.flatMap((r) => took(r) ?? []))
   const filtered = repo !== "" || result !== ""
 
   let body
@@ -201,12 +206,12 @@ export function HistoryPage() {
     <div className="flex flex-col gap-4">
       <PageHeader title="History" />
       <div className="flex flex-wrap items-center gap-3">
-        <Select value={repo || ALL} onValueChange={(v) => update({ repo: v === ALL ? "" : v })}>
+        <Select value={repo || ALL_REPOS} onValueChange={(v) => update({ repo: v === ALL_REPOS ? "" : v })}>
           <SelectTrigger aria-label="Repository" className="w-52">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>All repositories</SelectItem>
+            <SelectItem value={ALL_REPOS}>All repositories</SelectItem>
             {repos.map((name) => (
               <SelectItem key={name} value={name}>
                 {name}

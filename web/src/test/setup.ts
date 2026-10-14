@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest"
 import { cleanup, configure } from "@testing-library/react"
+import { toast } from "darkraise-ui/components/sonner"
 import { afterEach, vi } from "vitest"
 import { liveConfig } from "@/api/live"
 import { clearRestarting } from "@/lib/restarting"
@@ -34,8 +35,13 @@ Element.prototype.scrollIntoView = () => {}
 // get 3 seconds, under Vitest's 5-second test timeout.
 configure({ asyncUtilTimeout: 3000 })
 
+// The kit keeps its toasts in a module store and announces them in a live
+// region on document.body; both outlive a test, so a toast from one test
+// would otherwise satisfy a later test's wait for the same text.
 afterEach(async () => {
   cleanup()
+  toast.dismiss()
+  document.querySelectorAll("body > [aria-live]").forEach((region) => region.remove())
   clearRestarting()
   await releaseQueryClients()
   vi.unstubAllGlobals()

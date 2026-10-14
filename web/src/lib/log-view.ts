@@ -38,13 +38,15 @@ export function containingGroup(lines: LogLine[], n: number): number | undefined
   return undefined
 }
 
-// The index of the first line to render: the last LOG_WINDOW lines, reaching
-// back to line keep when it falls above the cut.
-export function windowStart(lines: LogLine[], keep?: number): number {
+// The lines to render, as indexes [start, end): the last LOG_WINDOW lines,
+// or, when line keep lies above them, LOG_WINDOW lines centred on it so a
+// match near the top of a long step does not bring back every line below.
+export function logWindow(lines: LogLine[], keep?: number): { start: number; end: number } {
   const cut = Math.max(0, lines.length - LOG_WINDOW)
-  if (keep === undefined) return cut
-  const at = lines.findIndex((l) => l.n === keep)
-  return at >= 0 ? Math.min(cut, at) : cut
+  const at = keep === undefined ? -1 : lines.findIndex((l) => l.n === keep)
+  if (at < 0 || at >= cut) return { start: cut, end: lines.length }
+  const start = Math.max(0, at - LOG_WINDOW / 2)
+  return { start, end: start + LOG_WINDOW }
 }
 
 export interface LogMatch {

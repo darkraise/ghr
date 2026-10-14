@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react"
+import { act, screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { json, mockApi, type Call } from "@/test/api"
 import { fixtures, runRoutes } from "@/test/fixtures"
@@ -80,6 +80,19 @@ describe("Run page", () => {
     await user.click(await screen.findByRole("option", { name: "Attempt 1" }))
     await waitFor(() => expect(router.state.location.search).toEqual({ attempt: 1 }))
     await waitFor(() => expect(runCalls(calls).some((c) => c.path === "/api/actions/darkmem/runs/102" && c.search === "?attempt=1")).toBe(true))
+  })
+
+  it("opens the repository's runs from the breadcrumb", async () => {
+    mockApi(runRoutes())
+    const { user, router } = renderApp("/actions/darkmem/runs/102")
+    await screen.findByRole("heading", { name: "Fix the cache key", level: 1 })
+    const crumb = within(screen.getByRole("navigation", { name: /breadcrumb/i })).getByRole("link", { name: "darkmem" })
+    expect(crumb).toHaveAttribute("href", "/actions?repo=darkmem")
+    const build = vi.spyOn(router, "buildLocation")
+    await user.click(crumb)
+    await waitFor(() => expect(router.state.location.pathname).toBe("/actions"))
+    expect(router.state.location.search).toEqual({ repo: "darkmem" })
+    expect(build).toHaveBeenCalledWith(expect.objectContaining({ to: "/actions", search: { repo: "darkmem" } }))
   })
 
   it.each([
@@ -225,6 +238,60 @@ describe("Job page", () => {
     expect(await screen.findByText("This job produced no log.")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Raw log" })).toBeNull()
     expect(screen.queryByLabelText("Search logs")).toBeNull()
+  })
+
+  it("reads the log again on Check again", async () => {
+    let stored = false
+    const { calls } = mockApi(
+      runRoutes({ "GET /api/actions/darkmem/jobs/1002/log": () => (stored ? fixtures.jobLog : { ...fixtures.jobLog, no_log: true, steps: [] }) }),
+    )
+    const { user } = renderApp("/actions/darkmem/runs/102/jobs/1002")
+    expect(await screen.findByText("This job produced no log.")).toBeInTheDocument()
+    stored = true
+    await user.click(screen.getByRole("button", { name: "Check again" }))
+    expect(await screen.findByLabelText("Search logs")).toBeInTheDocument()
+    expect(calls.filter((c) => c.path.endsWith("/log"))).toHaveLength(2)
+  })
+
+  it("asks again for the log of a job that finished moments ago", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
+    try {
+      const recent = {
+        ...fixtures.runDetail,
+        jobs: fixtures.runDetail.jobs.map((j) => (j.id === 1002 ? { ...j, completed_at: new Date(Date.parse(fixtures.status.now) - 30_000).toISOString() } : j)),
+      }
+      let stored = false
+      const { calls } = mockApi(
+        runRoutes({
+          "GET /api/actions/darkmem/runs/102": recent,
+          "GET /api/actions/darkmem/jobs/1002/log": () => (stored ? fixtures.jobLog : { ...fixtures.jobLog, no_log: true, steps: [] }),
+        }),
+      )
+      renderApp("/actions/darkmem/runs/102/jobs/1002")
+      expect(await screen.findByText("GitHub has not stored this job's log yet; checking again.")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument()
+      stored = true
+      await act(() => vi.advanceTimersByTimeAsync(15_000))
+      expect(await screen.findByLabelText("Search logs")).toBeInTheDocument()
+      expect(calls.filter((c) => c.path.endsWith("/log"))).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("does not wait for a log of a job that completed after the page's clock", async () => {
+    const skewed = {
+      ...fixtures.runDetail,
+      jobs: fixtures.runDetail.jobs.map((j) => (j.id === 1002 ? { ...j, completed_at: new Date(Date.parse(fixtures.status.now) + 10 * 60_000).toISOString() } : j)),
+    }
+    mockApi(
+      runRoutes({
+        "GET /api/actions/darkmem/runs/102": skewed,
+        "GET /api/actions/darkmem/jobs/1002/log": { ...fixtures.jobLog, no_log: true, steps: [] },
+      }),
+    )
+    renderApp("/actions/darkmem/runs/102/jobs/1002")
+    expect(await screen.findByText("This job produced no log.")).toBeInTheDocument()
   })
 
   it("saves the raw log through a Blob", async () => {

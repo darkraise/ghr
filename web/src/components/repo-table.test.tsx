@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "darkraise-ui/components/tooltip"
 import { describe, expect, it, vi } from "vitest"
@@ -62,6 +62,35 @@ describe("RepoTable", () => {
     expect(cell("darkcloud", 2).textContent).toBe("1")
   })
 
+  it("draws one track instead of a cell per runner when there are many", () => {
+    draw([{ ...darkmem, max: 99, active: 33 }])
+    const meter = cell("darkmem", 2)
+    expect(meter).toHaveTextContent("33/99")
+    expect(meter.querySelectorAll('[data-slot="runner"]')).toHaveLength(0)
+    const track = meter.querySelector('[data-slot="runner-track"]')
+    expect(track).toBeInTheDocument()
+    expect(parseFloat((track?.firstElementChild as HTMLElement).style.width)).toBeCloseTo(33.33, 1)
+  })
+
+  it.each([
+    [16, 16, 0],
+    [17, 0, 1],
+  ])("with max %i draws %i cells and %i tracks", (max, cells, tracks) => {
+    draw([{ ...darkmem, max, active: 3 }])
+    expect(cell("darkmem", 2).querySelectorAll('[data-slot="runner"]')).toHaveLength(cells)
+    expect(cell("darkmem", 2).querySelectorAll('[data-slot="runner-track"]')).toHaveLength(tracks)
+  })
+
+  it("keeps a lone busy runner visible on the track", () => {
+    draw([{ ...darkmem, max: 99, active: 1 }])
+    expect(cell("darkmem", 2).querySelector('[data-slot="runner-track"]')?.firstElementChild).toHaveClass("min-w-px")
+  })
+
+  it("leaves the track empty when no runner is busy", () => {
+    draw([{ ...darkmem, max: 99, active: 0 }])
+    expect(cell("darkmem", 2).querySelector('[data-slot="runner-track"]')?.firstElementChild).toBeNull()
+  })
+
   it("draws the last 24 hours with the hour in progress outlined", () => {
     draw()
     const strip = within(row("darkmem")).getByRole("img", { name: /^darkmem, last 24 hours/ })
@@ -106,6 +135,18 @@ describe("RepoTable", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Edit" }))
     expect(onEdit).toHaveBeenCalledWith("darkmem")
     expect(onOpen).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    ["Ctrl", { ctrlKey: true }],
+    ["Cmd", { metaKey: true }],
+    ["Shift", { shiftKey: true }],
+    ["Alt", { altKey: true }],
+  ])("leaves a click with %s held on a repository's name to the browser", (_, modifier) => {
+    const { onOpen } = draw()
+    const proceeded = fireEvent.click(screen.getByRole("link", { name: "darkcloud" }), modifier)
+    expect(proceeded).toBe(true)
+    expect(onOpen).not.toHaveBeenCalled()
   })
 
   it("locks pause and remove while the daemon is unreachable", async () => {

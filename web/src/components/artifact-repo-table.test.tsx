@@ -138,6 +138,16 @@ describe("ArtifactRepoTable", () => {
     expect(input).toHaveAccessibleDescription("Enter a whole number of days from 1 to 400")
   })
 
+  it("takes a fraction typed into the days field as whole days", async () => {
+    mockApi({})
+    const { user } = await draw()
+    const input = screen.getByRole("spinbutton", { name: "Retention for all" })
+    await user.type(input, "30.5")
+    expect(input).toHaveValue("30.5")
+    expect(input).not.toHaveAttribute("aria-invalid", "true")
+    expect(screen.getByRole("button", { name: "Set retention" })).toBeEnabled()
+  })
+
   it("holds Set retention while an operation runs", async () => {
     mockApi({})
     const operation = fixtures.githubStorage.operation && { ...fixtures.githubStorage.operation, finished_at: undefined }
@@ -202,6 +212,51 @@ describe("ArtifactRepoTable", () => {
     renderRoutes({ "/": () => <ArtifactRepoTable storage={fixtures.githubStorage} config={undefined} offline={false} /> }, "/")
     await screen.findByRole("region", { name: "Repositories" })
     expect(screen.getByRole("button", { name: "Edit cleanup of darkcloud" })).toBeDisabled()
+  })
+
+  it("holds Save while the cleanup preview is pending", async () => {
+    const { calls } = mockApi({ "GET /api/github-storage/preview": () => new Promise<Response>(() => undefined) })
+    const { user } = await draw()
+    await user.click(screen.getByRole("button", { name: "Edit cleanup of darkcloud" }))
+    await user.selectOptions(screen.getByRole("combobox", { name: "Cleanup of darkcloud" }), "age")
+    await user.type(screen.getByRole("textbox", { name: "Cleanup age of darkcloud" }), "12h")
+    await user.click(screen.getByRole("button", { name: "Save cleanup of darkcloud" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save cleanup of darkcloud" })).toBeDisabled())
+    expect(calls.filter((c) => c.path === "/api/github-storage/preview")).toHaveLength(1)
+  })
+
+  it("opens no confirm for a cleanup preview that finishes after Cancel", async () => {
+    let answer: (r: Response) => void = () => undefined
+    mockApi({ "GET /api/github-storage/preview": () => new Promise<Response>((resolve) => (answer = resolve)) })
+    const { user } = await draw()
+    await user.click(screen.getByRole("button", { name: "Edit cleanup of darkcloud" }))
+    await user.selectOptions(screen.getByRole("combobox", { name: "Cleanup of darkcloud" }), "age")
+    await user.type(screen.getByRole("textbox", { name: "Cleanup age of darkcloud" }), "12h")
+    await user.click(screen.getByRole("button", { name: "Save cleanup of darkcloud" }))
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    answer(json([{ repo: "darkcloud", count: 1, bytes: 20971520 }]))
+    await expect(waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeNull(), { timeout: 300 })).rejects.toThrow()
+  })
+
+  it("disables the retention field while its save is pending", async () => {
+    mockApi({ "PUT /api/github-storage/darkcloud/retention": () => new Promise<Response>(() => undefined) })
+    const { user } = await draw()
+    await user.click(screen.getByRole("button", { name: "Edit retention of darkcloud" }))
+    const input = screen.getByRole("spinbutton", { name: "Retention of darkcloud" })
+    await user.clear(input)
+    await user.type(input, "3")
+    await user.click(screen.getByRole("button", { name: "Save retention of darkcloud" }))
+    await user.click(within(await screen.findByRole("alertdialog", { name: "Set retention of darkcloud to 3 days?" })).getByRole("button", { name: "Set retention" }))
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Retention of darkcloud" })).toBeDisabled())
+  })
+
+  it("disables the retention-for-all field while its save is pending", async () => {
+    mockApi({ "POST /api/github-storage/retention": () => new Promise<Response>(() => undefined) })
+    const { user } = await draw()
+    await user.type(screen.getByRole("spinbutton", { name: "Retention for all" }), "7")
+    await user.click(screen.getByRole("button", { name: "Set retention" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Set retention" }))
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Retention for all" })).toBeDisabled())
   })
 
   it("shows a refused preview and saves nothing", async () => {

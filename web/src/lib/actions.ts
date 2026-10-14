@@ -1,6 +1,7 @@
 import type { ActionsRepo, ActionsRun } from "@/api/types"
 import { hhmm, monthDay } from "./format"
 import { resultWord } from "./history"
+import { ALL_REPOS } from "./repos"
 
 export const STATUS_FILTERS = [
   { value: "active", label: "Active" },
@@ -15,10 +16,11 @@ export interface ActionsSearch {
 }
 
 // Unknown values are dropped, so the page falls back to its defaults; the
-// page also drops a repository that is neither configured nor watched.
+// page also drops a repository that is neither configured nor watched. The
+// selects' "all repositories" value is no repository, so it is dropped too.
 export function parseActionsSearch(search: Record<string, unknown>): ActionsSearch {
   const out: ActionsSearch = {}
-  if (typeof search.repo === "string" && search.repo !== "") out.repo = search.repo
+  if (typeof search.repo === "string" && search.repo !== "" && search.repo !== ALL_REPOS) out.repo = search.repo
   const status = STATUS_FILTERS.find((s) => s.value === search.status)
   if (status) out.status = status.value
   return out
