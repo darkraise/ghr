@@ -149,6 +149,9 @@ type actionsCache struct {
 	good   map[string][]model.ActionsRun
 	goodAt time.Time
 	call   *actionsCall
+	// joined, when set, is called as a caller starts waiting on a build in
+	// flight; tests use it to know the caller is parked.
+	joined func()
 	// histFailing holds whether the last build failed to read history, so a
 	// read that keeps failing warns once rather than at every build.
 	histFailing bool
@@ -190,7 +193,11 @@ func (b *Backend) Actions(ctx context.Context) (model.Actions, error) {
 			b.buildActions(ctx, call)
 			return call.val, call.err
 		}
+		joined := c.joined
 		c.mu.Unlock()
+		if joined != nil {
+			joined()
+		}
 		select {
 		case <-call.done:
 		case <-ctx.Done():
