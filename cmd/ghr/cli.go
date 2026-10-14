@@ -237,7 +237,7 @@ func repo(ctx context.Context, c *api.Client, args []string) error {
 }
 
 func logs(ctx context.Context, c *api.Client, args []string, out io.Writer) error {
-	const usage = "usage: ghr logs <id> [-f]"
+	const logsUsage = "usage: ghr logs <id> [-f]"
 	follow := false
 	var id string
 	for _, a := range args {
@@ -245,13 +245,13 @@ func logs(ctx context.Context, c *api.Client, args []string, out io.Writer) erro
 		case a == "-f":
 			follow = true
 		case strings.HasPrefix(a, "-") || id != "":
-			return usageError(usage)
+			return usageError(logsUsage)
 		default:
 			id = a
 		}
 	}
 	if id == "" {
-		return usageError(usage)
+		return usageError(logsUsage)
 	}
 	cursor := ""
 	for {
