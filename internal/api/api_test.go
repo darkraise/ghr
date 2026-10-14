@@ -1167,3 +1167,36 @@ func TestPatchConfigMaxAndWarmOverTheWire(t *testing.T) {
 		t.Errorf("an empty patch arrived as %+v", absent)
 	}
 }
+
+func TestRequestBodiesAreReadWhole(t *testing.T) {
+	c, b := setup(t)
+	send := func(method, path, body string) int {
+		t.Helper()
+		req, _ := http.NewRequest(method, c.Base+path, strings.NewReader(body))
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := send(http.MethodPatch, "/config", `{"global_max":2}{"global_max":3}`); got != http.StatusBadRequest {
+		t.Errorf("two JSON values: status %d, want 400", got)
+	}
+	if len(b.patches) != 0 {
+		t.Errorf("a refused body applied %+v", b.patches)
+	}
+	over := `{"mode":"` + strings.Repeat("a", 1<<20) + `"}`
+	if got := send(http.MethodPatch, "/config", over); got != http.StatusRequestEntityTooLarge {
+		t.Errorf("a body over 1 MiB: status %d, want 413", got)
+	}
+	if got := send(http.MethodPut, "/token", strings.Repeat("a", 64*1024+1)); got != http.StatusRequestEntityTooLarge {
+		t.Errorf("a token over 64 KiB: status %d, want 413", got)
+	}
+	if b.token != "" {
+		t.Errorf("an oversized token was stored, %d bytes", len(b.token))
+	}
+	if got := send(http.MethodPut, "/token", strings.Repeat("a", 64*1024)); got != http.StatusNoContent {
+		t.Errorf("a token of 64 KiB: status %d, want 204", got)
+	}
+}
