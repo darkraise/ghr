@@ -21,6 +21,7 @@ const (
 	parseLimit        = 4 << 20
 	logSlots          = 4
 	annotationEntries = 500
+	logMissEntries    = 1000
 	logRetryTTL       = 10 * time.Minute
 	// GitHub may not have stored a log yet when its job has only just
 	// completed. "No log" for a job that completed less than logSettle ago
@@ -98,7 +99,7 @@ type logCache struct {
 	calls  map[int64]*logCall
 	parsed *lru.Cache[int64, model.JobLog]
 	notes  *lru.Cache[int64, jobNotes]
-	misses map[int64]logMiss
+	misses *lru.Cache[int64, logMiss]
 	gen    uint64 // the token generation parsed, notes and misses were filled under
 }
 
@@ -115,7 +116,7 @@ func (c *logCache) initLocked(gen uint64) {
 		c.gen = gen
 		c.parsed = lru.New[int64, model.JobLog](1<<30, parsedLogBytes)
 		c.notes = lru.New[int64, jobNotes](annotationEntries, 0)
-		c.misses = map[int64]logMiss{}
+		c.misses = lru.New[int64, logMiss](logMissEntries, 0)
 	}
 }
 
@@ -168,14 +169,14 @@ func (b *Backend) downloadLog(j logJob, call *logCall, queueWait time.Duration) 
 		case logParsed:
 			c.parsed.Add(j.id, res.log, size)
 			c.notes.Add(j.id, res.notes, 0)
-			delete(c.misses, j.id)
+			c.misses.Remove(j.id)
 		case logBusy:
 		default:
 			now, ttl := b.now(), logRetryTTL
 			if res.outcome == logNone && now.Sub(j.completedAt) < logSettle {
 				ttl = logSettleTTL
 			}
-			c.misses[j.id] = logMiss{until: now.Add(ttl), res: res}
+			c.misses.Add(j.id, logMiss{until: now.Add(ttl), res: res}, 0)
 		}
 	}
 	c.mu.Unlock()
@@ -291,7 +292,7 @@ func (b *Backend) JobLog(ctx context.Context, repo string, jobID int64) (model.J
 		c.mu.Unlock()
 		return l, nil
 	}
-	if m, ok := c.misses[jobID]; ok && m.res.outcome != logFailed && b.now().Before(m.until) {
+	if m, ok := c.misses.Get(jobID); ok && m.res.outcome != logFailed && b.now().Before(m.until) {
 		c.mu.Unlock()
 		return flaggedLog(jobID, m.res.outcome), nil
 	}

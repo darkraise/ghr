@@ -253,6 +253,31 @@ func TestJobLogParsedCacheIsBoundedByLogSize(t *testing.T) {
 	}
 }
 
+// Misses are kept for minutes, so a daemon that is asked about many jobs
+// would otherwise keep one for every job it ever failed to read.
+func TestJobLogMissesAreBounded(t *testing.T) {
+	b, _, gh := newBackend(t)
+	ctx := context.Background()
+	for id := int64(1); id <= logMissEntries+1; id++ {
+		logJobOf(gh, id, "job", "x")
+		gh.logErr[id] = ghNotFound()
+		if l, err := b.JobLog(ctx, "darkmem", id); err != nil || !l.NoLog {
+			t.Fatalf("job %d: log %+v err %v", id, l, err)
+		}
+	}
+	b.logs.mu.Lock()
+	defer b.logs.mu.Unlock()
+	if _, ok := b.logs.misses.Get(1); ok {
+		t.Fatal("the oldest miss was kept")
+	}
+	if _, ok := b.logs.misses.Get(2); !ok {
+		t.Fatal("the second oldest miss was dropped")
+	}
+	if _, ok := b.logs.misses.Get(logMissEntries + 1); !ok {
+		t.Fatal("the newest miss was dropped")
+	}
+}
+
 func TestJobLogCallersShareOneDownload(t *testing.T) {
 	b, _, gh := newBackend(t)
 	logJobOf(gh, 1002, "Backend tests", "x")
@@ -543,7 +568,7 @@ func TestLogRouteTellsAQueuedDownloadFromAStartedOne(t *testing.T) {
 	for {
 		b.logs.mu.Lock()
 		_, inFlight := b.logs.calls[5]
-		_, missed := b.logs.misses[5]
+		_, missed := b.logs.misses.Get(5)
 		b.logs.mu.Unlock()
 		if missed {
 			t.Fatal("a busy download was cached as a miss")

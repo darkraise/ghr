@@ -42,7 +42,7 @@ func (b *Backend) RunAnnotations(ctx context.Context, repo string, id int64, att
 			notes[j.ID] = n
 			continue
 		}
-		if m, ok := c.misses[j.ID]; ok && b.now().Before(m.until) {
+		if m, ok := c.misses.Get(j.ID); ok && b.now().Before(m.until) {
 			outcomes[j.ID] = m.res.outcome
 			continue
 		}
