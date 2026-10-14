@@ -344,20 +344,25 @@ func otherFilesystem(t *testing.T) string {
 
 func TestMeasureSaysWhetherTheCachesShareTheDataRootFilesystem(t *testing.T) {
 	home, tools := t.TempDir(), t.TempDir()
-	for name, c := range map[string]struct {
-		docker Docker
+	for _, c := range []struct {
+		name   string
+		docker func(t *testing.T) Docker
 		want   bool
 	}{
-		"the data root is beside the caches":     {rootedDisk{fakeDisk: &fakeDisk{}, root: home}, true},
-		"the data root is on another filesystem": {rootedDisk{fakeDisk: &fakeDisk{}, root: otherFilesystem(t)}, false},
-		"the data root cannot be read":           {rootedDisk{fakeDisk: &fakeDisk{}, err: errors.New("docker is down")}, true},
-		"the data root is gone":                  {rootedDisk{fakeDisk: &fakeDisk{}, root: filepath.Join(home, "absent")}, true},
-		"docker does not name its data root":     {&fakeDisk{}, true},
+		{"the data root is beside the caches", func(*testing.T) Docker { return rootedDisk{fakeDisk: &fakeDisk{}, root: home} }, true},
+		{"the data root is on another filesystem", func(t *testing.T) Docker { return rootedDisk{fakeDisk: &fakeDisk{}, root: otherFilesystem(t)} }, false},
+		{"the data root cannot be read", func(*testing.T) Docker {
+			return rootedDisk{fakeDisk: &fakeDisk{}, err: errors.New("docker is down")}
+		}, true},
+		{"the data root is gone", func(*testing.T) Docker { return rootedDisk{fakeDisk: &fakeDisk{}, root: filepath.Join(home, "absent")} }, true},
+		{"docker does not name its data root", func(*testing.T) Docker { return &fakeDisk{} }, true},
 	} {
-		m := measure(context.Background(), &fakeTools{root: tools}, c.docker, home, time.Now())
-		if m.cachesOnDataRoot != c.want {
-			t.Errorf("%s: cachesOnDataRoot = %v, want %v", name, m.cachesOnDataRoot, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			m := measure(context.Background(), &fakeTools{root: tools}, c.docker(t), home, time.Now())
+			if m.cachesOnDataRoot != c.want {
+				t.Errorf("cachesOnDataRoot = %v, want %v", m.cachesOnDataRoot, c.want)
+			}
+		})
 	}
 }
 
