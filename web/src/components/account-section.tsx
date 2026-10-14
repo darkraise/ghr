@@ -29,7 +29,7 @@ export function AccountSection() {
       setNext("")
       setAgain("")
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 401 ? "The current password is wrong" : errorText(err))
+      setError(err instanceof ApiError && err.status === 403 ? "The current password is wrong" : errorText(err))
     } finally {
       setBusy(false)
     }

@@ -348,11 +348,28 @@ describe("Account section", () => {
   })
 
   it("says when the current password is wrong", async () => {
-    mockApi(routes({ "POST /auth/password": () => json({ error: "wrong password" }, 401) }))
+    mockApi(routes({ "POST /auth/password": () => json({ error: "wrong password" }, 403) }))
     const { user, router } = renderApp("/settings/account")
     await fill(user, "bad password 1", "new password 12", "new password 12")
     expect(await screen.findByRole("alert")).toHaveTextContent("The current password is wrong")
     expect(router.state.location.pathname).toBe("/settings/account")
+  })
+
+  it("a 401 on password change goes to the login page", async () => {
+    let authenticated = true
+    mockApi(
+      routes({
+        "GET /auth/state": () => ({ setup_required: false, authenticated }),
+        "POST /auth/password": () => {
+          authenticated = false
+          return json({ error: "not logged in" }, 401)
+        },
+      }),
+    )
+    const { user, router } = renderApp("/settings/account")
+    await fill(user, "old password 1", "new password 12", "new password 12")
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"))
+    expect(screen.queryByText("The current password is wrong")).not.toBeInTheDocument()
   })
 })
 
