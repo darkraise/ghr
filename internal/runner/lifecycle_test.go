@@ -1479,7 +1479,7 @@ func TestStartTimeoutRetriesOnlyTheUnitAfterDeregistering(t *testing.T) {
 		t.Fatalf("stopped %v deleted %v", h.sd.stopped, h.gh.deleted)
 	}
 	delete(h.sd.stopErr, "ghr-runner-aaaaaa")
-	h.m.apiErr("darkmem", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Hour)}, h.now)
+	h.rateLimited("darkmem", h.now.Add(time.Hour))
 	h.m.beginTick()
 	calls := h.gh.callCount()
 	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
@@ -1527,7 +1527,7 @@ func TestRunnerMadeBusyDuringTheCheckStaysBusy(t *testing.T) {
 func TestStartTimeoutWaitsForAnAnswerFromTheRunnersAPI(t *testing.T) {
 	for name, block := range map[string]func(h *harness) (unblock func()){
 		"API pause": func(h *harness) func() {
-			h.m.apiErr("darkmem", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(10 * time.Minute)}, h.now)
+			h.rateLimited("darkmem", h.now.Add(10*time.Minute))
 			return func() { h.now = h.now.Add(10 * time.Minute) }
 		},
 		"failed call": func(h *harness) func() {

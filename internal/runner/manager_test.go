@@ -3,9 +3,11 @@ package runner
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/sched"
 )
@@ -136,5 +138,31 @@ func TestStatusCarriesTheOldestQueuedJob(t *testing.T) {
 				t.Fatalf("darkcloud oldest = %v", r.OldestQueuedAt)
 			}
 		}
+	}
+}
+
+// A rate limit and a repository's backoff were met with the old token, so a
+// new token lifts them.
+func TestClearDegradedLiftsTheRateLimitPause(t *testing.T) {
+	h := newHarness(t)
+	h.m.apiErr("darkmem", &github.APIError{Status: 502, Kind: github.ErrServer}, h.now)
+	h.gh.setErr("ListRuns darkcloud", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Hour)})
+	h.m.gatherDemand(context.Background(), h.cfg, h.now)
+	if h.m.apiAllowed(h.now) || h.m.Status().Repos[1].Error == "" {
+		t.Fatalf("setup: allowed %v, darkmem error %q", h.m.apiAllowed(h.now), h.m.Status().Repos[1].Error)
+	}
+	h.m.ClearDegraded()
+	if !h.m.apiAllowed(h.now) || h.m.Status().Repos[1].Error != "" {
+		t.Fatalf("after a new token: allowed %v, darkmem error %q", h.m.apiAllowed(h.now), h.m.Status().Repos[1].Error)
+	}
+}
+
+// The client keeps no suspension for a rate limit met with a token it has
+// since replaced; that answer, arriving late, must not pause the new token.
+func TestRateLimitTheClientDroppedDoesNotPause(t *testing.T) {
+	h := newHarness(t)
+	h.m.apiErr("darkcloud", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Hour)}, h.now)
+	if !h.m.apiAllowed(h.now) || strings.Contains(h.eventText(), "rate limit") {
+		t.Fatalf("paused until %v\n%s", h.m.PausedUntil(), h.eventText())
 	}
 }

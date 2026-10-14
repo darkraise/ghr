@@ -506,7 +506,7 @@ func TestPausingDuringAnAPIPauseStillClearsTheRepository(t *testing.T) {
 	queuedRun(h, "darkmem", 2, github.Job{ID: 3, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
 	h.m.Tick(context.Background())
 	h.m.apiErr("darkmem", &github.APIError{Status: 502, Kind: github.ErrServer}, h.now)
-	h.m.apiErr("darkcloud", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Hour)}, h.now)
+	h.rateLimited("darkcloud", h.now.Add(time.Hour))
 	if r := h.m.Status().Repos[1]; r.Queued != 1 || r.Error == "" {
 		t.Fatalf("setup: queued %d error %q", r.Queued, r.Error)
 	}

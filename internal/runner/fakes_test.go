@@ -34,6 +34,7 @@ type fakeGH struct {
 	releases  []github.Release
 	public    map[string]bool     // repos GetRepo reports public; any other is private
 	hook      func(method string) // runs during every call, after it is recorded
+	suspended time.Time           // RetryAt of the last rate limit a call returned
 }
 
 func newFakeGH() *fakeGH {
@@ -47,6 +48,9 @@ func (f *fakeGH) call(method, repo string) error {
 	f.mu.Lock()
 	f.calls = append(f.calls, method+" "+repo)
 	err, hook := f.errs[method+" "+repo], f.hook
+	if ae, ok := err.(*github.APIError); ok && ae.Kind == github.ErrRateLimit {
+		f.suspended = ae.RetryAt
+	}
 	f.mu.Unlock()
 	if hook != nil {
 		hook(method)
@@ -173,6 +177,21 @@ func (f *fakeGH) setReleases(rels ...github.Release) {
 }
 
 func (f *fakeGH) RateRemaining() int { return f.remaining }
+
+func (f *fakeGH) SuspendedUntil() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.suspended
+}
+
+// rateLimited files a rate limit met under repo until until, as the client
+// suspended by it reports.
+func (h *harness) rateLimited(repo string, until time.Time) {
+	h.gh.mu.Lock()
+	h.gh.suspended = until
+	h.gh.mu.Unlock()
+	h.m.apiErr(repo, &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: until}, h.now)
+}
 
 func (f *fakeGH) GetRepo(_ context.Context, repo string) (*github.Repository, error) {
 	if err := f.call("GetRepo", repo); err != nil {

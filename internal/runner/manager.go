@@ -54,6 +54,7 @@ type GitHub interface {
 	GetRepo(ctx context.Context, repo string) (*github.Repository, error)
 	ListRunnerReleases(ctx context.Context) ([]github.Release, error)
 	RateRemaining() int
+	SuspendedUntil() time.Time
 }
 
 type Systemd interface {
@@ -915,13 +916,16 @@ func (m *Manager) PausedUntil() time.Time {
 }
 
 // ClearDegraded is called after the token is replaced or reloaded. A new
-// token may also be what a failing spawn was waiting for. Every repository's
+// token may also be what a failing spawn was waiting for, and the rate limit
+// and repository backoffs were met with the old one. Every repository's
 // visibility is read again at its next poll; the last answer stands until
 // then.
 func (m *Manager) ClearDegraded() {
 	m.mu.Lock()
 	m.degraded = false
 	m.degradedReason = ""
+	m.pauseUntil = time.Time{}
+	m.fails, m.retryAt, m.repoErr = map[string]int{}, map[string]time.Time{}, map[string]string{}
 	m.spawnFails, m.spawnRetryAt, m.spawnErr = map[string]int{}, map[string]time.Time{}, map[string]string{}
 	m.visGen++
 	for key, v := range m.vis {
@@ -974,14 +978,19 @@ func (m *Manager) apiErr(repo string, err error, now time.Time) {
 			}
 			return
 		case ae.Kind == github.ErrRateLimit:
+			// The client's suspension, not the error's retry time: the client
+			// drops a rate limit that answered a request made with a token it
+			// has since replaced.
+			until := m.GH.SuspendedUntil()
 			m.mu.Lock()
 			was := now.Before(m.pauseUntil)
-			if ae.RetryAt.After(m.pauseUntil) {
-				m.pauseUntil = ae.RetryAt
+			if until.After(m.pauseUntil) {
+				m.pauseUntil = until
 			}
+			paused := now.Before(m.pauseUntil)
 			m.mu.Unlock()
-			if !was {
-				m.Events.Add("warn", repo, "GitHub rate limit; pausing API calls until %s", ae.RetryAt.Format(time.TimeOnly))
+			if !was && paused {
+				m.Events.Add("warn", repo, "GitHub rate limit; pausing API calls until %s", until.Format(time.TimeOnly))
 			}
 			return
 		}
