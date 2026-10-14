@@ -6,11 +6,11 @@ import { AccountSection } from "@/components/account-section"
 import { ErrorLine } from "@/components/page/error-line"
 import { GitHubStorageSection } from "@/components/github-storage-section"
 import { SideGroup, SideLayout } from "@/components/page/side-layout"
-import { RunnerSection } from "@/components/runner-section"
 import { SaveBar } from "@/components/save-bar"
 import { SettingsSections } from "@/components/settings-form"
 import { TokenSection } from "@/components/token-section"
 import { UnsavedGuard } from "@/components/unsaved-guard"
+import { UpdatesSection } from "@/components/updates-section"
 import { useSettingsForm } from "@/lib/settings-form"
 import { SIDE_LINK } from "@/lib/side-link"
 import { StoragePage } from "@/pages/storage"
@@ -20,7 +20,7 @@ const CONFIG = [
   { id: "", title: "General" },
   { id: "token", title: "GitHub token" },
   { id: "github-storage", title: "GitHub storage" },
-  { id: "runner", title: "Runner software" },
+  { id: "updates", title: "Updates" },
   { id: "account", title: "Account" },
 ] as const
 
@@ -41,7 +41,7 @@ function SectionLink({ id, title }: { id: string; title: string }) {
   )
 }
 
-// The save bar counts config fields only; the token, runner and account
+// The save bar counts config fields only; the token, updates and account
 // sections act at once with their own buttons.
 function GeneralSettings() {
   const form = useSettingsForm()
@@ -92,10 +92,10 @@ function SectionContent({ section }: { section: string }) {
       )
     case "github-storage":
       return <GitHubStorageSection />
-    case "runner":
+    case "updates":
       return (
-        <Titled title="Runner software">
-          <RunnerSection />
+        <Titled title="Updates">
+          <UpdatesSection />
         </Titled>
       )
     case "account":

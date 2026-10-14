@@ -169,6 +169,8 @@ describe("routes", () => {
     ["/storage", "/settings/storage", ""],
     ["/toolchains#installed", "/settings/toolchains", "installed"],
     ["/storage#prune", "/settings/storage", "prune"],
+    ["/settings/runner", "/settings/updates", ""],
+    ["/settings/runner#runner", "/settings/updates", "runner"],
   ])("sends %s to its settings section, keeping the hash", async (from, to, hash) => {
     mockApi(authedRoutes())
     const { router } = renderApp(from)

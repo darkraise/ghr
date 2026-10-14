@@ -454,7 +454,7 @@ describe("Settings sections", () => {
       "General",
       "GitHub token",
       "GitHub storage",
-      "Runner software",
+      "Updates",
       "Account",
       "Toolchains",
       "Storage",
@@ -470,7 +470,7 @@ describe("Settings sections", () => {
   it.each([
     ["token", "GitHub token"],
     ["github-storage", "GitHub storage"],
-    ["runner", "Runner software"],
+    ["updates", "Updates"],
     ["account", "Account"],
     ["toolchains", "Toolchains"],
     ["storage", "Storage"],

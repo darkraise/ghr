@@ -172,6 +172,15 @@ const storageRoute = createRoute({
     throw redirect({ to: "/settings/$section", params: { section: "storage" }, hash: location.hash, replace: true })
   },
 })
+// Settings › Runner software became part of Settings › Updates. A static
+// route ranks above /settings/$section.
+const settingsRunnerRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/settings/runner",
+  beforeLoad: ({ location }) => {
+    throw redirect({ to: "/settings/$section", params: { section: "updates" }, hash: location.hash, replace: true })
+  },
+})
 const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: "/settings", component: SettingsPage })
 // The section pages read $section themselves, so the route table does not
 // change when a page gains or loses a section.
@@ -200,6 +209,7 @@ const routeTree = rootRoute.addChildren([
     artifactsRoute,
     toolchainsRoute,
     storageRoute,
+    settingsRunnerRoute,
     settingsRoute,
     settingsSectionRoute,
   ]),
