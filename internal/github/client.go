@@ -172,6 +172,10 @@ type Client struct {
 	// Sleep waits d. When ctx ends first it returns at once with ctx's error.
 	Sleep func(ctx context.Context, d time.Duration) error
 
+	// blobHost reports whether a download address is one GitHub serves
+	// logs from; tests swap it to reach local servers.
+	blobHost func(string) bool
+
 	mu sync.Mutex
 	// cache holds the last body per GET URL for ETag revalidation, sized by
 	// its body bytes.
@@ -187,13 +191,16 @@ type Client struct {
 }
 
 func New(owner string, token func() string) *Client {
-	return &Client{
+	c := &Client{
 		BaseURL: "https://api.github.com", Owner: owner, Token: token,
 		HTTP: &http.Client{Timeout: 30 * time.Second}, Blob: newBlobClient(), Now: time.Now, Sleep: sleep,
+		blobHost:  BlobHost,
 		cache:     lru.New[string, cached](maxCacheEntries, maxCacheBytes),
 		remaining: -1,
 		mutSlot:   make(chan struct{}, 1),
 	}
+	c.Blob.CheckRedirect = c.blobRedirect
+	return c
 }
 
 func sleep(ctx context.Context, d time.Duration) error {

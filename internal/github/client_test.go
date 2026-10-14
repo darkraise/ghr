@@ -35,6 +35,7 @@ func newClient(t *testing.T, h func(w http.ResponseWriter, r *http.Request)) (*C
 	c := New("darkraise", func() string { return "tok" })
 	c.BaseURL = srv.URL
 	c.HTTP = srv.Client()
+	c.blobHost = func(string) bool { return true } // the fake blob stores are local http servers
 	return c, f
 }
 

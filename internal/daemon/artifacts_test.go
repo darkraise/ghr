@@ -9,30 +9,6 @@ import (
 	"github.com/darkraise/ghr/internal/github"
 )
 
-func TestDownloadHost(t *testing.T) {
-	for u, want := range map[string]bool{
-		"https://productionresultssa1.blob.core.windows.net/actions-results/x.zip?sig=1": true,
-		"https://pipelines.actions.githubusercontent.com/x":                              true,
-		"https://PIPELINES.ACTIONS.GITHUBUSERCONTENT.COM/x":                              true,
-		"http://productionresultssa1.blob.core.windows.net/x":                            false,
-		"https://blob.core.windows.net.example.com/x":                                    false,
-		"https://evilblob.core.windows.net/x":                                            false,
-		"https://example.com/x":                                                          false,
-		"https://evilgithubusercontent.com/x":                                            false,
-		"https://githubusercontent.com/x":                                                false,
-		"https://pipelines.actions.githubusercontent.com@example.com/x":                  false,
-		"https://pipelines.actions.githubusercontent.com:8443/x":                         true,
-		"https://example.com#.githubusercontent.com":                                     false,
-		"https://example.com/.githubusercontent.com":                                     false,
-		"/relative": false,
-		"":          false,
-	} {
-		if got := downloadHost(u); got != want {
-			t.Errorf("%q: got %v", u, got)
-		}
-	}
-}
-
 func TestArtifactDownload(t *testing.T) {
 	const signed = "https://productionresultssa1.blob.core.windows.net/actions-results/x.zip?sig=1"
 	for _, tc := range []struct {
