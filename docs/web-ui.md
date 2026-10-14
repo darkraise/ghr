@@ -23,6 +23,7 @@ Until a password is set, the UI asks for a one-time setup code along with the ne
 - `ghr web reset-password` deletes the password, logs every browser out and prints a new setup code; set a new password with `ghr web set-password`, or in the browser with that code.
 - Five wrong passwords, at login or when changing it, from one address within 15 minutes lock that address out for 15 minutes.
 - Changing the password logs out every other browser and session.
+- A session ends after 24 hours without use, and after 30 days in any case. A tab left open keeps its session in use.
 - Sessions live in memory: every restart, including each `setup.sh` upgrade, logs you out.
 
 ## Listen address and hostnames

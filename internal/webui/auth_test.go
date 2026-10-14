@@ -682,6 +682,46 @@ func TestSessionsExpireAndEnd(t *testing.T) {
 	}
 }
 
+func TestSessionsEndWhenIdle(t *testing.T) {
+	a, c := newTestAuth(t)
+	used, err := claim(a, pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle, err := a.Login("10.0.0.1", pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := c.now()
+	c.add(idleTTL - time.Nanosecond)
+	if !a.Valid(used) {
+		t.Fatal("a session ended before it was idle for idleTTL")
+	}
+	c.add(time.Nanosecond)
+	if a.Valid(idle) {
+		t.Fatal("a session idle for idleTTL is still valid")
+	}
+	a.Login("10.0.0.2", "wrong password!")
+	a.mu.Lock()
+	_, kept := a.sessions[idle]
+	a.mu.Unlock()
+	if kept {
+		t.Fatal("a sweep kept an idle session")
+	}
+	for {
+		c.add(idleTTL - time.Minute)
+		if c.now().Sub(start) >= sessionTTL {
+			break
+		}
+		if !a.Valid(used) {
+			t.Fatalf("a session in use ended after %v", c.now().Sub(start))
+		}
+	}
+	if a.Valid(used) {
+		t.Fatal("a session in use outlived sessionTTL")
+	}
+}
+
 func TestFailedLoginSweepsExpiredSessions(t *testing.T) {
 	a, c := newTestAuth(t)
 	if _, err := claim(a, pw); err != nil {

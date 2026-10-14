@@ -18,6 +18,7 @@ import (
 
 const (
 	sessionTTL  = 30 * 24 * time.Hour
+	idleTTL     = 24 * time.Hour
 	maxFailures = 5
 	// maxPrefixFailures is the limit for a whole IPv6 /64. It is higher than
 	// maxFailures because on a LAN every host shares one /64.
@@ -66,15 +67,21 @@ type Auth struct {
 	// code is the setup code Setup asks for, without dashes; empty until
 	// SetupCode issues one. It lives in memory only, so a restart replaces it.
 	code     string
-	sessions map[string]time.Time
+	sessions map[string]session
 	fails    map[string]*failures
+}
+
+type session struct{ expires, seen time.Time }
+
+func (s session) live(now time.Time) bool {
+	return now.Before(s.expires) && now.Sub(s.seen) < idleTTL
 }
 
 func NewAuth(path string, now func() time.Time, rand io.Reader) *Auth {
 	return &Auth{
 		path: path, now: now, rand: rand, iter: DefaultIterations,
 		sem:      make(chan struct{}, maxDerivations),
-		sessions: map[string]time.Time{},
+		sessions: map[string]session{},
 		fails:    map[string]*failures{},
 	}
 }
@@ -279,11 +286,12 @@ func (a *Auth) admitLocked(key string, now time.Time) error {
 	return nil
 }
 
-// sweepLocked drops expired sessions, failures older than failWindow, and
-// clients with neither recent failures nor a lockout. a.mu is held.
+// sweepLocked drops expired and idle sessions, failures older than
+// failWindow, and clients with neither recent failures nor a lockout. a.mu is
+// held.
 func (a *Auth) sweepLocked(now time.Time) {
-	for k, exp := range a.sessions {
-		if !now.Before(exp) {
+	for k, s := range a.sessions {
+		if !s.live(now) {
 			delete(a.sessions, k)
 		}
 	}
@@ -299,23 +307,32 @@ func (a *Auth) sweepLocked(now time.Time) {
 	}
 }
 
-// newSessionLocked starts a session expiring sessionTTL after now. a.mu is held.
+// newSessionLocked starts a session expiring sessionTTL after now, or idleTTL
+// after its last use. a.mu is held.
 func (a *Auth) newSessionLocked(now time.Time) (string, error) {
 	b := make([]byte, 32)
 	if _, err := io.ReadFull(a.rand, b); err != nil {
 		return "", err
 	}
 	id := base64.RawURLEncoding.EncodeToString(b)
-	a.sessions[id] = now.Add(sessionTTL)
+	a.sessions[id] = session{expires: now.Add(sessionTTL), seen: now}
 	return id, nil
 }
 
-// Valid reports whether id names a live session.
+// Valid reports whether id names a live session, and counts as its use. An
+// open /api request rechecks its session every sessionRecheck, so a tab
+// holding the change stream open stays logged in.
 func (a *Auth) Valid(id string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	exp, ok := a.sessions[id]
-	return ok && a.now().Before(exp)
+	now := a.now()
+	s, ok := a.sessions[id]
+	if !ok || !s.live(now) {
+		return false
+	}
+	s.seen = now
+	a.sessions[id] = s
+	return true
 }
 
 func (a *Auth) Logout(id string) {
