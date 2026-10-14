@@ -6,10 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/model"
@@ -263,6 +265,7 @@ func logs(ctx context.Context, c *api.Client, args []string, out io.Writer) erro
 	if id == "" {
 		return usageError("usage: ghr logs <id> [-f]")
 	}
+	safe := stdoutText()
 	cursor := ""
 	for {
 		chunk, err := c.Log(ctx, id, cursor)
@@ -272,7 +275,7 @@ func logs(ctx context.Context, c *api.Client, args []string, out io.Writer) erro
 			}
 			return err
 		}
-		if _, err := io.WriteString(out, chunk.Data); err != nil {
+		if _, err := io.WriteString(out, safe(chunk.Data)); err != nil {
 			return err
 		}
 		cursor = chunk.Next
@@ -304,13 +307,39 @@ func historyCmd(ctx context.Context, c *api.Client, args []string, out io.Writer
 	if err != nil {
 		return err
 	}
+	return printHistory(out, h)
+}
+
+func printHistory(out io.Writer, h []model.HistoryEntry) error {
+	safe := stdoutText()
 	w := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(w, "FINISHED\tREPO\tRUN\tJOB\tRESULT\tDURATION")
 	for _, e := range h {
-		fmt.Fprintf(w, "%s\t%s\t#%s\t%s\t%s\t%s\n", e.FinishedAt.Local().Format("2006-01-02 15:04"), e.Repo, e.RunNumber, e.JobName,
+		fmt.Fprintf(w, "%s\t%s\t#%s\t%s\t%s\t%s\n", e.FinishedAt.Local().Format("2006-01-02 15:04"), safe(e.Repo), safe(e.RunNumber), safe(e.JobName),
 			e.Conclusion, e.FinishedAt.Sub(e.StartedAt).Round(time.Second))
 	}
 	return w.Flush()
+}
+
+// termSafe replaces every control character a job could use to drive the
+// terminal reading its output: C0 controls except newline and tab, DEL and
+// C1. That takes ESC, so no CSI or OSC sequence survives.
+func termSafe(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 && r != '\n' && r != '\t' || r == 0x7f || r >= 0x80 && r <= 0x9f {
+			return utf8.RuneError
+		}
+		return r
+	}, s)
+}
+
+// stdoutText returns termSafe when stdout is a terminal. A pipe or a file
+// keeps the raw bytes.
+func stdoutText() func(string) string {
+	if fdIsTerminal(os.Stdout.Fd()) {
+		return termSafe
+	}
+	return func(s string) string { return s }
 }
 
 func maxText(n int) string {
@@ -321,6 +350,7 @@ func maxText(n int) string {
 }
 
 func printStatus(out io.Writer, st model.Status) {
+	safe := stdoutText()
 	if st.Unconfigured {
 		fmt.Fprintln(out, "warning: ghr is not configured. Run: ghr setup github --owner <owner>, or open the web UI")
 	}
@@ -361,10 +391,10 @@ func printStatus(out io.Writer, st model.Status) {
 		}
 		last := "-"
 		if r.LastJob != nil {
-			last = fmt.Sprintf("%s #%s %s (%s ago)", r.LastJob.Conclusion, r.LastJob.RunNumber, r.LastJob.JobName,
+			last = fmt.Sprintf("%s #%s %s (%s ago)", r.LastJob.Conclusion, safe(r.LastJob.RunNumber), safe(r.LastJob.JobName),
 				st.Now.Sub(r.LastJob.FinishedAt).Round(time.Minute))
 		}
-		fmt.Fprintf(w, "%s\t%s\t%d/%s\t%d\t%s\n", r.Name, state, r.Active, maxText(r.Max), r.Queued, last)
+		fmt.Fprintf(w, "%s\t%s\t%d/%s\t%d\t%s\n", safe(r.Name), state, r.Active, maxText(r.Max), r.Queued, last)
 	}
 	w.Flush()
 	if len(st.Instances) == 0 {
@@ -376,13 +406,13 @@ func printStatus(out io.Writer, st model.Status) {
 	for _, i := range st.Instances {
 		job := "-"
 		if i.Job != nil {
-			job = fmt.Sprintf("%s #%s", i.Job.Name, i.Job.RunNumber)
+			job = fmt.Sprintf("%s #%s", safe(i.Job.Name), safe(i.Job.RunNumber))
 		}
 		state := i.State
 		if i.Stopping {
 			state = "stopping"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", i.ID, i.Repo, state, job, st.Now.Sub(i.Since).Round(time.Second))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", i.ID, safe(i.Repo), state, job, st.Now.Sub(i.Since).Round(time.Second))
 	}
 	w.Flush()
 }

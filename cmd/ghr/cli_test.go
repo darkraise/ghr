@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -45,6 +46,12 @@ func fakeDaemon(t *testing.T) *[]recorded {
 		case r.URL.Path == "/history":
 			json.NewEncoder(w).Encode([]model.HistoryEntry{{Repo: "darkmem", RunNumber: "88", JobName: "build", Conclusion: "failure",
 				StartedAt: now.Add(-time.Minute), FinishedAt: now}})
+		case r.URL.Path == "/runners/evil/log":
+			chunk := model.LogChunk{}
+			if r.URL.Query().Get("cursor") == "" {
+				chunk = model.LogChunk{Data: hostileLog, Next: "evil=1"}
+			}
+			json.NewEncoder(w).Encode(chunk)
 		case strings.HasSuffix(r.URL.Path, "/log"):
 			// Two chunks, then nothing new: an unknown cursor gets an empty chunk.
 			chunks := map[string]model.LogChunk{
@@ -286,6 +293,57 @@ func TestLogsAndHistory(t *testing.T) {
 	for _, r := range *reqs {
 		if strings.HasPrefix(r.path, "/history") && strings.Contains(r.path, "since=") {
 			t.Fatalf("ghr history sent a since bound: %s", r.path)
+		}
+	}
+}
+
+// hostileLog carries an ESC clear-screen, a BEL, an OSC 52 clipboard write
+// and a C1 CSI around ordinary lines.
+const hostileLog = "ok\tline\n\x1b[2Jcleared\a\x1b]52;c;aGk=\x07bell\u009b31mc1\x7fdel\n"
+
+func stubStdoutTerminal(t *testing.T, on bool) {
+	t.Helper()
+	old := fdIsTerminal
+	fdIsTerminal = func(fd uintptr) bool { return on && fd == os.Stdout.Fd() }
+	t.Cleanup(func() { fdIsTerminal = old })
+}
+
+func TestLogsEscapeControlsAtATerminal(t *testing.T) {
+	fakeDaemon(t)
+	stubStdoutTerminal(t, true)
+	code, out, _ := runCLI(t, "", "logs", "evil")
+	want := "ok\tline\n\ufffd[2Jcleared\ufffd\ufffd]52;c;aGk=\ufffdbell\ufffd31mc1\ufffddel\n"
+	if code != 0 || out != want {
+		t.Fatalf("logs %d %q, want %q", code, out, want)
+	}
+}
+
+func TestLogsAreRawInAPipe(t *testing.T) {
+	fakeDaemon(t)
+	stubStdoutTerminal(t, false)
+	if code, out, _ := runCLI(t, "", "logs", "evil"); code != 0 || out != hostileLog {
+		t.Fatalf("logs %d %q, want the raw bytes", code, out)
+	}
+}
+
+func TestJobNamesEscapeControlsAtATerminal(t *testing.T) {
+	const name = "build\x1b]0;pwned\x07"
+	st := model.Status{Mode: "queue", GlobalMax: 1,
+		Repos:     []model.RepoStatus{{Name: "r\x1b[31m", LastJob: &model.HistoryEntry{Conclusion: "success", RunNumber: "1", JobName: name}}},
+		Instances: []model.InstanceStatus{{ID: "a3f9c1", Repo: "r", State: "busy", Job: &model.JobInfo{Name: "wf / " + name, RunNumber: "2"}}}}
+	hist := []model.HistoryEntry{{Repo: "r", RunNumber: "1\x1b[2J", JobName: name, Conclusion: "success"}}
+	for _, on := range []bool{true, false} {
+		stubStdoutTerminal(t, on)
+		var status, history bytes.Buffer
+		printStatus(&status, st)
+		printHistory(&history, hist)
+		for what, out := range map[string]string{"status": status.String(), "history": history.String()} {
+			if on && strings.ContainsAny(out, "\x1b\a") {
+				t.Errorf("%s at a terminal kept a control byte: %q", what, out)
+			}
+			if !on && !strings.Contains(out, "\x1b") {
+				t.Errorf("%s in a pipe lost the raw bytes: %q", what, out)
+			}
 		}
 	}
 }
