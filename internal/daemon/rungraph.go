@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,10 @@ const (
 	wfFileEntries = 64
 	wfMissingTTL  = 10 * time.Minute
 )
+
+// pathRef matches a workflow path that carries the ref it was run from, as in
+// ".github/workflows/ci.yml@refs/heads/main".
+var pathRef = regexp.MustCompile(`^(\.github/workflows/[^@]+\.ya?ml)@.+$`)
 
 // wfFile is a workflow file's bytes, the time GitHub answered 404 for it, or
 // the mark that GitHub delivered it in a form that cannot be decoded.
@@ -96,6 +101,9 @@ func (b *Backend) runGraph(ctx context.Context, repo, sha, path string, jobs []g
 	// Without jobs there is nothing to lay out, so the file is not read.
 	if len(jobs) == 0 {
 		return nil, noteNoJobs, nil
+	}
+	if m := pathRef.FindStringSubmatch(path); m != nil {
+		path = m[1]
 	}
 	if !strings.HasPrefix(path, ".github/workflows/") {
 		return nil, noteNoFile, nil

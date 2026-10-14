@@ -70,6 +70,15 @@ func TestRunGraphBuildsFromTheFile(t *testing.T) {
 	}
 }
 
+func TestRunGraphStripsARefFromThePath(t *testing.T) {
+	b, _, gh := newBackend(t)
+	gh.content = map[string][]byte{contentKey("darkmem", ciPath, "abc"): []byte(ciYAML)}
+	g, note, err := b.runGraph(context.Background(), "darkmem", "abc", ciPath+"@refs/heads/main", ciJobs())
+	if err != nil || note != "" || g == nil || len(g.Nodes) != 2 {
+		t.Fatalf("graph %+v note %q err %v", g, note, err)
+	}
+}
+
 func TestRunGraphNotesATransientError(t *testing.T) {
 	for _, tc := range []struct {
 		name string
