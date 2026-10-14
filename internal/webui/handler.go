@@ -281,8 +281,7 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) password(w http.ResponseWriter, r *http.Request) {
-	id, ok := h.session(r)
-	if !ok {
+	if _, ok := h.session(r); !ok {
 		writeError(w, http.StatusUnauthorized, "not logged in")
 		return
 	}
@@ -290,10 +289,12 @@ func (h *handler) password(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &b) {
 		return
 	}
-	if err := h.auth.ChangePassword(id, b.Current, b.New); err != nil {
+	id, err := h.auth.ChangePassword(b.Current, b.New)
+	if err != nil {
 		h.fail(w, err)
 		return
 	}
+	setSession(w, r, id, int(sessionTTL/time.Second))
 	w.WriteHeader(http.StatusNoContent)
 }
 

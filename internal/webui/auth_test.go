@@ -707,20 +707,21 @@ func TestChangePassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.ChangePassword(keep, "wrong password!", "another long secret"); !errors.Is(err, ErrWrongPassword) {
-		t.Fatalf("wrong current: %v", err)
+	if id, err := a.ChangePassword("wrong password!", "another long secret"); !errors.Is(err, ErrWrongPassword) || id != "" {
+		t.Fatalf("wrong current: id %q err %v", id, err)
 	}
 	if !a.Valid(keep) || !a.Valid(other) {
 		t.Fatal("a refused change ended sessions")
 	}
-	if err := a.ChangePassword(keep, pw, "short"); !errors.Is(err, ErrPasswordLength) {
-		t.Fatalf("short new: %v", err)
+	if id, err := a.ChangePassword(pw, "short"); !errors.Is(err, ErrPasswordLength) || id != "" {
+		t.Fatalf("short new: id %q err %v", id, err)
 	}
-	if err := a.ChangePassword(keep, pw, "another long secret"); err != nil {
+	id, err := a.ChangePassword(pw, "another long secret")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !a.Valid(keep) || a.Valid(other) {
-		t.Fatalf("after change: keep %v other %v", a.Valid(keep), a.Valid(other))
+	if a.Valid(keep) || a.Valid(other) || !a.Valid(id) || id == keep {
+		t.Fatalf("after change: old %v other %v new %v", a.Valid(keep), a.Valid(other), a.Valid(id))
 	}
 	if _, err := a.Login("10.0.0.2", pw); !errors.Is(err, ErrWrongPassword) {
 		t.Fatalf("old password: %v", err)
@@ -790,13 +791,19 @@ func TestLoginRacingAResetCreatesNoSession(t *testing.T) {
 // it to the login.
 func TestLoginRacingAPasswordChangeCreatesNoSession(t *testing.T) {
 	a, _ := newTestAuth(t)
-	keep, err := claim(a, pw)
-	if err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	fillSlots(a)
-	changed := make(chan error, 1)
-	go func() { changed <- a.ChangePassword(keep, pw, "another long secret") }()
+	type change struct {
+		id  string
+		err error
+	}
+	changed := make(chan change, 1)
+	go func() {
+		id, err := a.ChangePassword(pw, "another long secret")
+		changed <- change{id, err}
+	}()
 	time.Sleep(50 * time.Millisecond)
 	type result struct {
 		id  string
@@ -809,15 +816,16 @@ func TestLoginRacingAPasswordChangeCreatesNoSession(t *testing.T) {
 	}()
 	time.Sleep(50 * time.Millisecond)
 	<-a.sem
-	if err := <-changed; err != nil {
-		t.Fatal(err)
+	ch := <-changed
+	if ch.err != nil {
+		t.Fatal(ch.err)
 	}
 	r := <-done
 	if r.err == nil || a.Valid(r.id) {
 		t.Fatalf("a login that read the old password outlived the change: id valid %v err %v", a.Valid(r.id), r.err)
 	}
-	if !a.Valid(keep) {
-		t.Fatal("the changing session was ended")
+	if !a.Valid(ch.id) {
+		t.Fatal("the change's new session was ended")
 	}
 	<-a.sem
 }

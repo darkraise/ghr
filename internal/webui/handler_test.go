@@ -413,17 +413,27 @@ func TestLogoutAndPasswordChange(t *testing.T) {
 	if rec := do(h, http.MethodGet, "/api/status", "", withCookie(keep)); rec.Code != 200 {
 		t.Fatalf("a wrong current password ended the session: %d", rec.Code)
 	}
-	if rec := change(keep, pw, "another long secret"); rec.Code != http.StatusNoContent {
+	rec := change(keep, pw, "another long secret")
+	if rec.Code != http.StatusNoContent {
 		t.Fatalf("change: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(h, http.MethodGet, "/api/status", "", withCookie(other)); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("other session survived the change: %d", rec.Code)
+	c := sessionCookie(t, rec)
+	if c.Value == keep || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || c.MaxAge != 2592000 || c.Path != "/" {
+		t.Fatalf("cookie after the change %+v", c)
 	}
-	rec := do(h, http.MethodPost, "/auth/logout", "", withCookie(keep))
+	for name, id := range map[string]string{"the changing": keep, "another": other} {
+		if rec := do(h, http.MethodGet, "/api/status", "", withCookie(id)); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s session survived the change: %d", name, rec.Code)
+		}
+	}
+	if rec := do(h, http.MethodGet, "/api/status", "", withCookie(c.Value)); rec.Code != 200 {
+		t.Fatalf("the new session: %d", rec.Code)
+	}
+	rec = do(h, http.MethodPost, "/auth/logout", "", withCookie(c.Value))
 	if rec.Code != http.StatusNoContent || sessionCookie(t, rec).MaxAge >= 0 {
 		t.Fatalf("logout: %d", rec.Code)
 	}
-	if rec := do(h, http.MethodGet, "/api/status", "", withCookie(keep)); rec.Code != http.StatusUnauthorized {
+	if rec := do(h, http.MethodGet, "/api/status", "", withCookie(c.Value)); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("session survived logout: %d", rec.Code)
 	}
 	if rec := do(h, http.MethodPost, "/auth/logout", "", nil); rec.Code != http.StatusUnauthorized {

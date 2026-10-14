@@ -324,23 +324,25 @@ func (a *Auth) Logout(id string) {
 	a.mu.Unlock()
 }
 
-// ChangePassword replaces the password and ends every session except keep.
-func (a *Auth) ChangePassword(keep, current, next string) error {
+// ChangePassword replaces the password, ends every session and starts a new
+// one for the caller, so a copy of the caller's old cookie stops working too.
+func (a *Auth) ChangePassword(current, next string) (string, error) {
 	if !validLength(next) {
-		return ErrPasswordLength
+		return "", ErrPasswordLength
 	}
 	a.fileMu.Lock()
 	defer a.fileMu.Unlock()
 	h, ok, err := readHash(a.path)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !ok {
-		return ErrSetupRequired
+		return "", ErrSetupRequired
 	}
 	// The slot is held until the change is published, so a login queued
 	// behind it sees the new gen.
 	var match bool
+	var id string
 	a.derive(func() {
 		if match = h.matches(current); !match {
 			return
@@ -354,17 +356,14 @@ func (a *Auth) ChangePassword(keep, current, next string) error {
 		}
 		a.mu.Lock()
 		a.gen++
-		for k := range a.sessions {
-			if k != keep {
-				delete(a.sessions, k)
-			}
-		}
+		clear(a.sessions)
+		id, err = a.newSessionLocked(a.now())
 		a.mu.Unlock()
 	})
 	if !match {
-		return ErrWrongPassword
+		return "", ErrWrongPassword
 	}
-	return err
+	return id, err
 }
 
 // Set replaces the password, or sets the first one, and ends every session.
