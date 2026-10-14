@@ -202,6 +202,8 @@ export function useEvents(epoch: string | undefined): GhrEvent[] {
 export interface LogTail {
   text: string
   next: string
+  // The last read came back empty, so the daemon has nothing more to give.
+  drained: boolean
 }
 
 const LOG_HEADER = /^==> (?:Runner|Worker)_.*\.log <==$/gm
@@ -222,22 +224,24 @@ function trimLog(text: string): string {
 
 export function appendLog(prev: LogTail, chunk: LogChunk): LogTail {
   const text = prev.text + chunk.data
-  return { text: text.length > MAX_LOG ? trimLog(text) : text, next: chunk.next }
+  return { text: text.length > MAX_LOG ? trimLog(text) : text, next: chunk.next, drained: chunk.data === "" }
 }
 
 // A runner that has ended writes no more log, so the caller stops the polling
-// with poll=false while the text already read stays on screen.
+// with poll=false while the text already read stays on screen. An answer
+// holds at most one chunk, so the archive of an ended runner is still read
+// on until a read comes back empty.
 export function useLogTail(id: string, enabled: boolean, poll = true) {
   const queryClient = useQueryClient()
   const key = keys.log(id)
   return useQuery({
     queryKey: key,
     queryFn: async ({ signal }) => {
-      const prev = queryClient.getQueryData<LogTail>(key) ?? { text: "", next: "" }
+      const prev = queryClient.getQueryData<LogTail>(key) ?? { text: "", next: "", drained: false }
       return appendLog(prev, await api.log(id, prev.next, signal))
     },
     enabled,
-    refetchInterval: enabled && poll ? POLL_FAST : false,
+    refetchInterval: (q) => (enabled && (poll || q.state.data?.drained === false) ? POLL_FAST : false),
   })
 }
 

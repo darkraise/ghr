@@ -80,6 +80,10 @@ describe("RunnerPanel", () => {
       routes({
         "GET /api/status": () =>
           gone ? { ...fixtures.status, instances: fixtures.status.instances.filter((i) => i.id !== "aaaaaa") } : fixtures.status,
+        "GET /api/runners/aaaaaa/log": ({ url }: { url: URL }) => {
+          const cursor = url.searchParams.get("cursor") ?? ""
+          return cursor ? { data: "", next: cursor } : fixtures.log
+        },
       }),
     )
     draw("/runners/aaaaaa?tab=log")
