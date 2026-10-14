@@ -190,7 +190,7 @@ describe("Settings page", () => {
       release = () => resolve(fixtures.config)
     })
     let config = fixtures.config
-    mockApi(
+    const { calls } = mockApi(
       routes({
         "GET /api/config": () => {
           if (!hold) return config
@@ -210,7 +210,11 @@ describe("Settings page", () => {
     hold = true
     void queryClient.refetchQueries({ queryKey: ["config"] })
     await user.click(screen.getByRole("button", { name: "Save changes" }))
-    expect((await screen.findAllByText("Settings saved")).length).toBeGreaterThan(0)
+    // The held poll is the second read; the save's own read is the third, so
+    // the stale answer is released only after the save has asked again.
+    const configReads = () => calls.filter((c) => c.method === "GET" && c.path === "/api/config").length
+    await waitFor(() => expect(configReads()).toBe(3))
+    expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(1)
     release()
     await waitFor(() => expect(screen.queryByText(/unsaved change/)).toBeNull())
     expect(screen.queryByText(/Daemon did not apply/)).toBeNull()
