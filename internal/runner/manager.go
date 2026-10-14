@@ -216,6 +216,7 @@ type Manager struct {
 	maintCtx       context.Context         // cancelled by Close
 	maintCancel    context.CancelFunc
 	lastJob        map[string]model.HistoryEntry
+	histIDs        map[string]bool        // instance IDs history holds; guarded by mu
 	orphans        map[int64]bool         // untracked registrations seen offline at the last reconcile; guarded by mu
 	undeleted      map[int64]registration // by runner ID: registrations finish could not delete; guarded by mu
 	epoch          string
@@ -244,6 +245,7 @@ func (m *Manager) Init() error {
 	m.wasBlocked = map[string]bool{}
 	m.lastJob = map[string]model.HistoryEntry{}
 	m.undeleted = map[int64]registration{}
+	m.histIDs = map[string]bool{}
 	m.lastPrune = m.Now()
 	m.maintCtx, m.maintCancel = context.WithCancel(context.Background())
 	m.epoch = m.Epoch
@@ -257,6 +259,7 @@ func (m *Manager) Init() error {
 	}
 	for _, e := range entries {
 		m.recordLastJob(e)
+		m.histIDs[e.ID] = true
 	}
 	return nil
 }

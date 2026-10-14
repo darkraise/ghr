@@ -159,6 +159,41 @@ func TestUniqueIDSkipsArchivedLogsAndPendingHistory(t *testing.T) {
 	}
 }
 
+// History outlives the log archive and the pending record, so an ID it holds
+// is not reused: two entries would share one ID. Both history read at start
+// and history appended since count.
+func TestUniqueIDSkipsIDsInHistory(t *testing.T) {
+	h := newHarness(t)
+	if err := h.m.History.Append(model.HistoryEntry{ID: "aaaaaa", Repo: "darkmem", Conclusion: "success"}); err != nil {
+		t.Fatal(err)
+	}
+	h.restart(t)
+	if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	if h.state("bbbbbb") != "starting" || h.state("aaaaaa") != "gone" {
+		t.Fatalf("aaaaaa %s, bbbbbb %s", h.state("aaaaaa"), h.state("bbbbbb"))
+	}
+	h.writeJob(t, "bbbbbb", 55)
+	h.gh.setJobs(55, completedJob(h, 55, "ghr-darkmem-bbbbbb", "success"))
+	h.sd.active["ghr-runner-bbbbbb"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if got := h.history(t); !reflect.DeepEqual(got, []string{"bbbbbb success", "aaaaaa success"}) {
+		t.Fatalf("history %v", got)
+	}
+	if err := os.RemoveAll(filepath.Join(h.m.Paths.Logs, "bbbbbb")); err != nil {
+		t.Fatal(err)
+	}
+	h.ids = []string{"bbbbbb", "dddddd"}
+	if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	if h.state("dddddd") != "starting" || h.state("bbbbbb") != "gone" {
+		t.Fatalf("bbbbbb %s, dddddd %s", h.state("bbbbbb"), h.state("dddddd"))
+	}
+}
+
 func TestStartingToIdleToBusy(t *testing.T) {
 	h := newHarness(t)
 	h.m.spawn(context.Background(), h.cfg, "darkmem")

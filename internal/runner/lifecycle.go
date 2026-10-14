@@ -48,14 +48,15 @@ func exists(path string) bool {
 	return !os.IsNotExist(err)
 }
 
-// uniqueID returns an ID with no live instance, instance dir, log archive or
-// pending history record, so retained logs and history never collide. An
-// unreadable path counts as taken, so the attempts are bounded.
+// uniqueID returns an ID with no live instance, instance dir, log archive,
+// pending history record or history entry, so retained logs and history never
+// collide. An unreadable path counts as taken, so the attempts are bounded.
 func (m *Manager) uniqueID() (string, error) {
 	for range 1000 {
 		id := m.NewID()
 		m.mu.Lock()
 		_, taken := m.insts[id]
+		taken = taken || m.histIDs[id]
 		m.mu.Unlock()
 		if !taken && !exists(m.instanceDir(id)) && !exists(filepath.Join(m.Paths.Logs, id)) &&
 			!exists(m.pendingPath(id)) {
@@ -619,6 +620,7 @@ func (m *Manager) finalize(ctx context.Context, path string) {
 	}
 	m.mu.Lock()
 	m.recordLastJob(e)
+	m.histIDs[e.ID] = true
 	m.mu.Unlock()
 	level := "warn"
 	switch e.Conclusion {
