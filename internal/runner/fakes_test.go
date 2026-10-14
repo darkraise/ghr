@@ -109,8 +109,12 @@ func (f *fakeGH) GetRunner(_ context.Context, repo string, id int64) (*github.Ru
 	return &c, nil
 }
 
-func (f *fakeGH) DeleteRunner(_ context.Context, repo string, id int64) error {
+func (f *fakeGH) DeleteRunner(ctx context.Context, repo string, id int64) error {
 	if err := f.call("DeleteRunner", repo); err != nil {
+		return err
+	}
+	// The real client answers a context that has ended with its error.
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	f.mu.Lock()
@@ -192,6 +196,9 @@ type fakeSD struct {
 	// onActive, when set, runs at the start of every Active call, before the
 	// unit's state is read.
 	onActive func(unit string)
+	// onStart, when set, runs inside Start once the unit is recorded active,
+	// and its result is Start's: systemd-run can fail after the unit started.
+	onStart func() error
 }
 
 func newFakeSD() *fakeSD {
@@ -200,9 +207,13 @@ func newFakeSD() *fakeSD {
 
 func (f *fakeSD) Start(_ context.Context, u system.UnitSpec) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.started = append(f.started, u)
 	f.active[u.Unit] = true
+	hook := f.onStart
+	f.mu.Unlock()
+	if hook != nil {
+		return hook()
+	}
 	return nil
 }
 
@@ -217,6 +228,9 @@ func (f *fakeSD) Stop(ctx context.Context, unit string) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()

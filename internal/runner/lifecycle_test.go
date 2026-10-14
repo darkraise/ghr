@@ -68,6 +68,84 @@ func TestSpawnFailureCleansUp(t *testing.T) {
 	}
 }
 
+// A failed systemd-run may have started the unit, which would then run from
+// the instance dir with the registration. The rollback stops it first, and
+// runs to its end even when the tick is cancelled; a unit that does not stop
+// keeps everything it may be using for reconciliation.
+func TestSpawnStopsTheUnitBeforeRollingBackAFailedStart(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		stopErr error
+		cancel  bool
+	}{
+		{"the unit stops", nil, false},
+		{"the tick is cancelled", nil, true},
+		{"the unit does not stop", errors.New("Failed to connect to bus"), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			h.sd.onStart = func() error {
+				if c.cancel {
+					cancel()
+				}
+				return errors.New("systemd-run: signal: killed")
+			}
+			if c.stopErr != nil {
+				h.sd.stopErr["ghr-runner-aaaaaa"] = c.stopErr
+			}
+			if err := h.m.spawn(ctx, h.cfg, "darkmem"); err == nil {
+				t.Fatal("spawn succeeded")
+			}
+			_, dirErr := os.Stat(h.m.instanceDir("aaaaaa"))
+			_, privErr := os.Stat(filepath.Join(h.m.Paths.Private, "aaaaaa.json"))
+			if c.stopErr == nil {
+				if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || !reflect.DeepEqual(h.gh.deleted, []int64{101}) ||
+					!os.IsNotExist(dirErr) || !os.IsNotExist(privErr) {
+					t.Fatalf("stopped %v deleted %v dir %v record %v", h.sd.stopped, h.gh.deleted, dirErr, privErr)
+				}
+				return
+			}
+			if len(h.gh.deleted) != 0 || dirErr != nil || privErr != nil ||
+				!strings.Contains(h.eventText(), "left for reconciliation") {
+				t.Fatalf("deleted %v dir %v record %v\n%s", h.gh.deleted, dirErr, privErr, h.eventText())
+			}
+			// Reconciliation stops the unit, removes the dir and its record,
+			// and deletes the registration once it is offline twice.
+			delete(h.sd.stopErr, "ghr-runner-aaaaaa")
+			h.gh.listed["darkmem"] = []github.Runner{{ID: 101, Name: "ghr-darkmem-aaaaaa", Status: "offline"}}
+			h.m.Reconcile(context.Background(), h.cfg)
+			h.m.Reconcile(context.Background(), h.cfg)
+			_, dirErr = os.Stat(h.m.instanceDir("aaaaaa"))
+			_, privErr = os.Stat(filepath.Join(h.m.Paths.Private, "aaaaaa.json"))
+			if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || !reflect.DeepEqual(h.gh.deleted, []int64{101}) ||
+				!os.IsNotExist(dirErr) || !os.IsNotExist(privErr) {
+				t.Fatalf("after reconciling: stopped %v deleted %v dir %v record %v", h.sd.stopped, h.gh.deleted, dirErr, privErr)
+			}
+		})
+	}
+}
+
+// A rollback after an earlier step deletes the registration even when the
+// tick is cancelled.
+func TestSpawnRollbackOutlivesACancelledTick(t *testing.T) {
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	h.gh.hook = func(method string) {
+		if method == "GenerateJITConfig" {
+			cancel()
+		}
+	}
+	h.m.Paths.Dist = filepath.Join(h.root, "missing")
+	if err := h.m.spawn(ctx, h.cfg, "darkmem"); err == nil {
+		t.Fatal("spawn succeeded")
+	}
+	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("deleted %v\n%s", h.gh.deleted, h.eventText())
+	}
+}
+
 func TestUniqueIDSkipsArchivedLogsAndPendingHistory(t *testing.T) {
 	h := newHarness(t)
 	os.MkdirAll(filepath.Join(h.m.Paths.Logs, "aaaaaa"), 0o755)

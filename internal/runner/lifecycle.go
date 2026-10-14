@@ -29,6 +29,9 @@ const (
 	// maxCleanupFailures bounds consecutive failed Docker cleanups of one
 	// instance (about five minutes at finishRetry) before finish frees its slot.
 	maxCleanupFailures = 10
+	// rollbackTimeout bounds a failed spawn's rollback, which outlives the
+	// tick's context so that a cancelled tick leaks no registration.
+	rollbackTimeout = 30 * time.Second
 )
 
 // RandomID returns 6 lowercase hex characters.
@@ -84,12 +87,14 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 	}
 	dir := m.instanceDir(id)
 	fail := func(err error) error {
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
+		defer cancel()
 		if rerr := removeAll(dir); rerr == nil {
 			m.removePrivate(id)
 		} else {
 			m.Events.Add("warn", r.Name, "spawn %s: remove dir: %v; reconciliation retries", id, rerr)
 		}
-		if derr := m.GH.DeleteRunner(ctx, r.Name, jit.Runner.ID); derr != nil && !github.IsKind(derr, github.ErrNotFound) {
+		if derr := m.GH.DeleteRunner(dctx, r.Name, jit.Runner.ID); derr != nil && !github.IsKind(derr, github.ErrNotFound) {
 			m.Events.Add("warn", r.Name, "spawn %s: delete registration: %v", id, derr)
 		}
 		return err
@@ -135,6 +140,16 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 		Command: []string{filepath.Join(dir, "run.sh"), "--jitconfig", jit.EncodedJITConfig},
 	}
 	if err := m.SD.Start(ctx, spec); err != nil {
+		// systemd-run can fail after the unit started, which would then run
+		// from dir with the registration. Reconcile stops an untracked unit
+		// and removes what it leaves once it is down.
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
+		serr := m.SD.Stop(dctx, spec.Unit)
+		cancel()
+		if serr != nil {
+			m.Events.Add("warn", r.Name, "spawn %s: stop after a failed start: %v; left for reconciliation", id, serr)
+			return err
+		}
 		return fail(err)
 	}
 	m.mu.Lock()
