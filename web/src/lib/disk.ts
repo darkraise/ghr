@@ -25,6 +25,17 @@ export function partTint(key: string): string {
 
 const sum = (items: { bytes: number }[] | null) => (items ?? []).reduce((n, i) => n + i.bytes, 0)
 
+const cacheParts = (storage: Storage): DiskPart[] => [
+  { key: "package-caches", label: "Package caches", bytes: sum(storage.package_caches) },
+  { key: "toolchains", label: "Toolchains", bytes: sum(storage.toolchains) + sum(storage.other_tool_cache) },
+]
+
+// The caches that sit on a different filesystem than Docker's data root, and
+// so are not part of the disk the bar measures.
+export function otherFilesystemParts(storage: Storage | undefined): DiskPart[] {
+  return storage && !storage.caches_on_data_root ? cacheParts(storage) : []
+}
+
 export function diskParts(storage: Storage | undefined, used: number): DiskPart[] {
   if (!storage) return [{ key: "used", label: "Used", bytes: used }]
   const docker = (key: string, label: string, type: string): DiskPart => ({
@@ -38,8 +49,7 @@ export function diskParts(storage: Storage | undefined, used: number): DiskPart[
     docker("images", "Images", "Images"),
     docker("containers", "Containers", "Containers"),
     docker("volumes", "Local volumes", "Local Volumes"),
-    { key: "package-caches", label: "Package caches", bytes: sum(storage.package_caches) },
-    { key: "toolchains", label: "Toolchains", bytes: sum(storage.toolchains) + sum(storage.other_tool_cache) },
+    ...(storage.caches_on_data_root ? cacheParts(storage) : []),
   ]
   const known = parts.reduce((n, p) => n + p.bytes, 0)
   return [...parts, { key: "other", label: "Other", bytes: Math.max(0, used - known) }]
