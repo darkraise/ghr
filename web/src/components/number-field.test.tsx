@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest"
 import { numberFromText, textFromNumber } from "@/lib/number-text"
 import { NumberField } from "./number-field"
 
-function Harness({ initial = Number.NaN, onValue }: { initial?: number; onValue?: (n: number) => void }) {
+function Harness({ initial = Number.NaN, precision, onValue }: { initial?: number; precision?: number; onValue?: (n: number) => void }) {
   const [value, setValue] = useState(initial)
   return (
     <NumberField
@@ -13,6 +13,7 @@ function Harness({ initial = Number.NaN, onValue }: { initial?: number; onValue?
       value={value}
       min={1}
       max={100}
+      precision={precision}
       suffix="days"
       placeholder="default"
       onValueChange={(n) => {
@@ -53,6 +54,19 @@ describe("NumberField", () => {
     await user.tab()
     expect(onValue).toHaveBeenLastCalledWith(100)
     expect(field).toHaveValue("100")
+  })
+
+  it("reports whole numbers while a fraction is typed into a whole-number field", async () => {
+    const onValue = vi.fn()
+    const user = userEvent.setup()
+    render(<Harness precision={0} onValue={onValue} />)
+    const field = screen.getByRole("spinbutton", { name: "Days" })
+    await user.type(field, "30.5")
+    expect(onValue).toHaveBeenLastCalledWith(30)
+    expect(field).toHaveValue("30.5")
+    await user.tab()
+    expect(onValue).toHaveBeenLastCalledWith(30)
+    expect(field).toHaveValue("30")
   })
 
   it("steps with buttons named after the field", async () => {

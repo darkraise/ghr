@@ -31,13 +31,15 @@ interface NumberFieldProps {
 }
 
 // NumberInput reports each number as it is typed and clamps to min and max
-// only when the field loses focus.
+// only when the field loses focus. It rounds to precision only then too, so a
+// whole-number field truncates what it reports while the typed text stays.
 export function NumberField({ id, label, value, onValueChange, min, max, step, precision, suffix, placeholder, disabled, className, ...aria }: NumberFieldProps) {
+  const report = (n: number) => onValueChange(precision === 0 && Number.isFinite(n) ? Math.trunc(n) : n)
   return (
     <NumberInput
       className={className}
       value={value}
-      onValueChange={(d) => onValueChange(d.valueAsNumber)}
+      onValueChange={(d) => report(d.valueAsNumber)}
       min={min}
       max={max}
       step={step}

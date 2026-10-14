@@ -138,6 +138,16 @@ describe("ArtifactRepoTable", () => {
     expect(input).toHaveAccessibleDescription("Enter a whole number of days from 1 to 400")
   })
 
+  it("takes a fraction typed into the days field as whole days", async () => {
+    mockApi({})
+    const { user } = await draw()
+    const input = screen.getByRole("spinbutton", { name: "Retention for all" })
+    await user.type(input, "30.5")
+    expect(input).toHaveValue("30.5")
+    expect(input).not.toHaveAttribute("aria-invalid", "true")
+    expect(screen.getByRole("button", { name: "Set retention" })).toBeEnabled()
+  })
+
   it("holds Set retention while an operation runs", async () => {
     mockApi({})
     const operation = fixtures.githubStorage.operation && { ...fixtures.githubStorage.operation, finished_at: undefined }
