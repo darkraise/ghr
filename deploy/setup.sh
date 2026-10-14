@@ -256,7 +256,7 @@ install_config() {
 
 install_service() {
   local unit="$SYSTEMD_DIR/ghr.service" want reload=0
-  want=$(cat <<'EOF'
+  want=$(cat <<EOF
 [Unit]
 Description=ghr GitHub Actions runner manager
 After=network-online.target docker.service
@@ -264,8 +264,8 @@ Wants=network-online.target
 Requires=docker.service
 
 [Service]
-ExecStart=/usr/local/bin/ghr daemon
-ExecReload=/bin/kill -HUP $MAINPID
+ExecStart=$BIN_DIR/ghr daemon
+ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
 RestartSec=5
 

@@ -982,6 +982,8 @@ install_unit
 check "n: install_service succeeds" [ "$rc" -eq 0 ]
 check "n: the unit starts again with Docker" contains "$(cat "$unit")" "WantedBy=multi-user.target docker.service"
 check "n: the unit still requires Docker" contains "$(cat "$unit")" "Requires=docker.service"
+check "n: the unit starts the daemon from BIN_DIR" contains "$(cat "$unit")" "ExecStart=$BIN_DIR/ghr daemon"
+check "n: the unit keeps MAINPID literal" contains "$(cat "$unit")" 'ExecReload=/bin/kill -HUP $MAINPID'
 check "n: a first install enables without a reload, reloads once, then starts" [ "$(cat "$MARK_DIR/systemctl")" = "$reloaded" ]
 check "n: and leaves the docker.service link" [ -e "$link" ]
 touch -d '2020-01-01 00:00:00' "$unit"
