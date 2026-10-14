@@ -210,7 +210,7 @@ func TestRunServesTicksReloadsAndKeepsRunners(t *testing.T) {
 		t.Fatalf("status %+v", st)
 	}
 
-	if err := Run(context.Background(), o); err == nil || !strings.Contains(err.Error(), "already serving") {
+	if err := Run(context.Background(), o); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("second daemon: %v", err)
 	}
 	if _, err := c.Status(context.Background()); err != nil {
@@ -309,6 +309,61 @@ func TestRunServesWhileReconcileLists(t *testing.T) {
 		t.Fatal("the startup reconcile never listed runners")
 	}
 	releaseOnce.Do(func() { close(release) })
+}
+
+func TestListenAllowsOneDaemonPerSocket(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "ghr.sock")
+	ln, lock, err := listen(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(socket + ".lock"); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("lock file %v, %v", fi, err)
+	}
+	// With nothing answering on the socket, as when two daemons start
+	// together, only the lock separates them.
+	ln.Close()
+	if ln2, lock2, err := listen(socket); err == nil {
+		ln2.Close()
+		lock2.Close()
+		t.Fatal("a second daemon took the socket")
+	} else if !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("second listen: %v", err)
+	}
+	lock.Close()
+	ln, lock, err = listen(socket)
+	if err != nil {
+		t.Fatalf("listen after the first daemon ended: %v", err)
+	}
+	ln.Close()
+	lock.Close()
+}
+
+// A daemon that holds the socket but not the lock, as one from before the
+// lock existed, is still refused.
+func TestListenRefusesASocketSomeoneAnswers(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "ghr.sock")
+	old, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer old.Close()
+	go func() {
+		for {
+			c, err := old.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	if ln, lock, err := listen(socket); err == nil {
+		ln.Close()
+		lock.Close()
+		t.Fatal("took a socket another daemon answers on")
+	} else if !strings.Contains(err.Error(), "already serving") {
+		t.Fatalf("listen: %v", err)
+	}
 }
 
 func TestRunServesTheWebUI(t *testing.T) {

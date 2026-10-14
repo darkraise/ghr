@@ -115,28 +115,44 @@ func DefaultOptions() Options {
 	}
 }
 
-// listen binds the control socket before any runner is touched. The bound
-// socket is the single-daemon lock: when another daemon answers on it, Run
-// refuses to start instead of removing the live socket; a socket nobody
-// answers is a crashed daemon's leftover and is replaced.
-func listen(socket string) (net.Listener, error) {
+// listen binds the control socket before any runner is touched. A lock file
+// beside the socket makes the check for another daemon atomic, and the
+// returned file holds that lock until it is closed. As a second guard, when
+// another daemon answers on the socket, Run refuses to start instead of
+// removing the live socket; a socket nobody answers is a crashed daemon's
+// leftover and is replaced.
+func listen(socket string) (net.Listener, *os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(socket), 0o755); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	lock, err := os.OpenFile(socket+".lock", os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lock.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, nil, fmt.Errorf("another ghr daemon is already running (%s.lock is held)", socket)
+		}
+		return nil, nil, err
 	}
 	if conn, err := net.DialTimeout("unix", socket, time.Second); err == nil {
 		conn.Close()
-		return nil, fmt.Errorf("another ghr daemon is already serving %s", socket)
+		lock.Close()
+		return nil, nil, fmt.Errorf("another ghr daemon is already serving %s", socket)
 	}
 	os.Remove(socket)
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
-		return nil, err
+		lock.Close()
+		return nil, nil, err
 	}
 	if err := os.Chmod(socket, 0o600); err != nil {
 		ln.Close()
-		return nil, err
+		lock.Close()
+		return nil, nil, err
 	}
-	return ln, nil
+	return ln, lock, nil
 }
 
 // checkToken validates a candidate token with the reads the manager depends on,
@@ -311,10 +327,11 @@ func Run(ctx context.Context, o Options) error {
 	if err != nil {
 		return err
 	}
-	ln, err := listen(o.Socket)
+	ln, lock, err := listen(o.Socket)
 	if err != nil {
 		return err
 	}
+	defer lock.Close()
 	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second}
 	webSrv := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
