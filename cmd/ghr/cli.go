@@ -123,6 +123,16 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 		return pruneCmd(ctx, c, args[1:], out)
 	case "setup":
 		return setupCmd(ctx, c, args[1:], stdin, out, errOut)
+	case "code":
+		if err := need(args, 1, "code"); err != nil {
+			return err
+		}
+		code, err := c.SetupCode(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, code)
+		return nil
 	case "web":
 		const webUsage = "usage: ghr web <reset-password|set-password>"
 		if len(args) != 2 {
@@ -133,7 +143,11 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 			if err := c.ResetWebPassword(ctx); err != nil {
 				return err
 			}
-			fmt.Fprintln(out, "web password removed; set a new one with: ghr web set-password")
+			code, err := c.SetupCode(ctx)
+			if err != nil {
+				return fmt.Errorf("web password removed, but reading the new setup code failed: %w", err)
+			}
+			fmt.Fprintln(out, "web password removed; set a new one with: ghr web set-password, or in the browser with setup code "+code)
 			return nil
 		case "set-password":
 			pw, err := readNewPassword(ctx, stdin, errOut)
@@ -311,7 +325,7 @@ func printStatus(out io.Writer, st model.Status) {
 		fmt.Fprintln(out, "warning: ghr is not configured. Run: ghr setup github --owner <owner>, or open the web UI")
 	}
 	if st.WebSetupRequired {
-		fmt.Fprintln(out, "warning: the web UI has no password. Run: ghr web set-password")
+		fmt.Fprintln(out, "warning: the web UI has no password. Run: ghr web set-password, or open the web UI with the code from: ghr code")
 	}
 	if st.Unconfigured {
 		return

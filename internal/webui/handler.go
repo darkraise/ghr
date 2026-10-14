@@ -221,6 +221,7 @@ func (h *handler) state(w http.ResponseWriter, r *http.Request) {
 }
 
 type passwordBody struct {
+	Code     string `json:"code"`
 	Password string `json:"password"`
 	Current  string `json:"current"`
 	New      string `json:"new"`
@@ -245,7 +246,7 @@ func (h *handler) setup(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &b) {
 		return
 	}
-	id, err := h.auth.Setup(b.Password)
+	id, err := h.auth.Setup(b.Code, b.Password)
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -320,7 +321,7 @@ func (h *handler) fail(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{
 			"error": err.Error(), "retry_at": te.RetryAt.UTC().Format(time.RFC3339),
 		})
-	case errors.Is(err, ErrWrongPassword):
+	case errors.Is(err, ErrWrongPassword), errors.Is(err, ErrSetupCode):
 		writeError(w, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, ErrPasswordLength):
 		writeError(w, http.StatusBadRequest, err.Error())

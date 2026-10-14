@@ -831,6 +831,20 @@ func TestResetWebPasswordPostsToTheSocketRoute(t *testing.T) {
 	}
 }
 
+func TestSetupCodeReadsTheSocketRoute(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Method + " " + r.URL.Path
+		w.Write([]byte(`{"code":"ABCDE-FGHJK-MNPQR-STVWX"}`))
+	}))
+	defer srv.Close()
+	c := &Client{Base: srv.URL, HTTP: &http.Client{Timeout: 5 * time.Second}}
+	code, err := c.SetupCode(context.Background())
+	if err != nil || got != "GET /web/setup-code" || code != "ABCDE-FGHJK-MNPQR-STVWX" {
+		t.Fatalf("code %q err %v request %q", code, err, got)
+	}
+}
+
 func TestSetWebPasswordPostsTheBody(t *testing.T) {
 	var got, body string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

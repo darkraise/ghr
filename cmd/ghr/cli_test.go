@@ -55,6 +55,8 @@ func fakeDaemon(t *testing.T) *[]recorded {
 		case r.URL.Path == "/repos" && strings.Contains(string(b), `"public"`) && !strings.Contains(string(b), `"allow_public":true`):
 			w.WriteHeader(409)
 			json.NewEncoder(w).Encode(map[string]string{"error": "public is public"})
+		case r.URL.Path == "/web/setup-code":
+			json.NewEncoder(w).Encode(map[string]string{"code": "ABCDE-FGHJK-MNPQR-STVWX"})
 		case r.URL.Path == "/storage":
 			json.NewEncoder(w).Encode(sampleStorage(now))
 		case r.URL.Path == "/toolchains/available":
@@ -299,15 +301,45 @@ func TestLogsReportsWriteError(t *testing.T) {
 	}
 }
 
+func TestCode(t *testing.T) {
+	reqs := fakeDaemon(t)
+	code, out, errOut := runCLI(t, "", "code")
+	if code != 0 || out != "ABCDE-FGHJK-MNPQR-STVWX\n" {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+	if last := (*reqs)[len(*reqs)-1]; last.method != "GET" || last.path != "/web/setup-code" {
+		t.Fatalf("request %+v", last)
+	}
+	if code, _, errOut := runCLI(t, "", "code", "now"); code != 2 || !strings.Contains(errOut, "usage: ghr code") {
+		t.Errorf("extra argument: exit %d err %q", code, errOut)
+	}
+	if _, out, _ := runCLI(t, "", "help"); !strings.Contains(out, "\n  code ") {
+		t.Fatalf("usage lacks code:\n%s", out)
+	}
+}
+
+func TestCodeWithAPasswordSet(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{"error": "a web password is already set"})
+	}))
+	t.Cleanup(srv.Close)
+	newClient = func() *api.Client { return &api.Client{Base: srv.URL, HTTP: srv.Client()} }
+	code, out, errOut := runCLI(t, "", "code")
+	if code != 1 || out != "" || !strings.Contains(errOut, "ghr: a web password is already set") {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+}
+
 func TestWebResetPassword(t *testing.T) {
 	reqs := fakeDaemon(t)
 	code, out, errOut := runCLI(t, "", "web", "reset-password")
-	if code != 0 || !strings.Contains(out, "web password removed; set a new one with: ghr web set-password") {
+	if code != 0 || out != "web password removed; set a new one with: ghr web set-password, or in the browser with setup code ABCDE-FGHJK-MNPQR-STVWX\n" {
 		t.Fatalf("exit %d out %q err %q", code, out, errOut)
 	}
-	last := (*reqs)[len(*reqs)-1]
-	if last.method != "POST" || last.path != "/web/reset-password" {
-		t.Fatalf("request %+v", last)
+	if n := len(*reqs); n < 2 || (*reqs)[n-2].method != "POST" || (*reqs)[n-2].path != "/web/reset-password" ||
+		(*reqs)[n-1].method != "GET" || (*reqs)[n-1].path != "/web/setup-code" {
+		t.Fatalf("requests %+v", *reqs)
 	}
 	for _, args := range [][]string{{"web"}, {"web", "reset"}, {"web", "reset-password", "now"}} {
 		code, _, errOut := runCLI(t, "", args...)
@@ -512,7 +544,7 @@ func TestCtrlCAtAPromptPrintsInterrupted(t *testing.T) {
 func TestStatusWarnsWhileTheWebUIHasNoPassword(t *testing.T) {
 	var out bytes.Buffer
 	printStatus(&out, model.Status{Mode: "queue", GlobalMax: 1, WebSetupRequired: true})
-	const warning = "warning: the web UI has no password. Run: ghr web set-password\n"
+	const warning = "warning: the web UI has no password. Run: ghr web set-password, or open the web UI with the code from: ghr code\n"
 	if !strings.HasPrefix(out.String(), warning) {
 		t.Fatalf("output:\n%s", out.String())
 	}
@@ -527,7 +559,7 @@ func TestStatusWhileUnconfigured(t *testing.T) {
 	var out bytes.Buffer
 	printStatus(&out, model.Status{Mode: "queue", GlobalMax: 2, Unconfigured: true, WebSetupRequired: true})
 	want := "warning: ghr is not configured. Run: ghr setup github --owner <owner>, or open the web UI\n" +
-		"warning: the web UI has no password. Run: ghr web set-password\n"
+		"warning: the web UI has no password. Run: ghr web set-password, or open the web UI with the code from: ghr code\n"
 	if out.String() != want {
 		t.Fatalf("output:\n%s", out.String())
 	}

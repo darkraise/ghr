@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -30,6 +32,7 @@ const (
 var (
 	ErrPasswordLength = errors.New("password must be 12 to 1024 characters")
 	ErrPasswordSet    = errors.New("a web password is already set")
+	ErrSetupCode      = errors.New("wrong setup code; run on the host: ghr code")
 	ErrSetupRequired  = errors.New("no web password is set yet; set one first")
 	ErrWrongPassword  = errors.New("wrong password")
 )
@@ -59,7 +62,10 @@ type Auth struct {
 	mu     sync.Mutex // guards the fields below
 	// gen changes whenever the password changes or is reset; a login that
 	// read the file under an older gen must not publish a session.
-	gen      uint64
+	gen uint64
+	// code is the setup code Setup asks for, without dashes; empty until
+	// SetupCode issues one. It lives in memory only, so a restart replaces it.
+	code     string
 	sessions map[string]time.Time
 	fails    map[string]*failures
 }
@@ -100,8 +106,49 @@ func validLength(p string) bool {
 	return n >= MinPasswordLen && n <= MaxPasswordLen
 }
 
-// Setup sets the first password and starts a session for the caller.
-func (a *Auth) Setup(password string) (string, error) {
+const (
+	crockford      = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+	setupCodeLen   = 20 // 100 bits
+	setupCodeGroup = 5
+)
+
+// SetupCode returns the code Setup asks for while no password is set,
+// issuing one on the first call.
+func (a *Auth) SetupCode() (string, error) {
+	a.fileMu.Lock()
+	defer a.fileMu.Unlock()
+	_, ok, err := readHash(a.path)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return "", ErrPasswordSet
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.code == "" {
+		b := make([]byte, setupCodeLen)
+		if _, err := io.ReadFull(a.rand, b); err != nil {
+			return "", err
+		}
+		for i := range b {
+			b[i] = crockford[b[i]%32]
+		}
+		a.code = string(b)
+	}
+	var sb strings.Builder
+	for i := 0; i < len(a.code); i += setupCodeGroup {
+		if i > 0 {
+			sb.WriteByte('-')
+		}
+		sb.WriteString(a.code[i : i+setupCodeGroup])
+	}
+	return sb.String(), nil
+}
+
+// Setup sets the first password and starts a session for the caller. It
+// needs the code SetupCode issued, compared before any key derivation.
+func (a *Auth) Setup(code, password string) (string, error) {
 	if !validLength(password) {
 		return "", ErrPasswordLength
 	}
@@ -109,6 +156,7 @@ func (a *Auth) Setup(password string) (string, error) {
 	defer a.fileMu.Unlock()
 	a.mu.Lock()
 	a.sweepLocked(a.now())
+	want := a.code
 	a.mu.Unlock()
 	_, ok, err := readHash(a.path)
 	if err != nil {
@@ -116,6 +164,11 @@ func (a *Auth) Setup(password string) (string, error) {
 	}
 	if ok {
 		return "", ErrPasswordSet
+	}
+	got := strings.NewReplacer("-", "", " ", "").Replace(strings.ToUpper(code))
+	// An empty want would match an empty code.
+	if want == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+		return "", ErrSetupCode
 	}
 	var h passwordHash
 	a.derive(func() { h, err = newHash(password, a.rand, a.iter) })
@@ -127,6 +180,7 @@ func (a *Auth) Setup(password string) (string, error) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.code = ""
 	return a.newSessionLocked(a.now())
 }
 
@@ -334,13 +388,15 @@ func (a *Auth) Set(password string) error {
 		}
 		a.mu.Lock()
 		a.gen++
+		a.code = ""
 		clear(a.sessions)
 		a.mu.Unlock()
 	})
 	return err
 }
 
-// Reset forgets the password and ends every session.
+// Reset forgets the password and ends every session. It also forgets the
+// setup code, so a code printed before the reset stops working.
 func (a *Auth) Reset() error {
 	a.fileMu.Lock()
 	defer a.fileMu.Unlock()
@@ -349,6 +405,7 @@ func (a *Auth) Reset() error {
 	}
 	a.mu.Lock()
 	a.gen++
+	a.code = ""
 	clear(a.sessions)
 	a.mu.Unlock()
 	return nil

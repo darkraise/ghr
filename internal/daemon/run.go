@@ -415,7 +415,7 @@ func Run(ctx context.Context, o Options) error {
 		}()
 		ev.Add("info", "", "web UI listening on %s", webLn.Addr())
 		if webSetupRequired() {
-			ev.Add("warn", "", "web UI on %s has no password; run: ghr web set-password", webLn.Addr())
+			ev.Add("warn", "", "web UI on %s has no password; set one with: ghr web set-password, or open it and enter the code from: ghr code", webLn.Addr())
 		}
 	}
 	// Every return after serve goes through teardown, so no path leaves the

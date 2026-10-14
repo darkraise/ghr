@@ -71,6 +71,16 @@ func sessionCookie(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
 
 func body(pw string) string { return `{"password":"` + pw + `"}` }
 
+// setupBody is a setup request carrying a's current setup code.
+func setupBody(t *testing.T, a *Auth, pw string) string {
+	t.Helper()
+	code, err := a.SetupCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return `{"code":"` + code + `","password":"` + pw + `"}`
+}
+
 // local sends the request from loopback, then applies mods.
 func local(mods ...func(*http.Request)) func(*http.Request) {
 	return func(r *http.Request) {
@@ -82,12 +92,22 @@ func local(mods ...func(*http.Request)) func(*http.Request) {
 }
 
 func TestSetupThenAPI(t *testing.T) {
-	h, _, api := newTestHandler(t)
+	h, a, api := newTestHandler(t)
 	rec := do(h, http.MethodGet, "/auth/state", "", nil)
 	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"authenticated":false,"setup_required":true}` {
 		t.Fatalf("state: %d %s", rec.Code, rec.Body.String())
 	}
 	rec = do(h, http.MethodPost, "/auth/setup", body(pw), local())
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "wrong setup code; run on the host: ghr code") ||
+		len(rec.Result().Cookies()) != 0 {
+		t.Fatalf("setup without a code: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(h, http.MethodGet, "/auth/state", "", nil)
+	if strings.TrimSpace(rec.Body.String()) != `{"authenticated":false,"setup_required":true}` {
+		t.Fatalf("state after a refused setup: %s", rec.Body.String())
+	}
+	claimBody := setupBody(t, a, pw)
+	rec = do(h, http.MethodPost, "/auth/setup", claimBody, local())
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("setup: %d %s", rec.Code, rec.Body.String())
 	}
@@ -106,7 +126,7 @@ func TestSetupThenAPI(t *testing.T) {
 	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Fatalf("api cache-control %q", cc)
 	}
-	if rec := do(h, http.MethodPost, "/auth/setup", body(pw), local()); rec.Code != http.StatusConflict {
+	if rec := do(h, http.MethodPost, "/auth/setup", claimBody, local()); rec.Code != http.StatusConflict {
 		t.Fatalf("second setup: %d", rec.Code)
 	}
 }
@@ -117,11 +137,11 @@ func TestLoginResponses(t *testing.T) {
 		!strings.Contains(rec.Body.String(), "no web password is set yet") {
 		t.Fatalf("login before setup: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(h, http.MethodPost, "/auth/setup", body("short"), local()); rec.Code != http.StatusBadRequest ||
+	if rec := do(h, http.MethodPost, "/auth/setup", setupBody(t, a, "short"), local()); rec.Code != http.StatusBadRequest ||
 		!strings.Contains(rec.Body.String(), "password must be 12 to 1024 characters") {
 		t.Fatalf("short setup: %d %s", rec.Code, rec.Body.String())
 	}
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	for range maxFailures {
@@ -147,8 +167,8 @@ func TestLoginResponses(t *testing.T) {
 }
 
 func TestSecureCookie(t *testing.T) {
-	h, _, _ := newTestHandler(t)
-	rec := do(h, http.MethodPost, "/auth/setup", body(pw), local(func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https") }))
+	h, a, _ := newTestHandler(t)
+	rec := do(h, http.MethodPost, "/auth/setup", setupBody(t, a, pw), local(func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https") }))
 	if c := sessionCookie(t, rec); !c.Secure {
 		t.Fatal("cookie not Secure behind an HTTPS proxy")
 	}
@@ -166,7 +186,7 @@ func TestSecureCookie(t *testing.T) {
 
 func TestLoginEndsWithTheRequest(t *testing.T) {
 	h, a, _ := newTestHandler(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	fillSlots(a)
@@ -202,7 +222,7 @@ func TestAPIRequestsCarryTheBrowserMark(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	h := Handler(a, backend, testFS(), []string{"ghr.lan"}, nil)
-	id, err := a.Setup(pw)
+	id, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +247,7 @@ func TestAPIRequestsCarryTheBrowserMark(t *testing.T) {
 
 func TestRequestChecks(t *testing.T) {
 	h, a, _ := newTestHandler(t)
-	id, err := a.Setup(pw)
+	id, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +322,7 @@ func TestRequestChecks(t *testing.T) {
 
 func TestRoutes(t *testing.T) {
 	h, a, api := newTestHandler(t)
-	id, err := a.Setup(pw)
+	id, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +371,7 @@ func TestRoutes(t *testing.T) {
 func TestLongestPasswordsFitTheBodyLimit(t *testing.T) {
 	h, a, _ := newTestHandler(t)
 	current, next := strings.Repeat("\U0001F600", MaxPasswordLen), strings.Repeat("\U0001F601", MaxPasswordLen)
-	id, err := a.Setup(current)
+	id, err := claim(a, current)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +392,7 @@ func TestLongestPasswordsFitTheBodyLimit(t *testing.T) {
 
 func TestLogoutAndPasswordChange(t *testing.T) {
 	h, a, _ := newTestHandler(t)
-	keep, err := a.Setup(pw)
+	keep, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +453,7 @@ func TestSetupFromAnyAddress(t *testing.T) {
 		"loopback":        local(),
 	} {
 		h, a, _ := newTestHandler(t)
-		rec := do(h, http.MethodPost, "/auth/setup", body(pw), mod)
+		rec := do(h, http.MethodPost, "/auth/setup", setupBody(t, a, pw), mod)
 		if rec.Code != http.StatusNoContent || len(rec.Result().Cookies()) == 0 {
 			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
 		}
@@ -473,7 +493,7 @@ func TestLongRequestEndsWithItsSession(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setSessionRecheck(t, 20*time.Millisecond)
 			a, c := newTestAuth(t)
-			id, err := a.Setup(pw)
+			id, err := claim(a, pw)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -514,7 +534,7 @@ func TestRequestStopsItsSessionTimer(t *testing.T) {
 	}
 	t.Cleanup(func() { afterFunc = time.AfterFunc })
 	h, a, _ := newTestHandler(t)
-	id, err := a.Setup(pw)
+	id, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,7 +551,7 @@ func TestRequestStopsItsSessionTimer(t *testing.T) {
 
 func TestOnSessionRunsForLoggedInAPIRequests(t *testing.T) {
 	a, _ := newTestAuth(t)
-	id, err := a.Setup(pw)
+	id, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
