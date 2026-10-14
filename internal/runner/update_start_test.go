@@ -463,18 +463,25 @@ func TestSpawnsWhileTheUpdatePrepares(t *testing.T) {
 	h.m.Wait()
 }
 
-// A failed prepare keeps the queue and is retried an hour later.
+// A failed prepare keeps the queue and shows in the status as a failed
+// update. It is retried an hour later, then at doubling intervals; a
+// prepare that succeeds clears the failure.
 func TestFailedPrepareKeepsTheQueue(t *testing.T) {
 	h := newHarness(t)
 	dist, _ := queuedUpdate(t, h, tarballSum())
 	attempts := 0
-	h.m.Fetch = func(context.Context, string, string) error {
+	fail := true
+	h.m.Fetch = func(_ context.Context, _, dst string) error {
 		attempts++
-		return errors.New("connection reset")
+		if fail {
+			return errors.New("connection reset")
+		}
+		return os.WriteFile(dst, tarball, 0o644)
 	}
 	h.m.Tick(context.Background())
 	h.m.Wait()
-	if u := h.m.Status().RunnerUpdate; !u.Queued || u.Running || u.LastOutcome != "" {
+	if u := h.m.Status().RunnerUpdate; !u.Queued || u.Running || u.LastOutcome != "failed" || u.LastError != "download: connection reset" ||
+		u.LastFinished == nil || !u.LastFinished.Equal(h.now) {
 		t.Fatalf("status %+v", u)
 	}
 	if !strings.Contains(h.eventText(), "warn  runner update: preparing 2.338.0 failed: download: connection reset; retrying in 1h0m0s") {
@@ -492,8 +499,49 @@ func TestFailedPrepareKeepsTheQueue(t *testing.T) {
 	h.now = h.now.Add(releaseCheckRetry)
 	h.m.Tick(context.Background())
 	h.m.Wait()
+	if attempts != 2 || !strings.Contains(h.eventText(), "retrying in 2h0m0s") {
+		t.Fatalf("%d attempts after the hour\n%s", attempts, h.eventText())
+	}
+	h.now = h.now.Add(releaseCheckRetry)
+	h.m.Tick(context.Background())
+	h.m.Wait()
 	if attempts != 2 {
-		t.Fatalf("%d attempts after the hour", attempts)
+		t.Fatalf("%d attempts one hour into a two-hour wait", attempts)
+	}
+	fail = false
+	h.now = h.now.Add(releaseCheckRetry)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if u := h.m.Status().RunnerUpdate; attempts != 3 || !u.Queued || u.LastOutcome != "" || u.LastError != "" || u.LastFinished != nil {
+		t.Fatalf("%d attempts, status %+v", attempts, u)
+	}
+}
+
+// Cancelling the update forgets its failed prepare, and queueing it again
+// prepares at once.
+func TestCancelForgetsAFailedPrepare(t *testing.T) {
+	h := newHarness(t)
+	queuedUpdate(t, h, tarballSum())
+	attempts := 0
+	h.m.Fetch = func(context.Context, string, string) error {
+		attempts++
+		return errors.New("connection reset")
+	}
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if err := h.m.CancelUpdate(); err != nil {
+		t.Fatal(err)
+	}
+	if u := h.m.Status().RunnerUpdate; u.Queued || u.LastOutcome != "" || u.LastError != "" {
+		t.Fatalf("status after the cancel %+v", u)
+	}
+	if err := h.m.QueueUpdate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if attempts != 2 {
+		t.Fatalf("%d attempts; queueing again must not wait out the retry", attempts)
 	}
 }
 

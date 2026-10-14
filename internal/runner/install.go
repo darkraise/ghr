@@ -198,6 +198,7 @@ func (m *Manager) runUpdate(ctx context.Context) {
 	now := m.Now()
 	m.mu.Lock()
 	m.upd.lastOutcome, m.upd.lastFinished, m.upd.lastErr = outcome, now, ""
+	m.forgetPrepareLocked()
 	if err != nil {
 		m.upd.lastErr = err.Error()
 	}

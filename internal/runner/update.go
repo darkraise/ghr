@@ -63,6 +63,15 @@ type updateState struct {
 	preparing    bool      // the queued version is downloading in the background
 	prepareStop  context.CancelFunc
 	prepareAt    time.Time // no prepare before this, after one failed
+	prepareFails int       // failed prepares in a row
+	prepareErr   string    // the last failed prepare's error; "" once one succeeds
+	prepareErrAt time.Time
+}
+
+// forgetPrepareLocked drops what failed prepares left behind; m.mu must be
+// held.
+func (m *Manager) forgetPrepareLocked() {
+	m.upd.prepareAt, m.upd.prepareFails, m.upd.prepareErr, m.upd.prepareErrAt = time.Time{}, 0, "", time.Time{}
 }
 
 // releaseFacts is what a release listing says about an installed version.
@@ -257,7 +266,7 @@ func (m *Manager) QueueUpdate(ctx context.Context) error {
 	}
 	// Queueing again is the owner's retry: a failed prepare does not wait.
 	m.mu.Lock()
-	m.upd.prepareAt = time.Time{}
+	m.forgetPrepareLocked()
 	m.mu.Unlock()
 	m.Events.Add("info", "", "runner update queued")
 	return nil
@@ -283,6 +292,7 @@ func (m *Manager) CancelUpdate() error {
 	}
 	m.mu.Lock()
 	stop := m.upd.prepareStop
+	m.forgetPrepareLocked()
 	m.mu.Unlock()
 	if stop != nil {
 		stop()
@@ -298,15 +308,21 @@ func timePtr(t time.Time) *time.Time {
 	return &t
 }
 
-// runnerUpdate renders the update state for /status; m.mu must be held.
+// runnerUpdate renders the update state for /status; m.mu must be held. A
+// failing prepare is shown as the last outcome: before the prepare ran in
+// the background, the same failure ended the update.
 func (m *Manager) runnerUpdate() model.RunnerUpdate {
 	u := m.upd
-	return model.RunnerUpdate{
+	r := model.RunnerUpdate{
 		Installed: u.installed, Latest: u.latest, LatestPublished: timePtr(u.latestPub), Deadline: timePtr(u.deadline),
 		CheckedAt: timePtr(u.checkedAt), CheckError: u.checkErr,
 		Queued: u.file.QueuedAt != nil, QueuedAt: u.file.QueuedAt, Running: u.running,
 		LastOutcome: u.lastOutcome, LastError: u.lastErr, LastFinished: timePtr(u.lastFinished),
 	}
+	if u.prepareErr != "" {
+		r.LastOutcome, r.LastError, r.LastFinished = "failed", u.prepareErr, timePtr(u.prepareErrAt)
+	}
+	return r
 }
 
 const (
@@ -422,7 +438,9 @@ func (m *Manager) preparedLocked() bool {
 // prepareUpdate downloads, verifies and prepares a queued update's version in
 // the background, so the update itself only switches to it and runners keep
 // working meanwhile. A failure keeps the queue and is retried after
-// releaseCheckRetry; a shutdown or a cancel just ends it.
+// releaseCheckRetry, doubling with each failure in a row up to
+// releaseCheckEvery, since a bad checksum or a failing dependency script
+// fails the same way each time; a shutdown or a cancel just ends it.
 func (m *Manager) prepareUpdate(now time.Time) {
 	m.mu.Lock()
 	ver, sum := m.upd.latest, m.upd.latestSum
@@ -440,17 +458,27 @@ func (m *Manager) prepareUpdate(now time.Time) {
 		err := m.stage(ctx, filepath.Dir(m.Paths.Dist), ver, sum)
 		stopped := errors.Is(ctx.Err(), context.Canceled)
 		cancel()
+		now := m.Now()
+		retry := releaseCheckRetry
 		m.mu.Lock()
 		m.upd.preparing, m.upd.prepareStop = false, nil
-		if err != nil && !stopped {
-			m.upd.prepareAt = m.Now().Add(releaseCheckRetry)
+		switch {
+		case err == nil:
+			m.forgetPrepareLocked()
+		case !stopped:
+			m.upd.prepareFails++
+			for n := 1; n < m.upd.prepareFails && retry < releaseCheckEvery; n++ {
+				retry *= 2
+			}
+			retry = min(retry, releaseCheckEvery)
+			m.upd.prepareAt, m.upd.prepareErr, m.upd.prepareErrAt = now.Add(retry), err.Error(), now
 		}
 		m.mu.Unlock()
 		switch {
 		case err == nil:
 			m.Events.Add("info", "", "runner update: %s is ready", ver)
 		case !stopped:
-			m.Events.Add("warn", "", "runner update: preparing %s failed: %v; retrying in %s", ver, err, releaseCheckRetry)
+			m.Events.Add("warn", "", "runner update: preparing %s failed: %v; retrying in %s", ver, err, retry)
 		}
 	}()
 }
