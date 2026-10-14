@@ -259,6 +259,30 @@ func (m *Manager) confirm(id string, j github.Job, now time.Time) {
 // hold up reaping and polling for the minutes that many JIT registrations take.
 const maxSpawnsPerTick = 10
 
+// roundRobinByRepo reorders spawns to take one from each repo in turn, keeping
+// each repo's own order, so truncating the result cannot starve a later repo.
+func roundRobinByRepo(spawns []sched.Spawn) []sched.Spawn {
+	var repos []string
+	byRepo := map[string][]sched.Spawn{}
+	for _, s := range spawns {
+		key := strings.ToLower(s.Repo)
+		if _, ok := byRepo[key]; !ok {
+			repos = append(repos, key)
+		}
+		byRepo[key] = append(byRepo[key], s)
+	}
+	out := make([]sched.Spawn, 0, len(spawns))
+	for len(out) < len(spawns) {
+		for _, r := range repos {
+			if q := byRepo[r]; len(q) > 0 {
+				out = append(out, q[0])
+				byRepo[r] = q[1:]
+			}
+		}
+	}
+	return out
+}
+
 // spawnPlanned spawns what sched.Plan decides, at most maxSpawnsPerTick of it,
 // and nothing while a runner update runs or maintenance holds the runners. It
 // plans from planConfig, so a blocked repo gets nothing. Repos that are unread,
@@ -292,7 +316,7 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 		return
 	}
 	if len(spawns) > maxSpawnsPerTick {
-		spawns = spawns[:maxSpawnsPerTick]
+		spawns = roundRobinByRepo(spawns)[:maxSpawnsPerTick]
 	}
 	// A runner is in insts only once its unit has started, so a hold taken
 	// meanwhile would not see it; spawning refuses holds until these end.

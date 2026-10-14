@@ -197,6 +197,33 @@ func TestSpawnsPerTickAreCapped(t *testing.T) {
 	}
 }
 
+func TestCappedSpawnsAreSharedAcrossRepos(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.Mode = config.ModeAll
+	warm := 15
+	uncapped := 0
+	h.cfg.Repos[0].Max = &uncapped
+	h.cfg.Repos[0].Warm = &warm
+	h.cfg.Repos[1].Warm = &warm
+	h.ids = nil
+	for i := 0; i < 40; i++ {
+		h.ids = append(h.ids, fmt.Sprintf("%06x", i+1))
+	}
+	h.m.Tick(context.Background())
+	var darkcloud, darkmem int
+	for _, c := range h.gh.jitCalls {
+		switch {
+		case strings.HasPrefix(c, "ghr-darkcloud-"):
+			darkcloud++
+		case strings.HasPrefix(c, "ghr-darkmem-"):
+			darkmem++
+		}
+	}
+	if darkcloud != maxSpawnsPerTick/2 || darkmem != maxSpawnsPerTick/2 {
+		t.Fatalf("first tick spawned %d darkcloud and %d darkmem runners: %v", darkcloud, darkmem, h.gh.jitCalls)
+	}
+}
+
 // In all mode a repo in an error state gets no warm runner until a poll succeeds.
 func TestAllModeSkipsWarmSpawnsForFailingRepo(t *testing.T) {
 	for _, err := range []error{
