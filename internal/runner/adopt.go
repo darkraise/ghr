@@ -131,7 +131,7 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 		m.Events.Add("warn", "", "reconcile: list units: %v", err)
 		return
 	}
-	m.retryUndeleted(ctx)
+	m.retryUndeleted(ctx, cfg)
 	known := map[string]instance{}
 	for _, i := range m.snapshot() {
 		known[i.ID] = i
@@ -214,12 +214,20 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 }
 
 // retryUndeleted deletes the registrations finish could not delete. The
-// repository need not be served any more, so no runner list covers them.
-func (m *Manager) retryUndeleted(ctx context.Context) {
+// repository need not be served any more, so no runner list covers them. It
+// stops as soon as GitHub API calls are not allowed. A registration the token
+// is forbidden to delete in a repository that is no longer configured is
+// reported once and dropped; in a configured one the permission error is
+// filed against the repository and the registration stays.
+func (m *Manager) retryUndeleted(ctx context.Context, cfg *config.Config) {
 	m.mu.Lock()
 	regs := maps.Clone(m.undeleted)
 	m.mu.Unlock()
 	for id, r := range regs {
+		now := m.Now()
+		if !m.apiAllowed(now) {
+			return
+		}
 		err := m.GH.DeleteRunner(ctx, r.repo, id)
 		switch {
 		case err == nil, github.IsKind(err, github.ErrNotFound):
@@ -231,6 +239,13 @@ func (m *Manager) retryUndeleted(ctx context.Context) {
 			}
 		case github.IsKind(err, github.ErrUnprocessable):
 			// busy; retried at the next reconciliation
+		case github.IsKind(err, github.ErrAuth) && !tokenRejected(err) && cfg.Repo(r.repo) == nil:
+			m.mu.Lock()
+			delete(m.undeleted, id)
+			m.mu.Unlock()
+			m.Events.Add("warn", r.repo, "reconcile: delete registration %s: %v; the repository is no longer configured, so it is left on GitHub", r.name, err)
+		case github.IsKind(err, github.ErrAuth), github.IsKind(err, github.ErrRateLimit):
+			m.apiErr(r.repo, err, now)
 		default:
 			m.Events.Add("warn", r.repo, "reconcile: delete registration %s: %v", r.name, err)
 		}

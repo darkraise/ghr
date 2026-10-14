@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -186,6 +187,79 @@ func TestReconcileRetriesARegistrationFinishCouldNotDelete(t *testing.T) {
 	h.m.Reconcile(context.Background(), h.cfg)
 	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
 		t.Fatalf("deleted again: %v", h.gh.deleted)
+	}
+}
+
+func addUndeleted(h *harness, id int64, repo string) {
+	h.m.mu.Lock()
+	defer h.m.mu.Unlock()
+	h.m.undeleted[id] = registration{repo: repo, name: fmt.Sprintf("ghr-%s-%06x", repo, id)}
+}
+
+func undeletedCount(h *harness) int {
+	h.m.mu.Lock()
+	defer h.m.mu.Unlock()
+	return len(h.m.undeleted)
+}
+
+// Retrying a registration is a GitHub call like any other, so it waits out a
+// rate limit pause.
+func TestReconcileRetriesRegistrationsOnlyWhileTheAPIIsAllowed(t *testing.T) {
+	h := newHarness(t)
+	addUndeleted(h, 101, "darkmem")
+	h.m.mu.Lock()
+	h.m.pauseUntil = h.now.Add(time.Minute)
+	h.m.mu.Unlock()
+	h.m.Reconcile(context.Background(), h.cfg)
+	if strings.Contains(h.gh.callsText(), "DeleteRunner") || undeletedCount(h) != 1 {
+		t.Fatalf("calls %s, %d kept", h.gh.callsText(), undeletedCount(h))
+	}
+	h.now = h.now.Add(time.Minute)
+	h.m.Reconcile(context.Background(), h.cfg)
+	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) || undeletedCount(h) != 0 {
+		t.Fatalf("deleted %v, %d kept", h.gh.deleted, undeletedCount(h))
+	}
+}
+
+// A rate limit met by one retry pauses the rest, like it does anywhere else.
+func TestReconcileRateLimitedRetryPausesTheAPI(t *testing.T) {
+	h := newHarness(t)
+	addUndeleted(h, 101, "darkmem")
+	addUndeleted(h, 102, "darkmem")
+	until := h.now.Add(time.Minute)
+	h.gh.setErr("DeleteRunner darkmem", &github.APIError{Status: 429, Kind: github.ErrRateLimit, RetryAt: until})
+	h.m.Reconcile(context.Background(), h.cfg)
+	if got := strings.Count(h.gh.callsText(), "DeleteRunner"); got != 1 {
+		t.Fatalf("%d delete calls after a rate limit\n%s", got, h.eventText())
+	}
+	if !h.m.PausedUntil().Equal(until) || undeletedCount(h) != 2 {
+		t.Fatalf("paused until %v, %d kept", h.m.PausedUntil(), undeletedCount(h))
+	}
+}
+
+// A 403 for a repository ghr no longer serves is reported once and given up:
+// nothing in ghr will ever make that token allowed to delete it.
+func TestReconcileGivesUpOnARemovedRepositoryTheTokenCannotReach(t *testing.T) {
+	h := newHarness(t)
+	addUndeleted(h, 101, "gone-repo")
+	addUndeleted(h, 102, "darkmem")
+	forbidden := &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible by personal access token"}
+	h.gh.setErr("DeleteRunner gone-repo", forbidden)
+	h.gh.setErr("DeleteRunner darkmem", forbidden)
+	h.m.Reconcile(context.Background(), h.cfg)
+	h.m.Reconcile(context.Background(), h.cfg)
+	if got := strings.Count(h.gh.callsText(), "DeleteRunner gone-repo"); got != 1 {
+		t.Fatalf("%d delete calls for the removed repository\n%s", got, h.eventText())
+	}
+	if got := strings.Count(h.eventText(), "ghr-gone-repo-"); got != 1 {
+		t.Fatalf("%d events for the removed repository\n%s", got, h.eventText())
+	}
+	// A served repository keeps its registration and shows the permission error.
+	if got := strings.Count(h.gh.callsText(), "DeleteRunner darkmem"); got != 2 || undeletedCount(h) != 1 {
+		t.Fatalf("%d delete calls for darkmem, %d kept", got, undeletedCount(h))
+	}
+	if !strings.Contains(h.m.Status().Repos[1].Error, "token lacks permission for this repository") {
+		t.Fatalf("status %q", h.m.Status().Repos[1].Error)
 	}
 }
 
