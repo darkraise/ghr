@@ -82,7 +82,7 @@ func (s *Store) Reload() (warnings, added []string, tokenChanged bool, err error
 	if err != nil {
 		return nil, nil, false, err
 	}
-	if cur := s.cfg.Load(); cur != nil && cur.Owner != "" && cur.Owner != cfg.Owner {
+	if cur := s.cfg.Load(); cur != nil && cur.Owner != "" && !strings.EqualFold(cur.Owner, cfg.Owner) {
 		return nil, nil, false, fmt.Errorf("owner changed from %s to %s: restart ghr to switch owners", cur.Owner, cfg.Owner)
 	}
 	tok, err := s.readToken()

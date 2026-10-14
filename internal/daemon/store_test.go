@@ -73,6 +73,18 @@ func TestStoreUpdateReloadToken(t *testing.T) {
 	}
 }
 
+// GitHub owner names are case-insensitive, so a reload that only changes the
+// owner's case is not a change of owner and applies the rest of the file.
+func TestStoreReloadAcceptsTheOwnerInAnotherCase(t *testing.T) {
+	s := newStore(t)
+	edited := strings.Replace(cfgYAML, "owner: darkraise", "owner: DarkRaise", 1)
+	edited = strings.Replace(edited, "global_max: 2", "global_max: 3", 1)
+	os.WriteFile(s.ConfigPath, []byte(edited), 0o600)
+	if _, _, _, err := s.Reload(); err != nil || s.Config().GlobalMax != 3 {
+		t.Fatalf("reload: err %v cfg %+v", err, s.Config())
+	}
+}
+
 // Reload says which warnings of its load are new: neither in the load before
 // nor in the config saved since. A rejected reload changes nothing. A save
 // writes the lowered value to the file, so the same bad edit made again is
