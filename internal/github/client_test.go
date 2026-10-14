@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -918,6 +919,37 @@ func TestListingStopsAfter50Pages(t *testing.T) {
 			}
 			if len(f.requests) != 50 {
 				t.Fatalf("%d requests, want 50", len(f.requests))
+			}
+		})
+	}
+}
+
+func TestListingRefusesLinkToAnotherOrigin(t *testing.T) {
+	var hits atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		fmt.Fprint(w, `{"workflow_runs":[]}`)
+	}))
+	defer other.Close()
+	for name, link := range map[string]func(base string) string{
+		"other host":   func(string) string { return other.URL + "/runs?access=hunter2" },
+		"other scheme": func(base string) string { return "https" + strings.TrimPrefix(base, "http") + "/runs?access=hunter2" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var c *Client
+			c, _ = newClient(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Link", fmt.Sprintf(`<%s>; rel="next"`, link(c.BaseURL)))
+				fmt.Fprint(w, `{"workflow_runs":[{"id":7,"status":"queued"}]}`)
+			})
+			_, err := c.ListRuns(context.Background(), "darkcloud", "queued")
+			if err == nil || !strings.Contains(err.Error(), "pagination link") {
+				t.Fatalf("err %v", err)
+			}
+			if strings.Contains(err.Error(), "hunter2") {
+				t.Errorf("the error carries the query string: %v", err)
+			}
+			if hits.Load() != 0 {
+				t.Errorf("the other origin got %d requests", hits.Load())
 			}
 		})
 	}

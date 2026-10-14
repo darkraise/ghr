@@ -393,6 +393,11 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 		c.suspend(gen, apiErr)
 		return nil, "", apiErr
 	}
+	if next != "" {
+		if err := c.checkNext(next); err != nil {
+			return nil, "", err
+		}
+	}
 	if method == http.MethodGet {
 		if etag := resp.Header.Get("ETag"); etag != "" {
 			c.mu.Lock()
@@ -403,6 +408,21 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 		}
 	}
 	return data, next, nil
+}
+
+// checkNext refuses a pagination link that leaves the API origin, since the
+// next request would carry the token to wherever the link points.
+func (c *Client) checkNext(next string) error {
+	n, err := url.Parse(next)
+	base, berr := url.Parse(c.BaseURL)
+	if err != nil || berr != nil || n.Scheme != base.Scheme || n.Host != base.Host {
+		host := "an unparsable address"
+		if err == nil {
+			host = n.Host
+		}
+		return fmt.Errorf("github: pagination link to %s refused", host)
+	}
+	return nil
 }
 
 func (c *Client) classify(resp *http.Response, data []byte) *APIError {
