@@ -203,8 +203,8 @@ func TestJobLogOutcomes(t *testing.T) {
 }
 
 // GitHub may not have stored a log yet when its job has only just completed,
-// so "no log" is kept 15 seconds when the job completed less than two minutes
-// before the answer, and logRetryTTL otherwise.
+// so "no log" is kept 15 seconds when the job completed less than three
+// minutes before the answer, and logRetryTTL otherwise.
 func TestJobLogAsksAgainSoonAfterTheJobCompleted(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -212,7 +212,8 @@ func TestJobLogAsksAgainSoonAfterTheJobCompleted(t *testing.T) {
 		kept  time.Duration
 	}{
 		{"a minute ago", time.Minute, 15 * time.Second},
-		{"two minutes ago", 2 * time.Minute, logRetryTTL},
+		{"two and a half minutes ago", 150 * time.Second, 15 * time.Second},
+		{"three minutes ago", 3 * time.Minute, logRetryTTL},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b, _, gh := newBackend(t)

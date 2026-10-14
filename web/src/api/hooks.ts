@@ -120,9 +120,11 @@ export function useRunAnnotations(repo: string, id: number, attempt: number | un
 }
 
 // GitHub may not have stored the log of a job that has only just completed.
-// The daemon keeps such a "no log" answer for 15 seconds, so asking again
-// at that pace for a few minutes finds the log once it is there. A clock
-// behind the completion time is no reason to ask for the length of the skew.
+// For the job's first three minutes after completion the daemon keeps such a
+// "no log" answer for 15 seconds, so asking again at that pace for as long
+// finds the log once it is there; after that it keeps the answer ten minutes,
+// so the two windows must stay equal. A clock behind the completion time is
+// no reason to ask for the length of the skew.
 const LOG_SETTLE = 3 * 60_000
 
 export function logSettling(completedAt: string | undefined, now: number): boolean {

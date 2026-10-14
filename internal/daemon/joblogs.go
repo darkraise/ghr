@@ -25,8 +25,9 @@ const (
 	logRetryTTL       = 10 * time.Minute
 	// GitHub may not have stored a log yet when its job has only just
 	// completed. "No log" for a job that completed less than logSettle ago
-	// is therefore kept logSettleTTL, not logRetryTTL.
-	logSettle    = 2 * time.Minute
+	// is therefore kept logSettleTTL, not logRetryTTL. The web asks again
+	// for as long, so the two must stay equal.
+	logSettle    = 3 * time.Minute
 	logSettleTTL = 15 * time.Second
 	// logLineOverhead is what a parsed line costs beyond its bytes in the
 	// raw log: a model.LogLine is 40 bytes, and the slices holding them
