@@ -76,7 +76,9 @@ export function ActionsPage() {
   const configured = (config.data?.repos ?? []).map((r) => r.name)
   const watched = config.data?.watch_repos ?? []
   const names = [...configured, ...watched]
-  const repo = names.find((n) => n.toLowerCase() === (search.repo ?? "").toLowerCase())
+  // Until the config answers there is nothing to match against, so the URL's
+  // repository stands.
+  const repo = config.data ? names.find((n) => n.toLowerCase() === (search.repo ?? "").toLowerCase()) : search.repo
   const status: ActionsStatus | undefined = search.status
 
   // A repository that is neither configured nor watched leaves the URL once
@@ -124,6 +126,7 @@ export function ActionsPage() {
               {`${name} (watched)`}
             </SelectItem>
           ))}
+          {repo && !names.includes(repo) && <SelectItem value={repo}>{repo}</SelectItem>}
         </SelectContent>
       </Select>
       <ToggleGroup

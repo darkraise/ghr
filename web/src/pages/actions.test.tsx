@@ -201,6 +201,14 @@ describe("Actions page", () => {
     expect(box().queryByRole("link", { name: /^Bump the runner/ })).toBeNull()
   })
 
+  it("keeps the repository filter while the config cannot be read", async () => {
+    mockApi(authedRoutes({ "GET /api/config": () => json({ error: "config unreadable" }, 500) }))
+    renderApp("/actions?repo=darkmem")
+    expect(await screen.findByRole("combobox", { name: "Repository" })).toHaveTextContent("darkmem")
+    expect(await box().findByRole("link", { name: /^Bump the runner/ })).toBeInTheDocument()
+    expect(box().queryByRole("link", { name: /^deploy/ })).toBeNull()
+  })
+
   it("picks a watched repository from the select", async () => {
     mockApi(authedRoutes())
     const { user, router } = renderApp("/actions")
