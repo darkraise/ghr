@@ -56,6 +56,7 @@ Scripts set these variables instead of answering prompts:
 | `RUNNER_VERSION` | actions/runner version, such as `2.337.0`; `latest` by default |
 | `GHR_OWNER`, `GHR_TOKEN` | configure GitHub; `GHR_TOKEN` is ignored without an owner |
 | `GHR_WEB_PASSWORD` | web UI password, on a first install; the browser then needs no setup code |
+| `GHR_WEB_LISTEN` | web UI listen address as `host:port`, on a first install; `0.0.0.0:8080` by default, `127.0.0.1:8080` when a TLS proxy runs on the same host. An existing `config.yaml` keeps its `web.listen` |
 | `GHR_TOOLCHAINS` | `popular` or `none`; by default `popular` on a first install, `none` on an upgrade |
 
 Then run `ghr setup finish` to end first-run setup without the browser.

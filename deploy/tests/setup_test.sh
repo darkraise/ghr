@@ -341,6 +341,49 @@ out=$(run install_config 2>&1)
 rc=$?
 check "d: an upgrade does not need the example" [ "$rc" -eq 0 ]
 
+# GHR_WEB_LISTEN sets web.listen in the config a first install writes, and nowhere else.
+new_case d-web-listen
+ETC_DIR="$T/d-web-listen/etc"
+mkdir -p "$ETC_DIR"
+listen_line() { grep '^  listen:' "$ETC_DIR/config.yaml"; }
+out=$( (GHR_WEB_LISTEN=127.0.0.1:9090; run install_config) 2>&1)
+rc=$?
+check "d: a first install with GHR_WEB_LISTEN succeeds" [ "$rc" -eq 0 ]
+check "d: GHR_WEB_LISTEN sets the listen address" [ "$(listen_line)" = '  listen: "127.0.0.1:9090"' ]
+check "d: nothing else in the example changes" [ "$(grep -vc '^  listen:' "$ETC_DIR/config.yaml")" -eq "$(grep -vc '^  listen:' "$OPT_DIR/config.example.yaml")" ]
+check "d: config.yaml stays private" [ "$(stat -c %a "$ETC_DIR/config.yaml")" = 600 ]
+printf 'web:\n  listen: 10.0.0.1:8080\n' > "$ETC_DIR/config.yaml"
+(GHR_WEB_LISTEN=127.0.0.1:9090; run install_config) >/dev/null 2>&1
+check "d: an existing config.yaml keeps its listen address" [ "$(listen_line)" = '  listen: 10.0.0.1:8080' ]
+rm "$ETC_DIR/config.yaml"
+(GHR_WEB_LISTEN='[::1]:8080'; run install_config) >/dev/null 2>&1
+check "d: an IPv6 address is quoted so YAML reads it as a string" [ "$(listen_line)" = '  listen: "[::1]:8080"' ]
+rm "$ETC_DIR/config.yaml"
+(GHR_WEB_LISTEN=; run install_config) >/dev/null 2>&1
+check "d: without GHR_WEB_LISTEN the example's address stays" [ "$(listen_line)" = "$(grep '^  listen:' "$OPT_DIR/config.example.yaml")" ]
+rm "$ETC_DIR/config.yaml"
+sed -i '/^  listen:/d' "$OPT_DIR/config.example.yaml"
+out=$( (GHR_WEB_LISTEN=127.0.0.1:9090; run install_config) 2>&1)
+rc=$?
+check "d: GHR_WEB_LISTEN fails when the example has no listen line" [ "$rc" -ne 0 ]
+check "d: and says so" contains "$out" "has no web.listen line to set"
+check "d: and writes no config.yaml" absent "$ETC_DIR/config.yaml"
+
+for good in 0.0.0.0:8080 127.0.0.1:9090 :8080 localhost:80 ghr.lan:65535 '[::]:8080' '[::1]:8080' '[fd00::5]:1'; do
+  out=$( (GHR_WEB_LISTEN=$good; run check_web_listen) 2>&1)
+  rc=$?
+  check "d: GHR_WEB_LISTEN=$good is accepted" [ "$rc" -eq 0 ]
+done
+for bad in 8080 host: host:0 host:65536 host:abc host:-1 host:+80 ::1:8080 'a b:80' 'x"y:80' '1.2.3.4:8080;x' '[::1:80' '::1]:80' '[]:80' 'a/b:80' 'a&b:80' 'a\b:80' 'a#b:80' host:80:90; do
+  out=$( (GHR_WEB_LISTEN=$bad; run check_web_listen) 2>&1)
+  rc=$?
+  check "d: GHR_WEB_LISTEN=$bad is refused" [ "$rc" -ne 0 ]
+  check "d: GHR_WEB_LISTEN=$bad names the expected form" contains "$out" "GHR_WEB_LISTEN must be host:port with a port from 1 to 65535, such as 127.0.0.1:8080"
+done
+out=$( (GHR_WEB_LISTEN=; run check_web_listen) 2>&1)
+rc=$?
+check "d: an empty GHR_WEB_LISTEN is accepted" [ "$rc" -eq 0 ]
+
 # (l) install_ghr installs the example config the release ships.
 new_case l-install-ghr
 for variant in with without; do
@@ -608,8 +651,13 @@ rm -f "$pending"
 (run install_config) >/dev/null 2>&1
 check "h: an existing config.yaml does not" absent "$pending"
 
+# `ghr setup` answers only the web field, from the mark file web (absent: no answer).
 web_ghr() {
   ghr() {
+    if [ "$1" = setup ]; then
+      [ ! -f "$MARK_DIR/web" ] || echo "web: $(cat "$MARK_DIR/web")"
+      return 0
+    fi
     echo "$*" >> "$MARK_DIR/ghr-calls"
     cat > "$MARK_DIR/ghr-stdin"
     [ ! -f "$MARK_DIR/fail-web" ] || { echo "ghr: password must be 12 to 1024 characters" >&2; return 1; }
@@ -673,6 +721,30 @@ for ending in "end of input:/dev/null" "closed input:-" "a partial line:partial"
   check "h: ${ending%%:*} at the prompt keeps the marker" [ -f "$pending" ]
   check "h: ${ending%%:*} at the prompt still leaves the UI to print_next" contains "$out" "unclaimed=1"
 done
+
+# The web UI is plain HTTP; on a wildcard address every network the host is on
+# can read what a browser sends, so the installer says so while setup is open.
+exposed="the web UI is plain HTTP on every interface; put a TLS proxy in front"
+touch "$pending"
+rm -f "$MARK_DIR/ghr-calls"
+for web in 0.0.0.0:8080 '[::]:8080' :8080; do
+  echo "$web" > "$MARK_DIR/web"
+  out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
+  check "h: web $web warns about plain HTTP" contains "$out" "$exposed"
+  check "h: web $web points at the proxy docs" contains "$out" "docs/web-ui.md#behind-a-reverse-proxy"
+  check "h: web $web warns once" [ "$(grep -c 'plain HTTP' <<<"$out")" -eq 1 ]
+  touch "$pending"
+done
+for web in 127.0.0.1:9090 192.168.0.5:8080 localhost:8080 '[::1]:8080' '[fd00::5]:8080'; do
+  echo "$web" > "$MARK_DIR/web"
+  out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
+  check "h: web $web does not warn" lacks "$out" "plain HTTP"
+  touch "$pending"
+done
+rm -f "$MARK_DIR/web"
+out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
+check "h: an unanswered web field does not warn" lacks "$out" "plain HTTP"
+rm -f "$pending"
 
 # setup_ghr answers `ghr setup` from the mark files configured, wizard, owner
 # and web, and `ghr code` from the mark file code (absent: a password is set),
@@ -797,6 +869,18 @@ for listen_url in "192.168.0.5:8080 http://192.168.0.5:8080/setup" \
   out=$( (setup_ghr; run print_next) 2>&1)
   check "k: web ${listen_url%% *} gives ${listen_url##* }" contains "$out" "finish setup in the browser: ${listen_url##* }"
 done
+for web in 0.0.0.0:8080 '[::]:8080' :8080; do
+  setup_marks no pending - "$web"
+  out=$( (setup_ghr; run print_next) 2>&1)
+  check "k: web $web warns about plain HTTP" contains "$out" "the web UI is plain HTTP on every interface; put a TLS proxy in front"
+  check "k: web $web points at the proxy docs" contains "$out" "docs/web-ui.md#behind-a-reverse-proxy"
+  check "k: the warning follows the address" contains "$(sed -n 2p <<<"$out")" "plain HTTP"
+done
+for web in 127.0.0.1:9090 192.168.0.5:8080 localhost:8080 '[::1]:8080' '[fd00::5]:8080'; do
+  setup_marks no pending - "$web"
+  out=$( (setup_ghr; run print_next) 2>&1)
+  check "k: web $web does not warn" lacks "$out" "plain HTTP"
+done
 hostname() { echo "fd00::99 192.168.0.99"; }
 setup_marks no pending - 0.0.0.0:8080
 out=$( (setup_ghr; run print_next) 2>&1)
@@ -917,6 +1001,13 @@ rc=$?
 check "c: main with the steps stubbed succeeds" [ "$rc" -eq 0 ]
 check "c: the web password is set before GitHub is configured, and print_next ends the install" \
   [ "$(cat "$MARK_DIR/order")" = $'set_web_password\nconfigure_github\npreinstall_toolchains\nprint_next' ]
+
+new_case c-bad-web-listen
+out=$( (GHR_WEB_LISTEN=8080; run main) 2>&1)
+rc=$?
+check "c: main refuses a malformed GHR_WEB_LISTEN" [ "$rc" -ne 0 ]
+check "c: before it stops ghr" absent "$MARK_DIR/stopped"
+check "c: before it fetches anything" [ "$(count fetches)" -eq 0 ]
 
 new_case c-first-install
 out=$( (systemctl() { return 5; }; run stop_ghr) 2>&1)

@@ -14,6 +14,8 @@
 #     the web UI at /setup, or with: ghr setup github --owner <owner>
 #   GHR_WEB_PASSWORD=... sets the web UI password on a first install (else it asks; Enter skips),
 #     so the browser does not ask for the setup code.
+#   GHR_WEB_LISTEN=host:port sets the web UI's listen address on a first install (default
+#     0.0.0.0:8080), such as 127.0.0.1:8080 when a TLS proxy runs on this host.
 set -euo pipefail
 
 GHR_REPO="darkraise/ghr"
@@ -238,7 +240,13 @@ install_config() {
   if [ ! -f "$ETC_DIR/config.yaml" ]; then
     [ -f "$OPT_DIR/config.example.yaml" ] ||
       die "the ghr $GHR_VERSION release has no config.example.yaml; install a newer GHR_VERSION"
+    if [ -n "${GHR_WEB_LISTEN:-}" ]; then
+      grep -q '^  listen: ' "$OPT_DIR/config.example.yaml" ||
+        die "config.example.yaml has no web.listen line to set GHR_WEB_LISTEN on; set web.listen in $ETC_DIR/config.yaml instead"
+    fi
     install -m 0600 "$OPT_DIR/config.example.yaml" "$ETC_DIR/config.yaml"
+    # Quoted: a bracketed IPv6 address is a YAML flow sequence otherwise.
+    [ -z "${GHR_WEB_LISTEN:-}" ] || sed -i "s|^  listen: .*|  listen: \"$GHR_WEB_LISTEN\"|" "$ETC_DIR/config.yaml"
     log "wrote $ETC_DIR/config.yaml from config.example.yaml"
     # Files, not variables: a first install that dies before preinstall_toolchains,
     # the setup wizard or the web password prompt must still find them when re-run.
@@ -305,6 +313,7 @@ wait_ready() {
 set_web_password() {
   local pending="$STATE_DIR/web-password-pending" pw="${GHR_WEB_PASSWORD:-}" out
   [ -f "$pending" ] || return 0
+  warn_web_exposed "$(setup_field web)"
   if [ -z "$pw" ] && stdin_is_tty; then
     # Only a line that was read and is empty is a skip. End of input or a failed
     # read keeps the marker and drops whatever it left in $pw.
@@ -327,6 +336,24 @@ set_web_password() {
 }
 
 stdin_is_tty() { [ -t 0 ]; }
+
+# True for a listen host that accepts connections on every interface.
+wildcard_host() {
+  case "$1" in
+    "" | 0.0.0.0 | :: | "[::]") ;;
+    *) return 1 ;;
+  esac
+}
+
+# Warns when listen address $1 (the web field of `ghr setup`) is a wildcard: the
+# web UI is plain HTTP, so every network the host is on can read what a browser
+# sends it.
+warn_web_exposed() {
+  [ -n "$1" ] && [ "$1" != - ] || return 0
+  if wildcard_host "${1%:*}"; then
+    warn "the web UI is plain HTTP on every interface; put a TLS proxy in front (https://github.com/$GHR_REPO/blob/master/docs/web-ui.md#behind-a-reverse-proxy)"
+  fi
+}
 
 # Prints one field of `ghr setup` (configured, wizard, owner, web), or nothing
 # when the daemon does not answer.
@@ -374,13 +401,12 @@ print_next() {
   if [ "$configured" != yes ] || [ "$wizard" = pending ]; then
     if [ -n "$web" ]; then
       host=${web%:*}
-      case "$host" in
-        "" | 0.0.0.0 | :: | "[::]")
-          host=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
-          [[ "$host" != *:* ]] || host="[$host]"
-          ;;
-      esac
+      if wildcard_host "$host"; then
+        host=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+        [[ "$host" != *:* ]] || host="[$host]"
+      fi
       log "finish setup in the browser: http://${host:-<this host>}:${web##*:}/setup"
+      warn_web_exposed "$web"
     elif [ "$configured" != yes ]; then
       log "finish setup with: ghr setup github --owner <owner>"
     else
@@ -413,6 +439,15 @@ gc_dist() {
       rm -rf "${DIST_DIR:?}/$old"
     fi
   done
+}
+
+check_web_listen() {
+  local listen="${GHR_WEB_LISTEN:-}" shape='^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]*):([0-9]{1,5})$'
+  [ -n "$listen" ] || return 0
+  if [[ "$listen" =~ $shape ]] && [ "$((10#${BASH_REMATCH[2]}))" -ge 1 ] && [ "$((10#${BASH_REMATCH[2]}))" -le 65535 ]; then
+    return 0
+  fi
+  die "GHR_WEB_LISTEN must be host:port with a port from 1 to 65535, such as 127.0.0.1:8080"
 }
 
 check_toolchains() {
@@ -453,6 +488,7 @@ preinstall_toolchains() {
 main() {
   check_host
   check_toolchains
+  check_web_listen
   install_docker
   create_user_and_dirs
   stop_ghr

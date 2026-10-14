@@ -1,6 +1,6 @@
 # Web UI
 
-ghr serves a browser UI with every page and action the `ghr` command offers. The example config turns it on at `0.0.0.0:8080`.
+ghr serves a browser UI with every page and action the `ghr` command offers. The example config turns it on at `0.0.0.0:8080`; `GHR_WEB_LISTEN=host:port` makes `setup.sh` write another address on a first install.
 
 | Page | What it shows |
 |---|---|
