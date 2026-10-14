@@ -11,6 +11,7 @@ import { useChangeStream } from "@/api/use-change-stream"
 import type { Config, Status } from "@/api/types"
 import { Brand } from "@/components/brand"
 import { CapacitySegments } from "@/components/capacity-bar"
+import { GhrUpdateCard } from "@/components/ghr-update-card"
 import { ModeControl } from "@/components/mode-control"
 import { QuotaBanner } from "@/components/quota-banner"
 import { ListenErrorBanner, RestartBanner } from "@/components/restart-banner"
@@ -162,6 +163,7 @@ export function Shell() {
             {st.web_listen_error ? <ListenErrorBanner error={st.web_listen_error} /> : <RestartBanner status={st} offline={offline} />}
             {st.github_storage && <QuotaBanner alert={st.github_storage} />}
             <UpdateCard update={st.runner_update} offline={offline} />
+            <GhrUpdateCard update={st.ghr_update} />
           </div>
         )}
         <Outlet />
