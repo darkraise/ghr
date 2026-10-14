@@ -1759,7 +1759,7 @@ func TestUpdateWritesOnlyNewConfigWarnings(t *testing.T) {
 		t.Fatalf("an unchanged warning was written again: %q", got)
 	}
 	var p model.ConfigPatch
-	if err := json.Unmarshal([]byte(`{"repos":{"darkcloud":{"max":4,"cleanup_name_prefixes":["proj-"]}}}`), &p); err != nil {
+	if err := json.Unmarshal([]byte(`{"repos":{"darkcloud":{"max":4,"cleanup_name_prefixes":["svc-"]}}}`), &p); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.PatchConfig(context.Background(), p); err != nil {
