@@ -78,7 +78,7 @@ func (p python) Install(ctx context.Context, rel Release, progress func(string))
 	defer op.Close()
 	progress("downloading")
 	archive := filepath.Join(op.path, "python.tar.gz")
-	if err := e.fetch(ctx, Origin{Dir: pythonReleases}, rel.URL, archive); err != nil {
+	if err := e.fetch(ctx, Origin{Dir: pythonReleases}, rel.URL, op, "python.tar.gz"); err != nil {
 		return err
 	}
 	progress("extracting")

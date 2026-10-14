@@ -3,6 +3,7 @@ package system
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -222,7 +223,7 @@ func TestDownloadForTimesOutAtItsOwnLimit(t *testing.T) {
 	DownloadTimeout = time.Hour
 	defer func() { DownloadTimeout = old }()
 	start := time.Now()
-	if err := DownloadFor(100*time.Millisecond)(context.Background(), srv.URL, filepath.Join(t.TempDir(), "f")); err == nil {
+	if err := DownloadFor(100*time.Millisecond)(context.Background(), srv.URL, io.Discard); err == nil {
 		t.Fatal("expected a timeout error")
 	}
 	if time.Since(start) > 5*time.Second {
@@ -235,11 +236,11 @@ func TestDownloadForSavesTheBody(t *testing.T) {
 		w.Write([]byte("archive"))
 	}))
 	t.Cleanup(srv.Close)
-	dst := filepath.Join(t.TempDir(), "a.tar.gz")
-	if err := DownloadFor(time.Minute)(context.Background(), srv.URL, dst); err != nil {
+	var got bytes.Buffer
+	if err := DownloadFor(time.Minute)(context.Background(), srv.URL, &got); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(dst); string(b) != "archive" {
-		t.Fatalf("saved %q", b)
+	if got.String() != "archive" {
+		t.Fatalf("wrote %q", got.String())
 	}
 }

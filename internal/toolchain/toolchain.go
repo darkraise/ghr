@@ -6,6 +6,7 @@ package toolchain
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"sort"
 	"strconv"
@@ -50,7 +51,7 @@ type Env struct {
 	User    string // the runner user, owner of everything installed
 	Sources Sources
 	Get     func(ctx context.Context, url string) ([]byte, error)
-	Fetch   func(ctx context.Context, url, dst string) error
+	Fetch   func(ctx context.Context, url string, w io.Writer) error
 	// Allow returns an error unless url may be downloaded for an installer
 	// whose files come from from. A version list names the URL, and what it
 	// downloads is unpacked or run on this machine.

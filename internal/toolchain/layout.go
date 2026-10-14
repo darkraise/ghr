@@ -280,11 +280,20 @@ func dropFailed(r *os.Root, dir string) {
 
 // fetch is the one way an installer downloads: Allow judges rawURL against
 // the installer's own origin, and Fetch then gets that same string.
-func (e *Env) fetch(ctx context.Context, from Origin, rawURL, dst string) error {
+// It writes to name in op, a file it creates there.
+func (e *Env) fetch(ctx context.Context, from Origin, rawURL string, op *operation, name string) error {
 	if err := e.Allow(rawURL, from); err != nil {
 		return err
 	}
-	if err := e.Fetch(ctx, rawURL, dst); err != nil {
+	f, err := op.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+	err = e.Fetch(ctx, rawURL, f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
 		return fmt.Errorf("download: %w", err)
 	}
 	return nil
@@ -306,7 +315,7 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, from Origin, r
 	}
 	defer op.Close()
 	progress("downloading")
-	if err := e.fetch(ctx, from, rel.URL, filepath.Join(op.path, "archive.tar.gz")); err != nil {
+	if err := e.fetch(ctx, from, rel.URL, op, "archive.tar.gz"); err != nil {
 		return err
 	}
 	if err := verify(op.Root, "archive.tar.gz", rel.SHA256); err != nil {

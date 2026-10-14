@@ -2,6 +2,7 @@ package toolchain
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/ghr/internal/system"
 )
@@ -86,8 +88,8 @@ func TestNewEnvWiresTheRunnerAndFetch(t *testing.T) {
 		calls = append(calls, name+" "+strings.Join(args, " "))
 		return nil, nil
 	}
-	fetch := func(_ context.Context, url, dst string) error {
-		calls = append(calls, "fetch "+url+" "+dst)
+	fetch := func(_ context.Context, url string, _ io.Writer) error {
+		calls = append(calls, "fetch "+url)
 		return nil
 	}
 	e := NewEnv("/var/lib/ghr/toolcache", "/home/ghrunner", "ghrunner", run, fetch)
@@ -100,10 +102,10 @@ func TestNewEnvWiresTheRunnerAndFetch(t *testing.T) {
 	if _, err := e.Run(context.Background(), "chown", "x"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Fetch(context.Background(), "https://example.test/a.tar.gz", "dst"); err != nil {
+	if err := e.Fetch(context.Background(), "https://example.test/a.tar.gz", io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"tar --no-same-owner -xzf a.tar.gz -C dir", "chown x", "fetch https://example.test/a.tar.gz dst"}; !slices.Equal(calls, want) {
+	if want := []string{"tar --no-same-owner -xzf a.tar.gz -C dir", "chown x", "fetch https://example.test/a.tar.gz"}; !slices.Equal(calls, want) {
 		t.Fatalf("calls %q", calls)
 	}
 	if a, b := e.OpID(), e.OpID(); a == b || a == "" {
@@ -127,7 +129,7 @@ func TestNewEnvExtractsWithRealTar(t *testing.T) {
 	if err := os.Mkdir(out, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := NewEnv(dir, "", "", system.Exec, system.Download).Extract(context.Background(), archive, out); err != nil {
+	if err := NewEnv(dir, "", "", system.Exec, system.DownloadFor(time.Minute)).Extract(context.Background(), archive, out); err != nil {
 		t.Fatal(err)
 	}
 	if !exists(filepath.Join(out, "node-22", "bin", "node")) {

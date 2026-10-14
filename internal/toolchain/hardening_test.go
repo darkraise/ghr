@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -125,8 +126,8 @@ func TestInstallArchiveKeepsAVersionACompletedMeanwhile(t *testing.T) {
 	f := newFixture(t)
 	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
 	fetch := f.Fetch
-	f.Fetch = func(ctx context.Context, url, dst string) error {
-		if err := fetch(ctx, url, dst); err != nil {
+	f.Fetch = func(ctx context.Context, url string, w io.Writer) error {
+		if err := fetch(ctx, url, w); err != nil {
 			return err
 		}
 		mkInstall(t, f.Root, "demo", "1.2.3", true)
@@ -148,8 +149,8 @@ func TestPythonInstallKeepsAVersionACompletedMeanwhile(t *testing.T) {
 	p := newPython(f.Env)
 	rel, _ := p.Resolve(context.Background(), "3.13")
 	fetch := f.Fetch
-	f.Fetch = func(ctx context.Context, url, dst string) error {
-		if err := fetch(ctx, url, dst); err != nil {
+	f.Fetch = func(ctx context.Context, url string, w io.Writer) error {
+		if err := fetch(ctx, url, w); err != nil {
 			return err
 		}
 		mkInstall(t, f.Root, "Python", "3.13.7", true)
@@ -278,8 +279,8 @@ func TestInstallsDoNotChownThroughATmpSwappedForALink(t *testing.T) {
 		"dotnet": func(t *testing.T, swap func(string)) *fixture {
 			f := dotnetFixture(t)
 			fetch := f.Fetch
-			f.Fetch = func(ctx context.Context, url, dst string) error {
-				err := fetch(ctx, url, dst)
+			f.Fetch = func(ctx context.Context, url string, w io.Writer) error {
+				err := fetch(ctx, url, w)
 				swap(f.Root)
 				return err
 			}
@@ -327,6 +328,113 @@ func TestInstallsDoNotChownThroughATmpSwappedForALink(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The runner user owns .tmp's parent and can list .tmp's names, so a job can
+// swap .tmp for a link to its own copy of an operation directory before ghr,
+// as root, downloads into it or extracts from it.
+func TestInstallsDoNotWriteThroughATmpSwappedForALink(t *testing.T) {
+	installs := map[string]func(f *fixture){
+		"archive": func(f *fixture) {
+			rel := demoRelease(f, tarGz(map[string]string{"demo-1.2.3/bin/demo": "bin"}))
+			f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {})
+		},
+		"python": func(f *fixture) {
+			var env map[string]string
+			f.host.scripts["setup.sh"] = fakeSetup("3.13.7", &env, false)
+			p := newPython(f.Env)
+			rel, _ := p.Resolve(context.Background(), "3.13")
+			p.Install(context.Background(), rel, func(string) {})
+		},
+		"dotnet": func(f *fixture) {
+			f.host.scripts["dotnet-install.sh"] = func(string, map[string]string, []string) error { return nil }
+			d := newDotnet(f.Env)
+			rel, _ := d.Resolve(context.Background(), "8.0")
+			d.Install(context.Background(), rel, func(string) {})
+		},
+	}
+	fixtures := map[string]func(*testing.T) *fixture{"archive": newFixture, "python": pythonFixture, "dotnet": dotnetFixture}
+	steps := map[string]func(f *fixture, then func()){"download": onFetch, "tar": onExtract}
+	for _, tc := range []struct{ install, step string }{
+		{"dotnet", "download"},
+	} {
+		t.Run(tc.install+" "+tc.step, func(t *testing.T) {
+			outside := t.TempDir()
+			planted := string(tarGz(map[string]string{"evil/file": "x"}))
+			for name, body := range map[string]string{"op1/archive.tar.gz": planted, "op1/python.tar.gz": planted, "op1/dotnet-install.sh": "planted", "op1/x/keep": ""} {
+				p := filepath.Join(outside, filepath.FromSlash(name))
+				touch(t, p)
+				if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			symlinkOrSkip(t, outside, filepath.Join(t.TempDir(), "probe"))
+			before := snapshot(t, outside)
+			f := fixtures[tc.install](t)
+			steps[tc.step](f, func() {
+				tmp := filepath.Join(f.Root, ".tmp")
+				if err := os.Rename(tmp, filepath.Join(f.Root, ".moved")); err != nil {
+					t.Error(err)
+				}
+				if err := os.Symlink(outside, tmp); err != nil {
+					t.Error(err)
+				}
+			})
+			installs[tc.install](f)
+			after := snapshot(t, outside)
+			for name := range after {
+				if before[name] != after[name] {
+					t.Errorf("the %s wrote %s outside the tool cache", tc.step, name)
+				}
+			}
+			for name := range before {
+				if _, ok := after[name]; !ok {
+					t.Errorf("the install removed %s outside the tool cache", name)
+				}
+			}
+		})
+	}
+}
+
+// snapshot is every entry below dir, with each file's content.
+func snapshot(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, p)
+		if fi.IsDir() {
+			out[rel] = "<dir>"
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		out[rel] = string(b)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// onFetch runs then as each download starts.
+func onFetch(f *fixture, then func()) {
+	fetch := f.Fetch
+	f.Fetch = func(ctx context.Context, url string, w io.Writer) error {
+		then()
+		return fetch(ctx, url, w)
+	}
+}
+
+// onExtract runs then as each extraction starts.
+func onExtract(f *fixture, then func()) {
+	extract := f.Extract
+	f.Extract = func(ctx context.Context, archive, dir string) error {
+		then()
+		return extract(ctx, archive, dir)
 	}
 }
 

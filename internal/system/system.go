@@ -435,14 +435,32 @@ func Download(ctx context.Context, url, dst string) error {
 	return download(ctx, DownloadTimeout, url, dst)
 }
 
-// DownloadFor is Download with its own timeout d in place of DownloadTimeout.
-func DownloadFor(d time.Duration) func(ctx context.Context, url, dst string) error {
-	return func(ctx context.Context, url, dst string) error {
-		return download(ctx, d, url, dst)
+// DownloadFor is Download with its own timeout d in place of
+// DownloadTimeout, writing to w, which the caller has opened.
+func DownloadFor(d time.Duration) func(ctx context.Context, url string, w io.Writer) error {
+	return func(ctx context.Context, url string, w io.Writer) error {
+		return fetchTo(ctx, d, url, func() (io.Writer, error) { return w, nil })
 	}
 }
 
 func download(ctx context.Context, timeout time.Duration, url, dst string) error {
+	var f *os.File
+	err := fetchTo(ctx, timeout, url, func() (io.Writer, error) {
+		var err error
+		f, err = os.Create(dst)
+		return f, err
+	})
+	if f != nil {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}
+	return err
+}
+
+// fetchTo copies url's body to what open returns, calling open only once
+// the response is known to be one to keep.
+func fetchTo(ctx context.Context, timeout time.Duration, url string, open func() (io.Writer, error)) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -460,17 +478,13 @@ func download(ctx context.Context, timeout time.Duration, url, dst string) error
 	if resp.ContentLength > maxDownload {
 		return fmt.Errorf("GET %s: download is larger than %d bytes", url, maxDownload)
 	}
-	f, err := os.Create(dst)
+	w, err := open()
 	if err != nil {
 		return err
 	}
-	n, err := io.Copy(f, io.LimitReader(resp.Body, maxDownload+1))
+	n, err := io.Copy(w, io.LimitReader(resp.Body, maxDownload+1))
 	if err == nil && n > maxDownload {
 		err = fmt.Errorf("GET %s: download is larger than %d bytes", url, maxDownload)
 	}
-	if err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
+	return err
 }

@@ -3,6 +3,7 @@ package toolchain
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -163,8 +164,8 @@ func TestInstallArchiveTmpModes(t *testing.T) {
 	f := newFixture(t)
 	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
 	fetch := f.Fetch
-	f.Fetch = func(ctx context.Context, url, dst string) error {
-		for path, want := range map[string]os.FileMode{filepath.Join(f.Root, ".tmp"): 0o711, filepath.Dir(dst): 0o700} {
+	f.Fetch = func(ctx context.Context, url string, w io.Writer) error {
+		for path, want := range map[string]os.FileMode{filepath.Join(f.Root, ".tmp"): 0o711, filepath.Join(f.Root, ".tmp", "op1"): 0o700} {
 			st, err := os.Stat(path)
 			if err != nil {
 				t.Errorf("%s: %v", path, err)
@@ -174,7 +175,7 @@ func TestInstallArchiveTmpModes(t *testing.T) {
 				t.Errorf("%s: mode %v, want %v", path, st.Mode().Perm(), want)
 			}
 		}
-		return fetch(ctx, url, dst)
+		return fetch(ctx, url, w)
 	}
 	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); err != nil {
 		t.Fatal(err)

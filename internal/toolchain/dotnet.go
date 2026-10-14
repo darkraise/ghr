@@ -125,7 +125,7 @@ func (d dotnet) Install(ctx context.Context, rel Release, progress func(string))
 		return err
 	}
 	progress("downloading")
-	if err := e.fetch(ctx, Origin{File: e.Sources.DotnetScript}, rel.URL, filepath.Join(op.path, "dotnet-install.sh")); err != nil {
+	if err := e.fetch(ctx, Origin{File: e.Sources.DotnetScript}, rel.URL, op, "dotnet-install.sh"); err != nil {
 		return err
 	}
 	if err := e.chownTree(op.Root, "."); err != nil {

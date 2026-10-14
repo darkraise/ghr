@@ -310,7 +310,7 @@ func newFixture(t *testing.T) *fixture {
 			DotnetScript:   srv.URL + "/dotnet-install.sh",
 		},
 		Get:   testGet,
-		Fetch: system.Download,
+		Fetch: system.DownloadFor(time.Minute),
 		Allow: func(string, Origin) error { return nil },
 		Run:   f.host.run,
 		Chown: f.host.lchown,

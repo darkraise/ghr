@@ -33,7 +33,7 @@ func DefaultSources() Sources {
 // command's whole process group on cancel (system.ExecGroupFor), because the
 // install scripts start children of their own; run and fetch carry the
 // install-length timeouts.
-func NewEnv(root, home, user string, run system.Runner, fetch func(ctx context.Context, url, dst string) error) *Env {
+func NewEnv(root, home, user string, run system.Runner, fetch func(ctx context.Context, url string, w io.Writer) error) *Env {
 	return &Env{
 		Root:    root,
 		Home:    home,
