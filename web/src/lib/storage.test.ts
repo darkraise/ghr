@@ -38,7 +38,7 @@ describe("pruneActions", () => {
       ["Trim the build cache to 20GB?", "Build cache beyond that size is removed."],
       ["Remove all build cache?", "Frees up to 380.0 MB. The next builds start cold."],
       ["Remove dangling images?", "Images that are untagged and used by no container are removed."],
-      ["Remove unused volumes?", "Frees up to 1.2 GB. Every volume no container uses is removed. It is refused while jobs run."],
+      ["Remove unused volumes?", "Frees up to 1.2 GB. Every volume no container uses is removed. It is refused while a job runs or a runner starts, and idle runners stop while it runs."],
     ])
   })
 

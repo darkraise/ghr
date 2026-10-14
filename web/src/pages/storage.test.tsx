@@ -132,7 +132,7 @@ describe("Storage page", () => {
     ["Trim to 20GB", "Trim the build cache to 20GB?", "Build cache beyond that size is removed."],
     ["Remove all build cache", "Remove all build cache?", "Frees up to 380.0 MB. The next builds start cold."],
     ["Remove dangling images", "Remove dangling images?", "Images that are untagged and used by no container are removed."],
-    ["Remove unused volumes", "Remove unused volumes?", "Every volume no container uses is removed. It is refused while jobs run."],
+    ["Remove unused volumes", "Remove unused volumes?", "Every volume no container uses is removed. It is refused while a job runs or a runner starts, and idle runners stop while it runs."],
   ])("asks before %s and sends nothing on Cancel", async (label, title, body) => {
     const { calls } = mockApi(routes())
     const { user } = renderApp("/storage")
