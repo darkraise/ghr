@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/sched"
 	"github.com/darkraise/ghr/internal/system"
@@ -250,6 +251,31 @@ func TestPruneHistoryAndLogs(t *testing.T) {
 	}
 	if _, err := os.Stat(newLog); err != nil {
 		t.Fatal("new log dir removed")
+	}
+}
+
+// The runner creates _diag when it starts, and a long job can outlast the
+// retention; its archive ages from the job's end, as its history entry does.
+func TestArchivedLogsAgeFromTheJobsEnd(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.HistoryRetention = config.Duration(24 * time.Hour)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	diag := filepath.Join(h.m.instanceDir("aaaaaa"), "_diag")
+	os.WriteFile(filepath.Join(diag, "Worker_1.log"), []byte("log"), 0o644)
+	started := h.now.Add(-72 * time.Hour)
+	os.Chtimes(diag, started, started)
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	archive := filepath.Join(h.m.Paths.Logs, "aaaaaa")
+	h.m.prune(h.cfg, h.now)
+	if _, err := os.Stat(archive); err != nil {
+		t.Fatalf("archive of a job that just ended was pruned: %v", err)
+	}
+	h.now = h.now.Add(25 * time.Hour)
+	h.m.prune(h.cfg, h.now)
+	if _, err := os.Stat(archive); !os.IsNotExist(err) {
+		t.Fatalf("archive kept past the retention: %v", err)
 	}
 }
 

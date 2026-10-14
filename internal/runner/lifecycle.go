@@ -491,6 +491,13 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 		if err := m.Host.ChownR(ctx, archive, "root"); err != nil {
 			return fmt.Errorf("chown archived logs: %w", err)
 		}
+		// The rename keeps _diag's mtime, the time its last log file was
+		// created, often the job's start. prune ages archives as it ages
+		// history: from the job's end.
+		now := m.Now()
+		if err := os.Chtimes(archive, now, now); err != nil {
+			return fmt.Errorf("archive logs: %w", err)
+		}
 	}
 
 	removed, err := m.cleanupDocker(ctx, cfg, id, i.Repo)
