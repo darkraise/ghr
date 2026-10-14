@@ -4,10 +4,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/events"
+	"github.com/darkraise/ghr/internal/jobs"
+	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/system"
 )
 
@@ -180,5 +184,87 @@ func TestCloseStopsTheService(t *testing.T) {
 	recvOrFail(t, waited, "Wait after Close")
 	if err := s.Refresh(); !errors.Is(err, ErrClosed) {
 		t.Fatalf("refresh after Close: %v", err)
+	}
+}
+
+// jobsRig is a registry whose config the test changes under a lock, since
+// the measure loop reads it from its own goroutine.
+func jobsRig() (*jobs.Registry, func(fn func(c *config.Jobs))) {
+	var mu sync.Mutex
+	cfg := config.DefaultJobs()
+	r := jobs.New(func() config.Jobs {
+		mu.Lock()
+		defer mu.Unlock()
+		return cfg
+	}, time.Now, nil)
+	return r, func(fn func(c *config.Jobs)) {
+		mu.Lock()
+		fn(&cfg)
+		mu.Unlock()
+	}
+}
+
+func storageJob(t *testing.T, r *jobs.Registry) model.JobStatus {
+	t.Helper()
+	for _, j := range r.Snapshot() {
+		if j.Name == config.JobStorageMeasure {
+			return j
+		}
+	}
+	t.Fatal("no storage_measure task")
+	return model.JobStatus{}
+}
+
+func TestRunNowMeasuresAndAConfigChangeOnlyRearms(t *testing.T) {
+	disk := &fakeDisk{}
+	s := newService(t, &fakeTools{}, disk)
+	reg, set := jobsRig()
+	s.Jobs = reg
+	startService(t, s)
+	waitFor(t, "the first measurement", func() bool {
+		j := storageJob(t, reg)
+		return j.LastFinish != nil && !j.Running
+	})
+	first := *storageJob(t, reg).LastFinish
+	if err := reg.RunNow(config.JobStorageMeasure); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the Run now measurement", func() bool {
+		j := storageJob(t, reg)
+		return j.LastFinish != nil && j.LastFinish.After(first) && !j.Running && !j.Pending
+	})
+	calls := disk.callCount()
+	set(func(c *config.Jobs) { c.StorageMeasure.Every = config.Duration(time.Hour) })
+	reg.Changed()
+	time.Sleep(50 * time.Millisecond)
+	if n := disk.callCount(); n != calls {
+		t.Fatalf("a config change measured: %d calls, want %d", n, calls)
+	}
+	if j := storageJob(t, reg); j.Every != "1h0m0s" {
+		t.Fatalf("task %+v", j)
+	}
+}
+
+func TestATriggerMeasuresWhileTheTaskIsOff(t *testing.T) {
+	disk := &fakeDisk{}
+	s := newService(t, &fakeTools{}, disk)
+	reg, set := jobsRig()
+	set(func(c *config.Jobs) { c.StorageMeasure.Enabled = false })
+	s.Jobs = reg
+	startService(t, s)
+	waitFor(t, "the measurement at start", func() bool { return s.Snapshot().MeasuredAt != nil && !s.Snapshot().Measuring })
+	if err := reg.RunNow(config.JobStorageMeasure); !errors.Is(err, jobs.ErrOff) {
+		t.Fatalf("Run now while off: %v", err)
+	}
+	calls := disk.callCount()
+	if err := s.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the refresh", func() bool { return disk.callCount() > calls })
+}
+
+func TestMeasureIntervalIsTheJobsDefault(t *testing.T) {
+	if got := config.DefaultJobs().StorageMeasure.Every.D(); got != MeasureInterval {
+		t.Fatalf("storage_measure defaults to %s, MeasureInterval is %s", got, MeasureInterval)
 	}
 }

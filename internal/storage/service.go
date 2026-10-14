@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/events"
+	"github.com/darkraise/ghr/internal/jobs"
 	"github.com/darkraise/ghr/internal/model"
 )
 
@@ -16,7 +18,7 @@ var (
 	ErrClosed    = errors.New("ghr is shutting down")
 )
 
-// MeasureInterval is how often the measurer runs without being asked.
+// MeasureInterval is the storage_measure task's default; config.DefaultJobs repeats it.
 const MeasureInterval = 30 * time.Minute
 
 // Service holds the snapshot GET /storage serves, runs the measurer, and
@@ -32,6 +34,9 @@ type Service struct {
 	Events *events.Ring
 	Now    func() time.Time // nil means time.Now
 	NewID  func() string    // operation ids; nil makes random ones
+	// Jobs schedules the periodic measurement; Start makes one with the
+	// default schedule when the daemon sets none.
+	Jobs *jobs.Registry
 
 	mu        sync.Mutex
 	snap      measured
@@ -45,6 +50,7 @@ type Service struct {
 	cancel  context.CancelFunc
 	trigger chan struct{}
 	wake    chan struct{}
+	jobWake chan struct{}
 	wg      sync.WaitGroup
 }
 
@@ -70,6 +76,16 @@ func (s *Service) Start() {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.trigger = make(chan struct{}, 1)
 	s.wake = make(chan struct{}, 1)
+	if s.Jobs == nil {
+		s.Jobs = jobs.New(config.DefaultJobs, s.now, nil)
+	}
+	s.jobWake = make(chan struct{}, 1)
+	s.Jobs.Register(config.JobStorageMeasure, func() {
+		select {
+		case s.jobWake <- struct{}{}:
+		default:
+		}
+	})
 	s.trigger <- struct{}{}
 	s.wg.Add(2)
 	go func() {
@@ -93,16 +109,30 @@ func (s *Service) cleanUp() {
 	}
 }
 
+// measureLoop measures on a trigger, which always measures, and when the
+// storage_measure task is due: its timer fired, or Run now woke it. A wake
+// from a config change finds the task not due and only resets the timer.
 func (s *Service) measureLoop() {
-	tick := time.NewTicker(MeasureInterval)
-	defer tick.Stop()
+	until := func() time.Duration { return s.Jobs.Until(config.JobStorageMeasure, s.now()) }
+	timer := time.NewTimer(until())
+	defer timer.Stop()
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-tick.C:
 		case <-s.trigger:
+		case <-s.jobWake:
+			if !s.Jobs.Due(config.JobStorageMeasure, s.now()) {
+				timer.Reset(until())
+				continue
+			}
+		case <-timer.C:
+			if !s.Jobs.Due(config.JobStorageMeasure, s.now()) {
+				timer.Reset(until())
+				continue
+			}
 		}
+		s.Jobs.Started(config.JobStorageMeasure, s.now())
 		s.mu.Lock()
 		s.measuring = true
 		s.mu.Unlock()
@@ -113,6 +143,8 @@ func (s *Service) measureLoop() {
 		}
 		s.measuring = false
 		s.mu.Unlock()
+		s.Jobs.Finished(config.JobStorageMeasure, s.now(), nil, nil)
+		timer.Reset(until())
 	}
 }
 
