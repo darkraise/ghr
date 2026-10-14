@@ -40,7 +40,7 @@ describe("repository page", () => {
       "homelabglobal",
       "gpu",
     ])
-    expect(screen.getByText("Leave empty for the default: 1 in queue mode, no limit in all mode.")).toBeInTheDocument()
+    expect(screen.getByText("Leave empty for the default: 1 in queue mode, no limit in all mode. 0 means no limit.")).toBeInTheDocument()
     expect(screen.getByRole("region", { name: "Capacity" })).toBeInTheDocument()
   })
 

@@ -313,7 +313,7 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
               <Field
                 label="Max"
                 htmlFor="repo-max"
-                help="Leave empty for the default: 1 in queue mode, no limit in all mode."
+                help="Leave empty for the default: 1 in queue mode, no limit in all mode. 0 means no limit."
                 changed={is("max")}
               >
                 <NumberField
