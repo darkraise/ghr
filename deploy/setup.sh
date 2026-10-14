@@ -357,7 +357,9 @@ wildcard_host() {
 # sends it.
 warn_web_exposed() {
   [ -n "$1" ] && [ "$1" != - ] || return 0
+  [ -z "${WEB_EXPOSED_WARNED:-}" ] || return 0
   if wildcard_host "${1%:*}"; then
+    WEB_EXPOSED_WARNED=1
     warn "the web UI is plain HTTP on every interface; put a TLS proxy in front (https://github.com/$GHR_REPO/blob/master/docs/web-ui.md#behind-a-reverse-proxy)"
   fi
 }

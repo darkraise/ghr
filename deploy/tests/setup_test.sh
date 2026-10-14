@@ -917,6 +917,8 @@ for web in 127.0.0.1:9090 192.168.0.5:8080 localhost:8080 '[::1]:8080' '[fd00::5
   out=$( (setup_ghr; run print_next) 2>&1)
   check "k: web $web does not warn" lacks "$out" "plain HTTP"
 done
+out=$( (setup_ghr; warn_web_exposed 0.0.0.0:8080; warn_web_exposed 0.0.0.0:8080) 2>&1)
+check "k: the plain HTTP warning prints once per run" [ "$(grep -c 'plain HTTP' <<<"$out")" -eq 1 ]
 hostname() { echo "fd00::99 192.168.0.99"; }
 setup_marks no pending - 0.0.0.0:8080
 out=$( (setup_ghr; run print_next) 2>&1)
