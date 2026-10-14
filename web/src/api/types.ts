@@ -5,6 +5,7 @@ export interface AuthState {
 
 export interface JobInfo {
   run_id: number
+  run_attempt?: number
   run_number: string
   workflow: string
   name: string
@@ -26,6 +27,7 @@ export interface HistoryEntry {
   id: string
   repo: string
   run_id: number
+  run_attempt?: number
   run_number: string
   workflow: string
   job_name: string

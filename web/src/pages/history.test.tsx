@@ -53,6 +53,19 @@ describe("History page", () => {
     expect(within(row).getByRole("img", { name: resultWord(entry.conclusion) })).toBeInTheDocument()
   })
 
+  it("links a job to the run attempt it ran in", async () => {
+    setViewport(1024)
+    const [first, second] = fixtures.history
+    if (!first || !second) throw new Error("fixture has fewer than two entries")
+    const entries: HistoryEntry[] = [{ ...first, run_attempt: 1 }, second]
+    mockApi(authedRoutes({ "GET /api/history": entries }))
+    renderApp("/history")
+    const earlier = (await screen.findAllByRole("link", { name: first.job_name }))[0]
+    expect(earlier).toHaveAttribute("href", `/actions/${first.repo}/runs/${first.run_id}?attempt=1`)
+    const latest = screen.getAllByRole("link", { name: second.job_name })[0]
+    expect(latest).toHaveAttribute("href", `/actions/${second.repo}/runs/${second.run_id}`)
+  })
+
   it("puts the summary in the list's header band and the duration bar under the duration", async () => {
     setViewport(1024)
     mockApi(authedRoutes({ "GET /api/history": fixtures.history }))

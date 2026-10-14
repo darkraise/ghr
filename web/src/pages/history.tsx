@@ -68,7 +68,12 @@ function HistoryRow({ entry, longest, wide }: { entry: HistoryEntry; longest: nu
       icon={<ResultIcon conclusion={entry.conclusion} />}
       title={
         entry.run_id > 0 ? (
-          <Link to="/actions/$repo/runs/$id" params={{ repo: entry.repo, id: String(entry.run_id) }} className="hover:text-primary hover:underline">
+          <Link
+            to="/actions/$repo/runs/$id"
+            params={{ repo: entry.repo, id: String(entry.run_id) }}
+            search={{ attempt: entry.run_attempt !== undefined && entry.run_attempt > 0 ? entry.run_attempt : undefined }}
+            className="hover:text-primary hover:underline"
+          >
             {entry.job_name}
           </Link>
         ) : (
