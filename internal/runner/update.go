@@ -159,6 +159,14 @@ func sameTime(a, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
+// releaseChecked reports whether a release check has succeeded since the
+// start, or since dist/current changed.
+func (m *Manager) releaseChecked() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return !m.upd.checkedAt.IsZero()
+}
+
 func (m *Manager) releaseCheckDue(now time.Time) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -358,6 +366,8 @@ func (m *Manager) startUpdateIfFree(tickCtx context.Context, cfg *config.Config,
 		reason = "GitHub API calls are paused"
 	case !demandOK:
 		reason = unanswered + " did not answer its poll"
+	case !m.releaseChecked():
+		reason = "no runner release check has succeeded"
 	}
 	m.noteUpdateWait(reason)
 	if reason != "" || m.Config() != cfg {
@@ -428,10 +438,14 @@ func (m *Manager) startUpdateIfFree(tickCtx context.Context, cfg *config.Config,
 
 // preparedLocked reports whether a queued update has nothing left to
 // download: its version is complete in dist, or the update would not stage
-// one, because no newer release is known or no checksum can verify it.
-// m.mu must be held.
+// one, because the last good check found no newer release or no checksum to
+// verify it by. Before a check has succeeded nothing is known, and nothing
+// is prepared. m.mu must be held.
 func (m *Manager) preparedLocked() bool {
 	u := m.upd
+	if u.checkedAt.IsZero() {
+		return false
+	}
 	return u.deadline.IsZero() || u.latestSum == "" || complete(filepath.Join(filepath.Dir(m.Paths.Dist), u.latest))
 }
 
@@ -444,7 +458,8 @@ func (m *Manager) preparedLocked() bool {
 func (m *Manager) prepareUpdate(now time.Time) {
 	m.mu.Lock()
 	ver, sum := m.upd.latest, m.upd.latestSum
-	if m.upd.file.QueuedAt == nil || m.upd.running || m.upd.preparing || m.closed || now.Before(m.upd.prepareAt) || m.preparedLocked() {
+	if m.upd.file.QueuedAt == nil || m.upd.running || m.upd.preparing || m.closed || now.Before(m.upd.prepareAt) ||
+		m.upd.checkedAt.IsZero() || m.preparedLocked() {
 		m.mu.Unlock()
 		return
 	}

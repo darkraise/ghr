@@ -606,3 +606,43 @@ func TestCancelLetsTheDependencyScriptFinish(t *testing.T) {
 		t.Fatalf("dist holds %s\n%s", got, h.eventText())
 	}
 }
+
+// After a restart nothing is known about the releases until a check
+// succeeds. A failing first check keeps the update queued rather than
+// starting it with its version not prepared.
+func TestUpdateWaitsForAReleaseCheckAfterARestart(t *testing.T) {
+	h := newHarness(t)
+	_, fetched := queuedUpdate(t, h, tarballSum())
+	h.restart(t)
+	h.gh.setErr("ListRunnerReleases ", &github.APIError{Status: 502, Kind: github.ErrServer})
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if u := h.m.Status().RunnerUpdate; !u.Queued || u.LastOutcome != "" || len(*fetched) != 0 || strings.Contains(h.eventText(), "runner update started") {
+		t.Fatalf("status %+v fetched %v\n%s", u, *fetched, h.eventText())
+	}
+	if !strings.Contains(h.eventText(), "warn  runner update waiting: no runner release check has succeeded") {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+	h.gh.setErr("ListRunnerReleases ", nil)
+	h.now = h.now.Add(releaseCheckRetry)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if current(t, h) != "2.338.0" || len(*fetched) != 1 {
+		t.Fatalf("current %s fetched %v\n%s", current(t, h), *fetched, h.eventText())
+	}
+}
+
+// A release whose notes carry no checksum has nothing to prepare: the update
+// starts and fails at once, ending the queue, without downloading.
+func TestUpdateWithoutAChecksumFailsAtOnce(t *testing.T) {
+	h := newHarness(t)
+	_, fetched := queuedUpdate(t, h, "")
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	u := h.m.Status().RunnerUpdate
+	if u.Queued || u.LastOutcome != "failed" || !strings.HasPrefix(u.LastError, "checksum: no linux-x64 checksum") || len(*fetched) != 0 {
+		t.Fatalf("status %+v fetched %v\n%s", u, *fetched, h.eventText())
+	}
+}
