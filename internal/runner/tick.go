@@ -110,10 +110,11 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 		}
 	}
 	forget := func(name string) {
+		key := strings.ToLower(name)
 		m.mu.Lock()
-		delete(m.fails, name)
-		delete(m.retryAt, name)
-		delete(m.repoErr, name)
+		delete(m.fails, key)
+		delete(m.retryAt, key)
+		delete(m.repoErr, key)
 		m.mu.Unlock()
 	}
 	for _, r := range cfg.Repos {
@@ -121,7 +122,7 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 			continue // forgetPaused has dropped what its last polls left behind
 		}
 		m.mu.Lock()
-		wait := now.Before(m.retryAt[r.Name])
+		wait := now.Before(m.retryAt[strings.ToLower(r.Name)])
 		m.mu.Unlock()
 		if wait {
 			missed(r)
@@ -181,10 +182,11 @@ func (m *Manager) forgetPaused(cfg *config.Config) {
 		if !r.Paused || m.unconfirmedBusy(r.Name) {
 			continue
 		}
+		key := strings.ToLower(r.Name)
 		m.mu.Lock()
-		delete(m.fails, r.Name)
-		delete(m.retryAt, r.Name)
-		delete(m.repoErr, r.Name)
+		delete(m.fails, key)
+		delete(m.retryAt, key)
+		delete(m.repoErr, key)
 		delete(m.demand, r.Name)
 		m.mu.Unlock()
 	}
@@ -306,7 +308,8 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 	planCfg := *plan
 	planCfg.Repos = nil
 	for _, r := range read {
-		if m.repoErr[r.Name] == "" && !now.Before(m.retryAt[r.Name]) && !now.Before(m.spawnRetryAt[strings.ToLower(r.Name)]) {
+		key := strings.ToLower(r.Name)
+		if m.repoErr[key] == "" && !now.Before(m.retryAt[key]) && !now.Before(m.spawnRetryAt[key]) {
 			planCfg.Repos = append(planCfg.Repos, r)
 		}
 	}

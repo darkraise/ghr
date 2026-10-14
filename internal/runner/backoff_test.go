@@ -194,3 +194,19 @@ func TestRunnerThatRanAJobBetweenTicksClearsTheSpawnBackoff(t *testing.T) {
 		t.Fatalf("failures %d error %q", spawnFailures(h), h.m.Status().Repos[1].Error)
 	}
 }
+
+// An instance carries its repository in the spelling it was spawned under. A
+// refusal filed under that spelling holds back the config's repository all
+// the same, and its status shows it.
+func TestRepoBackoffIgnoresTheSpelling(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.Repos[1].Name = "myrepo"
+	h.m.apiErr("MyRepo", &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible by personal access token"}, h.now)
+	h.m.Tick(context.Background())
+	if strings.Contains(h.gh.callsText(), "ListRuns myrepo") {
+		t.Fatalf("polled during its backoff: %s", h.gh.callsText())
+	}
+	if got := h.m.Status().Repos[1].Error; !strings.Contains(got, "token lacks permission") {
+		t.Fatalf("status error %q", got)
+	}
+}

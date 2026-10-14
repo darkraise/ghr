@@ -194,7 +194,7 @@ type Manager struct {
 	mu             sync.Mutex
 	insts          map[string]*instance
 	demand         sched.Demand
-	repoErr        map[string]string
+	repoErr        map[string]string // by lower-cased repo, like fails and retryAt
 	fails          map[string]int
 	retryAt        map[string]time.Time
 	lists          map[string]runnerList // by lower-cased repo; reset every tick
@@ -793,7 +793,7 @@ func (m *Manager) Status() model.Status {
 	}
 	for _, r := range cfg.Repos {
 		rs := model.RepoStatus{Name: r.Name, Paused: r.Paused, Removing: r.Removing, Max: cfg.EffectiveMax(r),
-			Queued: len(m.demand[r.Name]), Error: m.repoErr[r.Name]}
+			Queued: len(m.demand[r.Name]), Error: m.repoErr[strings.ToLower(r.Name)]}
 		// A paused repo gets no spawns, so a failed start from before the
 		// pause is not its state any more.
 		if rs.Error == "" && !r.Paused {
@@ -993,18 +993,19 @@ func (m *Manager) apiErr(repo string, err error, now time.Time) {
 	case github.IsKind(err, github.ErrAuth):
 		msg = permissionText(ae)
 	}
+	key := strings.ToLower(repo)
 	m.mu.Lock()
 	// A 403 from a call that does not wait for the repo's backoff repeats on
 	// every tick; it is filed once per backoff window.
-	if github.IsKind(err, github.ErrAuth) && now.Before(m.retryAt[repo]) {
-		m.repoErr[repo] = msg
+	if github.IsKind(err, github.ErrAuth) && now.Before(m.retryAt[key]) {
+		m.repoErr[key] = msg
 		m.mu.Unlock()
 		return
 	}
-	m.fails[repo]++
-	d := backoff(m.fails[repo], maxBackoff)
-	m.retryAt[repo] = now.Add(d)
-	m.repoErr[repo] = msg
+	m.fails[key]++
+	d := backoff(m.fails[key], maxBackoff)
+	m.retryAt[key] = now.Add(d)
+	m.repoErr[key] = msg
 	m.mu.Unlock()
 	m.Events.Add("warn", repo, "%s; retrying in %s", msg, d)
 }
@@ -1014,7 +1015,7 @@ func (m *Manager) apiErr(repo string, err error, now time.Time) {
 // event list does not get a line per tick.
 func (m *Manager) repoRefused(repo string, err error, now time.Time) {
 	m.mu.Lock()
-	waiting := now.Before(m.retryAt[repo])
+	waiting := now.Before(m.retryAt[strings.ToLower(repo)])
 	m.mu.Unlock()
 	if !waiting {
 		m.apiErr(repo, err, now)
