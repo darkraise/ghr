@@ -339,7 +339,7 @@ func Run(ctx context.Context, o Options) error {
 		var tcp net.Listener
 		tcp, webCfg.Listen, webErr = listenWeb(webCfg.Listen, o.WebListenPath)
 		if tcp != nil {
-			webLn = limitConns(tcp, maxWebConns, maxWebConnsPerClient)
+			webLn = limitConns(tcp, maxWebConns, maxWebConnsPerClient, webCfg.TrustedProxyPrefixes())
 		}
 	}
 	auth := webui.NewAuth(o.WebPasswordPath, time.Now, rand.Reader)
@@ -396,7 +396,7 @@ func Run(ctx context.Context, o Options) error {
 		if err != nil {
 			return err
 		}
-		webSrv.Handler = webui.Handler(auth, handler, static, webCfg.Hosts, recordWebListen(o.WebListenPath, webCfg.Listen))
+		webSrv.Handler = webui.Handler(auth, handler, static, webCfg.Hosts, webCfg.TrustedProxyPrefixes(), recordWebListen(o.WebListenPath, webCfg.Listen))
 	}
 	serve := func() {
 		served = true

@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -73,9 +74,38 @@ type RunnerLimits struct {
 
 // Web is the browser UI's TCP listener. Hosts names the hostnames, besides IP
 // literals and localhost, that a request's Host header may carry.
+// TrustedProxies are the addresses and CIDR prefixes of reverse proxies whose
+// X-Forwarded-For names the client.
 type Web struct {
-	Listen string   `yaml:"listen,omitempty" json:"listen,omitempty"`
-	Hosts  []string `yaml:"hosts,omitempty" json:"hosts,omitempty"`
+	Listen         string   `yaml:"listen,omitempty" json:"listen,omitempty"`
+	Hosts          []string `yaml:"hosts,omitempty" json:"hosts,omitempty"`
+	TrustedProxies []string `yaml:"trusted_proxies,omitempty" json:"trusted_proxies,omitempty"`
+}
+
+// TrustedProxyPrefixes returns TrustedProxies as prefixes, an address as one
+// of its full length. Validate refuses an entry that is neither.
+func (w Web) TrustedProxyPrefixes() []netip.Prefix {
+	var out []netip.Prefix
+	for _, s := range w.TrustedProxies {
+		if p, ok := proxyPrefix(s); ok {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// proxyPrefix unmaps an IPv4-mapped address and drops its zone, as the web
+// listener does to the peer addresses it checks.
+func proxyPrefix(s string) (netip.Prefix, bool) {
+	if p, err := netip.ParsePrefix(s); err == nil {
+		return p.Masked(), true
+	}
+	ip, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Prefix{}, false
+	}
+	ip = ip.Unmap().WithZone("")
+	return netip.PrefixFrom(ip, ip.BitLen()), true
 }
 
 type Repo struct {
@@ -578,6 +608,11 @@ func (c *Config) Validate() ([]string, error) {
 	for _, h := range c.Web.Hosts {
 		if len(h) > 253 || !hostnameRe.MatchString(h) {
 			errs = append(errs, "web.hosts entries must be bare hostnames such as ghr.lan")
+		}
+	}
+	for _, p := range c.Web.TrustedProxies {
+		if _, ok := proxyPrefix(p); !ok {
+			errs = append(errs, "web.trusted_proxies entries must be IP addresses or CIDR prefixes such as 10.0.0.2 or 10.0.0.0/24")
 		}
 	}
 	errs = append(errs, c.GitHubStorage.validate()...)

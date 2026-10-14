@@ -23,6 +23,7 @@ runner_limits:              # per runner
 web:
   listen: 0.0.0.0:8080
   hosts: [ghr.lan]          # names a proxy serves the UI under; IPs and localhost always work
+  trusted_proxies: [10.0.0.2]   # reverse proxies, as IPs or CIDR prefixes, whose X-Forwarded-For names the browser; see web-ui.md
 github_storage:             # see artifact-storage.md
   included_mb: 500
 repos:
