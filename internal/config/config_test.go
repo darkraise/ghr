@@ -347,6 +347,7 @@ func TestValidRunnerLimits(t *testing.T) {
 		{MemoryMax: "16777216T", CPUQuota: "200%"},
 		{MemoryMax: "6G", CPUQuota: "99999999999%"},
 		{MemoryMax: "6G", CPUQuota: "1000001%"},
+		{MemoryMax: "6G", CPUQuota: "99999999999999999999999%"},
 	} {
 		c, _, _ := Parse([]byte(sample))
 		c.RunnerLimits = l
