@@ -163,6 +163,7 @@ var (
 	sizeRe     = regexp.MustCompile(`^[0-9]+(B|KB|MB|GB|TB)$`)
 	memoryRe   = regexp.MustCompile(`^([1-9][0-9]*[KMGT]?|[1-9][0-9]?%|100%|infinity)$`)
 	cpuQuotaRe = regexp.MustCompile(`^[1-9][0-9]*%$`)
+	repoNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 	// hostnameRe is RFC 1123: dot-separated labels of letters, digits and
 	// inner hyphens, each 1 to 63 characters.
 	hostnameRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
@@ -278,6 +279,10 @@ func labelFault(l string) string {
 		}
 	}
 	return ""
+}
+
+func validRepoName(name string) bool {
+	return repoNameRe.MatchString(name) && name != "." && name != ".."
 }
 
 // memoryFitsUint64 reports whether a memory_max that memoryRe accepted, bytes
@@ -543,6 +548,9 @@ func (c *Config) Validate() ([]string, error) {
 			errs = append(errs, "repo name is required")
 			continue
 		}
+		if !validRepoName(r.Name) {
+			errs = append(errs, "repos: "+r.Name+" must be a repository name under owner, 1 to 100 letters, digits, '.', '_' or '-', and not . or ..")
+		}
 		key := strings.ToLower(r.Name)
 		if seen[key] {
 			errs = append(errs, "duplicate repo "+r.Name+" (names are case-insensitive)")
@@ -596,8 +604,8 @@ func (c *Config) Validate() ([]string, error) {
 		if name != w {
 			errs = append(errs, "watch_repos: "+w+" must not have surrounding spaces")
 		}
-		if strings.Contains(name, "/") {
-			errs = append(errs, "watch_repos: "+w+" must be a repository name under owner, without a slash")
+		if !validRepoName(name) {
+			errs = append(errs, "watch_repos: "+w+" must be a repository name under owner, 1 to 100 letters, digits, '.', '_' or '-', and not . or ..")
 		}
 		key := strings.ToLower(name)
 		if watched[key] {

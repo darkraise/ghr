@@ -108,6 +108,11 @@ func TestValidateErrors(t *testing.T) {
 		"runner_limits.memory_max must fit in 64 bits":         func(c *Config) { c.RunnerLimits.MemoryMax = "999999999999999999999999G" },
 		"runner_limits.cpu_quota must be at most 1000000%":     func(c *Config) { c.RunnerLimits.CPUQuota = "99999999999%" },
 		"darkmem: 101 labels; GitHub allows at most 100":       func(c *Config) { c.Labels = numberedLabels(98) },
+		"repos: owner/repo must be a repository name":          func(c *Config) { c.Repos[1].Name = "owner/repo" },
+		"repos: a b must be a repository name":                 func(c *Config) { c.Repos[1].Name = "a b" },
+		"repos: .. must be a repository name":                  func(c *Config) { c.Repos[1].Name = ".." },
+		"watch_repos: a b must be a repository name":           func(c *Config) { c.WatchRepos = []string{"a b"} },
+		"watch_repos: .. must be a repository name":            func(c *Config) { c.WatchRepos = []string{".."} },
 		"poll_interval must be >= 5s":                          func(c *Config) { c.PollInterval = Duration(time.Millisecond) },
 		"history_retention must be >= 1d":                      func(c *Config) { c.HistoryRetention = Duration(time.Second) },
 		"watch_repos must not contain an empty name":           func(c *Config) { c.WatchRepos = []string{" "} },
@@ -287,6 +292,29 @@ func TestLabelCountBound(t *testing.T) {
 	c.Repos[1].Labels = nil
 	if _, err := c.Validate(); err != nil {
 		t.Fatalf("labels repeated across the global and repo lists counted twice: %v", err)
+	}
+}
+
+func TestRepoNameRules(t *testing.T) {
+	for _, name := range []string{"my.repo_1-x", "A", strings.Repeat("a", 100), "...", ".hidden"} {
+		c, _, _ := Parse([]byte(sample))
+		c.Repos[1].Name = name
+		c.WatchRepos = []string{name[:len(name)-1] + "w"}
+		if _, err := c.Validate(); err != nil {
+			t.Errorf("%q rejected: %v", name, err)
+		}
+	}
+	for _, name := range []string{"owner/repo", "a b", "..", ".", strings.Repeat("a", 101), "répo", "a\nb"} {
+		c, _, _ := Parse([]byte(sample))
+		c.Repos[1].Name = name
+		if _, err := c.Validate(); err == nil {
+			t.Errorf("repo %q accepted", name)
+		}
+		c, _, _ = Parse([]byte(sample))
+		c.WatchRepos = []string{name}
+		if _, err := c.Validate(); err == nil {
+			t.Errorf("watch repo %q accepted", name)
+		}
 	}
 }
 
