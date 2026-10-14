@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 func marker(dir string) string { return dir + ".complete" }
@@ -210,6 +211,20 @@ func singleRoot(dir string) (string, error) {
 	return dir, nil
 }
 
+// unfinishedFor is how long an x64 folder without a marker counts as a
+// running job's own setup-* install rather than a killed one.
+const unfinishedFor = time.Hour
+
+// checkUnfinished returns ErrInstallInProgress when rel's x64 folder dir,
+// inside r and known to have no marker, was written within unfinishedFor.
+func checkUnfinished(r *os.Root, dir string, rel Release) error {
+	fi, err := r.Lstat(dir)
+	if err != nil || time.Since(fi.ModTime()) >= unfinishedFor {
+		return nil
+	}
+	return fmt.Errorf("%s %s: %w", rel.Tool, rel.Version, ErrInstallInProgress)
+}
+
 // removeIncomplete deletes an x64 folder inside r and its marker.
 func removeIncomplete(r *os.Root, dir string) {
 	r.Remove(marker(dir))
@@ -301,7 +316,10 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, from Origin, r
 	if e.has(toolDir, rel.Folder) {
 		return ErrAlreadyInstalled
 	}
-	// A target without a marker is a killed install; replace it, as
+	if err := checkUnfinished(r, target, rel); err != nil {
+		return err
+	}
+	// An older target without a marker is a killed install; replace it, as
 	// @actions/tool-cache's _createToolPath does.
 	removeIncomplete(r, target)
 	if err := r.Rename(srcRel, target); err != nil {

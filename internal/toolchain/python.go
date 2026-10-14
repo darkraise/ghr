@@ -106,6 +106,9 @@ func (p python) Install(ctx context.Context, rel Release, progress func(string))
 	if e.has(p.dir, rel.Folder) {
 		return ErrAlreadyInstalled
 	}
+	if err := checkUnfinished(r, filepath.Join(p.dir, rel.Folder, arch), rel); err != nil {
+		return err
+	}
 	progress("running setup.sh")
 	verRel := filepath.Join(p.dir, rel.Folder)
 	// A version folder that is already there may be a job's own setup-python

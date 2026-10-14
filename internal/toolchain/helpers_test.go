@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/darkraise/ghr/internal/system"
 )
@@ -40,6 +41,15 @@ func mkInstall(t *testing.T, root, toolDir, folder string, complete bool) string
 		}
 	}
 	return dir
+}
+
+// backdate sets path's times d in the past.
+func backdate(t *testing.T, path string, d time.Duration) {
+	t.Helper()
+	at := time.Now().Add(-d)
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // semver is the part of node-semver the ported finders need.

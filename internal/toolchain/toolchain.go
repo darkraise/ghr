@@ -22,6 +22,8 @@ var (
 	ErrUnknownTool      = errors.New("unknown toolchain")
 	ErrNotInstalled     = errors.New("toolchain version not installed")
 	ErrAlreadyInstalled = errors.New("toolchain version already installed")
+	// ErrInstallInProgress comes with the tool and version it was found for.
+	ErrInstallInProgress = errors.New("an unfinished install was written in the last hour, maybe by a running job; try again later")
 )
 
 // Sources are the upstream URLs the installers read.

@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func demoRelease(f *fixture, body []byte) Release {
@@ -73,6 +74,7 @@ func TestInstallArchiveSkipsACompleteVersion(t *testing.T) {
 func TestInstallArchiveReplacesAFolderWithoutMarker(t *testing.T) {
 	f := newFixture(t)
 	stale := mkInstall(t, f.Root, "demo", "1.2.3", false)
+	backdate(t, stale, 2*time.Hour)
 	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
 	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); err != nil {
 		t.Fatal(err)
@@ -82,6 +84,24 @@ func TestInstallArchiveReplacesAFolderWithoutMarker(t *testing.T) {
 	}
 	if !exists(stale + ".complete") {
 		t.Fatal("no marker")
+	}
+}
+
+// A folder without a marker written this recently may be a running job's
+// own setup-* step at work.
+func TestInstallArchiveLeavesAFreshFolderWithoutMarker(t *testing.T) {
+	f := newFixture(t)
+	theirs := mkInstall(t, f.Root, "demo", "1.2.3", false)
+	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
+	err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {})
+	if !errors.Is(err, ErrInstallInProgress) || !strings.Contains(err.Error(), "demo 1.2.3") {
+		t.Fatalf("got %v", err)
+	}
+	if !exists(filepath.Join(theirs, "file")) || exists(filepath.Join(theirs, "bin")) || exists(theirs+".complete") {
+		t.Fatal("the unfinished folder was touched")
+	}
+	if got := tmpEntries(t, f.Root); len(got) != 0 {
+		t.Fatalf(".tmp holds %v", got)
 	}
 }
 
