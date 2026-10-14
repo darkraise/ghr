@@ -3,12 +3,14 @@ package runner
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -150,6 +152,37 @@ func TestCleanupRetryRemembersCustomProjects(t *testing.T) {
 	want := []string{"com.docker.compose.project=custom-p", "com.docker.compose.project=ghr-aaaaaa"}
 	if !reflect.DeepEqual(h.docker.netLabels, want) {
 		t.Fatalf("retry networks %v", h.docker.netLabels)
+	}
+}
+
+// A rewrite of the remembered projects that dies partway leaves the previous
+// list readable, so a later retry still reaches the projects it names.
+func TestFailedProjectRecordKeepsThePreviousOne(t *testing.T) {
+	h := newHarness(t)
+	dir := h.m.instanceDir("aaaaaa")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.docker.compose = []system.ComposeContainer{{ID: "c1", Project: "custom-p", WorkingDir: filepath.Join(dir, "_work", "r", "r")}}
+	h.docker.setErr("RemoveNetworksByLabel", errors.New("network busy"))
+	if _, err := h.m.cleanupDocker(context.Background(), h.cfg, "aaaaaa", "darkmem"); err == nil {
+		t.Fatal("network failure not reported")
+	}
+	h.docker.compose = nil
+	orig := writeFile
+	t.Cleanup(func() { writeFile = orig })
+	writeFile = func(name string, data []byte, perm os.FileMode) error {
+		if strings.HasPrefix(name, h.m.privateProjects("aaaaaa")) {
+			orig(name, data[:len(data)/2], perm)
+			return &fs.PathError{Op: "write", Path: name, Err: syscall.EIO}
+		}
+		return orig(name, data, perm)
+	}
+	if _, err := h.m.cleanupDocker(context.Background(), h.cfg, "aaaaaa", "darkmem"); err == nil || !strings.Contains(err.Error(), "record compose projects") {
+		t.Fatalf("failed record not reported: %v", err)
+	}
+	if b, err := os.ReadFile(h.m.privateProjects("aaaaaa")); err != nil || !reflect.DeepEqual(strings.Fields(string(b)), []string{"custom-p", "ghr-aaaaaa"}) {
+		t.Fatalf("remembered list %q, %v", b, err)
 	}
 }
 

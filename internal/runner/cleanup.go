@@ -104,7 +104,7 @@ func (m *Manager) cleanupDocker(ctx context.Context, cfg *config.Config, id, rep
 	record := func() error {
 		err := os.MkdirAll(m.Paths.Private, 0o700)
 		if err == nil {
-			err = writeFile(m.privateProjects(id), []byte(strings.Join(names, "\n")+"\n"), 0o600)
+			err = writeFileAtomic(m.privateProjects(id), []byte(strings.Join(names, "\n")+"\n"), 0o600)
 		}
 		if err != nil {
 			return fmt.Errorf("record compose projects: %w", err)

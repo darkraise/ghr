@@ -679,11 +679,44 @@ func writeJSON(path string, v any) error {
 
 // writeJSONAtomic writes via a temp file and rename so a crash never leaves a partial file.
 func writeJSONAtomic(path string, v any) error {
-	tmp := path + ".tmp"
-	if err := writeJSON(tmp, v); err != nil {
+	data, err := json.Marshal(v)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return writeFileAtomic(path, data, 0o644)
+}
+
+// writeFileAtomic replaces path through a temp file that is synced before the
+// rename, so a crash or power loss leaves the old content or the new, never
+// a truncated file.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	defer os.Remove(tmp)
+	if err := writeFile(tmp, data, perm); err != nil {
+		return err
+	}
+	// Opened for writing: Windows cannot flush a read-only handle.
+	f, err := os.OpenFile(tmp, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	err = f.Sync()
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	// Syncing the directory makes the rename itself durable. Some platforms,
+	// Windows among them, cannot sync a directory, so it is best effort.
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		d.Sync()
+		d.Close()
+	}
+	return nil
 }
 
 func readJSON(path string, v any) error {

@@ -645,7 +645,7 @@ func diskFullUntilCleanup(t *testing.T, h *harness, fail error) {
 		h.docker.mu.Lock()
 		full := len(h.docker.volLabels) == 0
 		h.docker.mu.Unlock()
-		if full && (strings.HasPrefix(name, h.m.Paths.Pending) || strings.HasSuffix(name, ".projects")) {
+		if full && (strings.HasPrefix(name, h.m.Paths.Pending) || strings.HasSuffix(name, ".projects.tmp")) {
 			return &fs.PathError{Op: "write", Path: name, Err: fail}
 		}
 		return orig(name, data, perm)
