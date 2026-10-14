@@ -68,7 +68,8 @@ Job hooks record which job each runner ran. When a runner exits, ghr removes the
 ghr executes your CI jobs natively on the host, so treat the host as trusted by everyone who can run a workflow:
 
 - Any job can become root on the host through Docker. Do not run anything else on it.
-- ghr serves public repositories only when `allow_public` is set for them. Never enable "Run workflows from fork pull requests" on a repository ghr serves: a fork's pull request could then run its code on your host.
+- ghr serves public repositories only when `allow_public` is set for them, and refuses jobs whose event comes from a fork, such as a fork's pull request. A runner that is already idle when a private repository turns public may still take one job before the next poll pauses it, so never enable "Run workflows from fork pull requests" on a repository ghr serves.
+- An `issue_comment` workflow on a fork's pull request runs the base branch's code and is not refused. Do not let such a workflow check out the pull request's code.
 - The web UI is plain HTTP. Put a TLS proxy in front of it and keep it on a trusted network; see [Web UI](docs/web-ui.md#behind-a-reverse-proxy).
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).

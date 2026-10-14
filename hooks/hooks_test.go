@@ -3,9 +3,11 @@ package hooks
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -77,6 +79,60 @@ func TestJobStartedWritesJobJSON(t *testing.T) {
 	checkTime(t, "started_at", rec["started_at"], before, time.Now())
 	if _, err := os.Stat(filepath.Join(dir, "job.json.tmp")); !os.IsNotExist(err) {
 		t.Fatal("temp file left behind")
+	}
+}
+
+func TestJobStartedRefusesForkEvents(t *testing.T) {
+	const repo = "darkraise/ghr"
+	pr := func(head string) string { return `{"pull_request":{"head":{"repo":{"full_name":"` + head + `"}}}}` }
+	missing := "<missing>"
+	for _, tc := range []struct {
+		name, event, payload string
+		refuse               bool
+	}{
+		{"fork pull_request", "pull_request", pr("evil/ghr"), true},
+		{"fork pull_request_target", "pull_request_target", pr("evil/ghr"), true},
+		{"fork pull_request_review", "pull_request_review", pr("evil/ghr"), true},
+		{"fork pull_request_review_comment", "pull_request_review_comment", pr("evil/ghr"), true},
+		{"fork workflow_run", "workflow_run", `{"workflow_run":{"head_repository":{"full_name":"evil/ghr"}}}`, true},
+		{"pull_request without head repo", "pull_request", `{"pull_request":{"head":{"repo":null}}}`, true},
+		{"pull_request with invalid payload", "pull_request", `{`, true},
+		{"pull_request without event path", "pull_request", missing, true},
+		{"same-repo pull_request", "pull_request", pr(repo), false},
+		{"same-repo pull_request in another case", "pull_request", pr("Darkraise/GHR"), false},
+		{"same-repo workflow_run", "workflow_run", `{"workflow_run":{"head_repository":{"full_name":"darkraise/ghr"}}}`, false},
+		{"push", "push", `{}`, false},
+		{"issue_comment runs base-branch code", "issue_comment", `{}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			env := []string{"GHR_INSTANCE_DIR=" + dir, "GITHUB_RUN_ID=123", "GITHUB_EVENT_NAME=" + tc.event, "GITHUB_REPOSITORY=" + repo}
+			if tc.payload != missing {
+				path := filepath.Join(t.TempDir(), "event.json")
+				if err := os.WriteFile(path, []byte(tc.payload), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				env = append(env, "GITHUB_EVENT_PATH="+path)
+			}
+			if !tc.refuse {
+				runHook(t, "job-started.sh", env...)
+				if rec := readRecord(t, dir); rec["run_id"] != "123" {
+					t.Fatalf("record %v", rec)
+				}
+				return
+			}
+			out, err := hookCmd(t, "job-started.sh", env...).CombinedOutput()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+				t.Fatalf("want exit 1, got %v\n%s", err, out)
+			}
+			if !strings.Contains(string(out), "refusing") {
+				t.Fatalf("no refusal message: %s", out)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "job.json")); !os.IsNotExist(err) {
+				t.Fatal("a refused job was recorded")
+			}
+		})
 	}
 }
 
