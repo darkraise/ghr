@@ -707,16 +707,16 @@ func TestChangePassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id, err := a.ChangePassword("wrong password!", "another long secret"); !errors.Is(err, ErrWrongPassword) || id != "" {
+	if id, err := a.ChangePassword("10.0.0.9", "wrong password!", "another long secret"); !errors.Is(err, ErrWrongPassword) || id != "" {
 		t.Fatalf("wrong current: id %q err %v", id, err)
 	}
 	if !a.Valid(keep) || !a.Valid(other) {
 		t.Fatal("a refused change ended sessions")
 	}
-	if id, err := a.ChangePassword(pw, "short"); !errors.Is(err, ErrPasswordLength) || id != "" {
+	if id, err := a.ChangePassword("10.0.0.9", pw, "short"); !errors.Is(err, ErrPasswordLength) || id != "" {
 		t.Fatalf("short new: id %q err %v", id, err)
 	}
-	id, err := a.ChangePassword(pw, "another long secret")
+	id, err := a.ChangePassword("10.0.0.9", pw, "another long secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -728,6 +728,74 @@ func TestChangePassword(t *testing.T) {
 	}
 	if _, err := a.Login("10.0.0.2", "another long secret"); err != nil {
 		t.Fatalf("new password: %v", err)
+	}
+}
+
+// A wrong current password counts against the client like a wrong login, on
+// the same counters: once either has locked the client out, a password change
+// from it is refused before any key derivation, and so is a login.
+func TestPasswordChangeIsThrottled(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fail func(a *Auth) error
+	}{
+		{"wrong current passwords", func(a *Auth) error {
+			_, err := a.ChangePassword(v6(1), "wrong password!", "another long secret")
+			return err
+		}},
+		{"wrong logins", func(a *Auth) error {
+			_, err := a.Login(v6(1), "wrong password!")
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, c := newTestAuth(t)
+			id, err := claim(a, pw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range maxFailures {
+				if err := tc.fail(a); !errors.Is(err, ErrWrongPassword) {
+					t.Fatalf("failure %d: %v", i+1, err)
+				}
+			}
+			until := c.now().Add(lockout)
+			if f := a.fails[v6Prefix]; f == nil || len(f.times) != maxFailures {
+				t.Fatalf("the /64 counted %+v, want %d failures", f, maxFailures)
+			}
+			fillSlots(a)
+			type change struct {
+				id  string
+				err error
+			}
+			changed := make(chan change, 1)
+			go func() {
+				id, err := a.ChangePassword(v6(1), pw, "another long secret")
+				changed <- change{id, err}
+			}()
+			var te *ThrottledError
+			select {
+			case ch := <-changed:
+				if !errors.As(ch.err, &te) || !te.RetryAt.Equal(until) || ch.id != "" {
+					t.Fatalf("change from a locked client: id %q err %v", ch.id, ch.err)
+				}
+			case <-time.After(2 * time.Second):
+				<-a.sem
+				<-a.sem
+				t.Fatal("a change from a locked client waited for a derivation slot")
+			}
+			if _, err := a.Login(v6(1), pw); !errors.As(err, &te) || !te.RetryAt.Equal(until) {
+				t.Fatalf("login from a locked client: %v", err)
+			}
+			<-a.sem
+			<-a.sem
+			if !a.Valid(id) {
+				t.Fatal("refused changes ended the session")
+			}
+			if _, err := a.Login(v6(2), pw); err != nil {
+				t.Fatalf("another address in the /64: %v", err)
+			}
+		})
 	}
 }
 
@@ -801,7 +869,7 @@ func TestLoginRacingAPasswordChangeCreatesNoSession(t *testing.T) {
 	}
 	changed := make(chan change, 1)
 	go func() {
-		id, err := a.ChangePassword(pw, "another long secret")
+		id, err := a.ChangePassword("10.0.0.9", pw, "another long secret")
 		changed <- change{id, err}
 	}()
 	time.Sleep(50 * time.Millisecond)

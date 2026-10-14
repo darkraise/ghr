@@ -324,11 +324,19 @@ func (a *Auth) Logout(id string) {
 	a.mu.Unlock()
 }
 
-// ChangePassword replaces the password, ends every session and starts a new
-// one for the caller, so a copy of the caller's old cookie stops working too.
-func (a *Auth) ChangePassword(current, next string) (string, error) {
+// ChangePassword checks current for the client named by key, as Login does
+// and on the same throttle, then replaces the password, ends every session
+// and starts a new one for the caller, so a copy of the caller's old cookie
+// stops working too.
+func (a *Auth) ChangePassword(key, current, next string) (string, error) {
 	if !validLength(next) {
 		return "", ErrPasswordLength
+	}
+	a.mu.Lock()
+	err := a.admitLocked(key, a.now())
+	a.mu.Unlock()
+	if err != nil {
+		return "", err
 	}
 	a.fileMu.Lock()
 	defer a.fileMu.Unlock()
@@ -341,10 +349,26 @@ func (a *Auth) ChangePassword(current, next string) (string, error) {
 	}
 	// The slot is held until the change is published, so a login queued
 	// behind it sees the new gen.
-	var match bool
 	var id string
 	a.derive(func() {
-		if match = h.matches(current); !match {
+		a.mu.Lock()
+		err = a.admitLocked(key, a.now())
+		a.mu.Unlock()
+		if err != nil {
+			return
+		}
+		match := h.matches(current)
+		a.mu.Lock()
+		now := a.now()
+		if err = a.admitLocked(key, now); err == nil && !match {
+			a.failLocked(key, maxFailures, now)
+			if p, ok := prefixKey(key); ok {
+				a.failLocked(p, maxPrefixFailures, now)
+			}
+			err = ErrWrongPassword
+		}
+		a.mu.Unlock()
+		if err != nil {
 			return
 		}
 		var nh passwordHash
@@ -356,13 +380,11 @@ func (a *Auth) ChangePassword(current, next string) (string, error) {
 		}
 		a.mu.Lock()
 		a.gen++
+		delete(a.fails, key)
 		clear(a.sessions)
 		id, err = a.newSessionLocked(a.now())
 		a.mu.Unlock()
 	})
-	if !match {
-		return "", ErrWrongPassword
-	}
 	return id, err
 }
 

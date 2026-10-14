@@ -289,7 +289,7 @@ func (h *handler) password(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &b) {
 		return
 	}
-	id, err := h.auth.ChangePassword(b.Current, b.New)
+	id, err := h.auth.ChangePassword(ClientKey(r.RemoteAddr), b.Current, b.New)
 	if err != nil {
 		h.fail(w, err)
 		return
