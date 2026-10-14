@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -77,8 +78,10 @@ func (m *Manager) projects(ctx context.Context, id string) ([]string, error) {
 
 // dockerInstanceLabel returns the label the actions runner puts on the job and
 // service containers it creates and on the job network: a bare key of the
-// first six hex digits of the SHA-256 of its lower-cased .runner file. It
-// returns "" when the runner never wrote the file, and then created nothing.
+// first six hex digits of the SHA-256 of its lower-cased .runner file. The
+// runner writes the file with a UTF-8 BOM and hashes it as read by
+// File.ReadAllText, which drops the BOM. It returns "" when the runner never
+// wrote the file, and then created nothing.
 // Containers a job starts itself with docker run do not carry it.
 func (m *Manager) dockerInstanceLabel(id string) (string, error) {
 	data, err := readJobFile(filepath.Join(m.instanceDir(id), ".runner"))
@@ -88,6 +91,7 @@ func (m *Manager) dockerInstanceLabel(id string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read .runner: %w", err)
 	}
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 	sum := sha256.Sum256([]byte(strings.ToLower(string(data))))
 	return fmt.Sprintf("%x", sum[:3]), nil
 }
