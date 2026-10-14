@@ -314,9 +314,9 @@ func TestFinishLeavesASymlinkAtTheArchivePathAlone(t *testing.T) {
 }
 
 // A name in _diag can be a second name for a file elsewhere on the host. The
-// archive is trimmed as root, so cutting such a log to size would cut the
-// original too: a log with more than one name is dropped from the archive and
-// the original is left as it was.
+// archive is chowned and trimmed as root, so either would reach the original
+// too: a log with more than one name is dropped from the archive before the
+// chown, and the original is left as it was.
 func TestArchiveDropsAHardLinkedLog(t *testing.T) {
 	h := newHarness(t)
 	h.m.spawn(context.Background(), h.cfg, "darkmem")
@@ -334,12 +334,26 @@ func TestArchiveDropsAHardLinkedLog(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(diag, "Worker_1.log"), []byte("head\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	archive := filepath.Join(h.m.Paths.Logs, "aaaaaa")
+	var atChown []string
+	h.host.onChown = func(path string) {
+		if path != archive {
+			return
+		}
+		es, _ := os.ReadDir(path)
+		for _, e := range es {
+			atChown = append(atChown, e.Name())
+		}
+	}
 	h.sd.active["ghr-runner-aaaaaa"] = false
 	mustReturn(t, "finish", func() {
 		h.m.refreshUnits(context.Background())
 		h.m.Wait()
 	})
-	entries, err := os.ReadDir(filepath.Join(h.m.Paths.Logs, "aaaaaa"))
+	if !reflect.DeepEqual(atChown, []string{"Worker_1.log"}) {
+		t.Fatalf("the archive held %v when it was chowned", atChown)
+	}
+	entries, err := os.ReadDir(archive)
 	if err != nil {
 		t.Fatal(err)
 	}

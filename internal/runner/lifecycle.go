@@ -512,6 +512,9 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	// Checked again, as a swap between the check and the rename moves the
 	// link instead.
 	if err := realDirOrRemove(archive); err == nil {
+		if err := pruneArchive(m.Paths.Logs, id); err != nil {
+			return fmt.Errorf("prune archived logs: %w", err)
+		}
 		if err := m.Host.ChownR(ctx, archive, "root"); err != nil {
 			return fmt.Errorf("chown archived logs: %w", err)
 		}

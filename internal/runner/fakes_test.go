@@ -498,9 +498,10 @@ func (f *fakeDocker) pruneList() string {
 type fakeHost struct {
 	mu       sync.Mutex
 	chowned  []string
-	calls    []string         // Extract and RunScript calls, as "<method> <dir>"
-	errs     map[string]error // by method name
-	onScript func()           // runs inside RunScript
+	calls    []string          // Extract and RunScript calls, as "<method> <dir>"
+	errs     map[string]error  // by method name
+	onScript func()            // runs inside RunScript
+	onChown  func(path string) // runs inside ChownR
 }
 
 func (f *fakeHost) err(method string) error {
@@ -594,8 +595,12 @@ func (f *fakeHost) CopyTree(_ context.Context, src, dst string) error {
 }
 func (f *fakeHost) ChownR(_ context.Context, path, user string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.chowned = append(f.chowned, path+":"+user)
+	hook := f.onChown
+	f.mu.Unlock()
+	if hook != nil {
+		hook(path)
+	}
 	return nil
 }
 

@@ -562,14 +562,41 @@ func (m *Manager) openLogs(id string) (*os.Root, error) {
 	return os.OpenRoot(dir)
 }
 
-// trimArchive removes from the archive id under logs everything but its
-// regular files named by logPatterns that have no other name on the host,
-// cuts each of those to its first maxArchivedLog bytes, and sets its mtime
-// to now. The job filled the archive, so only a real directory is opened,
-// through an os.Root of logs, and it is worked on through its own os.Root,
-// which follows no symlink out of it and keeps the directory it opened even
-// if the name is swapped.
+// pruneArchive removes from the archive id under logs everything but its
+// regular files named by logPatterns that have no other name on the host.
+// It runs before the archive is chowned, because a chown reaches a file's
+// other names too. The job filled the archive, so only a real directory is
+// opened, through an os.Root of logs, and it is worked on through its own
+// os.Root, which follows no symlink out of it and keeps the directory it
+// opened even if the name is swapped.
+func pruneArchive(logs, id string) error {
+	return withArchive(logs, id, pruneEntries)
+}
+
+// trimArchive prunes the archive again, cuts each log left to its first
+// maxArchivedLog bytes, and sets the archive's mtime to now.
 func trimArchive(logs, id string, now time.Time) error {
+	return withArchive(logs, id, func(root *os.Root) error {
+		if err := pruneEntries(root); err != nil {
+			return err
+		}
+		entries, err := fs.ReadDir(root.FS(), ".")
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if err := truncateLog(root, e.Name()); err != nil {
+				return err
+			}
+		}
+		// The rename keeps _diag's mtime, the time its last log file was
+		// created, often the job's start. prune ages archives as it ages
+		// history: from the job's end.
+		return root.Chtimes(".", now, now)
+	})
+}
+
+func withArchive(logs, id string, fn func(root *os.Root) error) error {
 	parent, err := os.OpenRoot(logs)
 	if err != nil {
 		return err
@@ -586,6 +613,10 @@ func trimArchive(logs, id string, now time.Time) error {
 		return err
 	}
 	defer root.Close()
+	return fn(root)
+}
+
+func pruneEntries(root *os.Root) error {
 	entries, err := fs.ReadDir(root.FS(), ".")
 	if err != nil {
 		return err
@@ -596,16 +627,9 @@ func trimArchive(logs, id string, now time.Time) error {
 			if err := root.RemoveAll(name); err != nil {
 				return err
 			}
-			continue
-		}
-		if err := truncateLog(root, name); err != nil {
-			return err
 		}
 	}
-	// The rename keeps _diag's mtime, the time its last log file was
-	// created, often the job's start. prune ages archives as it ages
-	// history: from the job's end.
-	return root.Chtimes(".", now, now)
+	return nil
 }
 
 // otherNames reports whether the entry is a file that has another name
