@@ -1468,6 +1468,37 @@ func TestStartTimeoutDeregistersBeforeStopping(t *testing.T) {
 	}
 }
 
+// A 404 on the delete also answers a token that cannot see the repository, so
+// the runner is stopped only when a readable runner list lacks it.
+func TestStartTimeoutNeedsTheRunnerListOnA404(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		listed  []github.Runner
+		listErr error
+		stopped bool
+	}{
+		{"listed", []github.Runner{{ID: 101, Name: "ghr-darkmem-aaaaaa", Status: "offline"}}, nil, false},
+		{"list refused", nil, &github.APIError{Status: 502, Kind: github.ErrServer}, false},
+		{"absent", nil, nil, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.m.spawn(context.Background(), h.cfg, "darkmem")
+			h.m.refreshRunners(context.Background())
+			h.now = h.now.Add(3 * time.Minute)
+			h.gh.setErr("DeleteRunner darkmem", &github.APIError{Status: 404, Kind: github.ErrNotFound})
+			h.gh.listed["darkmem"] = c.listed
+			if c.listErr != nil {
+				h.gh.setErr("ListRunners darkmem", c.listErr)
+			}
+			h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+			if got := len(h.sd.stopped) == 1; got != c.stopped {
+				t.Fatalf("stopped %v, want stopped=%v", h.sd.stopped, c.stopped)
+			}
+		})
+	}
+}
+
 // A runner deregistered by a stop that then failed can take no job, so its
 // stop is retried without another delete, even during an API pause.
 func TestStartTimeoutRetriesOnlyTheUnitAfterDeregistering(t *testing.T) {

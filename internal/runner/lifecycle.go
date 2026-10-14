@@ -880,14 +880,19 @@ func (m *Manager) stopStartTimedOut(ctx context.Context, cfg *config.Config, now
 			if !m.apiAllowed(now) {
 				continue
 			}
-			// The runners API answered for it in this tick, so a 404 here
-			// means the registration is gone.
 			err := m.GH.DeleteRunner(ctx, repo, cur.RunnerID)
 			switch {
 			case github.IsKind(err, github.ErrUnprocessable):
 				m.move(id, sched.Busy, sched.Starting, sched.Idle)
 				continue
-			case err != nil && !github.IsKind(err, github.ErrNotFound):
+			case github.IsKind(err, github.ErrNotFound):
+				// A 404 also answers a token that cannot see the repository,
+				// and a runner that took a job meanwhile must not be killed
+				// on it: only a readable runner list without it says gone.
+				if !m.registrationGone(ctx, repo, cur.RunnerID, now) {
+					continue
+				}
+			case err != nil:
 				m.apiErr(repo, err, now)
 				continue
 			}
