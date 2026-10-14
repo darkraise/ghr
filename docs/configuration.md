@@ -63,7 +63,7 @@ ghr token set < new-token.txt # or prompts
 ghr kill <id>                 # stop a runner
 ghr logs <id> [-f]            # a runner's diagnostic log
 ghr history [--repo r] [--conclusion c] [--limit n]
-ghr runner-update [--cancel]  # queue a runner update; it downloads in the background, and runners pause only for the switch, made when no job is running or queued
+ghr runner-update [--cancel]  # queue a runner update; downloaded in the background, installed when no job is running or queued
 ghr web set-password          # prompts, or reads stdin
 ghr web reset-password
 ghr setup                     # first-run state: configured, wizard, owner
