@@ -14,6 +14,6 @@ now="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || exit 0
   && out="$(timeout 10 jq -ce --arg f "$now" '. + {finished_at: $f}' "$dir/job.json" 2>/dev/null)" \
   || out="$(jq -nc --arg f "$now" '{finished_at: $f}' 2>/dev/null)" \
   || exit 0
-printf '%s\n' "$out" > "$dir/job.json.tmp" 2>/dev/null \
-  && mv -f "$dir/job.json.tmp" "$dir/job.json" 2>/dev/null || true
+# job.json.tmp may be a FIFO nobody reads, which blocks the open of the redirect.
+timeout 5 bash -c 'printf "%s\n" "$1" > "$2" && mv -f "$2" "$3"' _ "$out" "$dir/job.json.tmp" "$dir/job.json" 2>/dev/null || true
 exit 0

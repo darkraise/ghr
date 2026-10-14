@@ -237,6 +237,31 @@ func TestJobCompletedSkipsFIFOJobJSON(t *testing.T) {
 	checkTime(t, "finished_at", rec["finished_at"], before, time.Now())
 }
 
+// A FIFO at job.json.tmp with no reader blocks the open of the hook's write.
+func TestJobCompletedBoundsAFIFOTempFile(t *testing.T) {
+	runHook(t, "job-completed.sh", "GHR_INSTANCE_DIR=")
+	if _, err := exec.LookPath("mkfifo"); err != nil {
+		t.Skip("mkfifo not available")
+	}
+	dir := t.TempDir()
+	if out, err := exec.Command("mkfifo", filepath.Join(dir, "job.json.tmp")).CombinedOutput(); err != nil {
+		t.Fatalf("mkfifo: %v\n%s", err, out)
+	}
+	cmd := hookCmd(t, "job-completed.sh", "GHR_INSTANCE_DIR="+dir)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	cmd.WaitDelay = time.Second
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	kill := time.AfterFunc(15*time.Second, func() { cmd.Process.Kill() })
+	err := cmd.Wait()
+	stopped := !kill.Stop()
+	if err != nil || stopped {
+		t.Fatalf("job-completed.sh with a FIFO job.json.tmp: err %v, killed %v\n%s", err, stopped, out.String())
+	}
+}
+
 // The job can write a job.json too large for jq to hold in memory.
 func TestJobCompletedSkipsLargeJobJSON(t *testing.T) {
 	dir := t.TempDir()
