@@ -50,6 +50,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     concurrency:
       group: release
       cancel-in-progress: false
@@ -110,6 +112,12 @@ jobs:
           # checksums.txt: older setup.sh copies verify every line of that file.
           sed 's/^GHR_VERSION="${GHR_VERSION:-latest}"$/GHR_VERSION="${GHR_VERSION:-'"$VERSION"'}"/' deploy/setup.sh > dist/setup.sh
           grep -qxF "GHR_VERSION=\"\${GHR_VERSION:-$VERSION}\"" dist/setup.sh
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: env.VERSION != ''
+        with:
+          subject-path: |
+            dist/ghr_linux_amd64.tar.gz
+            dist/setup.sh
       - name: publish
         if: env.VERSION != ''
         env:
