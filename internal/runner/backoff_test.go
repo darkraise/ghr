@@ -6,11 +6,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/github"
 )
 
 func jitAttempts(h *harness, repo string) int {
 	return strings.Count(h.gh.callsText(), "GenerateJITConfig "+repo)
+}
+
+func spawnFails(h *harness, repo string) int {
+	h.m.mu.Lock()
+	defer h.m.mu.Unlock()
+	return h.m.spawnFails[repo]
 }
 
 func spawnFailures(h *harness) int {
@@ -103,6 +110,37 @@ func TestRunnerThatNeverCameOnlineDelaysTheNextSpawn(t *testing.T) {
 	if n := jitAttempts(h, "darkmem"); n != 2 {
 		t.Fatalf("attempts after the delay: %d", n)
 	}
+}
+
+// A runner stopped for not coming online is a failed start like one that
+// exits: its replacement waits out the delay, which doubles with each repeat.
+func TestStartTimedOutRunnerDelaysItsReplacement(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.cfg.Mode = config.ModeAll
+	h.cfg.Repo("darkcloud").Paused = true
+	step := func(d time.Duration, want int) {
+		t.Helper()
+		h.now = h.now.Add(d)
+		h.m.Tick(ctx)
+		h.m.Wait()
+		if got := jitAttempts(h, "darkmem"); got != want {
+			t.Fatalf("at +%s: %d attempts, want %d\n%s", d, got, want, h.eventText())
+		}
+	}
+	step(0, 1)
+	step(3*time.Minute, 1) // aaaaaa times out and is stopped; its replacement waits
+	if !strings.Contains(h.eventText(), "next spawn in 10s") {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+	step(0, 1) // the exit the next tick sees is the same failed start
+	if n := spawnFails(h, "darkmem"); n != 1 {
+		t.Fatalf("%d failed starts, want 1", n)
+	}
+	step(10*time.Second, 2) // bbbbbb
+	step(3*time.Minute, 2)  // bbbbbb times out: the second failure in a row
+	step(10*time.Second, 2)
+	step(10*time.Second, 3)
 }
 
 func TestAStoppedOrAdoptedRunnerIsNotASpawnFailure(t *testing.T) {

@@ -152,6 +152,7 @@ type instance struct {
 	adopted      bool      // rebuilt by Adopt, not spawned by this process
 	stopping     bool      // Kill asked systemd to stop the unit
 	cameOnline   bool      // it has been idle or busy at least once
+	startFailed  bool      // its failed start is already recorded in the repo's spawn backoff
 	cleaned      int       // containers removed by earlier finish attempts of a runner that ran no job
 	answered     bool      // the runners API answered for it in the current tick
 }

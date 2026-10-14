@@ -324,7 +324,7 @@ func (m *Manager) refreshUnits(ctx context.Context) {
 func (m *Manager) neverOnline(id string) (repo string, yes bool) {
 	m.mu.Lock()
 	i, ok := m.insts[id]
-	if !ok || i.State == sched.Cleaning || i.cameOnline || i.adopted || i.stopping {
+	if !ok || i.State == sched.Cleaning || i.cameOnline || i.adopted || i.stopping || i.startFailed {
 		m.mu.Unlock()
 		return "", false
 	}
@@ -843,6 +843,14 @@ func (m *Manager) stopStartTimedOut(ctx context.Context, cfg *config.Config, now
 			m.Events.Add("warn", repo, "stop %s: %v", id, err)
 			continue
 		}
-		m.Events.Add("warn", repo, "runner %s did not come online within %s; replaced", id, cfg.StartTimeout)
+		// Recorded now, not by the refreshUnits that sees the unit exit, because
+		// this tick can plan the replacement first.
+		m.mu.Lock()
+		if p := m.insts[id]; p != nil {
+			p.startFailed = true
+		}
+		m.mu.Unlock()
+		d := m.spawnFailed(repo, "runner did not come online", now)
+		m.Events.Add("warn", repo, "runner %s did not come online within %s; stopped, next spawn in %s", id, cfg.StartTimeout, d)
 	}
 }
