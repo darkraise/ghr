@@ -2,7 +2,7 @@
 
 ## Requirements
 
-**Host.** A dedicated LXC or VM running Debian 13 or Ubuntu 22.04, 24.04 or 26.04 on x86-64, with root access. On Proxmox, the LXC needs `features: nesting=1,keyctl=1` so Docker can run inside it. The host should run nothing else: any job can become root on it through Docker.
+**Host.** A dedicated LXC or VM running Debian 13 or Ubuntu 22.04, 24.04 or 26.04 on x86-64 (amd64 only), with root access. On Proxmox, the LXC needs `features: nesting=1,keyctl=1` so Docker can run inside it. The host should run nothing else: any job can become root on it through Docker.
 
 **Repositories.** ghr serves private repositories. It serves a public one only when `allow_public` is set for it. Any repository it serves must **not** enable "Run workflows from fork pull requests", because a fork's pull request could then run its code on your host.
 

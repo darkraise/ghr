@@ -990,6 +990,14 @@ for h in "ubuntu 20.04 focal" "debian 12 bookworm" "fedora 42 x"; do
   check "o: $id $ver names the supported hosts" contains "$out" "Debian 13 or Ubuntu 22.04, 24.04 or 26.04 required (found $id $ver)"
 done
 
+# ghr and the actions-runner are installed for amd64 only.
+host debian 13 trixie
+check "o: amd64 is accepted" [ "$rc" -eq 0 ]
+out=$( (dpkg() { echo arm64; }; run probe_host) 2>&1)
+rc=$?
+check "o: arm64 is refused" [ "$rc" -ne 0 ]
+check "o: arm64 is named in the refusal" contains "$out" "ghr supports amd64 (x86_64) hosts only (found arm64)"
+
 DOCKER_DISTRO=ubuntu
 VERSION_CODENAME=jammy
 out=$(run write_docker_source 2>&1)

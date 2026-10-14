@@ -57,6 +57,8 @@ check_host() {
     ubuntu:22.04) PYTHON_RUNTIME_LIBS=(libssl3 libffi8 libsqlite3-0 liblzma5 libbz2-1.0 libgdbm6 libncursesw6 libreadline8 libtcl8.6 libtk8.6) ;;
     *) die "Debian 13 or Ubuntu 22.04, 24.04 or 26.04 required (found ${PRETTY_NAME:-unknown})" ;;
   esac
+  [ "$(dpkg --print-architecture)" = amd64 ] ||
+    die "ghr supports amd64 (x86_64) hosts only (found $(dpkg --print-architecture))"
   DOCKER_DISTRO=$ID
 }
 
