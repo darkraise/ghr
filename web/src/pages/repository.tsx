@@ -319,7 +319,7 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
                 <NumberField
                   id="repo-max"
                   label="Max"
-                  emptyValue={cfg?.mode === "all" ? 0 : 1}
+                  emptyValue={cfg.mode === "all" ? 0 : 1}
                   min={0}
                   max={99}
                   precision={0}
