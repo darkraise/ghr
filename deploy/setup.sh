@@ -393,8 +393,12 @@ configure_github() {
 # ends with the setup code its browser asks for.
 print_next() {
   local configured wizard web host code
+  local unclaimed="the web UI has no password; set one with: ghr web set-password"
   configured=$(setup_field configured)
-  [ -n "$configured" ] || return 0
+  if [ -z "$configured" ]; then
+    [ -z "$WEB_UNCLAIMED" ] || log "$unclaimed"
+    return 0
+  fi
   wizard=$(setup_field wizard)
   web=$(setup_field web)
   [ "$web" != - ] || web=
@@ -420,7 +424,7 @@ print_next() {
   if [ -n "$code" ]; then
     log "web UI setup code: $code (the browser asks for it once; or set a password now with: ghr web set-password)"
   elif [ -n "$WEB_UNCLAIMED" ]; then
-    log "the web UI has no password; set one with: ghr web set-password"
+    log "$unclaimed"
   fi
 }
 

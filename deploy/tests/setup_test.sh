@@ -912,6 +912,11 @@ echo ABCDE-FGHJK-MNPQR-STVWX > "$MARK_DIR/code"
 out=$( (setup_ghr; WEB_UNCLAIMED=1; run print_next) 2>&1)
 check "k: without the web UI there is no code to print" lacks "$out" "setup code"
 check "k: nor a reminder" lacks "$out" "has no password"
+# A daemon that answers nothing leaves nothing to print, except that the web UI still has no password.
+out=$( (ghr() { return 1; }; WEB_UNCLAIMED=1; run print_next) 2>&1)
+check "k: a silent daemon with an unclaimed web UI still gets the reminder" [ "$out" = "$(log "the web UI has no password; set one with: ghr web set-password")" ]
+out=$( (ghr() { return 1; }; WEB_UNCLAIMED=; run print_next) 2>&1)
+check "k: a silent daemon and a claimed web UI print nothing" [ -z "$out" ]
 unset -f hostname
 
 # (n) The unit comes back with Docker. It is rewritten only when its content
