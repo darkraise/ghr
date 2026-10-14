@@ -179,7 +179,6 @@ func TestNotFoundIsPerRepoWithBackoff(t *testing.T) {
 	}
 }
 
-// In all mode a repo in an error state gets no warm runner until a poll succeeds.
 func TestSpawnsPerTickAreCapped(t *testing.T) {
 	h := newHarness(t)
 	h.cfg.Mode = config.ModeAll
@@ -198,6 +197,7 @@ func TestSpawnsPerTickAreCapped(t *testing.T) {
 	}
 }
 
+// In all mode a repo in an error state gets no warm runner until a poll succeeds.
 func TestAllModeSkipsWarmSpawnsForFailingRepo(t *testing.T) {
 	for _, err := range []error{
 		&github.APIError{Status: 404, Kind: github.ErrNotFound},
