@@ -256,11 +256,11 @@ func (m *Manager) confirm(id string, j github.Job, now time.Time) {
 }
 
 // spawnPlanned spawns what sched.Plan decides, nothing while a runner update
-// runs. It plans from planConfig, so a blocked repo gets nothing. Repos that
-// are unread, in an error state, or waiting after a failed start, are left
-// out of planning. Spawning stops as soon as the live config differs from the
-// one the plan used, so a pause or cap change made during polling is never
-// overridden.
+// runs or maintenance holds the runners. It plans from planConfig, so a
+// blocked repo gets nothing. Repos that are unread, in an error state, or
+// waiting after a failed start, are left out of planning. Spawning stops as
+// soon as the live config differs from the one the plan used, so a pause or
+// cap change made during polling is never overridden.
 func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time.Time) {
 	plan := m.planConfig(cfg)
 	var read []config.Repo
@@ -270,7 +270,7 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 		}
 	}
 	m.mu.Lock()
-	if m.upd.running {
+	if m.upd.running || m.held > 0 {
 		m.mu.Unlock()
 		return
 	}
@@ -283,8 +283,26 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 		}
 	}
 	m.mu.Unlock()
+	spawns := sched.Plan(&planCfg, m.schedInstances(cfg), demand, now)
+	if len(spawns) == 0 {
+		return
+	}
+	// A runner is in insts only once its unit has started, so a hold taken
+	// meanwhile would not see it; spawning refuses holds until these end.
+	m.mu.Lock()
+	if m.held > 0 {
+		m.mu.Unlock()
+		return
+	}
+	m.spawning = true
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.spawning = false
+		m.mu.Unlock()
+	}()
 	failed := map[string]bool{}
-	for _, s := range sched.Plan(&planCfg, m.schedInstances(cfg), demand, now) {
+	for _, s := range spawns {
 		if m.Config() != cfg {
 			return
 		}

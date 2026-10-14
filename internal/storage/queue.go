@@ -31,11 +31,11 @@ func (s *Service) newID() string {
 	return s.now().UTC().Format("20060102T150405") + "-" + hex.EncodeToString(b[:])
 }
 
-func (s *Service) busy() int {
-	if s.Busy == nil {
-		return 0
+func (s *Service) hold(ctx context.Context) (func(), error) {
+	if s.Hold == nil {
+		return func() {}, nil
 	}
-	return s.Busy()
+	return s.Hold(ctx)
 }
 
 func (s *Service) enqueue(ops ...*op) error {
@@ -165,8 +165,8 @@ func (s *Service) installOp(tool string, inst toolchain.Installer, spec string) 
 	}
 }
 
-// Remove queues the removal of an installed version. It is refused when it
-// runs if any runner is busy then.
+// Remove queues the removal of an installed version. When it runs it holds
+// the runners until it ends, and it is refused if the hold is.
 func (s *Service) Remove(tool, version string) error {
 	inst, err := s.Tools.Get(tool)
 	if err != nil {
@@ -190,9 +190,11 @@ func (s *Service) Remove(tool, version string) error {
 	return s.enqueue(&op{
 		Operation: model.Operation{ID: s.newID(), Kind: "remove", Target: target},
 		run: func(ctx context.Context, progress func(string)) (string, string) {
-			if n := s.busy(); n > 0 {
-				return "refused", model.BusyError{N: n}.Error()
+			release, err := s.hold(ctx)
+			if err != nil {
+				return interruptedOr(ctx, "refused"), err.Error()
 			}
+			defer release()
 			progress("removing")
 			note := freed(s.toolchainBytes(ctx, tool, version))
 			if ctx.Err() != nil {
@@ -206,8 +208,8 @@ func (s *Service) Remove(tool, version string) error {
 	})
 }
 
-// Clear queues clearing a present package cache. It is refused when it runs
-// if any runner is busy then.
+// Clear queues clearing a present package cache. When it runs it holds the
+// runners until it ends, and it is refused if the hold is.
 func (s *Service) Clear(name string) error {
 	c, ok := cacheByName(name)
 	if !ok {
@@ -220,9 +222,11 @@ func (s *Service) Clear(name string) error {
 	return s.enqueue(&op{
 		Operation: model.Operation{ID: id, Kind: "clear", Target: name},
 		run: func(ctx context.Context, progress func(string)) (string, string) {
-			if n := s.busy(); n > 0 {
-				return "refused", model.BusyError{N: n}.Error()
+			release, err := s.hold(ctx)
+			if err != nil {
+				return interruptedOr(ctx, "refused"), err.Error()
 			}
+			defer release()
 			own, err := lookupOwner(s.User)
 			if err != nil {
 				return "failed", err.Error()

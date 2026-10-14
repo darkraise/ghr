@@ -122,6 +122,11 @@ func TestQueuedUpdateWaitsUntilFree(t *testing.T) {
 			h.m.pruning = true
 			h.m.mu.Unlock()
 		}},
+		{"maintenance hold", func(t *testing.T, h *harness) {
+			h.m.mu.Lock()
+			h.m.held = 1
+			h.m.mu.Unlock()
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t)

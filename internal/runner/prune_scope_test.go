@@ -240,3 +240,33 @@ func TestCheckDiskRecordsFailedReadings(t *testing.T) {
 		t.Fatalf("step %+v", lp.Steps[1])
 	}
 }
+
+// An unused-volumes prune holds the runners: its idle runner is stopped
+// before it starts, and the hold ends with the prune.
+func TestUnusedVolumesHoldsTheRunnersUntilItEnds(t *testing.T) {
+	h := newHarness(t)
+	id := idleRunner(t, h)
+	entered, release := holdOn(t, h, "PruneUnusedVolumes")
+	if err := h.m.StartPruneScope(ScopeUnusedVolumes); err != nil {
+		t.Fatal(err)
+	}
+	waitOrFail(t, entered, "the volume prune")
+	if len(h.sd.stopped) != 1 || h.sd.stopped[0] != UnitPrefix+id || heldCount(h) != 1 {
+		t.Fatalf("stopped %v, held %d", h.sd.stopped, heldCount(h))
+	}
+	if err := h.m.StartPruneScope(ScopeUnusedVolumes); !errors.Is(err, ErrPruneRunning) || heldCount(h) != 1 {
+		t.Fatalf("second prune: %v, held %d", err, heldCount(h))
+	}
+	release()
+	h.m.Wait()
+	if heldCount(h) != 0 {
+		t.Fatalf("held %d after the prune", heldCount(h))
+	}
+	if err := h.m.StartPruneScope(ScopeDanglingImages); err != nil {
+		t.Fatal(err)
+	}
+	h.m.Wait()
+	if heldCount(h) != 0 {
+		t.Fatalf("a dangling-images prune held the runners")
+	}
+}

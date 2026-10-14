@@ -956,7 +956,7 @@ func (b *Backend) PruneScope(scope string) error {
 	switch {
 	case errors.Is(err, runner.ErrUnknownScope):
 		return api.BadRequest(err.Error())
-	case errors.As(err, &busy), errors.Is(err, runner.ErrPruneRunning), errors.Is(err, runner.ErrUpdateRunning):
+	case errors.As(err, &busy), errors.Is(err, runner.ErrHoldRefused), errors.Is(err, runner.ErrPruneRunning), errors.Is(err, runner.ErrUpdateRunning):
 		return api.Conflict(err.Error())
 	case errors.Is(err, runner.ErrClosed):
 		return &api.Error{Status: http.StatusServiceUnavailable, Msg: err.Error()}

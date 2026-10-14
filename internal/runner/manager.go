@@ -215,6 +215,8 @@ type Manager struct {
 	epoch          string
 	wg             sync.WaitGroup
 	upd            updateState // guarded by mu
+	held           int         // maintenance holds that keep runners from spawning; guarded by mu
+	spawning       bool        // a tick is spawning runners not yet in insts; guarded by mu
 	// fileMu serialises changes to the persisted update state, so a queue,
 	// a cancel, a warning and an update start never overwrite one another;
 	// take it before mu.
@@ -290,35 +292,30 @@ func (m *Manager) StartPrune() error { return m.StartPruneScope(ScopeStandard) }
 
 // StartPruneScope starts a manual prune of one scope in the background. The
 // caller returns before it finishes; Wait waits for it and Close interrupts
-// it. unused-volumes is refused while a runner is busy: a job's unnamed
-// volume is unreferenced between the steps that mount it.
+// it. unused-volumes holds the runners for maintenance until it ends, so it
+// is refused while a runner is busy: a job's unnamed volume is unreferenced
+// between the steps that mount it.
 func (m *Manager) StartPruneScope(scope string) error {
 	if !slices.Contains(Scopes, scope) {
 		return fmt.Errorf("%w %q", ErrUnknownScope, scope)
 	}
 	m.mu.Lock()
-	closed := m.closed
+	err := m.pruneRefusedLocked()
 	m.mu.Unlock()
-	if closed {
-		return ErrClosed
+	if err != nil {
+		return err
 	}
+	release := func() {}
 	if scope == ScopeUnusedVolumes {
-		if n := m.BusyCount(); n > 0 {
-			return model.BusyError{N: n}
+		if release, err = m.HoldForMaintenance(m.maintCtx); err != nil {
+			return err
 		}
 	}
 	m.mu.Lock()
-	if m.closed {
+	if err := m.pruneRefusedLocked(); err != nil {
 		m.mu.Unlock()
-		return ErrClosed
-	}
-	if m.upd.running {
-		m.mu.Unlock()
-		return ErrUpdateRunning
-	}
-	if m.pruning {
-		m.mu.Unlock()
-		return ErrPruneRunning
+		release()
+		return err
 	}
 	now := m.Now()
 	m.pruning = true
@@ -330,8 +327,23 @@ func (m *Manager) StartPruneScope(scope string) error {
 	m.mu.Unlock()
 	go func() {
 		defer m.wg.Done()
+		defer release()
 		m.forcedPrune(ctx, scope)
 	}()
+	return nil
+}
+
+// pruneRefusedLocked is why a manual prune cannot start now, nil when it
+// can; m.mu must be held.
+func (m *Manager) pruneRefusedLocked() error {
+	switch {
+	case m.closed:
+		return ErrClosed
+	case m.upd.running:
+		return ErrUpdateRunning
+	case m.pruning:
+		return ErrPruneRunning
+	}
 	return nil
 }
 
@@ -354,13 +366,8 @@ func (m *Manager) LastPrune() *model.LastPrune {
 	return &lp
 }
 
-// BusyCount is the number of runners with a job. It reads job.json first, so
-// a job the hook has just recorded counts before GitHub confirms it.
-// readJobFiles takes mu itself, so the count takes it afterwards.
-func (m *Manager) BusyCount() int {
-	m.readJobFiles()
-	m.mu.Lock()
-	defer m.mu.Unlock()
+// busyLocked counts the busy runners; m.mu must be held.
+func (m *Manager) busyLocked() int {
 	n := 0
 	for _, i := range m.insts {
 		if i.State == sched.Busy {
@@ -368,6 +375,70 @@ func (m *Manager) BusyCount() int {
 		}
 	}
 	return n
+}
+
+// ErrHoldRefused wraps why HoldForMaintenance could not keep the runners off
+// when no job is running.
+var ErrHoldRefused = errors.New("refused")
+
+// HoldForMaintenance keeps every runner off for maintenance that must not run
+// beside a job. It is refused while a runner is starting or busy or a runner
+// update runs; otherwise it stops every idle runner, and no runner spawns
+// until release is called. An idle runner that took a job before it
+// could be stopped, or that could not be stopped, refuses the hold. release
+// may be called more than once.
+//
+// job.json is read first, so a job the hook has just recorded counts before
+// GitHub confirms it; readJobFiles takes mu itself.
+func (m *Manager) HoldForMaintenance(ctx context.Context) (release func(), err error) {
+	m.readJobFiles()
+	m.mu.Lock()
+	starting := m.spawning
+	for _, i := range m.insts {
+		starting = starting || i.State == sched.Starting
+	}
+	switch {
+	case m.closed:
+		err = ErrClosed
+	case m.upd.running:
+		err = ErrUpdateRunning
+	case m.busyLocked() > 0:
+		err = model.BusyError{N: m.busyLocked()}
+	case starting:
+		err = fmt.Errorf("%w: a runner is starting", ErrHoldRefused)
+	}
+	if err != nil {
+		m.mu.Unlock()
+		return nil, err
+	}
+	m.held++
+	m.mu.Unlock()
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			m.mu.Lock()
+			m.held--
+			m.mu.Unlock()
+		})
+	}
+	for _, i := range m.snapshot() {
+		if i.State != sched.Idle {
+			continue
+		}
+		switch m.stopIdleRunner(ctx, i, m.Now()) {
+		case idleStopped:
+			continue
+		case idleBusy:
+			m.mu.Lock()
+			err = model.BusyError{N: m.busyLocked()}
+			m.mu.Unlock()
+		default:
+			err = fmt.Errorf("%w: idle runner %s could not be stopped", ErrHoldRefused, i.ID)
+		}
+		release()
+		return nil, err
+	}
+	return release, nil
 }
 
 // Close interrupts a running prune and refuses new ones; the daemon calls it

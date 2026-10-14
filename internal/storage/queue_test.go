@@ -1,15 +1,19 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/toolchain"
 )
 
@@ -17,9 +21,23 @@ func queueService(t *testing.T, tools *fakeTools) (*Service, *atomic.Int32) {
 	t.Helper()
 	var busy atomic.Int32
 	s := newService(t, tools, &fakeDisk{})
-	s.Busy = func() int { return int(busy.Load()) }
+	s.Hold = busyHold(&busy, nil)
 	startService(t, s)
 	return s, &busy
+}
+
+// busyHold refuses while busy is above zero, as the runner manager's hold
+// does while jobs run; released, when set, is called on each release.
+func busyHold(busy *atomic.Int32, released func()) func(context.Context) (func(), error) {
+	return func(context.Context) (func(), error) {
+		if n := int(busy.Load()); n > 0 {
+			return nil, model.BusyError{N: n}
+		}
+		if released == nil {
+			return func() {}, nil
+		}
+		return released, nil
+	}
 }
 
 func nodeTools() (*fakeTools, *fakeInstaller) {
@@ -169,7 +187,7 @@ func TestPopularPresetQueuesNineInstallsInOrder(t *testing.T) {
 	}
 }
 
-func TestRemoveAndClearCheckBusyWhenTheyRun(t *testing.T) {
+func TestRemoveAndClearHoldTheRunnersWhenTheyRun(t *testing.T) {
 	tools, node := nodeTools()
 	nodeDir := filepath.Join(t.TempDir(), "node", "20.18.0", "x64")
 	writeFile(t, filepath.Join(nodeDir, "bin", "node"), "x")
@@ -180,12 +198,20 @@ func TestRemoveAndClearCheckBusyWhenTheyRun(t *testing.T) {
 	// the measurer, which walks the caches, in Docker's df throughout.
 	disk := &fakeDisk{entered: make(chan struct{}, 10), gate: make(chan struct{})}
 	var busy atomic.Int32
+	// Each release notes what the operation had removed by then, so the hold
+	// is seen to last until the operation ends.
+	var releases []string
+	var relMu sync.Mutex
 	s := newService(t, tools, disk)
-	s.Busy = func() int { return int(busy.Load()) }
+	s.Hold = busyHold(&busy, func() {
+		relMu.Lock()
+		defer relMu.Unlock()
+		_, err := os.Stat(pkg(s))
+		releases = append(releases, strings.Join(node.removedList(), ",")+" "+strconv.FormatBool(err != nil))
+	})
 	startService(t, s)
 	recvOrFail(t, disk.entered, "the first measurement")
-	pkg := filepath.Join(s.Home, ".nuget", "packages", "pkg", "a.nupkg")
-	writeFile(t, pkg, "x")
+	writeFile(t, pkg(s), "x")
 	if err := s.Install("node", "22"); err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +233,7 @@ func TestRemoveAndClearCheckBusyWhenTheyRun(t *testing.T) {
 	if got := node.removedList(); len(got) != 0 {
 		t.Fatalf("a refused removal ran: %q", got)
 	}
-	if _, err := os.Stat(pkg); err != nil {
+	if _, err := os.Stat(pkg(s)); err != nil {
 		t.Fatalf("a refused clear deleted files: %v", err)
 	}
 	busy.Store(0)
@@ -234,7 +260,14 @@ func TestRemoveAndClearCheckBusyWhenTheyRun(t *testing.T) {
 	if got := entries(t, filepath.Join(s.Home, ".nuget", "packages")); len(got) != 0 {
 		t.Fatalf("not cleared: %v", got)
 	}
+	relMu.Lock()
+	defer relMu.Unlock()
+	if want := []string{"20.18.0 false", "20.18.0 true"}; !slices.Equal(releases, want) {
+		t.Fatalf("releases %q, want %q", releases, want)
+	}
 }
+
+func pkg(s *Service) string { return filepath.Join(s.Home, ".nuget", "packages", "pkg", "a.nupkg") }
 
 func TestCloseInterruptsTheRunningOperationAndDropsTheRest(t *testing.T) {
 	tools, node := nodeTools()
