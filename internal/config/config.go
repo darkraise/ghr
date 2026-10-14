@@ -48,6 +48,10 @@ const MaxLabelLength = 100
 // JIT configuration; the system labels count towards it.
 const maxJITLabels = 100
 
+// maxCPUQuotaPercent is 10,000 CPUs; systemd keeps the quota as a 32-bit
+// count of parts per million of a CPU.
+const maxCPUQuotaPercent = 1000000
+
 type Config struct {
 	Owner            string       `yaml:"owner" json:"owner"`
 	Mode             string       `yaml:"mode" json:"mode"`
@@ -274,6 +278,21 @@ func labelFault(l string) string {
 		}
 	}
 	return ""
+}
+
+// memoryFitsUint64 reports whether a memory_max that memoryRe accepted, bytes
+// with an optional K/M/G/T suffix, is below 2^64 bytes.
+func memoryFitsUint64(s string) bool {
+	if strings.HasSuffix(s, "%") || s == "infinity" {
+		return true
+	}
+	mult := uint64(1)
+	if i := strings.IndexAny(s, "KMGT"); i >= 0 {
+		mult = uint64(1) << (10 * uint(strings.IndexByte("KMGT", s[i])+1))
+		s = s[:i]
+	}
+	v, err := strconv.ParseUint(s, 10, 64)
+	return err == nil && v <= math.MaxUint64/mult
 }
 
 // labelProblem describes the first label in the list that is not valid or
@@ -510,9 +529,13 @@ func (c *Config) Validate() ([]string, error) {
 	}
 	if !memoryRe.MatchString(c.RunnerLimits.MemoryMax) {
 		errs = append(errs, "runner_limits.memory_max must be bytes with an optional K/M/G/T suffix (6G), a percentage (50%) or infinity")
+	} else if !memoryFitsUint64(c.RunnerLimits.MemoryMax) {
+		errs = append(errs, "runner_limits.memory_max must fit in 64 bits (under 16 EiB)")
 	}
 	if !cpuQuotaRe.MatchString(c.RunnerLimits.CPUQuota) {
 		errs = append(errs, "runner_limits.cpu_quota must be a positive percentage such as 200%")
+	} else if n, err := strconv.ParseUint(strings.TrimSuffix(c.RunnerLimits.CPUQuota, "%"), 10, 64); err != nil || n > maxCPUQuotaPercent {
+		errs = append(errs, fmt.Sprintf("runner_limits.cpu_quota must be at most %d%%", maxCPUQuotaPercent))
 	}
 	seen := map[string]bool{}
 	for _, r := range c.Repos {

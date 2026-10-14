@@ -105,6 +105,8 @@ func TestValidateErrors(t *testing.T) {
 		"darkmem: a repo being removed must stay paused":       func(c *Config) { c.Repos[1].Removing = true },
 		"runner_limits.memory_max":                             func(c *Config) { c.RunnerLimits.MemoryMax = "6 gigs" },
 		"runner_limits.cpu_quota":                              func(c *Config) { c.RunnerLimits.CPUQuota = "2" },
+		"runner_limits.memory_max must fit in 64 bits":         func(c *Config) { c.RunnerLimits.MemoryMax = "999999999999999999999999G" },
+		"runner_limits.cpu_quota must be at most 1000000%":     func(c *Config) { c.RunnerLimits.CPUQuota = "99999999999%" },
 		"darkmem: 101 labels; GitHub allows at most 100":       func(c *Config) { c.Labels = numberedLabels(98) },
 		"poll_interval must be >= 5s":                          func(c *Config) { c.PollInterval = Duration(time.Millisecond) },
 		"history_retention must be >= 1d":                      func(c *Config) { c.HistoryRetention = Duration(time.Second) },
@@ -295,6 +297,8 @@ func TestValidRunnerLimits(t *testing.T) {
 		{MemoryMax: "1073741824", CPUQuota: "100%"},
 		{MemoryMax: "50%", CPUQuota: "400%"},
 		{MemoryMax: "infinity", CPUQuota: "1%"},
+		{MemoryMax: "16777215T", CPUQuota: "1000000%"},
+		{MemoryMax: "18446744073709551615", CPUQuota: "200%"},
 	} {
 		c, _, _ := Parse([]byte(sample))
 		c.RunnerLimits = l
@@ -310,6 +314,11 @@ func TestValidRunnerLimits(t *testing.T) {
 		{MemoryMax: "6G", CPUQuota: ""},
 		{MemoryMax: "6G", CPUQuota: "0%"},
 		{MemoryMax: "6G", CPUQuota: "2.5"},
+		{MemoryMax: "999999999999999999999999G", CPUQuota: "200%"},
+		{MemoryMax: "18446744073709551616", CPUQuota: "200%"},
+		{MemoryMax: "16777216T", CPUQuota: "200%"},
+		{MemoryMax: "6G", CPUQuota: "99999999999%"},
+		{MemoryMax: "6G", CPUQuota: "1000001%"},
 	} {
 		c, _, _ := Parse([]byte(sample))
 		c.RunnerLimits = l
