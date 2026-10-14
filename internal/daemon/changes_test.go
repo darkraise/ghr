@@ -122,7 +122,7 @@ func TestStateChangesReachTheirTopics(t *testing.T) {
 	}
 }
 
-func TestOnlyASampleChangesTheMetricsTopic(t *testing.T) {
+func TestASampleMovesTheMetricsTopicAndAnIdleCheckDoesNot(t *testing.T) {
 	b, _, _ := newBackend(t)
 	b.Sampler = metrics.NewSampler(func() metrics.Snapshot { return metrics.Snapshot{} }, func() int { return 0 })
 	prev := b.fingerprints()
