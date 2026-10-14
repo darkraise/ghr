@@ -7,8 +7,8 @@
 # do, and the fork writes those. So a refusal kills the runner's worker
 # process, which spawns this script directly and is its parent; the exit 1
 # only covers a kill that failed. This is read from the actions/runner source
-# (JobExtension, StepsRunner, ScriptHandler), not seen with a real fork pull
-# request; that check against a test repository is still due before release.
+# (JobExtension, StepsRunner, ScriptHandler); a real fork pull request against
+# a test repository ended before any step ran, `if: always()` steps included.
 # A pull-request-type event whose payload cannot be read is refused too.
 case "${GITHUB_EVENT_NAME:-}" in
   pull_request|pull_request_target|pull_request_review|pull_request_review_comment|workflow_run)
