@@ -82,6 +82,19 @@ describe("Run page", () => {
     await waitFor(() => expect(runCalls(calls).some((c) => c.path === "/api/actions/darkmem/runs/102" && c.search === "?attempt=1")).toBe(true))
   })
 
+  it("opens the repository's runs from the breadcrumb", async () => {
+    mockApi(runRoutes())
+    const { user, router } = renderApp("/actions/darkmem/runs/102")
+    await screen.findByRole("heading", { name: "Fix the cache key", level: 1 })
+    const crumb = within(screen.getByRole("navigation", { name: /breadcrumb/i })).getByRole("link", { name: "darkmem" })
+    expect(crumb).toHaveAttribute("href", "/actions?repo=darkmem")
+    const build = vi.spyOn(router, "buildLocation")
+    await user.click(crumb)
+    await waitFor(() => expect(router.state.location.pathname).toBe("/actions"))
+    expect(router.state.location.search).toEqual({ repo: "darkmem" })
+    expect(build).toHaveBeenCalledWith(expect.objectContaining({ to: "/actions", search: { repo: "darkmem" } }))
+  })
+
   it.each([
     ["a run ID that is not a number", "/actions/darkmem/runs/abc"],
     ["an attempt of zero", "/actions/darkmem/runs/102?attempt=0"],
