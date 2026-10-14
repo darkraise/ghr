@@ -687,7 +687,7 @@ func TestWebBlockRoundTrips(t *testing.T) {
 }
 
 func TestTrustedProxyPrefixes(t *testing.T) {
-	w := Web{TrustedProxies: []string{"10.0.0.2", "10.1.2.3/16", "::ffff:10.0.0.3", "2001:db8::1", "fe80::1%eth0", "2001:db8:1::/48", "::ffff:10.2.3.4/112", "::ffff:10.0.0.0/128"}}
+	w := Web{TrustedProxies: []string{"10.0.0.2", "10.1.2.3/16", "::ffff:10.0.0.3", "2001:db8::1", "fe80::1%eth0", "2001:db8:1::/48", "::ffff:10.2.3.4/112", "::ffff:10.0.0.0/128", "::ffff:0:0/96"}}
 	want := []netip.Prefix{
 		netip.MustParsePrefix("10.0.0.2/32"),
 		netip.MustParsePrefix("10.1.0.0/16"),
@@ -697,6 +697,7 @@ func TestTrustedProxyPrefixes(t *testing.T) {
 		netip.MustParsePrefix("2001:db8:1::/48"),
 		netip.MustParsePrefix("10.2.0.0/16"),
 		netip.MustParsePrefix("10.0.0.0/32"),
+		netip.MustParsePrefix("0.0.0.0/0"),
 	}
 	if got := w.TrustedProxyPrefixes(); !slices.Equal(got, want) {
 		t.Fatalf("prefixes %v, want %v", got, want)

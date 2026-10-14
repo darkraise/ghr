@@ -620,7 +620,7 @@ func (c *Config) Validate() ([]string, error) {
 	}
 	for _, p := range c.Web.TrustedProxies {
 		if _, ok := proxyPrefix(p); !ok {
-			errs = append(errs, "web.trusted_proxies entries must be IP addresses or CIDR prefixes such as 10.0.0.2 or 10.0.0.0/24")
+			errs = append(errs, "web.trusted_proxies entries must be IP addresses or CIDR prefixes such as 10.0.0.2 or 10.0.0.0/24, and an IPv4-mapped prefix needs at least 96 bits")
 		}
 	}
 	errs = append(errs, c.GitHubStorage.validate()...)
