@@ -236,6 +236,13 @@ describe("repository page", () => {
     expect(screen.getByRole("link", { name: "Go to Repositories" })).toHaveAttribute("href", "/repositories")
   })
 
+  it("moves to the configured spelling of a name written in another case", async () => {
+    mockApi(routes())
+    const { router } = renderApp("/repositories/DarkMem/settings")
+    await waitFor(() => expect(router.state.location.pathname).toBe("/repositories/darkmem/settings"))
+    expect(await screen.findByLabelText("Max")).toHaveValue("2")
+  })
+
   it("is reached from the Repositories page", async () => {
     mockApi(routes())
     const { user, router } = renderApp("/repositories")

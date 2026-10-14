@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { Link, useParams } from "@tanstack/react-router"
+import { Link, useNavigate, useParams } from "@tanstack/react-router"
 import { Button } from "darkraise-ui/components/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "darkraise-ui/components/dropdown-menu"
 import { toast } from "darkraise-ui/components/sonner"
@@ -8,7 +8,7 @@ import { Switch } from "darkraise-ui/components/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "darkraise-ui/components/tooltip"
 import { PageHeader } from "darkraise-ui/layout"
 import { Ellipsis } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, readConfig, useConfig, useStatus } from "@/api/hooks"
 import type { Config, RepoConfig, RepoPatch, RepoStatus } from "@/api/types"
@@ -154,9 +154,10 @@ export function RepositoryPage() {
   return <RepositoryForm key={name} name={name} section={section} />
 }
 
-function RepositoryForm({ name, section }: { name: string; section: string }) {
+function RepositoryForm({ name: urlName, section }: { name: string; section: string }) {
   const status = useStatus()
   const config = useConfig()
+  const navigate = useNavigate()
   const now = useNow()
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState<Values>({})
@@ -165,7 +166,16 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
   const [question, setQuestion] = useState<{ confirm: Confirm; cancel: () => void } | null>(null)
 
   const cfg = config.data
-  const repoCfg = cfg?.repos?.find((r) => r.name === name)
+  const repoCfg = cfg?.repos?.find((r) => r.name.toLowerCase() === urlName.toLowerCase())
+  // The configured spelling keys the PATCH, so the page uses it whatever case the URL had.
+  const name = repoCfg?.name ?? urlName
+
+  useEffect(() => {
+    if (name === urlName) return
+    if (section === "") void navigate({ to: "/repositories/$name", params: { name }, search: true, replace: true })
+    else void navigate({ to: "/repositories/$name/$section", params: { name, section }, search: true, replace: true })
+  }, [name, urlName, section, navigate])
+
   const repoStatus = status.data?.repos.find((r) => r.name === name)
   const loaded = repoValues(repoCfg)
   const values: Values = { ...loaded, ...draft }
