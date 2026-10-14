@@ -308,11 +308,18 @@ wait_ready() {
 
 # A first install turns the web UI on (config.example.yaml); until a password
 # is set, the browser asks for the setup code print_next shows. The marker stays
-# until a password is set or the owner skipped the prompt, so a re-run after a
-# failed first install, or one without a terminal, asks again.
+# until a password is set (here or in the browser) or the owner skipped the
+# prompt, so a re-run after a failed first install, or one without a terminal,
+# asks again.
 set_web_password() {
   local pending="$STATE_DIR/web-password-pending" pw="${GHR_WEB_PASSWORD:-}" out
   [ -f "$pending" ] || return 0
+  # A password set in the browser since an earlier run is the owner's: the
+  # marker is stale, and a prompt here would replace that password.
+  if ! out=$(timeout 10 ghr code 2>&1) && [[ "$out" == *"a web password is already set"* ]]; then
+    rm -f "$pending"
+    return 0
+  fi
   warn_web_exposed "$(setup_field web)"
   if [ -z "$pw" ] && stdin_is_tty; then
     # Only a line that was read and is empty is a skip. End of input or a failed

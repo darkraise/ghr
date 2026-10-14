@@ -652,10 +652,18 @@ rm -f "$pending"
 check "h: an existing config.yaml does not" absent "$pending"
 
 # `ghr setup` answers only the web field, from the mark file web (absent: no answer).
+# `ghr code` fails like the real one when the mark file password-set exists (a
+# password is set) or daemon-down exists (the daemon does not answer).
 web_ghr() {
   ghr() {
     if [ "$1" = setup ]; then
       [ ! -f "$MARK_DIR/web" ] || echo "web: $(cat "$MARK_DIR/web")"
+      return 0
+    fi
+    if [ "$1" = code ]; then
+      [ ! -f "$MARK_DIR/daemon-down" ] || { echo "ghr: cannot reach the daemon" >&2; return 1; }
+      [ ! -f "$MARK_DIR/password-set" ] || { echo "ghr: a web password is already set" >&2; return 1; }
+      echo ABCDE-FGHJK-MNPQR-STVWX
       return 0
     fi
     echo "$*" >> "$MARK_DIR/ghr-calls"
@@ -721,6 +729,28 @@ for ending in "end of input:/dev/null" "closed input:-" "a partial line:partial"
   check "h: ${ending%%:*} at the prompt keeps the marker" [ -f "$pending" ]
   check "h: ${ending%%:*} at the prompt still leaves the UI to print_next" contains "$out" "unclaimed=1"
 done
+
+# A password set in the browser since the first install is not replaced, and the
+# marker that asked for one is cleared, at a terminal or through GHR_WEB_PASSWORD.
+touch "$pending" "$MARK_DIR/password-set"
+rm -f "$MARK_DIR/ghr-calls" "$MARK_DIR/ghr-stdin"
+out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
+check "h: a password already set is not replaced from GHR_WEB_PASSWORD" absent "$MARK_DIR/ghr-calls"
+check "h: and its marker is cleared" absent "$pending"
+check "h: and nothing is left for print_next" [ "$out" = "unclaimed=" ]
+touch "$pending"
+out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run web_password) <<<'a long secret' 2>&1)
+check "h: a password already set is not asked for at a terminal" absent "$MARK_DIR/ghr-calls"
+check "h: nor read from it" lacks "$out" "Web UI password"
+check "h: and the marker is cleared at a terminal too" absent "$pending"
+check "h: and nothing is left for print_next at a terminal" [ "$out" = "unclaimed=" ]
+rm "$MARK_DIR/password-set"
+touch "$pending" "$MARK_DIR/daemon-down"
+rm -f "$MARK_DIR/ghr-calls"
+out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
+check "h: a daemon that does not answer ghr code does not stop the password being set" [ "$(cat "$MARK_DIR/ghr-calls")" = "web set-password" ]
+check "h: and that password clears the marker" absent "$pending"
+rm -f "$MARK_DIR/daemon-down" "$MARK_DIR/ghr-calls"
 
 # The web UI is plain HTTP; on a wildcard address every network the host is on
 # can read what a browser sends, so the installer says so while setup is open.
