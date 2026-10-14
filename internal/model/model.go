@@ -25,6 +25,9 @@ type Status struct {
 	Maintenance  MaintenanceStatus `json:"maintenance"`
 	RunnerUpdate RunnerUpdate      `json:"runner_update"`
 	Jobs         []JobStatus       `json:"jobs,omitempty"`
+	// GhrUpdate is omitted only when it is empty, as in a status built
+	// without the daemon, such as the web fixtures; the daemon always fills it.
+	GhrUpdate GhrUpdate `json:"ghr_update,omitzero"`
 	// WebSetupRequired is true while the web UI listens with no password set.
 	WebSetupRequired bool `json:"web_setup_required"`
 	// Unconfigured is true while ghr has no owner or token; an older daemon
@@ -115,6 +118,27 @@ type JobStatus struct {
 	LastFinish  *time.Time `json:"last_finish,omitempty"`
 	LastError   string     `json:"last_error,omitempty"`
 	Next        *time.Time `json:"next,omitempty"`
+}
+
+// GhrUpdate is ghr's own release state: the last check and the install.
+type GhrUpdate struct {
+	Installed string `json:"installed"`
+	// Development is true when the running version is not a release tag;
+	// no install is offered.
+	Development bool `json:"development,omitempty"`
+	// Newer is true when Latest is a newer release than Installed.
+	Newer      bool       `json:"newer,omitempty"`
+	Latest     string     `json:"latest,omitempty"`
+	CheckedAt  *time.Time `json:"checked_at,omitempty"`
+	CheckError string     `json:"check_error,omitempty"`
+	Installing bool       `json:"installing,omitempty"`
+	// Step is the running install's step: download, verify, smoke, waiting,
+	// swap or restart.
+	Step string `json:"step,omitempty"`
+	// RestartPending is the tag swapped in that the daemon does not run yet.
+	RestartPending string `json:"restart_pending,omitempty"`
+	LastOutcome    string `json:"last_outcome,omitempty"` // "ok", "failed", "cancelled"
+	LastError      string `json:"last_error,omitempty"`
 }
 
 type RepoStatus struct {

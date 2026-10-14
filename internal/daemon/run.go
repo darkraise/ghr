@@ -29,6 +29,7 @@ import (
 	"github.com/darkraise/ghr/internal/metrics"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/runner"
+	"github.com/darkraise/ghr/internal/selfupdate"
 	"github.com/darkraise/ghr/internal/storage"
 	"github.com/darkraise/ghr/internal/system"
 	"github.com/darkraise/ghr/internal/toolchain"
@@ -71,6 +72,12 @@ type Options struct {
 	// fallback when web.listen fails to bind; empty records nothing and
 	// offers no fallback.
 	WebListenPath string
+	// Version is the running ghr's version, which the ghr update check
+	// compares releases with.
+	Version string
+	// ReleaseBase is the GitHub repository ghr's own releases come from;
+	// empty turns the ghr update check off.
+	ReleaseBase string
 
 	// Test seams: zero values use GitHub, systemd, Docker, the host, an HTTP
 	// download and SIGHUP.
@@ -102,6 +109,7 @@ func DefaultOptions() Options {
 		SelfUnit:              selfUnitCheck(system.Exec),
 		Restart:               restartUnit(system.Exec),
 		WebListenPath:         "/var/lib/ghr/web-listen",
+		ReleaseBase:           selfupdate.DefaultBase,
 		Paths: runner.Paths{
 			Dist:        "/opt/ghr/dist/current",
 			Instances:   "/var/lib/ghr/instances",
@@ -282,6 +290,8 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 		WebSetupRequired: webSetupRequired,
 		SetupPending:     func() bool { return exists(o.SetupPendingPath) },
 		Changes:          hub,
+		Version:          o.Version,
+		ReleaseBase:      o.ReleaseBase,
 		Jobs:             reg,
 		Wake: func() {
 			select {
@@ -292,6 +302,9 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 	}
 	reg.Register(config.JobRunnerUpdateCheck, b.Wake)
 	reg.Register(config.JobPrune, b.Wake)
+	if o.ReleaseBase != "" {
+		b.StartGhrChecks()
+	}
 	hub.SetSources(b.fingerprints, b.staleActivity)
 	return &running{m: m, space: space, ghs: ghs, b: b, sampled: sampled, wake: wake}, nil
 }
@@ -527,6 +540,9 @@ func Run(ctx context.Context, o Options) error {
 		select {
 		case <-ctx.Done():
 			teardown()
+			// Before the manager closes: m.Close ends a running prune, and a
+			// ghr install waiting for it must not take that as its cue to swap.
+			rt.b.StopBackground()
 			// Shutdown starts its hooks without waiting for them, and no
 			// fingerprint may read the manager once it closes.
 			hub.Close()
@@ -540,6 +556,7 @@ func Run(ctx context.Context, o Options) error {
 				m.Wait()
 				rt.space.Wait()
 				rt.ghs.Wait()
+				rt.b.Wait()
 				close(done)
 			}()
 			select {

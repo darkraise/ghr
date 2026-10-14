@@ -134,7 +134,14 @@ type Backend struct {
 	// Changes is the hub GET /changes subscribes to; nil until the daemon has started.
 	Changes *changes.Hub
 	// Jobs schedules the background tasks; nil in tests that do not use it.
-	Jobs   *jobs.Registry
+	Jobs *jobs.Registry
+	// Version is the running ghr's version, as ghr version prints it.
+	Version string
+	// ReleaseBase is the GitHub repository ghr's releases come from; empty
+	// turns the ghr update check off.
+	ReleaseBase string
+	// HTTP makes the ghr release check's request; nil means a plain client.
+	HTTP   *http.Client
 	flags  setupFlagCache
 	checks labelChecks
 
@@ -161,6 +168,16 @@ type Backend struct {
 
 	restartMu     sync.Mutex
 	restartFailed string
+
+	ghrMu sync.Mutex
+	ghr   ghrState
+
+	// bgCtx ends the daemon's own goroutines, the ghr update check and a ghr
+	// install; bg counts them.
+	bgOnce   sync.Once
+	bgCtx    context.Context
+	bgCancel context.CancelFunc
+	bg       sync.WaitGroup
 }
 
 var _ api.Backend = (*Backend)(nil)
@@ -307,6 +324,7 @@ func (b *Backend) Status() model.Status {
 // GET /status and the status topic's fingerprint alike.
 func (b *Backend) daemonStatus(st *model.Status) {
 	st.Jobs = b.Jobs.Snapshot()
+	st.GhrUpdate = b.ghrStatus()
 }
 
 // RunJob runs a background task now. The runner check needs GitHub, so it is
