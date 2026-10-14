@@ -278,6 +278,39 @@ func TestJobLogMissesAreBounded(t *testing.T) {
 	}
 }
 
+// A parsed line costs memory beyond its bytes in the raw log, so a log of
+// many short lines is charged more than a log of one long line of the same
+// size.
+func TestJobLogParsedCacheChargesForLines(t *testing.T) {
+	short := make([]string, 40)
+	for i := range short {
+		short[i] = "x"
+	}
+	raw := int64(len(logLines(short...)))
+	long := strings.Repeat("y", int(raw)-len(logLines("")))
+	setParsedLogBytes(t, raw+10*logLineOverhead)
+	b, _, gh := newBackend(t)
+	logJobOf(gh, 1, "short lines", short...)
+	logJobOf(gh, 2, "one long line", long)
+	if int64(len(logLines(long))) != raw {
+		t.Fatalf("raw sizes differ: %d and %d", len(logLines(long)), raw)
+	}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		id        int64
+		downloads int
+	}{{1, 2}, {2, 1}} {
+		for range 2 {
+			if _, err := b.JobLog(ctx, "darkmem", tc.id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n := gh.count(fmt.Sprintf("JobLog darkmem %d", tc.id)); n != tc.downloads {
+			t.Errorf("job %d downloaded %d times, want %d", tc.id, n, tc.downloads)
+		}
+	}
+}
+
 func TestJobLogCallersShareOneDownload(t *testing.T) {
 	b, _, gh := newBackend(t)
 	logJobOf(gh, 1002, "Backend tests", "x")

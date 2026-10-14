@@ -28,11 +28,16 @@ const (
 	// is therefore kept logSettleTTL, not logRetryTTL.
 	logSettle    = 2 * time.Minute
 	logSettleTTL = 15 * time.Second
+	// logLineOverhead is what a parsed line costs beyond its bytes in the
+	// raw log: a model.LogLine is 40 bytes, and the slices holding them
+	// grow by doubling.
+	logLineOverhead = 64
 )
 
 var (
-	// parsedLogBytes bounds the parsed-log cache by the raw logs' total size;
-	// tests shrink it before the cache is first used.
+	// parsedLogBytes bounds the parsed-log cache by the raw logs' total size
+	// plus a charge per parsed line; tests shrink it before the cache is
+	// first used.
 	parsedLogBytes int64 = 32 << 20
 	logDeadline          = 60 * time.Second
 	// logRequestWindow bounds each log request from its start (job read,
@@ -215,7 +220,11 @@ func (b *Backend) readLog(j logJob, started chan struct{}, queueWait time.Durati
 	case err == nil:
 		steps := joblog.Parse(data, j.steps)
 		items, omitted := joblog.Annotations(j.id, j.name, steps)
-		return logResult{outcome: logParsed, log: model.JobLog{JobID: j.id, Steps: steps}, notes: jobNotes{items: items, omitted: omitted}}, int64(len(data))
+		size := int64(len(data))
+		for _, st := range steps {
+			size += int64(len(st.Lines)) * logLineOverhead
+		}
+		return logResult{outcome: logParsed, log: model.JobLog{JobID: j.id, Steps: steps}, notes: jobNotes{items: items, omitted: omitted}}, size
 	case errors.Is(err, github.ErrTooLarge):
 		return logResult{outcome: logTooLarge}, 0
 	case github.IsKind(err, github.ErrGone):
