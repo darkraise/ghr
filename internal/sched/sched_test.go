@@ -2,6 +2,7 @@ package sched
 
 import (
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -94,6 +95,39 @@ func TestPlan(t *testing.T) {
 			got := repos(Plan(tc.cfg, tc.insts, tc.demand, t0))
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlanAllCapsTotalRunners(t *testing.T) {
+	var queued []QueuedJob
+	for i := 0; i < 300; i++ {
+		queued = append(queued, QueuedJob{Repo: "a", ID: int64(i + 1), CreatedAt: t0.Add(-time.Duration(i+1) * time.Minute)})
+	}
+	live := func(n int) []Instance {
+		var out []Instance
+		for i := 0; i < n; i++ {
+			out = append(out, Instance{ID: strconv.Itoa(i), Repo: "a", State: Busy, StateSince: t0.Add(-time.Hour), JobConfirmed: true})
+		}
+		return out
+	}
+	tests := []struct {
+		name  string
+		cfg   *config.Config
+		insts []Instance
+		want  int
+	}{
+		{"no max, 300 queued", cfg("all", 2, config.Repo{Name: "a"}), nil, config.MaxRunners},
+		{"live runners count toward the cap", cfg("all", 2, config.Repo{Name: "a"}), live(40), config.MaxRunners - 40},
+		{"at the cap", cfg("all", 2, config.Repo{Name: "a"}), live(config.MaxRunners), 0},
+		{"warm runners are capped too", cfg("all", 2, config.Repo{Name: "a", Warm: ptr(config.MaxRunners)}, config.Repo{Name: "b", Warm: ptr(5)}), nil, config.MaxRunners},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := len(Plan(tc.cfg, tc.insts, Demand{"a": queued}, t0))
+			if got != tc.want {
+				t.Fatalf("planned %d spawns, want %d", got, tc.want)
 			}
 		})
 	}

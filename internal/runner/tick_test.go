@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -179,6 +180,24 @@ func TestNotFoundIsPerRepoWithBackoff(t *testing.T) {
 }
 
 // In all mode a repo in an error state gets no warm runner until a poll succeeds.
+func TestSpawnsPerTickAreCapped(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.Mode = config.ModeAll
+	warm := 30
+	h.cfg.Repos[1].Warm = &warm
+	h.ids = nil
+	for i := 0; i < 40; i++ {
+		h.ids = append(h.ids, fmt.Sprintf("%06x", i+1))
+	}
+	for tick, want := range []int{maxSpawnsPerTick, 2 * maxSpawnsPerTick, 3 * maxSpawnsPerTick, 3*maxSpawnsPerTick + 1} {
+		h.m.Tick(context.Background())
+		if got := len(h.sd.started); got != want {
+			t.Fatalf("tick %d: started %d units, want %d", tick+1, got, want)
+		}
+		h.now = h.now.Add(10 * time.Second)
+	}
+}
+
 func TestAllModeSkipsWarmSpawnsForFailingRepo(t *testing.T) {
 	for _, err := range []error{
 		&github.APIError{Status: 404, Kind: github.ErrNotFound},

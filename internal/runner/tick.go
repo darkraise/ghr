@@ -255,12 +255,16 @@ func (m *Manager) confirm(id string, j github.Job, now time.Time) {
 	i.Job = &model.JobInfo{RunID: j.RunID, RunNumber: runNumber, Workflow: j.WorkflowName, Name: j.Name, HTMLURL: j.HTMLURL, StartedAt: started}
 }
 
-// spawnPlanned spawns what sched.Plan decides, nothing while a runner update
-// runs or maintenance holds the runners. It plans from planConfig, so a
-// blocked repo gets nothing. Repos that are unread, in an error state, or
-// waiting after a failed start, are left out of planning. Spawning stops as
-// soon as the live config differs from the one the plan used, so a pause or
-// cap change made during polling is never overridden.
+// maxSpawnsPerTick bounds one tick's spawns, so a burst of queued jobs does not
+// hold up reaping and polling for the minutes that many JIT registrations take.
+const maxSpawnsPerTick = 10
+
+// spawnPlanned spawns what sched.Plan decides, at most maxSpawnsPerTick of it,
+// and nothing while a runner update runs or maintenance holds the runners. It
+// plans from planConfig, so a blocked repo gets nothing. Repos that are unread,
+// in an error state, or waiting after a failed start, are left out of planning.
+// Spawning stops as soon as the live config differs from the one the plan used,
+// so a pause or cap change made during polling is never overridden.
 func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time.Time) {
 	plan := m.planConfig(cfg)
 	var read []config.Repo
@@ -286,6 +290,9 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 	spawns := sched.Plan(&planCfg, m.schedInstances(cfg), demand, now)
 	if len(spawns) == 0 {
 		return
+	}
+	if len(spawns) > maxSpawnsPerTick {
+		spawns = spawns[:maxSpawnsPerTick]
 	}
 	// A runner is in insts only once its unit has started, so a hold taken
 	// meanwhile would not see it; spawning refuses holds until these end.

@@ -40,7 +40,7 @@ Durations take `s`, `m`, `h` and `d` suffixes.
 ## Scheduling modes
 
 - `queue`: at most `global_max` jobs at once across repositories, and at most each repository's `max` (default 1). Further jobs wait as "Queued" in GitHub until a slot frees.
-- `all`: no global cap, and repositories are unlimited unless `max` is set. Each repository keeps `warm` idle runners ready (default 1), so a job starts without waiting for a runner to register.
+- `all`: no `global_max`; ghr never runs more than 99 runners in total, and starts at most 10 per poll. Repositories are unlimited within that unless `max` is set. Each repository keeps `warm` idle runners ready (default 1), so a job starts without waiting for a runner to register.
 
 ## Command line
 
