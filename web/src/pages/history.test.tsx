@@ -116,6 +116,52 @@ describe("History page", () => {
     expect(await screen.findByText("#7")).toBeInTheDocument()
   })
 
+  it("keeps the rows while the window rolls to the next bucket", { timeout: 10_000 }, async () => {
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    let rolled = false
+    mockApi(
+      authedRoutes({
+        "GET /api/activity": () => ({ ...fixtures.activityBuckets, from: rolled ? "2026-10-02T15:00:00Z" : fixtures.activityBuckets.from }),
+        "GET /api/history": async ({ url }: { url: URL }) => {
+          if (url.searchParams.get("since") === "2026-10-02T15:00:00Z") await gate
+          return fixtures.history
+        },
+      }),
+    )
+    const { queryClient } = renderApp("/history")
+    await screen.findByText("#7")
+    rolled = true
+    await queryClient.invalidateQueries({ queryKey: ["activity"] })
+    await waitFor(() => expect(queryClient.isFetching({ queryKey: ["history"] })).toBe(1))
+    expect(screen.getByText("#7")).toBeInTheDocument()
+    expect(screen.queryByText("Loading")).toBeNull()
+    release()
+    await waitFor(() => expect(queryClient.isFetching({ queryKey: ["history"] })).toBe(0))
+    expect(screen.getByText("#7")).toBeInTheDocument()
+  })
+
+  it("shows the spinner when the repository filter changes", { timeout: 10_000 }, async () => {
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    mockApi(
+      authedRoutes({
+        "GET /api/history": async ({ url }: { url: URL }) => {
+          if (url.searchParams.get("repo") === "darkmem") await gate
+          return fixtures.history
+        },
+      }),
+    )
+    const { user } = renderApp("/history")
+    await screen.findByText("#7")
+    await user.click(screen.getByRole("combobox", { name: "Repository" }))
+    await user.click(await screen.findByRole("option", { name: "darkmem" }))
+    await waitFor(() => expect(screen.queryByText("#7")).toBeNull())
+    expect(within(screen.getByRole("region", { name: "Finished jobs" })).getByText("Loading")).toBeInTheDocument()
+    release()
+    expect(await screen.findByText("#7")).toBeInTheDocument()
+  })
+
   it("says the table waits for the chart when the chart cannot load", async () => {
     mockApi(authedRoutes({ "GET /api/activity": () => json({ error: "activity unavailable" }, 500) }))
     renderApp("/history")

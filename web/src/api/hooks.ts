@@ -164,7 +164,8 @@ export function useActivity(window: ActivityWindow, repo = "") {
 export const HISTORY_LIMIT = 500
 
 // History passes the from of its activity response as since, so the table
-// and the chart cover one span; the query waits until it is known.
+// and the chart cover one span; the query waits until it is known. Rows are
+// kept across a roll of that span, never across a change of filter.
 export function useHistory(repo: string, conclusion: string, since: string | undefined) {
   const live = useLive()
   return useQuery({
@@ -172,7 +173,8 @@ export function useHistory(repo: string, conclusion: string, since: string | und
     queryFn: ({ signal }) => api.history(repo, conclusion, since ?? "", HISTORY_LIMIT, signal),
     enabled: since !== undefined,
     refetchInterval: livePoll(live, POLL_SLOW),
-    placeholderData: keepPreviousData,
+    placeholderData: (prev, prevQuery) =>
+      since !== undefined && prevQuery?.queryKey[1] === repo && prevQuery.queryKey[2] === conclusion ? prev : undefined,
   })
 }
 

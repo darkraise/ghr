@@ -138,9 +138,9 @@ export function HistoryPage() {
   // response and starts at its from.
   const since = activity.data && !activity.isPlaceholderData ? activity.data.from : undefined
   const history = useHistory(repo, result, since)
-  // Rows kept from the previous filter while the next ones load would sit
-  // under the wrong controls.
-  const settled = history.isPlaceholderData ? undefined : history.data
+  // A placeholder only ever carries the current filter's rows from the
+  // previous span, so it is safe to show.
+  const settled = history.data
   const wide = useMediaQuery("(min-width: 768px)")
   const now = useNow()
   const [ref, width] = useWidth<HTMLDivElement>(960)
