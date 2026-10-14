@@ -202,6 +202,38 @@ describe("setup wizard", () => {
     expect(screen.getByRole("heading", { name: "Settings", level: 2 })).toBeInTheDocument()
   })
 
+  it("stays on the step when Stay is chosen in a later prompt while the dialog's save is pending", async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const { calls } = mockApi(
+      authedRoutes({
+        "GET /api/setup": { ...base, configured: true, owner: "DarkRaise" },
+        "GET /api/storage": fixtures.storage,
+        "PATCH /api/config": async () => {
+          await gate
+          return noContent()
+        },
+      }),
+    )
+    const { user } = renderApp("/setup")
+    await user.click(await screen.findByRole("button", { name: "Next" }))
+    const max = await screen.findByLabelText("Max concurrent runners")
+    await user.clear(max)
+    await user.type(max, "3")
+    await user.click(screen.getByRole("button", { name: "Next" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    await user.click(screen.getByRole("button", { name: "Back" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Stay" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    const reads = calls.filter((c) => c.path === "/api/config" && c.method === "GET").length
+    release()
+    await waitFor(() => expect(calls.filter((c) => c.path === "/api/config" && c.method === "GET").length).toBeGreaterThan(reads))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole("heading", { name: "Toolchains", level: 2 })).toBeNull()
+    expect(screen.getByRole("heading", { name: "Settings", level: 2 })).toBeInTheDocument()
+  })
+
   it("stays on the step and shows the error when the dialog's save fails", async () => {
     mockApi(
       authedRoutes({

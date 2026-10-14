@@ -16,7 +16,7 @@ import { Label } from "darkraise-ui/components/label"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { Switch } from "darkraise-ui/components/switch"
 import { Check } from "lucide-react"
-import { useEffect, useState, type FormEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react"
 import { api } from "@/api/client"
 import { keys, setupStart, useConfig, useSetupState, useStatus, useStorage } from "@/api/hooks"
 import { AddRepoDialog } from "@/components/add-repo-dialog"
@@ -153,6 +153,9 @@ function SettingsStep({ nav }: { nav: NavProps }) {
   const form = useSettingsForm()
   const [leaving, setLeaving] = useState<(() => void) | null>(null)
   const [after, setAfter] = useState<(() => void) | null>(null)
+  // Bumped by every later departure, so a save still pending from an earlier
+  // prompt does not leave once it settles.
+  const departure = useRef(0)
 
   // Advance once the save has settled and no edit made meanwhile is left:
   // the closure that started the save still sees the earlier draft.
@@ -172,12 +175,18 @@ function SettingsStep({ nav }: { nav: NavProps }) {
     )
   }
 
-  const guard = (go: () => void) => () => (form.changed.length > 0 ? setLeaving(() => go) : go())
+  const guard = (go: () => void) => () => {
+    departure.current++
+    setAfter(null)
+    if (form.changed.length > 0) setLeaving(() => go)
+    else go()
+  }
 
   async function saveAndLeave() {
     const go = leaving
     setLeaving(null)
-    if (go && (await form.save())) setAfter(() => go)
+    const id = departure.current
+    if (go && (await form.save()) && departure.current === id) setAfter(() => go)
   }
 
   function discardAndLeave() {
