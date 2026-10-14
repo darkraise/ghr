@@ -29,8 +29,13 @@ describe("api client", () => {
     mockApi({
       "POST /auth/login": () => json({ error: "wrong password" }, 401),
       "POST /auth/password": () => json({ error: "wrong password" }, 401),
+      "POST /auth/setup": () => json({ error: "wrong setup code; run on the host: ghr code" }, 401),
     })
     await expect(api.login("x")).rejects.toBeInstanceOf(ApiError)
+    await expect(api.setup("x", "correct horse battery")).rejects.toMatchObject({
+      status: 401,
+      message: "wrong setup code; run on the host: ghr code",
+    })
     await expect(api.changePassword("old password!", "new password!")).rejects.toMatchObject({
       status: 401,
       message: "wrong password",
@@ -56,9 +61,13 @@ describe("api client", () => {
 
   it("sends JSON bodies and builds query strings", async () => {
     const { calls } = mockApi({ "POST /auth/setup": () => noContent(), "GET /api/history": [] })
-    await api.setup("correct horse battery")
+    await api.setup("ABCDE-FGHJK-MNPQR-STVWX", "correct horse battery")
     await api.history("darkmem", "", "", 200)
-    expect(calls[0]).toMatchObject({ method: "POST", body: { password: "correct horse battery" }, contentType: "application/json" })
+    expect(calls[0]).toMatchObject({
+      method: "POST",
+      body: { code: "ABCDE-FGHJK-MNPQR-STVWX", password: "correct horse battery" },
+      contentType: "application/json",
+    })
     expect(calls[1]?.method).toBe("GET")
     expect(calls[1]?.search).toBe("?repo=darkmem&conclusion=&limit=200")
   })

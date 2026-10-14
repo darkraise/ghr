@@ -16,11 +16,11 @@ The UI updates live over one long-lived request and falls back to polling when i
 
 ## Password
 
-Until a password is set, the first visitor to the port sets it. Set it during install (`GHR_WEB_PASSWORD` for scripts) or open the UI right after installing. The first-run wizard at `/setup` stays reachable until you finish it.
+Until a password is set, the UI asks for a one-time setup code along with the new password. `setup.sh` prints the code when it finishes, and `ghr code` prints it again on the host; a restart of ghr or `ghr web reset-password` replaces it. Setting the password during install (`GHR_WEB_PASSWORD` for scripts) makes the code unnecessary. The first-run wizard at `/setup` stays reachable until you finish it.
 
 - `ghr status` warns while the UI has no password.
 - `ghr web set-password` (12 to 1024 characters) sets it over SSH.
-- `ghr web reset-password` deletes the password and logs every browser out; the next visitor then sets a new one, so set one right after running it.
+- `ghr web reset-password` deletes the password, logs every browser out and prints a new setup code; set a new password with `ghr web set-password`, or in the browser with that code.
 - Five wrong passwords from one address within 15 minutes lock that address out for 15 minutes.
 - Sessions live in memory: every restart, including each `setup.sh` upgrade, logs you out.
 

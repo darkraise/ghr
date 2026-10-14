@@ -18,4 +18,6 @@ ghr runs CI jobs natively on its host, so some risks are part of its design rath
 - A repository that lets fork pull requests run workflows lets anyone run code on the host. ghr refuses public repositories unless `allow_public` is set for them.
 - The web UI is plain HTTP unless a TLS proxy is put in front of it.
 
-Reports about ways around these protections, such as reaching the web UI without the password, running jobs for a repository ghr should refuse, or a download ghr installs without checking it, are in scope.
+Claiming an unclaimed web UI needs the setup code, which only root on the host can read.
+
+Reports about ways around these protections, such as reaching the web UI without the password or claiming it without the setup code, running jobs for a repository ghr should refuse, or a download ghr installs without checking it, are in scope.

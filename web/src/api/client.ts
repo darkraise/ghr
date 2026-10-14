@@ -68,7 +68,8 @@ export async function request<T>(method: string, path: string, body?: unknown, s
   }
   const err = await toError(res)
   // Only an expired session on the API means "log in again"; a 401 from
-  // /auth/login or /auth/password is a wrong password the form shows.
+  // /auth/login, /auth/password or /auth/setup is a wrong password or setup
+  // code the form shows.
   if (res.status === 401 && path.startsWith("/api/")) onUnauthorized()
   throw err
 }
@@ -103,7 +104,7 @@ const send = (method: string, path: string, body?: unknown): Promise<void> => re
 
 export const api = {
   authState: (signal?: AbortSignal) => request<AuthState>("GET", "/auth/state", undefined, signal),
-  setup: (password: string) => send("POST", "/auth/setup", { password }),
+  setup: (code: string, password: string) => send("POST", "/auth/setup", { code, password }),
   login: (password: string) => send("POST", "/auth/login", { password }),
   logout: () => send("POST", "/auth/logout"),
   changePassword: (current: string, next: string) => send("POST", "/auth/password", { current, new: next }),
