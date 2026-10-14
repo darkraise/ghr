@@ -687,7 +687,7 @@ func TestWebBlockRoundTrips(t *testing.T) {
 }
 
 func TestTrustedProxyPrefixes(t *testing.T) {
-	w := Web{TrustedProxies: []string{"10.0.0.2", "10.1.2.3/16", "::ffff:10.0.0.3", "2001:db8::1", "fe80::1%eth0", "2001:db8:1::/48"}}
+	w := Web{TrustedProxies: []string{"10.0.0.2", "10.1.2.3/16", "::ffff:10.0.0.3", "2001:db8::1", "fe80::1%eth0", "2001:db8:1::/48", "::ffff:10.2.3.4/112", "::ffff:10.0.0.0/128"}}
 	want := []netip.Prefix{
 		netip.MustParsePrefix("10.0.0.2/32"),
 		netip.MustParsePrefix("10.1.0.0/16"),
@@ -695,6 +695,8 @@ func TestTrustedProxyPrefixes(t *testing.T) {
 		netip.MustParsePrefix("2001:db8::1/128"),
 		netip.MustParsePrefix("fe80::1/128"),
 		netip.MustParsePrefix("2001:db8:1::/48"),
+		netip.MustParsePrefix("10.2.0.0/16"),
+		netip.MustParsePrefix("10.0.0.0/32"),
 	}
 	if got := w.TrustedProxyPrefixes(); !slices.Equal(got, want) {
 		t.Fatalf("prefixes %v, want %v", got, want)
@@ -748,6 +750,8 @@ func TestWebValidation(t *testing.T) {
 		{Listen: "0.0.0.0:8080", TrustedProxies: []string{"10.0.0.0/"}},
 		{Listen: "0.0.0.0:8080", TrustedProxies: []string{""}},
 		{Listen: "0.0.0.0:8080", TrustedProxies: []string{"10.0.0.2", " 10.0.0.3"}},
+		{Listen: "0.0.0.0:8080", TrustedProxies: []string{"::ffff:10.0.0.0/95"}},
+		{Listen: "0.0.0.0:8080", TrustedProxies: []string{"::ffff:10.0.0.0/64"}},
 	}
 	for _, w := range bad {
 		c, _, err := Parse([]byte(sample))
@@ -764,7 +768,7 @@ func TestWebValidation(t *testing.T) {
 		{Listen: ":8080"},
 		{Listen: "[::]:8080"},
 		{Listen: "0.0.0.0:8080", Hosts: []string{"ghr.lan", "GHR.example.com", "ghr-1", "localhost"}},
-		{Listen: "0.0.0.0:8080", TrustedProxies: []string{"10.0.0.2", "10.1.0.0/16", "2001:db8::/48", "::1"}},
+		{Listen: "0.0.0.0:8080", TrustedProxies: []string{"10.0.0.2", "10.1.0.0/16", "2001:db8::/48", "::1", "::ffff:10.0.0.0/104"}},
 	}
 	for _, w := range good {
 		c, _, err := Parse([]byte(sample))

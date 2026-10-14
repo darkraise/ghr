@@ -269,6 +269,8 @@ func TestClientKeyBehindTrustedProxies(t *testing.T) {
 		{"a trusted peer written IPv4-mapped", "[::ffff:10.0.0.2]:4000", []string{"203.0.113.5"}, "203.0.113.5"},
 		{"a trusted hop written IPv4-mapped", "10.0.0.2:4000", []string{"203.0.113.5, ::ffff:10.1.2.3"}, "203.0.113.5"},
 		{"an entry with a port", "10.0.0.2:4000", []string{"[::ffff:203.0.113.5]:1234"}, "203.0.113.5"},
+		{"an entry with an IPv6 zone", "10.0.0.2:4000", []string{"fe80::1%eth0"}, "fe80::1"},
+		{"a bracketed IPv6 entry with a zone and a port", "10.0.0.2:4000", []string{"[fe80::1%eth0]:80"}, "fe80::1"},
 		{"a bracketed IPv6 entry", "10.0.0.2:4000", []string{"[2001:db8::1]"}, "2001:db8::1"},
 		{"every hop trusted", "10.0.0.2:4000", []string{"10.1.0.7, 10.1.2.3"}, "10.1.0.7"},
 		{"an entry that does not parse", "10.0.0.2:4000", []string{"203.0.113.5, unknown, 10.1.2.3"}, "10.1.2.3"},

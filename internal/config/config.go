@@ -94,10 +94,18 @@ func (w Web) TrustedProxyPrefixes() []netip.Prefix {
 	return out
 }
 
-// proxyPrefix unmaps an IPv4-mapped address and drops its zone, as the web
-// listener does to the peer addresses it checks.
+// proxyPrefix unmaps an IPv4-mapped address or prefix and drops its zone, as
+// the web listener does to the peer addresses it checks. A mapped prefix
+// shorter than the 96 bits of the mapping has no IPv4 form, and the listener
+// never sees a peer inside it, so it is refused.
 func proxyPrefix(s string) (netip.Prefix, bool) {
 	if p, err := netip.ParsePrefix(s); err == nil {
+		if p.Addr().Is4In6() {
+			if p.Bits() < 96 {
+				return netip.Prefix{}, false
+			}
+			return netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96).Masked(), true
+		}
 		return p.Masked(), true
 	}
 	ip, err := netip.ParseAddr(s)
