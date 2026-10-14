@@ -137,10 +137,11 @@ create_user_and_dirs() {
 
 # Downloads the actions-runner tarball for $1 to $2 and verifies its SHA-256.
 fetch_runner() {
-  local version="$1" out="$2" tgz="actions-runner-linux-x64-$1.tar.gz" want
+  local version="$1" out="$2" tgz="actions-runner-linux-x64-$1.tar.gz" notes want
   curl -fsSL -o "$out" "https://github.com/actions/runner/releases/download/v$version/$tgz"
-  want=$(curl -fsSL "https://api.github.com/repos/actions/runner/releases/tags/v$version" | jq -r .body |
-    grep -oP '(?<=<!-- BEGIN SHA linux-x64 -->)[0-9a-f]{64}(?=<!-- END SHA linux-x64 -->)') || true
+  notes=$(curl -fsSL "https://api.github.com/repos/actions/runner/releases/tags/v$version" | jq -r .body) ||
+    die "could not read the actions/runner v$version release notes (GitHub API rate limit?); try again later"
+  want=$(grep -oP '(?<=<!-- BEGIN SHA linux-x64 -->)[0-9a-f]{64}(?=<!-- END SHA linux-x64 -->)' <<<"$notes") || true
   [ -n "$want" ] || die "no linux-x64 checksum in the v$version release notes"
   echo "$want  $out" | sha256sum -c - >/dev/null || die "actions-runner checksum mismatch"
 }
@@ -176,7 +177,9 @@ tree_is_root_owned() {
 install_runner() {
   local version="${RUNNER_VERSION#v}"
   if [ "$version" = latest ]; then
-    version=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name)
+    local lookup_failed="could not read the latest actions/runner release (GitHub API rate limit?); set RUNNER_VERSION=<x.y.z>"
+    version=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name) || die "$lookup_failed"
+    [ -n "$version" ] && [ "$version" != null ] || die "$lookup_failed"
     version="${version#v}"
   fi
   local dir="$DIST_DIR/$version" staging="$DIST_DIR/$version.tmp"

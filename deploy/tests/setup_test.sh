@@ -11,6 +11,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set +e
 # Case (c) stubs check_host out; case (o) tests the real one.
 REAL_CHECK_HOST=$(declare -f check_host)
+REAL_FETCH_RUNNER=$(declare -f fetch_runner)
 
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
@@ -89,6 +90,7 @@ fetch_runner() {
   [ ! -f "$MARK_DIR/stopped" ] || touch "$MARK_DIR/fetched-after-stop"
   cp "$T/runner.tar.gz" "$2"
 }
+STUB_FETCH_RUNNER=$(declare -f fetch_runner)
 READY_AFTER=1
 FAKE_STATE=active
 ghr() {
@@ -217,6 +219,68 @@ check "a: an incomplete dist dir does not block the install" [ "$rc" -eq 0 ]
 check "a: the incomplete dist dir is replaced by a complete one" [ -x "$DIST_DIR/$FIXTURE_VERSION/run.sh" ]
 check "a: nothing of the incomplete dist dir is kept" absent "$DIST_DIR/$FIXTURE_VERSION/partial"
 check "a: current points at the replaced version" [ "$(target_of_current)" = "$FIXTURE_VERSION" ]
+
+# api_curl answers GitHub's API with API_BODY, or fails with API_RC, and saves a
+# download as the text "tarball".
+api_curl() {
+  curl() {
+    local out="" url=""
+    while [ $# -gt 0 ]; do
+      case "$1" in -o) out="$2"; shift ;; -*) ;; *) url="$1" ;; esac
+      shift
+    done
+    case "$url" in
+      https://api.github.com/*)
+        echo "$url" >> "$MARK_DIR/urls"
+        [ "${API_RC:-0}" = 0 ] || return "$API_RC"
+        printf '%s\n' "$API_BODY"
+        ;;
+      *) echo tarball > "$out" ;;
+    esac
+  }
+}
+# A rate-limited anonymous API call must end in a message, not a silent exit.
+new_case a-latest-lookup
+RUNNER_VERSION=latest
+out=$( (api_curl; API_RC=22; run install_runner) 2>&1)
+rc=$?
+check "a: a failed latest-release lookup fails install_runner" [ "$rc" -ne 0 ]
+check "a: and tells how to pin the version" contains "$out" "set RUNNER_VERSION=<x.y.z>"
+check "a: and names the likely cause" contains "$out" "GitHub API rate limit?"
+check "a: nothing is fetched after a failed lookup" [ "$(count fetches)" -eq 0 ]
+for body in '{"message":"API rate limit exceeded"}' '{"tag_name":""}' ''; do
+  out=$( (api_curl; API_BODY="$body"; run install_runner) 2>&1)
+  rc=$?
+  check "a: a latest-release answer without a tag ($body) fails install_runner" [ "$rc" -ne 0 ]
+  check "a: and tells how to pin the version ($body)" contains "$out" "set RUNNER_VERSION=<x.y.z>"
+done
+out=$( (api_curl; API_BODY='{"tag_name":"v'$FIXTURE_VERSION'"}'; run install_runner) 2>&1)
+rc=$?
+check "a: a latest-release answer with a tag succeeds" [ "$rc" -eq 0 ]
+check "a: and installs that version" [ -x "$DIST_DIR/$FIXTURE_VERSION/run.sh" ]
+
+# The checksum comes from the release notes; a failed lookup is not a missing checksum.
+new_case a-checksum-lookup
+eval "$REAL_FETCH_RUNNER"
+out=$( (api_curl; API_RC=22; run fetch_runner "$FIXTURE_VERSION" "$T/a-checksum-lookup/tgz") 2>&1)
+rc=$?
+check "a: a failed release-notes lookup fails fetch_runner" [ "$rc" -ne 0 ]
+check "a: and says the release could not be read" contains "$out" "could not read the actions/runner v$FIXTURE_VERSION release notes (GitHub API rate limit?)"
+check "a: and not that the checksum is missing" lacks "$out" "no linux-x64 checksum"
+out=$( (api_curl; API_BODY='{"body":"no checksums here"}'; run fetch_runner "$FIXTURE_VERSION" "$T/a-checksum-lookup/tgz") 2>&1)
+rc=$?
+check "a: release notes without a checksum still fail fetch_runner" [ "$rc" -ne 0 ]
+check "a: and say the checksum is missing" contains "$out" "no linux-x64 checksum in the v$FIXTURE_VERSION release notes"
+sum=$(echo tarball | sha256sum | cut -d' ' -f1)
+out=$( (api_curl; API_BODY='{"body":"<!-- BEGIN SHA linux-x64 -->'$sum'<!-- END SHA linux-x64 -->"}'; run fetch_runner "$FIXTURE_VERSION" "$T/a-checksum-lookup/tgz") 2>&1)
+rc=$?
+check "a: a download matching the release notes' checksum passes" [ "$rc" -eq 0 ]
+out=$( (api_curl; API_BODY='{"body":"<!-- BEGIN SHA linux-x64 -->'${sum//[0-9a-f]/0}'<!-- END SHA linux-x64 -->"}'; run fetch_runner "$FIXTURE_VERSION" "$T/a-checksum-lookup/tgz") 2>&1)
+rc=$?
+check "a: a download that does not match is refused" [ "$rc" -ne 0 ]
+check "a: and called a checksum mismatch" contains "$out" "actions-runner checksum mismatch"
+unset -f curl
+eval "$STUB_FETCH_RUNNER"
 
 # (b) Readiness loop.
 new_case b-ready-after-polls
