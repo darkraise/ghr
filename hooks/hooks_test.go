@@ -237,6 +237,22 @@ func TestJobCompletedSkipsFIFOJobJSON(t *testing.T) {
 	checkTime(t, "finished_at", rec["finished_at"], before, time.Now())
 }
 
+// The job can write a job.json too large for jq to hold in memory.
+func TestJobCompletedSkipsLargeJobJSON(t *testing.T) {
+	dir := t.TempDir()
+	big := `{"run_id":"123","pad":"` + strings.Repeat("x", 64<<10) + `"}`
+	if err := os.WriteFile(filepath.Join(dir, "job.json"), []byte(big), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now()
+	runHook(t, "job-completed.sh", "GHR_INSTANCE_DIR="+dir)
+	rec := readRecord(t, dir)
+	if len(rec) != 1 {
+		t.Fatalf("want finished_at only, got %d fields", len(rec))
+	}
+	checkTime(t, "finished_at", rec["finished_at"], before, time.Now())
+}
+
 func TestJobCompletedExitsZeroWhenDateFails(t *testing.T) {
 	stubs := t.TempDir()
 	if err := os.WriteFile(filepath.Join(stubs, "date"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
