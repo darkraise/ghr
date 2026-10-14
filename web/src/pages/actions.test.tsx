@@ -224,6 +224,26 @@ describe("Actions page", () => {
     expect(box().getAllByRole("rowheader")).toHaveLength(1)
   })
 
+  it("filters by a repository named like the all-repositories entry", async () => {
+    const [darkmem] = fixtures.config.repos ?? []
+    if (!darkmem) throw new Error("fixture has no repository")
+    const [run] = fixtures.actions.runs
+    if (!run) throw new Error("fixture has no run")
+    mockApi(
+      authedRoutes({
+        "GET /api/config": { ...fixtures.config, repos: [...(fixtures.config.repos ?? []), { ...darkmem, name: "__all__" }] },
+        "GET /api/actions": { ...fixtures.actions, runs: [...fixtures.actions.runs, { ...run, repo: "__all__", id: 900, title: "Odd one out" }] },
+      }),
+    )
+    const { user, router } = renderApp("/actions")
+    await screen.findByRole("region", { name: /workflow runs?$/ })
+    await user.click(screen.getByRole("combobox", { name: "Repository" }))
+    await user.click(await screen.findByRole("option", { name: "__all__" }))
+    await waitFor(() => expect(router.state.location.search).toEqual({ repo: "__all__" }))
+    expect(box().getByRole("link", { name: /^Odd one out/ })).toBeInTheDocument()
+    expect(box().queryByRole("link", { name: /^Bump the runner/ })).toBeNull()
+  })
+
   it("drops values it does not know, from the page and the URL", async () => {
     mockApi(authedRoutes())
     const { router } = renderApp("/actions?repo=nope&status=bogus")

@@ -2,6 +2,10 @@ import type { ActivityWeek, RepoStatus, Status } from "@/api/types"
 import type { Confirm } from "@/components/confirm-dialog"
 import { plural } from "./format"
 
+// The repository selects' value for "all repositories". GitHub repository
+// names cannot contain "*", and Radix Select does not allow an empty value.
+export const ALL_REPOS = "*"
+
 export const PUBLIC_HELP = "A job in a public repository can come from anyone's pull request and runs on this host."
 
 export function servePublicConfirm(name: string, run: () => void): Confirm {

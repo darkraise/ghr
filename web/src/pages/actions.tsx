@@ -24,6 +24,7 @@ import {
 } from "@/lib/actions"
 import { dur } from "@/lib/format"
 import { groupByDayOf } from "@/lib/history"
+import { ALL_REPOS } from "@/lib/repos"
 import { runCols } from "@/lib/run-cols"
 import { useMediaQuery } from "@/lib/use-media-query"
 import { useNow } from "@/lib/use-now"
@@ -110,12 +111,12 @@ export function ActionsPage() {
 
   const filters = (
     <>
-      <Select value={repo ?? ALL} onValueChange={(v) => update({ repo: v === ALL ? "" : v })}>
+      <Select value={repo ?? ALL_REPOS} onValueChange={(v) => update({ repo: v === ALL_REPOS ? "" : v })}>
         <SelectTrigger aria-label="Repository" className="w-56">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={ALL}>All repositories</SelectItem>
+          <SelectItem value={ALL_REPOS}>All repositories</SelectItem>
           {configured.map((name) => (
             <SelectItem key={name} value={name}>
               {name}

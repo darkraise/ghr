@@ -30,6 +30,7 @@ import {
   type HistorySearch,
   type HistoryWindow,
 } from "@/lib/history"
+import { ALL_REPOS } from "@/lib/repos"
 import { runCols } from "@/lib/run-cols"
 import { useMediaQuery } from "@/lib/use-media-query"
 import { useNow } from "@/lib/use-now"
@@ -205,12 +206,12 @@ export function HistoryPage() {
     <div className="flex flex-col gap-4">
       <PageHeader title="History" />
       <div className="flex flex-wrap items-center gap-3">
-        <Select value={repo || ALL} onValueChange={(v) => update({ repo: v === ALL ? "" : v })}>
+        <Select value={repo || ALL_REPOS} onValueChange={(v) => update({ repo: v === ALL_REPOS ? "" : v })}>
           <SelectTrigger aria-label="Repository" className="w-52">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL}>All repositories</SelectItem>
+            <SelectItem value={ALL_REPOS}>All repositories</SelectItem>
             {repos.map((name) => (
               <SelectItem key={name} value={name}>
                 {name}
