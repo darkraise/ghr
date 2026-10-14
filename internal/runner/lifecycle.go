@@ -32,6 +32,8 @@ const (
 	// rollbackTimeout bounds a failed spawn's rollback, which outlives the
 	// tick's context so that a cancelled tick leaks no registration.
 	rollbackTimeout = 30 * time.Second
+	// maxArchivedLog bounds each log file kept in an instance's archive.
+	maxArchivedLog = 16 << 20
 )
 
 // RandomID returns 6 lowercase hex characters.
@@ -490,6 +492,9 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	if exists(archive) {
 		if err := m.Host.ChownR(ctx, archive, "root"); err != nil {
 			return fmt.Errorf("chown archived logs: %w", err)
+		}
+		if err := trimArchive(archive); err != nil {
+			return fmt.Errorf("trim archived logs: %w", err)
 		}
 		// The rename keeps _diag's mtime, the time its last log file was
 		// created, often the job's start. prune ages archives as it ages

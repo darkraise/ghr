@@ -3,8 +3,11 @@
 package runner
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -108,5 +111,65 @@ func TestRunnerLogRefusesASymlinkedLogDirectory(t *testing.T) {
 	}
 	if c, err := readLog(t, h, "aaaaaa"); err == nil {
 		t.Fatalf("read through a symlinked log directory: %q", c.Data)
+	}
+}
+
+// The job owns _diag and can fill it. Its archive keeps only the logs ghr
+// shows, each cut to its head; the step output the runner pages under _diag
+// is on GitHub.
+func TestArchiveKeepsOnlyTheRunnerLogs(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	diag := filepath.Join(h.m.instanceDir("aaaaaa"), "_diag")
+	for _, d := range []string{"pages", "blocks", "Worker_2.log"} {
+		if err := os.MkdirAll(filepath.Join(diag, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, data := range map[string]string{"pages/x_y_1.log": "step output", "blocks/x_y.1": "block",
+		"notes.txt": "notes", "Runner_1.log": "real\n", "Worker_1.log": "head\n"} {
+		if err := os.WriteFile(filepath.Join(diag, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Truncate(filepath.Join(diag, "Worker_1.log"), maxArchivedLog+100); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(h.root, "token")
+	if err := os.WriteFile(secret, []byte("SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(diag, "Runner_2.log")); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(diag, "Worker_3.log"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	mustReturn(t, "finish", func() {
+		h.m.refreshUnits(context.Background())
+		h.m.Wait()
+	})
+	archive := filepath.Join(h.m.Paths.Logs, "aaaaaa")
+	entries, err := os.ReadDir(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if !reflect.DeepEqual(names, []string{"Runner_1.log", "Worker_1.log"}) {
+		t.Fatalf("archive holds %v\n%s", names, h.eventText())
+	}
+	if fi, err := os.Stat(filepath.Join(archive, "Worker_1.log")); err != nil || fi.Size() != maxArchivedLog {
+		t.Fatalf("worker log %v, %v", fi, err)
+	}
+	if _, err := os.Lstat(secret); err != nil {
+		t.Fatalf("the symlink's target went: %v", err)
+	}
+	c, err := readLog(t, h, "aaaaaa")
+	if err != nil || !strings.HasPrefix(c.Data, "==> Runner_1.log <==\nreal\n\n==> Worker_1.log <==\nhead\n") {
+		t.Fatalf("data %.80q err %v", c.Data, err)
 	}
 }

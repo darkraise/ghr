@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -470,6 +471,10 @@ func parseCursor(cursor string) map[string]int64 {
 	return out
 }
 
+// logPatterns match the runner's diagnostic logs, the only files of _diag
+// that RunnerLog reads and an archive keeps.
+var logPatterns = []string{"Runner_*.log", "Worker_*.log"}
+
 // lastLogKey is the cursor key naming the file the previous chunk ended in; log
 // file names always match Runner_*.log or Worker_*.log, so it never collides.
 const lastLogKey = "last"
@@ -490,7 +495,7 @@ func (m *Manager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 	}
 	defer root.Close()
 	var files []string
-	for _, pat := range []string{"Runner_*.log", "Worker_*.log"} {
+	for _, pat := range logPatterns {
 		matches, _ := fs.Glob(root.FS(), pat)
 		sort.Strings(matches)
 		files = append(files, matches...)
@@ -555,6 +560,60 @@ func (m *Manager) openLogs(id string) (*os.Root, error) {
 		return nil, fs.ErrNotExist
 	}
 	return os.OpenRoot(dir)
+}
+
+// trimArchive removes from an archived _diag everything but its regular
+// files named by logPatterns, and cuts each of those to its first
+// maxArchivedLog bytes. The job filled the directory, so it works through an
+// os.Root, which follows no symlink out of it.
+func trimArchive(dir string) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !e.Type().IsRegular() || !isLogName(name) {
+			if err := root.RemoveAll(name); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := truncateLog(root, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isLogName(name string) bool {
+	for _, pat := range logPatterns {
+		if ok, _ := path.Match(pat, name); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func truncateLog(root *os.Root, name string) error {
+	fi, err := root.Lstat(name)
+	if err != nil || fi.Size() <= maxArchivedLog {
+		return err
+	}
+	f, err := root.OpenFile(name, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return fmt.Errorf("%s: not a regular file", name)
+	}
+	return f.Truncate(maxArchivedLog)
 }
 
 // readFrom reads up to limit bytes of a log from off. Only a regular file is

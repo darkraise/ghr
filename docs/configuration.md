@@ -37,6 +37,8 @@ watch_repos: [other-repo]   # shown on the Actions page; ghr runs no runners for
 
 Durations take `s`, `m`, `h` and `d` suffixes.
 
+When a runner ends, ghr archives its diagnostic logs, the `Runner_*.log` and `Worker_*.log` files that `ghr logs` shows, each cut to its first 16 MiB, and removes them `history_retention` after the job ended. Step output is not kept; GitHub has it.
+
 ## Scheduling modes
 
 - `queue`: at most `global_max` jobs at once across repositories, and at most each repository's `max` (default 1). Further jobs wait as "Queued" in GitHub until a slot frees.
