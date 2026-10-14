@@ -7,12 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/sched"
@@ -156,6 +158,34 @@ func TestReconcileTakesA404FromTheDeleteAsRemoved(t *testing.T) {
 	h.m.Reconcile(context.Background(), h.cfg)
 	if ev := h.eventText(); !strings.Contains(ev, "info darkmem removed stale registration ghr-darkmem-ffffff") || strings.Contains(ev, "warn") {
 		t.Fatalf("events:\n%s", ev)
+	}
+}
+
+// A registration finish could not delete is retried by reconciliation even
+// once its repository is no longer served, which no runner list then covers.
+func TestReconcileRetriesARegistrationFinishCouldNotDelete(t *testing.T) {
+	h := newHarness(t)
+	if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	h.gh.setErr("DeleteRunner darkmem", &github.APIError{Status: 502, Kind: github.ErrServer})
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if h.state("aaaaaa") != "gone" || len(h.gh.deleted) != 0 {
+		t.Fatalf("state %s deleted %v", h.state("aaaaaa"), h.gh.deleted)
+	}
+	h.gh.setErr("DeleteRunner darkmem", nil)
+	cfg := h.cfg.Clone()
+	cfg.Repos = slices.DeleteFunc(cfg.Repos, func(r config.Repo) bool { return r.Name == "darkmem" })
+	h.cfg = cfg
+	h.m.Reconcile(context.Background(), h.cfg)
+	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("deleted %v\n%s", h.gh.deleted, h.eventText())
+	}
+	h.m.Reconcile(context.Background(), h.cfg)
+	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("deleted again: %v", h.gh.deleted)
 	}
 }
 

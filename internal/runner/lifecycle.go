@@ -535,9 +535,14 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 	}
 	m.removePrivate(id)
 	if !i.deregistered {
-		if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil &&
-			!github.IsKind(err, github.ErrUnprocessable) && !github.IsKind(err, github.ErrNotFound) {
-			m.Events.Add("warn", i.Repo, "delete registration %s: %v (reconciliation retries)", i.RunnerName, err)
+		if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil && !github.IsKind(err, github.ErrNotFound) {
+			// Reconcile retries it even if the repository stops being served.
+			m.mu.Lock()
+			m.undeleted[i.RunnerID] = registration{repo: i.Repo, name: i.RunnerName}
+			m.mu.Unlock()
+			if !github.IsKind(err, github.ErrUnprocessable) {
+				m.Events.Add("warn", i.Repo, "delete registration %s: %v (reconciliation retries)", i.RunnerName, err)
+			}
 		}
 	}
 

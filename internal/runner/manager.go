@@ -156,6 +156,11 @@ type instance struct {
 	answered     bool      // the runners API answered for it in the current tick
 }
 
+// registration names a runner registration for a delete retried later.
+type registration struct {
+	repo, name string
+}
+
 // runnerList is one repository's registered runner IDs as read in this tick;
 // ok is false when the read failed.
 type runnerList struct {
@@ -211,7 +216,8 @@ type Manager struct {
 	maintCtx       context.Context         // cancelled by Close
 	maintCancel    context.CancelFunc
 	lastJob        map[string]model.HistoryEntry
-	orphans        map[int64]bool // untracked registrations seen offline at the last reconcile; guarded by mu
+	orphans        map[int64]bool         // untracked registrations seen offline at the last reconcile; guarded by mu
+	undeleted      map[int64]registration // by runner ID: registrations finish could not delete; guarded by mu
 	epoch          string
 	wg             sync.WaitGroup
 	upd            updateState // guarded by mu
@@ -237,6 +243,7 @@ func (m *Manager) Init() error {
 	m.vis = map[string]visibility{}
 	m.wasBlocked = map[string]bool{}
 	m.lastJob = map[string]model.HistoryEntry{}
+	m.undeleted = map[int64]registration{}
 	m.lastPrune = m.Now()
 	m.maintCtx, m.maintCancel = context.WithCancel(context.Background())
 	m.epoch = m.Epoch

@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,8 +119,9 @@ func (m *Manager) Adopt(ctx context.Context) error {
 	return nil
 }
 
-// Reconcile works from the real unit inventory: it stops running units no
-// instance tracks, deletes ghr-<repo>-<id> registrations that match neither a
+// Reconcile works from the real unit inventory: it retries the registration
+// deletes finish could not make, stops running units no instance tracks,
+// deletes ghr-<repo>-<id> registrations that match neither a
 // tracked instance (same repo and runner ID) nor a running unit once they
 // have been offline at two reconciles in a row, and removes instance dirs
 // whose unit has confirmed exited.
@@ -129,6 +131,7 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 		m.Events.Add("warn", "", "reconcile: list units: %v", err)
 		return
 	}
+	m.retryUndeleted(ctx)
 	known := map[string]instance{}
 	for _, i := range m.snapshot() {
 		known[i.ID] = i
@@ -208,4 +211,28 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 		}
 	}
 	m.sweepPrivate()
+}
+
+// retryUndeleted deletes the registrations finish could not delete. The
+// repository need not be served any more, so no runner list covers them.
+func (m *Manager) retryUndeleted(ctx context.Context) {
+	m.mu.Lock()
+	regs := maps.Clone(m.undeleted)
+	m.mu.Unlock()
+	for id, r := range regs {
+		err := m.GH.DeleteRunner(ctx, r.repo, id)
+		switch {
+		case err == nil, github.IsKind(err, github.ErrNotFound):
+			m.mu.Lock()
+			delete(m.undeleted, id)
+			m.mu.Unlock()
+			if err == nil {
+				m.Events.Add("info", r.repo, "removed registration %s", r.name)
+			}
+		case github.IsKind(err, github.ErrUnprocessable):
+			// busy; retried at the next reconciliation
+		default:
+			m.Events.Add("warn", r.repo, "reconcile: delete registration %s: %v", r.name, err)
+		}
+	}
 }
