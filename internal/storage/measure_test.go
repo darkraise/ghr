@@ -197,6 +197,60 @@ func TestMeasureSkipsACacheBehindALinkOutOfTheHome(t *testing.T) {
 	}
 }
 
+// The link is swapped in after a check by path would have passed, so the walk
+// itself must stay inside the root it was given.
+func TestMeasureCacheWalksThroughTheOpenRoot(t *testing.T) {
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "w"), "w")
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".cache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(home, ".cache", "pip")); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	r, err := os.OpenRoot(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	pip, _ := cacheByName("pip")
+	var noted []string
+	c := measureCache(context.Background(), r, home, pip, func(name string, err error) {
+		if err != nil {
+			noted = append(noted, name+": "+err.Error())
+		}
+	})
+	if c.Present || c.Bytes != 0 || c.Files != 0 {
+		t.Fatalf("measured outside the home: %+v", c)
+	}
+	if len(noted) != 1 || !strings.HasPrefix(noted[0], "pip: ") {
+		t.Fatalf("noted %q, want the refused walk named once", noted)
+	}
+}
+
+func TestWalkFSMatchesWalkInsideTheRoot(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, "c", "a"), strings.Repeat("x", 5000))
+	writeFile(t, filepath.Join(home, "c", "sub", "b"), "y")
+	r, err := os.OpenRoot(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	want, _, err := walk(filepath.Join(home, "c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := walkFS(context.Background(), r.FS(), "c")
+	if err != nil || !ok || got != want {
+		t.Fatalf("usage %+v, ok %v, err %v, want %+v", got, ok, err, want)
+	}
+	if _, ok, err := walkFS(context.Background(), r.FS(), "absent"); ok || err != nil {
+		t.Fatalf("a missing path: ok %v, err %v", ok, err)
+	}
+}
+
 func TestMeasureFollowsALinkInsideTheHome(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, filepath.Join(home, "elsewhere", "pip", "wheels", "w"), "w")
