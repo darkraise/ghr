@@ -4,6 +4,10 @@ export function busyJobs(status: Status | undefined): number {
   return status?.instances.filter((i) => i.state === "busy").length ?? 0
 }
 
+export function startingRunners(status: Status | undefined): number {
+  return status?.instances.filter((i) => i.state === "starting").length ?? 0
+}
+
 export function running(status: Status): number {
   return status.instances.filter((i) => i.state !== "cleaning").length
 }

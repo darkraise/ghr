@@ -14,6 +14,7 @@ import { Section } from "@/components/page/section"
 import { RefusedHint } from "@/components/refused-hint"
 import { ago, dateTime, humanBytes, plural } from "@/lib/format"
 import { cacheParts, groupByTool, lastDotnetMajor, queueText, toolName, type CachePart } from "@/lib/toolchains"
+import { MAINTENANCE_HOLD } from "@/lib/storage"
 import { useNow } from "@/lib/use-now"
 import { usePopularSet } from "@/lib/use-popular-set"
 
@@ -83,6 +84,7 @@ export function InstalledSection({ storage, status, offline }: { storage: Storag
     const major = lastDotnetMajor(t, tools)
     let body = `Frees ${humanBytes(t.bytes)}. Jobs that need it install it again.`
     if (major) body += ` It is the last .NET ${major} SDK, so this also removes the ${major}.0 runtimes and packs.`
+    body += ` ${MAINTENANCE_HOLD}`
     setConfirm({ title: `Remove ${t.tool} ${t.version}?`, body, action: "Remove", destructive: true, run: () => remove.mutate(t) })
   }
 

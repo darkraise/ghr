@@ -61,6 +61,18 @@ describe("Toolchains page", () => {
     expect(screen.getByText("Remove: refused while 1 job runs")).toHaveClass("text-muted-foreground")
   })
 
+  it.each([
+    ["a runner starting beside a job", ["busy", "starting"], "Remove: refused while 1 job runs and 1 runner starts"],
+    ["runners starting", ["starting", "starting", "idle"], "Remove: refused while 2 runners start"],
+  ])("counts %s in the refusal", async (_why, states, text) => {
+    const [first] = fixtures.status.instances
+    if (!first) throw new Error("fixture has no instance")
+    const instances = states.map((state, i) => ({ ...first, id: `i${i}`, state, job: state === "busy" ? first.job : undefined }))
+    mockApi(routes({ "GET /api/status": { ...fixtures.status, instances } }))
+    renderApp("/toolchains")
+    expect(await screen.findByText(text)).toBeInTheDocument()
+  })
+
   it("says when the tool cache is empty, with the popular set", async () => {
     mockApi(routes({ "GET /api/storage": { ...fixtures.storage, toolchains: null, other_tool_cache: [] } }))
     renderApp("/toolchains")
@@ -82,7 +94,7 @@ describe("Toolchains page", () => {
     await user.click(await screen.findByRole("button", { name: "Remove node 22.11.0" }))
     const ask = within(await screen.findByRole("alertdialog"))
     expect(ask.getByText("Remove node 22.11.0?")).toBeInTheDocument()
-    expect(ask.getByText("Frees 190.0 MB. Jobs that need it install it again.")).toBeInTheDocument()
+    expect(ask.getByText("Frees 190.0 MB. Jobs that need it install it again. It is refused while a job runs or a runner starts, and idle runners stop while it runs.")).toBeInTheDocument()
     await user.click(ask.getByRole("button", { name: "Cancel" }))
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(calls.some((c) => c.method === "DELETE")).toBe(false)
@@ -98,7 +110,9 @@ describe("Toolchains page", () => {
     const { user } = renderApp("/toolchains")
     await user.click(await screen.findByRole("button", { name: "Remove dotnet 8.0.404" }))
     expect(
-      await screen.findByText("Frees 1 B. Jobs that need it install it again. It is the last .NET 8 SDK, so this also removes the 8.0 runtimes and packs."),
+      await screen.findByText(
+        "Frees 1 B. Jobs that need it install it again. It is the last .NET 8 SDK, so this also removes the 8.0 runtimes and packs. It is refused while a job runs or a runner starts, and idle runners stop while it runs.",
+      ),
     ).toBeInTheDocument()
   })
 

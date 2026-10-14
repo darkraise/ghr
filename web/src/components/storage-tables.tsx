@@ -15,7 +15,7 @@ import { Section } from "@/components/page/section"
 import { StatusPill } from "@/components/page/status-pill"
 import { RefusedHint } from "@/components/refused-hint"
 import { ago, dateTime, humanBytes, shortWhen } from "@/lib/format"
-import { lastPruneText } from "@/lib/storage"
+import { lastPruneText, MAINTENANCE_HOLD } from "@/lib/storage"
 import { queueText } from "@/lib/toolchains"
 import { useNow } from "@/lib/use-now"
 
@@ -111,7 +111,7 @@ export function PackageCachesSection({
                           onClick={() =>
                             setConfirm({
                               title: `Clear ${c.label}?`,
-                              body: `Frees ${humanBytes(c.bytes)}. Jobs download what they need again.`,
+                              body: `Frees ${humanBytes(c.bytes)}. Jobs download what they need again. ${MAINTENANCE_HOLD}`,
                               action: "Clear",
                               destructive: true,
                               run: () => clear.mutate(c),

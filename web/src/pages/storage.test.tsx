@@ -202,7 +202,7 @@ describe("Package caches", () => {
     await user.click(await screen.findByRole("button", { name: "Clear NuGet" }))
     const ask = within(await screen.findByRole("alertdialog"))
     expect(ask.getByText("Clear NuGet?")).toBeInTheDocument()
-    expect(ask.getByText("Frees 3.6 GB. Jobs download what they need again.")).toBeInTheDocument()
+    expect(ask.getByText("Frees 3.6 GB. Jobs download what they need again. It is refused while a job runs or a runner starts, and idle runners stop while it runs.")).toBeInTheDocument()
     await user.click(ask.getByRole("button", { name: "Cancel" }))
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
     expect(calls.some((c) => c.method === "POST")).toBe(false)
