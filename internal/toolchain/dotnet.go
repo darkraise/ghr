@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -103,18 +104,26 @@ func (d dotnet) Install(ctx context.Context, rel Release, progress func(string))
 	if d.hasSDK(rel.Version) {
 		return ErrAlreadyInstalled
 	}
-	existed := exists(d.sdkDir(rel.Version))
-	fail := func(err error) error {
-		if !existed {
-			os.RemoveAll(d.sdkDir(rel.Version))
-		}
-		return err
-	}
 	op, err := e.opDir()
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(op)
+	// The runner user owns <Root>/dotnet, and dotnet-install.sh runs as them.
+	r, err := os.OpenRoot(e.Root)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	sdk := filepath.Join("dotnet", "sdk", rel.Version)
+	_, statErr := r.Lstat(sdk)
+	existed := !errors.Is(statErr, fs.ErrNotExist)
+	fail := func(err error) error {
+		if !existed {
+			r.RemoveAll(sdk)
+		}
+		return err
+	}
 	progress("downloading")
 	if err := e.fetch(ctx, Origin{File: e.Sources.DotnetScript}, rel.URL, filepath.Join(op, "dotnet-install.sh")); err != nil {
 		return err
@@ -122,7 +131,7 @@ func (d dotnet) Install(ctx context.Context, rel Release, progress func(string))
 	if err := e.chownTree(ctx, op); err != nil {
 		return fmt.Errorf("chown: %w", err)
 	}
-	if err := e.mkdirOwned(ctx, d.root()); err != nil {
+	if err := e.mkdirOwned(r, "dotnet"); err != nil {
 		return err
 	}
 	progress("running dotnet-install.sh")
@@ -169,15 +178,18 @@ func (d dotnet) Remove(version string) error {
 	if v, ok := github.ParseVersion(version); !ok || len(v) != 3 || !d.hasSDK(version) {
 		return ErrNotInstalled
 	}
-	if err := noSymlinks(d.e.Root, d.sdkDir(version)); err != nil {
+	r, err := os.OpenRoot(d.e.Root)
+	if err != nil {
 		return err
 	}
+	defer r.Close()
+	sdk := filepath.Join("dotnet", "sdk", version)
 	// dotnet.dll first: setup-dotnet counts an SDK by it, so a job scanning
 	// meanwhile no longer sees a half-deleted one.
-	if err := os.Remove(filepath.Join(d.sdkDir(version), "dotnet.dll")); err != nil {
+	if err := r.Remove(filepath.Join(sdk, "dotnet.dll")); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(d.sdkDir(version)); err != nil {
+	if err := r.RemoveAll(sdk); err != nil {
 		return err
 	}
 	major := version[:strings.IndexByte(version, '.')+1]
@@ -193,11 +205,11 @@ func (d dotnet) Remove(version string) error {
 			continue
 		}
 		for _, m := range matches {
-			if err := noSymlinks(d.e.Root, m); err != nil {
-				errs = append(errs, err)
-				continue
+			rel, err := filepath.Rel(d.e.Root, m)
+			if err == nil {
+				err = r.RemoveAll(rel)
 			}
-			if err := os.RemoveAll(m); err != nil {
+			if err != nil {
 				errs = append(errs, err)
 			}
 		}

@@ -98,7 +98,7 @@ func TestDotnetInstallRunsTheInstallScript(t *testing.T) {
 	if !slices.Equal(steps, []string{"downloading", "running dotnet-install.sh"}) {
 		t.Fatalf("progress %v", steps)
 	}
-	if !slices.Contains(f.host.commands(), "chown -h ghrunner:ghrunner "+filepath.Join(f.Root, "dotnet")) {
+	if !slices.Contains(f.host.commands(), "lchown dotnet") {
 		t.Fatalf("commands %q: <Root>/dotnet must be created owned by ghrunner", f.host.commands())
 	}
 	if got := tmpEntries(t, f.Root); len(got) != 0 {

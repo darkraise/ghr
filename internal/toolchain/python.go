@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,7 +92,13 @@ func (p python) Install(ctx context.Context, rel Release, progress func(string))
 	if err := e.chownTree(ctx, op); err != nil {
 		return fmt.Errorf("chown: %w", err)
 	}
-	if err := e.mkdirOwned(ctx, filepath.Join(e.Root, p.dir)); err != nil {
+	// The runner user owns <Root>/Python, and setup.sh runs as them.
+	r, err := os.OpenRoot(e.Root)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	if err := e.mkdirOwned(r, p.dir); err != nil {
 		return err
 	}
 	// setup.sh replaces the version folder, so a job's setup-python that
@@ -100,14 +107,14 @@ func (p python) Install(ctx context.Context, rel Release, progress func(string))
 		return ErrAlreadyInstalled
 	}
 	progress("running setup.sh")
-	verDir := filepath.Join(e.Root, p.dir, rel.Folder)
+	verRel := filepath.Join(p.dir, rel.Folder)
 	// A version folder that is already there may be a job's own setup-python
-	// at work, and the runner user can swap any folder above it for a link.
-	_, statErr := os.Lstat(verDir)
-	existed := !os.IsNotExist(statErr)
+	// at work.
+	_, statErr := r.Lstat(verRel)
+	existed := !errors.Is(statErr, fs.ErrNotExist)
 	fail := func(err error) error {
-		if !existed && noSymlinks(e.Root, verDir) == nil {
-			os.RemoveAll(verDir)
+		if !existed {
+			r.RemoveAll(verRel)
 		}
 		return err
 	}

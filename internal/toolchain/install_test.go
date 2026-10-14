@@ -38,9 +38,9 @@ func TestInstallArchiveWritesTheToolCacheLayout(t *testing.T) {
 	}
 	want := []string{
 		"chown -R -h ghrunner:ghrunner " + filepath.Join(f.Root, ".tmp", "op1", "x", "demo-1.2.3"),
-		"chown -h ghrunner:ghrunner " + filepath.Join(f.Root, "demo"),
-		"chown -h ghrunner:ghrunner " + filepath.Join(f.Root, "demo", "1.2.3"),
-		"chown -h ghrunner:ghrunner " + dir + ".complete",
+		"lchown demo",
+		"lchown demo/1.2.3",
+		"lchown demo/1.2.3/x64.complete",
 	}
 	if got := f.host.commands(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands\n got %q\nwant %q", got, want)

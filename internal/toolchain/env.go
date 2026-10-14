@@ -43,6 +43,7 @@ func NewEnv(root, home, user string, run system.Runner, fetch func(ctx context.C
 		Fetch:   fetch,
 		Allow:   httpsFrom,
 		Run:     run,
+		Chown:   lchownTo(user),
 		Extract: func(ctx context.Context, archive, dir string) error {
 			// As root, tar would otherwise give each file the owner the
 			// archive names.

@@ -191,6 +191,8 @@ type host struct {
 	calls       []string
 	scripts     map[string]func(dir string, env map[string]string, args []string) error
 	failExtract error
+	// onChown runs before each chown with the path it is given.
+	onChown func(path string)
 }
 
 func (h *host) run(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -199,6 +201,9 @@ func (h *host) run(_ context.Context, name string, args ...string) ([]byte, erro
 	h.mu.Unlock()
 	switch name {
 	case "chown":
+		if h.onChown != nil {
+			h.onChown(args[len(args)-1])
+		}
 		return nil, nil
 	case "runuser":
 		return nil, h.runAs(args)
@@ -223,6 +228,19 @@ func (h *host) runAs(args []string) error {
 		return fmt.Errorf("no fake for %s", args[b+4])
 	}
 	return f(args[b+3], env, args[b+5:])
+}
+
+// lchown records the path Env.Chown is given, relative to the tool cache,
+// and fails unless it names something inside r.
+func (h *host) lchown(r *os.Root, rel string) error {
+	h.mu.Lock()
+	h.calls = append(h.calls, "lchown "+filepath.ToSlash(rel))
+	h.mu.Unlock()
+	if h.onChown != nil {
+		h.onChown(filepath.Join(r.Name(), rel))
+	}
+	_, err := r.Lstat(rel)
+	return err
 }
 
 func (h *host) commands() []string {
@@ -278,6 +296,7 @@ func newFixture(t *testing.T) *fixture {
 		Fetch: system.Download,
 		Allow: func(string, Origin) error { return nil },
 		Run:   f.host.run,
+		Chown: f.host.lchown,
 		Extract: func(_ context.Context, archive, dir string) error {
 			if f.host.failExtract != nil {
 				return f.host.failExtract

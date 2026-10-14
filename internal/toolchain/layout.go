@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -67,18 +69,20 @@ func (e *Env) removeLayout(toolDir, folder string) error {
 	if !validFolder(folder) || !e.has(toolDir, folder) {
 		return ErrNotInstalled
 	}
-	dir := e.versionDir(toolDir, folder)
-	if err := noSymlinks(e.Root, dir); err != nil {
+	r, err := os.OpenRoot(e.Root)
+	if err != nil {
 		return err
 	}
-	if err := os.Remove(marker(dir)); err != nil {
+	defer r.Close()
+	dir := filepath.Join(toolDir, folder, arch)
+	if err := r.Remove(marker(dir)); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(dir); err != nil {
+	if err := r.RemoveAll(dir); err != nil {
 		return err
 	}
 	// Fails, and keeps the folder, while it holds anything else.
-	os.Remove(filepath.Dir(dir))
+	r.Remove(filepath.Dir(dir))
 	return nil
 }
 
@@ -149,26 +153,18 @@ func (e *Env) chownTree(ctx context.Context, path string) error {
 	return err
 }
 
-// mkdirOwned creates dir, when missing, owned by the runner user, so jobs'
-// setup-* steps can still add versions beside ghr's.
-func (e *Env) mkdirOwned(ctx context.Context, dir string) error {
-	if err := noSymlinks(e.Root, dir); err != nil {
-		return err
-	}
-	if _, err := os.Stat(dir); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.Mkdir(dir, 0o755); err != nil {
-		if os.IsExist(err) {
+// mkdirOwned creates rel inside r, when missing, owned by the runner user, so
+// jobs' setup-* steps can still add versions beside ghr's.
+func (e *Env) mkdirOwned(r *os.Root, rel string) error {
+	if err := r.Mkdir(rel, 0o755); err != nil {
+		if errors.Is(err, fs.ErrExist) {
 			return nil
 		}
 		return err
 	}
-	if _, err := e.Run(ctx, "chown", "-h", e.owner(), dir); err != nil {
+	if err := e.Chown(r, rel); err != nil {
 		// Left root-owned, a job's setup-* step could not add to it.
-		os.Remove(dir)
+		r.Remove(rel)
 		return err
 	}
 	return nil
@@ -214,17 +210,17 @@ func singleRoot(dir string) (string, error) {
 	return dir, nil
 }
 
-// removeIncomplete deletes an x64 folder and its marker.
-func removeIncomplete(dir string) {
-	os.Remove(marker(dir))
-	os.RemoveAll(dir)
+// removeIncomplete deletes an x64 folder inside r and its marker.
+func removeIncomplete(r *os.Root, dir string) {
+	r.Remove(marker(dir))
+	r.RemoveAll(dir)
 }
 
 // dropFailed undoes a failed install: the x64 folder, its marker, and the
 // version folder when nothing else is left in it.
-func dropFailed(dir string) {
-	removeIncomplete(dir)
-	os.Remove(filepath.Dir(dir))
+func dropFailed(r *os.Root, dir string) {
+	removeIncomplete(r, dir)
+	r.Remove(filepath.Dir(dir))
 }
 
 // fetch is the one way an installer downloads: Allow judges rawURL against
@@ -277,17 +273,28 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, from Origin, r
 	if err := e.chownTree(ctx, src); err != nil {
 		return fmt.Errorf("chown: %w", err)
 	}
-	toolPath := filepath.Join(e.Root, toolDir)
-	verPath := filepath.Join(toolPath, rel.Folder)
-	for _, d := range []string{toolPath, verPath} {
-		if err := e.mkdirOwned(ctx, d); err != nil {
+	// The runner user owns the tool cache and can swap any folder in it for a
+	// link at any moment, so every step from here goes through a root, which
+	// never follows a link out of the cache.
+	r, err := os.OpenRoot(e.Root)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	srcRel, err := filepath.Rel(e.Root, src)
+	if err != nil {
+		return err
+	}
+	verRel := filepath.Join(toolDir, rel.Folder)
+	for _, d := range []string{toolDir, verRel} {
+		if err := e.mkdirOwned(r, d); err != nil {
 			return err
 		}
 	}
-	target := filepath.Join(verPath, arch)
+	target := filepath.Join(verRel, arch)
 	if err := ctx.Err(); err != nil {
 		// A marker-less target may be a job's own download, not ours to drop.
-		os.Remove(verPath)
+		r.Remove(verRel)
 		return err
 	}
 	// A job's setup-* step may have completed this version while ghr downloaded.
@@ -296,20 +303,20 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, from Origin, r
 	}
 	// A target without a marker is a killed install; replace it, as
 	// @actions/tool-cache's _createToolPath does.
-	removeIncomplete(target)
-	if err := os.Rename(src, target); err != nil {
-		dropFailed(target)
+	removeIncomplete(r, target)
+	if err := r.Rename(srcRel, target); err != nil {
+		dropFailed(r, target)
 		return err
 	}
 	// O_EXCL, so a link planted at the marker's path is never followed.
-	f, err := os.OpenFile(marker(target), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	f, err := r.OpenFile(marker(target), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		dropFailed(target)
+		dropFailed(r, target)
 		return err
 	}
 	f.Close()
-	if _, err := e.Run(ctx, "chown", "-h", e.owner(), marker(target)); err != nil {
-		dropFailed(target)
+	if err := e.Chown(r, marker(target)); err != nil {
+		dropFailed(r, target)
 		return fmt.Errorf("chown: %w", err)
 	}
 	return nil

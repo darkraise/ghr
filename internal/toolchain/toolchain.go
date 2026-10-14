@@ -6,6 +6,7 @@ package toolchain
 import (
 	"context"
 	"errors"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,8 +52,11 @@ type Env struct {
 	// Allow returns an error unless url may be downloaded for an installer
 	// whose files come from from. A version list names the URL, and what it
 	// downloads is unpacked or run on this machine.
-	Allow   func(url string, from Origin) error
-	Run     func(ctx context.Context, name string, args ...string) ([]byte, error)
+	Allow func(url string, from Origin) error
+	Run   func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// Chown gives rel, inside r, to the runner user without following a
+	// link at rel.
+	Chown   func(r *os.Root, rel string) error
 	Extract func(ctx context.Context, archive, dir string) error
 	OpID    func() string
 	// PythonPlatform is the Ubuntu release whose python-versions builds this

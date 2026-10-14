@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -173,42 +174,98 @@ func TestInstallArchiveCancelledKeepsAnExistingMarkerlessFolder(t *testing.T) {
 	}
 }
 
+func openRoot(t *testing.T, dir string) *os.Root {
+	t.Helper()
+	r, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close() })
+	return r
+}
+
 func TestMkdirOwnedRemovesWhatItCouldNotChown(t *testing.T) {
-	e := &Env{Root: t.TempDir(), User: "u", Run: func(context.Context, string, ...string) ([]byte, error) {
-		return nil, errors.New("chown failed")
+	e := &Env{Root: t.TempDir(), User: "u", Chown: func(*os.Root, string) error {
+		return errors.New("chown failed")
 	}}
-	dir := filepath.Join(e.Root, "demo")
-	if err := e.mkdirOwned(context.Background(), dir); err == nil {
+	if err := e.mkdirOwned(openRoot(t, e.Root), "demo"); err == nil {
 		t.Fatal("no error")
 	}
-	if exists(dir) {
+	if exists(filepath.Join(e.Root, "demo")) {
 		t.Fatal("a root-owned directory was left for jobs to trip over")
 	}
 }
 
-func TestNoSymlinksAndRefusals(t *testing.T) {
+func TestRemoveLayoutAndMkdirOwnedRefuseALinkOutOfTheToolCache(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	mkInstall(t, outside, "node", "22.11.0", true)
 	symlinkOrSkip(t, filepath.Join(outside, "node"), filepath.Join(root, "node"))
-	if err := noSymlinks(root, filepath.Join(root, "node", "22.11.0", "x64")); err == nil {
-		t.Fatal("a symlinked tool folder passed")
-	}
-	if err := noSymlinks(root, filepath.Join(root, "missing", "x")); err != nil {
-		t.Fatalf("a missing path: %v", err)
-	}
-	if err := noSymlinks(root, filepath.Join(outside, "x")); err == nil {
-		t.Fatal("a path outside root passed")
-	}
-	e := &Env{Root: root}
+	e := &Env{Root: root, Chown: func(*os.Root, string) error { return nil }}
 	if err := e.removeLayout("node", "22.11.0"); err == nil || errors.Is(err, ErrNotInstalled) {
 		t.Fatalf("remove through a symlink: %v", err)
 	}
-	if !exists(filepath.Join(outside, "node", "22.11.0", "x64", "file")) {
+	if !exists(filepath.Join(outside, "node", "22.11.0", "x64", "file")) || !exists(filepath.Join(outside, "node", "22.11.0", "x64.complete")) {
 		t.Fatal("remove followed the link and deleted outside the tool cache")
 	}
-	if err := e.mkdirOwned(context.Background(), filepath.Join(root, "node", "24.0.0")); err == nil {
+	if err := e.mkdirOwned(openRoot(t, root), filepath.Join("node", "24.0.0")); err == nil {
 		t.Fatal("mkdirOwned created a directory through a symlink")
+	}
+	if exists(filepath.Join(outside, "node", "24.0.0")) {
+		t.Fatal("mkdirOwned created a directory outside the tool cache")
+	}
+}
+
+// The runner user owns the tool folder, so a job can swap the version folder
+// ghr has just made for a link out of the tool cache.
+func TestInstallArchiveDoesNotFollowAVersionFolderSwappedForALink(t *testing.T) {
+	f := newFixture(t)
+	outside := t.TempDir()
+	theirs := mkInstall(t, outside, "", "", false)
+	symlinkOrSkip(t, outside, filepath.Join(t.TempDir(), "probe"))
+	ver := filepath.Join(f.Root, "demo", "1.2.3")
+	f.host.onChown = func(path string) {
+		if path != ver {
+			return
+		}
+		if err := os.Remove(ver); err != nil {
+			t.Error(err)
+		}
+		if err := os.Symlink(outside, ver); err != nil {
+			t.Error(err)
+		}
+	}
+	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
+	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); err == nil {
+		t.Fatal("installed through a link out of the tool cache")
+	}
+	if !exists(filepath.Join(theirs, "file")) {
+		t.Fatal("the install removed a folder outside the tool cache")
+	}
+	if exists(filepath.Join(theirs, "bin")) || exists(theirs+".complete") {
+		t.Fatal("the install wrote outside the tool cache")
+	}
+}
+
+func TestDotnetFailedInstallRemovesNothingThroughASymlink(t *testing.T) {
+	f := dotnetFixture(t)
+	outside := t.TempDir()
+	touch(t, filepath.Join(outside, "8.0.414", "x"))
+	symlinkOrSkip(t, outside, filepath.Join(t.TempDir(), "probe"))
+	// dotnet-install.sh runs as the runner user, who owns <Root>/dotnet.
+	f.host.scripts["dotnet-install.sh"] = func(string, map[string]string, []string) error {
+		if err := os.Symlink(outside, filepath.Join(f.Root, "dotnet", "sdk")); err != nil {
+			return err
+		}
+		return errors.New("download failed")
+	}
+	d := newDotnet(f.Env)
+	rel, _ := d.Resolve(context.Background(), "8.0")
+	if err := d.Install(context.Background(), rel, func(string) {}); err == nil || !strings.Contains(err.Error(), "download failed") {
+		t.Fatalf("got %v", err)
+	}
+	if !exists(filepath.Join(outside, "8.0.414", "x")) {
+		t.Fatal("the failed install removed a folder outside the tool cache")
 	}
 }
 

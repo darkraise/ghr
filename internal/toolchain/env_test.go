@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -131,5 +132,24 @@ func TestNewEnvExtractsWithRealTar(t *testing.T) {
 	}
 	if !exists(filepath.Join(out, "node-22", "bin", "node")) {
 		t.Fatal("not extracted")
+	}
+}
+
+func TestNewEnvChownsToTheRunnerUser(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix owners")
+	}
+	me, err := user.Current()
+	if err != nil {
+		t.Skip(err)
+	}
+	dir := t.TempDir()
+	touch(t, filepath.Join(dir, "f"))
+	r := openRoot(t, dir)
+	if err := NewEnv(dir, "", me.Username, nil, nil).Chown(r, "f"); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewEnv(dir, "", "ghr-no-such-user", nil, nil).Chown(r, "f"); err == nil {
+		t.Fatal("chowned to a user that does not exist")
 	}
 }
