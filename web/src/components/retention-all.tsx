@@ -38,7 +38,7 @@ export function RetentionAll({ count, offline, busy, ask }: { count: number; off
           suffix="days"
           className="w-40"
           value={numberFromText(days)}
-          disabled={offline}
+          disabled={offline || retention.isPending}
           aria-invalid={invalid}
           aria-describedby={invalid ? "retention_all_error" : undefined}
           onValueChange={(v) => setDays(textFromNumber(v))}

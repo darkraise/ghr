@@ -62,7 +62,17 @@ function RetentionCell({ repo, offline, ask }: { repo: RepoStorage; offline: boo
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-1">
-        <NumberField label={`Retention of ${repo.name}`} min={1} max={max} precision={0} suffix="days" className="w-36" value={numberFromText(days)} onValueChange={(v) => setDays(textFromNumber(v))} />
+        <NumberField
+          label={`Retention of ${repo.name}`}
+          min={1}
+          max={max}
+          precision={0}
+          suffix="days"
+          className="w-36"
+          value={numberFromText(days)}
+          disabled={set.isPending}
+          onValueChange={(v) => setDays(textFromNumber(v))}
+        />
         <Button
           size="sm"
           aria-label={`Save retention of ${repo.name}`}

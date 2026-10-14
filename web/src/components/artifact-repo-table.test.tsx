@@ -214,6 +214,27 @@ describe("ArtifactRepoTable", () => {
     expect(screen.getByRole("button", { name: "Edit cleanup of darkcloud" })).toBeDisabled()
   })
 
+  it("disables the retention field while its save is pending", async () => {
+    mockApi({ "PUT /api/github-storage/darkcloud/retention": () => new Promise<Response>(() => undefined) })
+    const { user } = await draw()
+    await user.click(screen.getByRole("button", { name: "Edit retention of darkcloud" }))
+    const input = screen.getByRole("spinbutton", { name: "Retention of darkcloud" })
+    await user.clear(input)
+    await user.type(input, "3")
+    await user.click(screen.getByRole("button", { name: "Save retention of darkcloud" }))
+    await user.click(within(await screen.findByRole("alertdialog", { name: "Set retention of darkcloud to 3 days?" })).getByRole("button", { name: "Set retention" }))
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Retention of darkcloud" })).toBeDisabled())
+  })
+
+  it("disables the retention-for-all field while its save is pending", async () => {
+    mockApi({ "POST /api/github-storage/retention": () => new Promise<Response>(() => undefined) })
+    const { user } = await draw()
+    await user.type(screen.getByRole("spinbutton", { name: "Retention for all" }), "7")
+    await user.click(screen.getByRole("button", { name: "Set retention" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Set retention" }))
+    await waitFor(() => expect(screen.getByRole("spinbutton", { name: "Retention for all" })).toBeDisabled())
+  })
+
   it("shows a refused preview and saves nothing", async () => {
     const { calls } = mockApi({ "GET /api/github-storage/preview": json({ error: "invalid duration \"1x\"" }, 400) })
     const { user } = await draw()
