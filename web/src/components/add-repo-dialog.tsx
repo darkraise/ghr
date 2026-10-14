@@ -103,6 +103,7 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
           <Label htmlFor="add-max">Max</Label>
           <NumberField
             id="add-max"
+            label="Max"
             min={0}
             max={99}
             precision={0}

@@ -31,6 +31,7 @@ export function RetentionAll({ count, offline, busy, ask }: { count: number; off
         <Label htmlFor="retention_all">Retention for all</Label>
         <NumberField
           id="retention_all"
+          label="Retention for all"
           min={1}
           max={400}
           precision={0}

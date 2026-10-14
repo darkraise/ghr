@@ -31,6 +31,7 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
       <Field label={label} htmlFor={key} help={help} changed={is(key)} error={errors[key]}>
         <NumberField
           id={key}
+          label={label}
           min={0}
           suffix={UNIT_SETTINGS[key]?.unit}
           className={FIELD_WIDTH}
@@ -70,6 +71,7 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
         >
           <NumberField
             id="global_max"
+            label="Max concurrent runners"
             min={1}
             max={99}
             precision={0}
@@ -92,6 +94,7 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
         <Field label="Disk high-water" htmlFor="disk_high_water" help="Disk use that triggers pruning" changed={is("disk_high_water")} error={errors.disk_high_water}>
           <NumberField
             id="disk_high_water"
+            label="Disk high-water"
             min={1}
             max={100}
             step={5}

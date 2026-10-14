@@ -318,6 +318,7 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
               >
                 <NumberField
                   id="repo-max"
+                  label="Max"
                   min={0}
                   max={99}
                   precision={0}
@@ -330,6 +331,7 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
               <Field label="Warm" htmlFor="repo-warm" help="Runners kept ready in all mode. Leave empty for the default of 1." error={warmError} changed={is("warm")}>
                 <NumberField
                   id="repo-warm"
+                  label="Warm"
                   min={0}
                   max={99}
                   precision={0}

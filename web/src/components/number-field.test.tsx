@@ -9,7 +9,7 @@ function Harness({ initial = Number.NaN, onValue }: { initial?: number; onValue?
   const [value, setValue] = useState(initial)
   return (
     <NumberField
-      aria-label="Days"
+      label="Days"
       value={value}
       min={1}
       max={100}
@@ -55,12 +55,12 @@ describe("NumberField", () => {
     expect(field).toHaveValue("100")
   })
 
-  it("steps with its buttons", async () => {
+  it("steps with buttons named after the field", async () => {
     const user = userEvent.setup()
     render(<Harness initial={5} />)
-    await user.click(screen.getByRole("button", { name: "Increment" }))
+    await user.click(screen.getByRole("button", { name: "Increase Days" }))
     expect(screen.getByRole("spinbutton", { name: "Days" })).toHaveValue("6")
-    await user.click(screen.getByRole("button", { name: "Decrement" }))
+    await user.click(screen.getByRole("button", { name: "Decrease Days" }))
     expect(screen.getByRole("spinbutton", { name: "Days" })).toHaveValue("5")
   })
 

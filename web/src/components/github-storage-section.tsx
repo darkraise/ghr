@@ -41,11 +41,11 @@ export function GitHubStorageSection() {
             {form.rejection && <ErrorLine>{form.rejection}</ErrorLine>}
             <FieldGroup id="storage-policy" title="Policy">
               <Field label="Included storage" htmlFor="included_mb" help="The plan's allowance for artifacts and Packages, in MB." error={errors.included} changed={changed("included")}>
-                <NumberField id="included_mb" min={1} precision={0} suffix="MB" className={FIELD_WIDTH} value={numberFromText(values.included)} disabled={offline} onValueChange={(n) => form.set("included")(textFromNumber(n))} />
+                <NumberField id="included_mb" label="Included storage" min={1} precision={0} suffix="MB" className={FIELD_WIDTH} value={numberFromText(values.included)} disabled={offline} onValueChange={(n) => form.set("included")(textFromNumber(n))} />
               </Field>
               <Field label="Warning levels" help="Warn, then warn louder, when the estimate reaches these shares of the allowance." error={errors.critical} changed={changed("warn", "critical")}>
-                <NumberField aria-label="Warning at" min={1} max={100} precision={0} suffix="%" className="w-32" value={numberFromText(values.warn)} disabled={offline} onValueChange={(n) => form.set("warn")(textFromNumber(n))} />
-                <NumberField aria-label="Critical at" min={1} max={100} precision={0} suffix="%" className="w-32" value={numberFromText(values.critical)} disabled={offline} onValueChange={(n) => form.set("critical")(textFromNumber(n))} />
+                <NumberField label="Warning at" min={1} max={100} precision={0} suffix="%" className="w-32" value={numberFromText(values.warn)} disabled={offline} onValueChange={(n) => form.set("warn")(textFromNumber(n))} />
+                <NumberField label="Critical at" min={1} max={100} precision={0} suffix="%" className="w-32" value={numberFromText(values.critical)} disabled={offline} onValueChange={(n) => form.set("critical")(textFromNumber(n))} />
               </Field>
               <Field label="Cleanup age" htmlFor="cleanup_max_age" help={`Delete artifacts older than this, such as 2d; empty is off, and at least 24h. ${CLEANUP_WARNING}`} changed={changed("age")}>
                 <Input id="cleanup_max_age" className={`${FIELD_WIDTH} font-mono`} placeholder="off" value={values.age} disabled={offline} onChange={(e) => form.set("age")(e.target.value)} />

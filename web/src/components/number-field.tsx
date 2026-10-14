@@ -11,6 +11,9 @@ import type { ReactNode } from "react"
 
 interface NumberFieldProps {
   id?: string
+  // Names the field and its steppers, which would otherwise all be "Increment"
+  // and "Decrement".
+  label: string
   // NaN is an empty box. undefined would hand the value over to NumberInput,
   // which then stops following this prop.
   value: number
@@ -23,14 +26,13 @@ interface NumberFieldProps {
   placeholder?: string
   disabled?: boolean
   className?: string
-  "aria-label"?: string
   "aria-invalid"?: boolean
   "aria-describedby"?: string
 }
 
 // NumberInput reports each number as it is typed and clamps to min and max
 // only when the field loses focus.
-export function NumberField({ id, value, onValueChange, min, max, step, precision, suffix, placeholder, disabled, className, ...aria }: NumberFieldProps) {
+export function NumberField({ id, label, value, onValueChange, min, max, step, precision, suffix, placeholder, disabled, className, ...aria }: NumberFieldProps) {
   return (
     <NumberInput
       className={className}
@@ -43,11 +45,11 @@ export function NumberField({ id, value, onValueChange, min, max, step, precisio
       disabled={disabled}
     >
       <NumberInputControl>
-        <NumberInputField id={id} placeholder={placeholder} {...aria} />
+        <NumberInputField id={id} aria-label={label} placeholder={placeholder} {...aria} />
         {suffix !== undefined && <NumberInputSuffix>{suffix}</NumberInputSuffix>}
         <NumberInputTriggerGroup>
-          <NumberInputIncrementTrigger />
-          <NumberInputDecrementTrigger />
+          <NumberInputIncrementTrigger aria-label={`Increase ${label}`} />
+          <NumberInputDecrementTrigger aria-label={`Decrease ${label}`} />
         </NumberInputTriggerGroup>
       </NumberInputControl>
     </NumberInput>
