@@ -45,7 +45,7 @@ Add or update tests with every behaviour change, next to the code they cover.
 
 ## Releases
 
-Every push to `master` that passes CI publishes a release: the next patch version, with `ghr_linux_amd64.tar.gz`, `checksums.txt` and a `setup.sh` that installs that release.
+Every push to `master` that passes CI publishes a release: the next patch version, with `ghr_linux_amd64.tar.gz`, `checksums.txt` and a `setup.sh` that installs that release, with a build provenance attestation for the tarball and `setup.sh`.
 
 ## License
 
