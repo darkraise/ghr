@@ -104,17 +104,11 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 	case "history":
 		return historyCmd(ctx, c, args[1:], out)
 	case "runner-update":
-		switch {
-		case len(args) == 1:
-			if err := c.QueueRunnerUpdate(ctx); err != nil {
-				return err
-			}
-			fmt.Fprintln(out, "runner update queued; it runs when no job is running or queued")
-			return nil
-		case len(args) == 2 && args[1] == "--cancel":
-			return c.CancelRunnerUpdate(ctx)
-		}
-		return usageError("usage: ghr runner-update [--cancel]")
+		return runnerUpdate(ctx, c, args[1:], out, "runner-update")
+	case "update":
+		return updateCmd(ctx, c, args[1:], out)
+	case "jobs":
+		return jobsCmd(ctx, c, args[1:], out)
 	case "storage":
 		return storageCmd(ctx, c, args[1:], out)
 	case "toolchain":

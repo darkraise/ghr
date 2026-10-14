@@ -64,7 +64,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	case "daemon":
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		if err := daemon.Run(ctx, daemon.DefaultOptions()); err != nil {
+		if err := daemon.Run(ctx, daemonOptions()); err != nil {
 			fmt.Fprintln(stderr, "ghr daemon:", err)
 			return 1
 		}
@@ -97,6 +97,14 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// daemonOptions is how ghr daemon runs: the default paths, and this
+// binary's version for the ghr update check.
+func daemonOptions() daemon.Options {
+	o := daemon.DefaultOptions()
+	o.Version = version
+	return o
+}
+
 const usage = `usage: ghr [command]
 
   (no command)                    same as status, in a terminal
@@ -114,7 +122,14 @@ const usage = `usage: ghr [command]
   kill <id>                       stop a runner
   logs <id> [-f]                  runner diagnostic log
   history [--repo r] [--conclusion c] [--limit n]
-  runner-update [--cancel]        queue (or cancel) a runner update
+  update                          ghr and runner versions and their state
+  update --check                  run the update checks that are on, wait, then show
+  update ghr [--cancel]           install the newest ghr release (or cancel the install)
+  update runner [--cancel]        queue (or cancel) a runner update
+  runner-update [--cancel]        same as update runner
+  jobs                            background tasks and their state
+  jobs run <name>                 run a background task now
+  jobs set <name> [--every <duration>] [--on | --off]
   storage [refresh]               disk use: Docker, toolchains, package caches
   toolchain list | available <tool>
   toolchain install <tool> <version> | --preset popular
