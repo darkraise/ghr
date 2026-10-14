@@ -119,23 +119,24 @@ function CleanupCell({ repo, globalAge, offline, ask }: { repo: RepoStorage; glo
     },
   })
 
-  async function submit(c: Choice) {
+  const preview = useMutation({ mutationFn: (effective: string) => api.storagePreview(effective, repo.name) })
+
+  function submit(c: Choice) {
     const value = c === "inherit" ? null : c === "off" ? "off" : age.trim()
     const effective = c === "inherit" ? globalAge : c === "age" ? age.trim() : ""
     if (effective === "") return save.mutate(value)
-    try {
-      const previews = await api.storagePreview(effective, repo.name)
-      ask({
-        title: `Clean ${repo.name}'s artifacts after ${effective}?`,
-        body: CLEANUP_WARNING,
-        details: <CleanupPreview age={effective} previews={previews} />,
-        action: "Save",
-        destructive: previews.some((p) => p.count > 0),
-        run: () => save.mutate(value),
-      })
-    } catch (err) {
-      toast.error(errorText(err))
-    }
+    preview.mutate(effective, {
+      onSuccess: (previews) =>
+        ask({
+          title: `Clean ${repo.name}'s artifacts after ${effective}?`,
+          body: CLEANUP_WARNING,
+          details: <CleanupPreview age={effective} previews={previews} />,
+          action: "Save",
+          destructive: previews.some((p) => p.count > 0),
+          run: () => save.mutate(value),
+        }),
+      onError: (err) => toast.error(errorText(err)),
+    })
   }
 
   if (choice === null) {
@@ -172,10 +173,17 @@ function CleanupCell({ repo, globalAge, offline, ask }: { repo: RepoStorage; glo
       {choice === "age" && (
         <Input aria-label={`Cleanup age of ${repo.name}`} className="w-20 font-mono" placeholder="6h" value={age} onChange={(e) => setAge(e.target.value)} />
       )}
-      <Button size="sm" aria-label={`Save cleanup of ${repo.name}`} disabled={offline || save.isPending || (choice === "age" && age.trim() === "")} onClick={() => void submit(choice)}>
+      <Button size="sm" aria-label={`Save cleanup of ${repo.name}`} disabled={offline || save.isPending || preview.isPending || (choice === "age" && age.trim() === "")} onClick={() => submit(choice)}>
         Save
       </Button>
-      <Button size="sm" variant="ghost" onClick={() => setChoice(null)}>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => {
+          preview.reset()
+          setChoice(null)
+        }}
+      >
         Cancel
       </Button>
     </div>

@@ -101,26 +101,28 @@ export function ArtifactRepoDetail({
   const all = repo.artifacts.length > 0 && chosen.length === repo.artifacts.length
   const toggle = (id: number) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
 
-  async function askOlder() {
+  const preview = useMutation({ mutationFn: (age: string) => api.storagePreview(age, repo.name) })
+
+  function askOlder() {
     const age = older.trim()
-    try {
-      const previews = await api.storagePreview(age, repo.name)
-      const count = previews.reduce((n, p) => n + p.count, 0)
-      const bytes = previews.reduce((n, p) => n + p.bytes, 0)
-      if (count === 0) {
-        toast(`No artifact of ${repo.name} is older than ${age}`)
-        return
-      }
-      ask({
-        title: `Delete ${repo.name}'s artifacts older than ${age}?`,
-        body: `Up to ${plural(count, "artifact")} (${humanBytes(bytes)}). Skips the artifacts of runs that have not completed. A run that downloads them later fails.`,
-        action: "Delete",
-        destructive: true,
-        run: () => bulk.mutate({ older_than: age }),
-      })
-    } catch (err) {
-      toast.error(errorText(err))
-    }
+    preview.mutate(age, {
+      onSuccess: (previews) => {
+        const count = previews.reduce((n, p) => n + p.count, 0)
+        const bytes = previews.reduce((n, p) => n + p.bytes, 0)
+        if (count === 0) {
+          toast(`No artifact of ${repo.name} is older than ${age}`)
+          return
+        }
+        ask({
+          title: `Delete ${repo.name}'s artifacts older than ${age}?`,
+          body: `Up to ${plural(count, "artifact")} (${humanBytes(bytes)}). Skips the artifacts of runs that have not completed. A run that downloads them later fails.`,
+          action: "Delete",
+          destructive: true,
+          run: () => bulk.mutate({ older_than: age }),
+        })
+      },
+      onError: (err) => toast.error(errorText(err)),
+    })
   }
 
   const cacheBytes = repo.caches.reduce((n, c) => n + c.bytes, 0)
@@ -156,7 +158,7 @@ export function ArtifactRepoDetail({
               disabled={offline}
               onChange={(e) => setOlder(e.target.value)}
             />
-            <Button size="sm" variant="outline" disabled={held || older.trim() === "" || bulk.isPending} onClick={() => void askOlder()}>
+            <Button size="sm" variant="outline" disabled={held || older.trim() === "" || bulk.isPending || preview.isPending} onClick={askOlder}>
               Delete older
             </Button>
           </>

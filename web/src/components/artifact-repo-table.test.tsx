@@ -214,6 +214,30 @@ describe("ArtifactRepoTable", () => {
     expect(screen.getByRole("button", { name: "Edit cleanup of darkcloud" })).toBeDisabled()
   })
 
+  it("holds Save while the cleanup preview is pending", async () => {
+    const { calls } = mockApi({ "GET /api/github-storage/preview": () => new Promise<Response>(() => undefined) })
+    const { user } = await draw()
+    await user.click(screen.getByRole("button", { name: "Edit cleanup of darkcloud" }))
+    await user.selectOptions(screen.getByRole("combobox", { name: "Cleanup of darkcloud" }), "age")
+    await user.type(screen.getByRole("textbox", { name: "Cleanup age of darkcloud" }), "12h")
+    await user.click(screen.getByRole("button", { name: "Save cleanup of darkcloud" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save cleanup of darkcloud" })).toBeDisabled())
+    expect(calls.filter((c) => c.path === "/api/github-storage/preview")).toHaveLength(1)
+  })
+
+  it("opens no confirm for a cleanup preview that finishes after Cancel", async () => {
+    let answer: (r: Response) => void = () => undefined
+    mockApi({ "GET /api/github-storage/preview": () => new Promise<Response>((resolve) => (answer = resolve)) })
+    const { user } = await draw()
+    await user.click(screen.getByRole("button", { name: "Edit cleanup of darkcloud" }))
+    await user.selectOptions(screen.getByRole("combobox", { name: "Cleanup of darkcloud" }), "age")
+    await user.type(screen.getByRole("textbox", { name: "Cleanup age of darkcloud" }), "12h")
+    await user.click(screen.getByRole("button", { name: "Save cleanup of darkcloud" }))
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    answer(json([{ repo: "darkcloud", count: 1, bytes: 20971520 }]))
+    await expect(waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeNull(), { timeout: 300 })).rejects.toThrow()
+  })
+
   it("disables the retention field while its save is pending", async () => {
     mockApi({ "PUT /api/github-storage/darkcloud/retention": () => new Promise<Response>(() => undefined) })
     const { user } = await draw()

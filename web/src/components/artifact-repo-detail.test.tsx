@@ -75,6 +75,17 @@ describe("ArtifactRepoDetail", () => {
     await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ older_than: "1d" }))
   })
 
+  it("previews once when Delete older is double clicked", async () => {
+    let answer: (r: Response) => void = () => undefined
+    const { calls } = mockApi({ "GET /api/github-storage/preview": () => new Promise<Response>((resolve) => (answer = resolve)) })
+    const { user } = await draw()
+    await user.type(within(artifacts()).getByRole("textbox", { name: "Delete artifacts of darkmem older than" }), "1d")
+    await user.dblClick(within(artifacts()).getByRole("button", { name: "Delete older" }))
+    answer(json([{ repo: "darkmem", count: 2, bytes: 209715200 }]))
+    expect(await screen.findByRole("alertdialog", { name: "Delete darkmem's artifacts older than 1d?" })).toBeInTheDocument()
+    expect(calls.filter((c) => c.path === "/api/github-storage/preview")).toHaveLength(1)
+  })
+
   it("says when nothing is older than the age", async () => {
     const { calls } = mockApi({ "GET /api/github-storage/preview": [] })
     const { user } = await draw()
