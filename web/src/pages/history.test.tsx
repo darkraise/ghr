@@ -66,6 +66,18 @@ describe("History page", () => {
     expect(bar?.parentElement).toHaveClass("flex-col")
   })
 
+  it("shows a job with no start time without a duration or bar", async () => {
+    setViewport(1024)
+    const [first] = fixtures.history
+    if (!first) throw new Error("fixture is empty")
+    mockApi(authedRoutes({ "GET /api/history": [{ ...first, started_at: "0001-01-01T00:00:00Z" }] }))
+    renderApp("/history")
+    const row = (await screen.findByRole("link", { name: first.job_name })).closest("tr") as HTMLElement
+    expect(within(row).getByText(first.workflow)).toBeInTheDocument()
+    expect(row.querySelector("[data-duration-bar]")).toBeNull()
+    expect(row).not.toHaveTextContent(/\d+[ms]/)
+  })
+
   it("keys the chart's busy time in the series colour", async () => {
     mockApi(authedRoutes({ "GET /api/history": fixtures.history }))
     renderApp("/history")
