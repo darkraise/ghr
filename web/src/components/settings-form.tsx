@@ -139,7 +139,7 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
             changed={is("web_hosts")}
             error={errors.web_hosts ?? form.rejectedFields.web_hosts}
           >
-            <TagField label="Allowed hostnames" value={values.web_hosts as string[]} onChange={set("web_hosts")} disabled={offline} className={FIELD_WIDTH} />
+            <TagField label="Allowed hostnames" value={values.web_hosts as string[]} onChange={set("web_hosts")} disabled={offline} maxLength={253} className={FIELD_WIDTH} />
           </Field>
           {restart?.pending?.length ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 text-sm">
