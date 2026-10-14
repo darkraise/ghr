@@ -78,6 +78,11 @@ type Options struct {
 	// ReleaseBase is the GitHub repository ghr's own releases come from;
 	// empty turns the ghr update check off.
 	ReleaseBase string
+	// OptDir is ghr's install folder, where a ghr install stages its download
+	// and keeps ghr.previous.
+	OptDir string
+	// UpdateRecordPath keeps the tag a ghr install restarts into.
+	UpdateRecordPath string
 
 	// Test seams: zero values use GitHub, systemd, Docker, the host, an HTTP
 	// download and SIGHUP.
@@ -110,6 +115,8 @@ func DefaultOptions() Options {
 		Restart:               restartUnit(system.Exec),
 		WebListenPath:         "/var/lib/ghr/web-listen",
 		ReleaseBase:           selfupdate.DefaultBase,
+		OptDir:                "/opt/ghr",
+		UpdateRecordPath:      "/var/lib/ghr/ghr-update.json",
 		Paths: runner.Paths{
 			Dist:        "/opt/ghr/dist/current",
 			Instances:   "/var/lib/ghr/instances",
@@ -292,6 +299,7 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 		Changes:          hub,
 		Version:          o.Version,
 		ReleaseBase:      o.ReleaseBase,
+		UpdateRecordPath: o.UpdateRecordPath,
 		Jobs:             reg,
 		Wake: func() {
 			select {
@@ -303,6 +311,17 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 	reg.Register(config.JobRunnerUpdateCheck, b.Wake)
 	reg.Register(config.JobPrune, b.Wake)
 	if o.ReleaseBase != "" {
+		// Without the binary's real path there is nothing to swap; the
+		// install then answers as for a ghr not run by ghr.service.
+		if bin, err := os.Executable(); err == nil {
+			if bin, err = filepath.EvalSymlinks(bin); err == nil {
+				b.Installer = &selfupdate.Installer{
+					Base: o.ReleaseBase, Opt: o.OptDir, Hooks: o.Paths.Hooks, Binary: bin,
+					Fetch: m.Fetch, Extract: m.Host.Extract, Run: system.Exec,
+				}
+			}
+		}
+		b.LoadGhrUpdateRecord()
 		b.StartGhrChecks()
 	}
 	hub.SetSources(b.fingerprints, b.staleActivity)

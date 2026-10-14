@@ -28,6 +28,7 @@ import (
 	"github.com/darkraise/ghr/internal/metrics"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/runner"
+	"github.com/darkraise/ghr/internal/selfupdate"
 	"github.com/darkraise/ghr/internal/storage"
 	"github.com/darkraise/ghr/internal/toolchain"
 )
@@ -141,9 +142,14 @@ type Backend struct {
 	// turns the ghr update check off.
 	ReleaseBase string
 	// HTTP makes the ghr release check's request; nil means a plain client.
-	HTTP   *http.Client
-	flags  setupFlagCache
-	checks labelChecks
+	HTTP *http.Client
+	// Installer stages and swaps a ghr release; nil turns the install off.
+	Installer *selfupdate.Installer
+	// UpdateRecordPath keeps the tag a ghr install restarts into, so the next
+	// start can report the install's outcome; empty keeps no record.
+	UpdateRecordPath string
+	flags            setupFlagCache
+	checks           labelChecks
 
 	stepsMu    sync.Mutex
 	steps      map[string]stepsEntry

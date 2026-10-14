@@ -77,8 +77,18 @@ var opVerbs = map[string]string{"install": "installing", "remove": "removing", "
 
 // blockedBy names the daemon work a restart would cut, in the order the UI
 // shows it. Running jobs are not on it: their units outlive the daemon, and
-// the next start adopts them.
+// the next start adopts them. A ghr install is on it while it stages or
+// swaps; its own wait and restart read workBlocking instead.
 func (b *Backend) blockedBy(st model.Status) []string {
+	out := b.workBlocking(st)
+	if b.ghrInstalling() {
+		out = append(out, "installing ghr")
+	}
+	return out
+}
+
+// workBlocking is blockedBy without the ghr install.
+func (b *Backend) workBlocking(st model.Status) []string {
 	var out []string
 	ops := b.storageOps()
 	if c := ops.Current; c != nil {
@@ -174,16 +184,29 @@ func (b *Backend) RequestRestart(ctx context.Context) (run func(), err error) {
 	}
 	// The request ends once it is answered; the restart must not end with it.
 	detached := context.WithoutCancel(ctx)
-	return func() {
-		if blocked := b.blockedBy(b.M.Status()); len(blocked) > 0 {
-			why := strings.Join(blocked, ", ") + " started"
-			b.Events.Add("warn", "", "restart cancelled: %s", why)
-			b.setRestartFailure(why)
-			return
-		}
-		if err := b.Restart(detached); err != nil {
-			b.Events.Add("error", "", "restart failed: %v", err)
-			b.setRestartFailure(err.Error())
-		}
-	}, nil
+	return func() { _ = b.restartNow(detached) }, nil
+}
+
+// restartBlocked refuses a restart because work started after it was asked
+// for; it lists that work.
+type restartBlocked string
+
+func (r restartBlocked) Error() string { return string(r) + " started" }
+
+// restartNow asks systemd for the restart unless work a restart would cut
+// runs, which it refuses with a restartBlocked. A refused or failed restart
+// writes its event and is reported as the restart's failure.
+func (b *Backend) restartNow(ctx context.Context) error {
+	if blocked := b.blockedBy(b.M.Status()); len(blocked) > 0 {
+		err := restartBlocked(strings.Join(blocked, ", "))
+		b.Events.Add("warn", "", "restart cancelled: %s", err.Error())
+		b.setRestartFailure(err.Error())
+		return err
+	}
+	if err := b.Restart(ctx); err != nil {
+		b.Events.Add("error", "", "restart failed: %v", err)
+		b.setRestartFailure(err.Error())
+		return err
+	}
+	return nil
 }
