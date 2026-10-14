@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "darkraise-ui/components/sonner"
 import { useState } from "react"
 import { ApiError, api } from "@/api/client"
-import { keys, useConfig, useStatus } from "@/api/hooks"
+import { keys, readConfig, useConfig, useStatus } from "@/api/hooks"
 import type { Config, ConfigPatch, RunnerLimitsPatch, WebPatch } from "@/api/types"
 import { changedKeys, sameValue, settle, type Equal, type Values } from "@/lib/draft"
 import { isHostname, splitListen } from "@/lib/listen"
@@ -181,9 +181,7 @@ export function useSettingsForm(): SettingsForm {
     }
     toast.success("Settings saved")
     try {
-      const fresh = loadedValues(
-        await queryClient.fetchQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), staleTime: 0 }),
-      )
+      const fresh = loadedValues(await readConfig(queryClient))
       const missed = Object.keys(sent).find((key) => !equal(key, fresh[key], sent[key]))
       if (missed) toast.error(`Daemon did not apply ${patchKey(missed)}; is it older than this ghr?`)
     } catch (err) {

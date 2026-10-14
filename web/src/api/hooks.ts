@@ -1,7 +1,7 @@
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { api } from "./client"
 import { useLive } from "./live"
-import type { ActivityWindow, GhrEvent, GitHubStorage, LogChunk, RunAnnotations, RunDetail, Status, Storage } from "./types"
+import type { ActivityWindow, Config, GhrEvent, GitHubStorage, LogChunk, RunAnnotations, RunDetail, Status, Storage } from "./types"
 
 export const POLL_FAST = 1000
 export const POLL_SLOW = 5000
@@ -66,6 +66,12 @@ export function useSetupState(poll: boolean) {
 export function useConfig() {
   const live = useLive()
   return useQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), refetchInterval: livePoll(live, POLL_SLOW) })
+}
+
+// A poll started before the save may answer with the old config, and fetchQuery would join it.
+export async function readConfig(queryClient: QueryClient): Promise<Config> {
+  await queryClient.cancelQueries({ queryKey: keys.config })
+  return queryClient.fetchQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), staleTime: 0 })
 }
 
 export function useMetrics() {

@@ -10,7 +10,7 @@ import { PageHeader } from "darkraise-ui/layout"
 import { Ellipsis } from "lucide-react"
 import { useState } from "react"
 import { ApiError, api } from "@/api/client"
-import { keys, useConfig, useStatus } from "@/api/hooks"
+import { keys, readConfig, useConfig, useStatus } from "@/api/hooks"
 import type { Config, RepoConfig, RepoPatch, RepoStatus } from "@/api/types"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { LabelCheckGroup } from "@/components/label-check-group"
@@ -228,7 +228,7 @@ function RepositoryForm({ name, section }: { name: string; section: string }) {
     }
     toast.success("Repositories saved")
     try {
-      const fresh = await queryClient.fetchQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), staleTime: 0 })
+      const fresh = await readConfig(queryClient)
       const applied = repoValues(fresh.repos?.find((r) => r.name === name))
       const missed = Object.keys(sent).find((key) => !sameValue(applied[key], sent[key]))
       if (missed) toast.error(`Daemon did not apply ${name}.${missed}; is it older than this ghr?`)

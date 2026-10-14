@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "darkraise-ui/components/sonner"
 import { useState } from "react"
 import { ApiError, api } from "@/api/client"
-import { keys, useConfig, useStatus } from "@/api/hooks"
+import { keys, readConfig, useConfig, useStatus } from "@/api/hooks"
 import type { Config, GitHubStoragePatch, StoragePreview } from "@/api/types"
 import { changedKeys, settle, type Equal } from "@/lib/draft"
 import { errorText } from "@/query"
@@ -88,7 +88,7 @@ export function useStoragePolicyForm() {
     // the values from before the save. When the read fails, the sent values go
     // into the cache instead, or the save would look lost.
     try {
-      await queryClient.fetchQuery({ queryKey: keys.config, queryFn: ({ signal }) => api.config(signal), staleTime: 0 })
+      await readConfig(queryClient)
     } catch (err) {
       toast.error(`Saved, but re-reading the config failed: ${errorText(err)}`)
       queryClient.setQueryData<Config>(

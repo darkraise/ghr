@@ -183,6 +183,40 @@ describe("Settings page", () => {
     expect(screen.queryByText(/Daemon did not apply/)).toBeNull()
   })
 
+  it("reads the saved config even when a poll started before the save answers last", async () => {
+    let hold = false
+    let release: () => void = () => {}
+    const old = new Promise<Config>((resolve) => {
+      release = () => resolve(fixtures.config)
+    })
+    let config = fixtures.config
+    mockApi(
+      routes({
+        "GET /api/config": () => {
+          if (!hold) return config
+          hold = false
+          return old
+        },
+        "PATCH /api/config": ({ body }: { body: unknown }) => {
+          config = { ...config, ...(body as Partial<Config>) }
+          return noContent()
+        },
+      }),
+    )
+    const { user, queryClient } = renderApp("/settings")
+    const poll = await screen.findByLabelText("Poll interval")
+    await user.clear(poll)
+    await user.type(poll, "15")
+    hold = true
+    void queryClient.refetchQueries({ queryKey: ["config"] })
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    expect((await screen.findAllByText("Settings saved")).length).toBeGreaterThan(0)
+    release()
+    await waitFor(() => expect(screen.queryByText(/unsaved change/)).toBeNull())
+    expect(screen.queryByText(/Daemon did not apply/)).toBeNull()
+    expect(screen.getByLabelText("Poll interval")).toHaveValue("15")
+  })
+
   it("says when the daemon did not apply a saved field", async () => {
     mockApi(routes({ "PATCH /api/config": () => noContent() }))
     const { user } = renderApp("/settings")
