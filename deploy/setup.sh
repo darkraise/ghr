@@ -351,7 +351,7 @@ configure_github() {
     return 0
   fi
   if [ -z "$tok" ] && stdin_is_tty; then
-    read -rsp "GitHub fine-grained PAT (Administration: read/write, Actions: read; Enter to finish in the browser): " tok || true
+    read -rsp "GitHub fine-grained PAT (Administration: read/write, Actions: read/write; Enter to finish in the browser): " tok || true
     echo
   fi
   [ -n "$tok" ] || return 0
