@@ -146,6 +146,39 @@ func TestSpawnRollbackOutlivesACancelledTick(t *testing.T) {
 	}
 }
 
+// A registration the rollback could not delete is retried by reconciliation,
+// as one finish could not delete is; a 404 means it is gone already.
+func TestSpawnRollbackKeepsARegistrationItCouldNotDelete(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		err    error
+		retain bool
+	}{
+		{"server error", &github.APIError{Status: 502, Kind: github.ErrServer}, true},
+		{"registration already gone", &github.APIError{Status: 404, Kind: github.ErrNotFound}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.m.Paths.Dist = filepath.Join(h.root, "missing")
+			h.gh.setErr("DeleteRunner darkmem", c.err)
+			if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err == nil {
+				t.Fatal("spawn succeeded")
+			}
+			if got := undeletedCount(h) == 1; got != c.retain {
+				t.Fatalf("%d registrations kept, want kept=%v\n%s", undeletedCount(h), c.retain, h.eventText())
+			}
+			if !c.retain {
+				return
+			}
+			h.gh.setErr("DeleteRunner darkmem", nil)
+			h.m.Reconcile(context.Background(), h.cfg)
+			if !reflect.DeepEqual(h.gh.deleted, []int64{101}) || undeletedCount(h) != 0 {
+				t.Fatalf("deleted %v, %d kept", h.gh.deleted, undeletedCount(h))
+			}
+		})
+	}
+}
+
 func TestUniqueIDSkipsArchivedLogsAndPendingHistory(t *testing.T) {
 	h := newHarness(t)
 	os.MkdirAll(filepath.Join(h.m.Paths.Logs, "aaaaaa"), 0o755)

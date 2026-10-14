@@ -96,7 +96,10 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 			m.Events.Add("warn", r.Name, "spawn %s: remove dir: %v; reconciliation retries", id, rerr)
 		}
 		if derr := m.GH.DeleteRunner(dctx, r.Name, jit.Runner.ID); derr != nil && !github.IsKind(derr, github.ErrNotFound) {
-			m.Events.Add("warn", r.Name, "spawn %s: delete registration: %v", id, derr)
+			m.mu.Lock()
+			m.undeleted[jit.Runner.ID] = registration{repo: r.Name, name: name}
+			m.mu.Unlock()
+			m.Events.Add("warn", r.Name, "spawn %s: delete registration: %v (reconciliation retries)", id, derr)
 		}
 		return err
 	}
