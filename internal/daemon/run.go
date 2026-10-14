@@ -129,12 +129,14 @@ func listen(socket string) (net.Listener, *os.File, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	held, err := tryLock(lock)
+	if err != nil {
 		lock.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, nil, fmt.Errorf("another ghr daemon is already running (%s.lock is held)", socket)
-		}
 		return nil, nil, err
+	}
+	if held {
+		lock.Close()
+		return nil, nil, fmt.Errorf("another ghr daemon is already running (%s.lock is held)", socket)
 	}
 	if conn, err := net.DialTimeout("unix", socket, time.Second); err == nil {
 		conn.Close()
