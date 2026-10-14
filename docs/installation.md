@@ -102,4 +102,5 @@ install -m 0755 /opt/ghr/ghr.previous /usr/local/bin/ghr && systemctl restart gh
 - A first install needs v0.1.17 or later, the first release that ships its example config.
 - A config that lists `watch_repos` is refused by any ghr older than v0.1.18, the first release with the Actions page. Remove the `watch_repos` key before installing an older release.
 - A config with a `github_storage` block is refused by any ghr older than the first release with the Artifacts page. Remove the block first.
+- A config with a `jobs` block is refused by any ghr older than the first release with the Jobs page, including the `ghr.previous` that the rollback above restores. ghr writes the block only when a task differs from its default, so remove the block before rolling back after you changed a task.
 - Upgrading from v0.1.20 or older stops runners that are running at the time, with any job they run: those releases kept a runner's metadata only in its own directory, which its job can rewrite, so ghr does not adopt them.
