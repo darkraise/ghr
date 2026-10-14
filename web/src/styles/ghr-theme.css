@@ -275,6 +275,13 @@ body {
   font-size: var(--text-base);
 }
 
+/* The kit's trigger group sets its steppers to position: static, so a
+   stepper's absolutely placed hover layer fills the nearest positioned
+   ancestor, often the whole page, instead of the button. */
+.dr-number-input-trigger-group .dr-number-input-stepper {
+  position: relative;
+}
+
 ::selection {
   background: hsl(var(--primary) / 0.3);
   color: hsl(var(--foreground));
