@@ -73,19 +73,25 @@ func TestInstallArchiveSkipsACompleteVersion(t *testing.T) {
 	}
 }
 
+// A folder written in the future, as a clock stepped back leaves it, would
+// otherwise never count as killed.
 func TestInstallArchiveReplacesAFolderWithoutMarker(t *testing.T) {
-	f := newFixture(t)
-	stale := mkInstall(t, f.Root, "demo", "1.2.3", false)
-	backdate(t, stale, 2*time.Hour)
-	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
-	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); err != nil {
-		t.Fatal(err)
-	}
-	if exists(filepath.Join(stale, "file")) {
-		t.Fatal("the marker-less folder's content survived")
-	}
-	if !exists(stale + ".complete") {
-		t.Fatal("no marker")
+	for name, age := range map[string]time.Duration{"two hours old": 2 * time.Hour, "two hours ahead": -2 * time.Hour} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			stale := mkInstall(t, f.Root, "demo", "1.2.3", false)
+			backdate(t, stale, age)
+			rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
+			if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); err != nil {
+				t.Fatal(err)
+			}
+			if exists(filepath.Join(stale, "file")) {
+				t.Fatal("the marker-less folder's content survived")
+			}
+			if !exists(stale + ".complete") {
+				t.Fatal("no marker")
+			}
+		})
 	}
 }
 

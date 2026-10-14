@@ -252,10 +252,14 @@ func singleRoot(r *os.Root, dir string) (string, error) {
 const unfinishedFor = time.Hour
 
 // checkUnfinished returns ErrInstallInProgress when rel's x64 folder dir,
-// inside r and known to have no marker, was written within unfinishedFor.
+// inside r and known to have no marker, was written within unfinishedFor. A
+// time in the future, as a clock stepped back leaves it, counts as stale.
 func checkUnfinished(r *os.Root, dir string, rel Release) error {
 	fi, err := r.Lstat(dir)
-	if err != nil || time.Since(fi.ModTime()) >= unfinishedFor {
+	if err != nil {
+		return nil
+	}
+	if age := time.Since(fi.ModTime()); age < 0 || age >= unfinishedFor {
 		return nil
 	}
 	return fmt.Errorf("%s %s: %w", rel.Tool, rel.Version, ErrInstallInProgress)
