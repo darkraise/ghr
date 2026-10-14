@@ -412,11 +412,13 @@ type pending struct {
 	Deadline   time.Time          `json:"deadline"`
 }
 
-// pendingFor builds the record from the job the manager knows of, which the
-// jobs API confirms, and from job.json only for a job too short for a tick to
-// see. The job can rewrite job.json, so once the job is known the record
-// moves only the finish time, within the job's run time. ok is false when no
-// job ran.
+// pendingFor builds the record from the job the manager knows of, and from
+// job.json only when it knows none, for a job too short for a tick to see.
+// The known job is the one the jobs API confirmed or, until a tick confirms
+// it, job.json as an earlier tick or Adopt read it. The job can rewrite
+// job.json, so once a job is known the record moves only the finish time,
+// within the job's run time; finalize takes a conclusion only from a job of
+// that run on this runner. ok is false when no job ran.
 func (m *Manager) pendingFor(i instance, rec JobRecord, recOK bool) (pending, bool) {
 	if !recOK && i.Job == nil {
 		return pending{}, false
