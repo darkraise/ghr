@@ -92,8 +92,9 @@ func (m *Manager) dockerInstanceLabel(id string) (string, error) {
 }
 
 // cleanupDocker removes the compose projects started from an instance's work dir,
-// the containers and network the runner itself created, and the repo's prefix-matched containers. It returns how many containers it
-// removed and every failure joined; the caller retries the whole cleanup on error.
+// the containers and network the runner itself created, and the repo's
+// prefix-matched containers. It returns how many containers it removed and
+// every failure joined; the caller retries the whole cleanup on error.
 func (m *Manager) cleanupDocker(ctx context.Context, cfg *config.Config, id, repo string) (int, error) {
 	names, err := m.projects(ctx, id)
 	if err != nil {
