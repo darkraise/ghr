@@ -384,7 +384,7 @@ func TestBlockedRepositoryDoesNotHoldAnUpdateBack(t *testing.T) {
 		h := newHarness(t)
 		blockDarkmem(t, h)
 		setup(h)
-		queuedUpdate(t, h, tarballSum())
+		preparedUpdate(t, h)
 		h.now = h.now.Add(10 * time.Second)
 		h.m.Tick(context.Background())
 		h.m.Wait()

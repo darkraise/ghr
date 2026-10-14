@@ -35,6 +35,21 @@ func queuedUpdate(t *testing.T, h *harness, sum string) (dist string, fetched *[
 	return dist, &urls
 }
 
+// preparedUpdate queues the update with 2.338.0 already downloaded and
+// prepared, as the background prepare leaves it.
+func preparedUpdate(t *testing.T, h *harness) (fetched *[]string) {
+	t.Helper()
+	dist, fetched := queuedUpdate(t, h, tarballSum())
+	dir := filepath.Join(dist, "2.338.0")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte("#!/bin/sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return fetched
+}
+
 func current(t *testing.T, h *harness) string {
 	t.Helper()
 	p, err := h.host.ReadLink(h.m.Paths.Dist)

@@ -42,6 +42,7 @@ func (m *Manager) Tick(ctx context.Context) {
 	}
 	m.stopStartTimedOut(ctx, cfg, now)
 	m.startUpdateIfFree(ctx, cfg, now, demandOK, unanswered)
+	m.prepareUpdate(now)
 	if m.apiAllowed(now) && !m.isDegraded() {
 		m.spawnPlanned(ctx, cfg, now)
 	}
