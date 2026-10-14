@@ -664,13 +664,14 @@ func truncateLog(root *os.Root, name string) error {
 	return f.Truncate(maxArchivedLog)
 }
 
-// readFrom reads up to limit bytes of a log from off. Only a regular file is
-// read: a symlink is skipped, and a FIFO or a device would block the reader
-// or feed it for ever. The check is repeated on the open file, because the
-// job can swap the name between the two; whatever it swaps in, the root
-// lets the open reach only a file inside the log directory.
+// readFrom reads up to limit bytes of a log from off. Only a regular file
+// with no other name is read: a symlink is skipped, and so is a hard link to
+// a file elsewhere, and a FIFO or a device would block the reader or feed it
+// for ever. The check is repeated on the open file, because the job can swap
+// the name between the two; whatever it swaps in, the root lets the open
+// reach only a file inside the log directory.
 func readFrom(root *os.Root, name string, off int64, limit int) ([]byte, error) {
-	if fi, err := root.Lstat(name); err != nil || !fi.Mode().IsRegular() {
+	if fi, err := root.Lstat(name); err != nil || !fi.Mode().IsRegular() || hasOtherNames(fi) {
 		return nil, fs.ErrInvalid
 	}
 	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
@@ -678,7 +679,7 @@ func readFrom(root *os.Root, name string, off int64, limit int) ([]byte, error) 
 		return nil, err
 	}
 	defer f.Close()
-	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() || hasOtherNames(fi) {
 		return nil, fs.ErrInvalid
 	}
 	if _, err := f.Seek(off, io.SeekStart); err != nil {

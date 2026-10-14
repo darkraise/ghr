@@ -94,6 +94,37 @@ func TestRunnerLogSkipsASymlinkInTheArchive(t *testing.T) {
 	}
 }
 
+// A log with a second name elsewhere on the host may be a file the job has
+// no business with, so neither a live _diag nor an archive serves it.
+func TestRunnerLogSkipsAHardLinkedFile(t *testing.T) {
+	for _, where := range []string{"live", "archive"} {
+		t.Run(where, func(t *testing.T) {
+			h := newHarness(t)
+			dir := filepath.Join(h.m.instanceDir("aaaaaa"), "_diag")
+			if where == "archive" {
+				dir = filepath.Join(h.m.Paths.Logs, "aaaaaa")
+			}
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			secret := filepath.Join(h.root, "token")
+			if err := os.WriteFile(secret, []byte("SECRET"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "Runner_1.log"), []byte("real\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Link(secret, filepath.Join(dir, "Worker_1.log")); err != nil {
+				t.Fatal(err)
+			}
+			c, err := readLog(t, h, "aaaaaa")
+			if err != nil || c.Data != "==> Runner_1.log <==\nreal\n" {
+				t.Fatalf("data %q err %v", c.Data, err)
+			}
+		})
+	}
+}
+
 func TestRunnerLogRefusesASymlinkedLogDirectory(t *testing.T) {
 	h := newHarness(t)
 	elsewhere := filepath.Join(h.root, "elsewhere")
