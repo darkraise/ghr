@@ -331,9 +331,9 @@ func TestInstallsDoNotChownThroughATmpSwappedForALink(t *testing.T) {
 	}
 }
 
-// The runner user owns .tmp's parent and can list .tmp's names, so a job can
-// swap .tmp for a link to its own copy of an operation directory before ghr,
-// as root, downloads into it or extracts from it.
+// .tmp is 0711, so the runner user cannot list it, but it owns .tmp's parent
+// and can swap .tmp for a link to a directory of its own before ghr, as root,
+// downloads into an operation directory or extracts from it.
 func TestInstallsDoNotWriteThroughATmpSwappedForALink(t *testing.T) {
 	installs := map[string]func(f *fixture){
 		"archive": func(f *fixture) {
