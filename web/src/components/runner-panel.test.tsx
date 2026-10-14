@@ -1,5 +1,6 @@
 import { useParams, useSearch } from "@tanstack/react-router"
 import { fireEvent, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { json, mockApi, noContent } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
@@ -72,6 +73,16 @@ describe("RunnerPanel", () => {
     draw("/runners/aaaaaa?tab=log")
     expect((await screen.findAllByText("Loading")).length).toBeGreaterThan(0)
     expect(screen.queryByText("No log output yet")).toBeNull()
+  })
+
+  it("offers a retry when the log cannot be read", async () => {
+    let fail = true
+    mockApi(routes({ "GET /api/runners/aaaaaa/log": () => (fail ? json({ error: "log unavailable" }, 500) : fixtures.log) }))
+    draw("/runners/aaaaaa?tab=log")
+    const retry = await screen.findByRole("button", { name: "Try again" })
+    fail = false
+    await userEvent.setup().click(retry)
+    expect(await screen.findByText(/Listening for Jobs/)).toBeInTheDocument()
   })
 
   it("stops polling a finished runner's log and keeps what it read", { timeout: 15_000 }, async () => {

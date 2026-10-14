@@ -187,7 +187,7 @@ export function RunnerPanel({ id, tab, backLink }: { id: string; tab: DetailTab;
             <Switch id="follow" checked={follow} onCheckedChange={setFollow} />
             <Label htmlFor="follow">Follow</Label>
           </div>
-          {log.isError && <ErrorLine>{errorText(log.error)}</ErrorLine>}
+          {log.isError && <ErrorLine onRetry={() => void log.refetch()}>{errorText(log.error)}</ErrorLine>}
           {log.data ? (
             <LogView text={log.data.text} follow={follow} onFollowChange={setFollow} className="h-[calc(100vh-24rem)] min-h-64" />
           ) : (
