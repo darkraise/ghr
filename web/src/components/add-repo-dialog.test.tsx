@@ -165,7 +165,7 @@ describe("Add repository dialog", () => {
     await user.click(dialog.getByRole("option", { name: /docs/ }))
     const serve = dialog.getByRole("switch", { name: "Serve when public" })
     expect(serve).not.toBeChecked()
-    expect(dialog.getByText("A job in a public repository can come from anyone's pull request and runs on this host.")).toBeInTheDocument()
+    expect(dialog.getByText("Jobs started from a fork, such as a fork's pull request, are refused. A workflow that runs untrusted code on another event, such as an issue comment or a merge queue, still runs it on this host.")).toBeInTheDocument()
     expect(dialog.getByText("Turn on Serve when public to add a public repository.")).toBeInTheDocument()
     expect(dialog.getByRole("button", { name: "Add" })).toBeDisabled()
     await user.click(serve)

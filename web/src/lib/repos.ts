@@ -6,7 +6,8 @@ import { plural } from "./format"
 // names cannot contain "*", and Radix Select does not allow an empty value.
 export const ALL_REPOS = "*"
 
-export const PUBLIC_HELP = "A job in a public repository can come from anyone's pull request and runs on this host."
+export const PUBLIC_HELP =
+  "Jobs started from a fork, such as a fork's pull request, are refused. A workflow that runs untrusted code on another event, such as an issue comment or a merge queue, still runs it on this host."
 
 export function servePublicConfirm(name: string, run: () => void): Confirm {
   return { title: `Serve ${name} while it is public?`, body: PUBLIC_HELP, action: "Serve when public", run }
