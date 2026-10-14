@@ -406,7 +406,7 @@ func TestLogoutAndPasswordChange(t *testing.T) {
 	if rec := do(h, http.MethodPost, "/auth/password", `{"current":"x","new":"y"}`, nil); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("change without a session: %d", rec.Code)
 	}
-	if rec := change(keep, "wrong password!", "another long secret"); rec.Code != http.StatusUnauthorized ||
+	if rec := change(keep, "wrong password!", "another long secret"); rec.Code != http.StatusForbidden ||
 		!strings.Contains(rec.Body.String(), "wrong password") {
 		t.Fatalf("wrong current: %d %s", rec.Code, rec.Body.String())
 	}

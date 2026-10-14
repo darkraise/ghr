@@ -291,6 +291,12 @@ func (h *handler) password(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.auth.ChangePassword(ClientKey(r.RemoteAddr), b.Current, b.New)
 	if err != nil {
+		// 401 on this route means only "not logged in", which the app answers
+		// by going to the login page.
+		if errors.Is(err, ErrWrongPassword) {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
 		h.fail(w, err)
 		return
 	}
