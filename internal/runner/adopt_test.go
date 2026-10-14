@@ -27,8 +27,11 @@ func makeInstance(t *testing.T, h *harness, id, repo string, runnerID int64, wit
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeJSON(filepath.Join(dir, MetaFile), Meta{ID: id, Repo: repo, RunnerID: runnerID, RunnerName: "ghr-" + repo + "-" + id,
-		Labels: []string{"homelab"}, SpawnedAt: h.now}); err != nil {
+	meta := Meta{ID: id, Repo: repo, RunnerID: runnerID, RunnerName: "ghr-" + repo + "-" + id, Labels: []string{"homelab"}, SpawnedAt: h.now}
+	if err := h.m.writePrivateMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(dir, MetaFile), meta); err != nil {
 		t.Fatal(err)
 	}
 	if withJob {
@@ -40,7 +43,7 @@ func TestAdopt(t *testing.T) {
 	h := newHarness(t)
 	makeInstance(t, h, "aaaaaa", "darkcloud", 1, true) // running, mid-job
 	makeInstance(t, h, "bbbbbb", "darkmem", 2, false)  // exited while daemon was down
-	os.MkdirAll(h.m.instanceDir("cccccc"), 0o755)      // no ghr.json, unit active
+	os.MkdirAll(h.m.instanceDir("cccccc"), 0o755)      // no metadata record, unit active
 	h.sd.active["ghr-runner-aaaaaa"] = true
 	h.sd.active["ghr-runner-cccccc"] = true
 	h.sd.active["ghr-runner-dddddd"] = true // unit without a dir
@@ -363,55 +366,29 @@ func TestAdoptTrustsTheRootOwnedRecordOverTheInstanceCopy(t *testing.T) {
 	}
 }
 
-// An instance an older ghr spawned has only the copy in its own directory.
-// It is adopted from that copy once, and recorded.
-func TestAdoptRecordsAnOlderInstancesMetadataOnce(t *testing.T) {
+// An instance an older ghr spawned has only the copy in its own directory,
+// which its job can rewrite. Nothing trusts that copy: the instance is
+// stopped and removed, and no registration is deleted on its word.
+func TestAdoptStopsAnInstanceWithoutARecord(t *testing.T) {
 	h := newHarness(t)
-	makeInstance(t, h, "aaaaaa", "darkmem", 1, false)
+	makeInstance(t, h, "aaaaaa", "darkmem", 1, true)
+	os.Remove(filepath.Join(h.m.Paths.Private, "aaaaaa.json"))
 	h.sd.active["ghr-runner-aaaaaa"] = true
 	if err := h.m.Adopt(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	var rec Meta
-	if err := readJSON(filepath.Join(h.m.Paths.Private, "aaaaaa.json"), &rec); err != nil || rec.Repo != "darkmem" || rec.RunnerID != 1 {
-		t.Fatalf("recorded %+v: %v", rec, err)
+	h.m.Wait()
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || h.state("aaaaaa") != "gone" {
+		t.Fatalf("stopped %v, state %s\n%s", h.sd.stopped, h.state("aaaaaa"), h.eventText())
 	}
-	forged := Meta{ID: "aaaaaa", Repo: "darkcloud", RunnerID: 999, RunnerName: "ghr-darkcloud-aaaaaa"}
-	if err := writeJSON(filepath.Join(h.m.instanceDir("aaaaaa"), MetaFile), forged); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(h.m.instanceDir("aaaaaa")); !os.IsNotExist(err) {
+		t.Fatalf("instance dir kept: %v", err)
 	}
-	h.restart(t)
-	if err := h.m.Adopt(context.Background()); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(h.m.Paths.Private, "aaaaaa.json")); !os.IsNotExist(err) {
+		t.Fatalf("the directory's copy was recorded: %v", err)
 	}
-	if got := adoptedMeta(h, "aaaaaa"); got.Repo != "darkmem" || got.RunnerID != 1 {
-		t.Fatalf("adopted %+v", got)
-	}
-}
-
-// When the record cannot be written, adopting from the instance's own copy
-// would mean trusting that copy again at every later start. Adoption fails
-// instead, and nothing is stopped or removed.
-func TestAdoptFailsRatherThanTrustAnUnrecordedCopy(t *testing.T) {
-	h := newHarness(t)
-	makeInstance(t, h, "aaaaaa", "darkmem", 1, false)
-	h.sd.active["ghr-runner-aaaaaa"] = true
-	orig := writeFile
-	t.Cleanup(func() { writeFile = orig })
-	writeFile = func(name string, data []byte, perm os.FileMode) error {
-		if strings.HasPrefix(name, h.m.Paths.Private) {
-			return &fs.PathError{Op: "write", Path: name, Err: syscall.EIO}
-		}
-		return orig(name, data, perm)
-	}
-	if err := h.m.Adopt(context.Background()); err == nil {
-		t.Fatal("adopted an instance whose metadata could not be recorded")
-	}
-	if len(h.sd.stopped) != 0 {
-		t.Fatalf("stopped %v", h.sd.stopped)
-	}
-	if _, err := os.Stat(h.m.instanceDir("aaaaaa")); err != nil {
-		t.Fatalf("instance dir removed: %v", err)
+	if len(h.gh.deleted) != 0 || len(h.history(t)) != 0 {
+		t.Fatalf("deleted %v, history %v", h.gh.deleted, h.history(t))
 	}
 }
 
@@ -436,8 +413,8 @@ func TestPrivateRecordsGoWithTheirInstance(t *testing.T) {
 }
 
 // If the instance directory cannot be removed after a failed spawn, it stays
-// runner-writable. Its private record must stay too, or the next start would
-// take the directory's own copy of the metadata on trust.
+// runner-writable. Its private record stays too, and is what the next start
+// reads, not the directory's copy.
 func TestFailedSpawnKeepsTheRecordWhileTheDirStays(t *testing.T) {
 	h := newHarness(t)
 	origWrite, origRemove := writeFile, removeAll

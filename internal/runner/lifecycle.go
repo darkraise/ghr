@@ -117,8 +117,7 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 	if err := m.writePrivateMeta(meta); err != nil {
 		return fail(err)
 	}
-	// A copy for a person reading the directory; nothing trusts it while the
-	// private record exists.
+	// A copy for a person reading the directory; nothing trusts it.
 	if err := writeJSON(filepath.Join(dir, MetaFile), meta); err != nil {
 		return fail(err)
 	}

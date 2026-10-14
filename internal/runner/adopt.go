@@ -2,7 +2,6 @@ package runner
 
 import (
 	"context"
-	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -28,8 +27,8 @@ func (m *Manager) activeUnits(ctx context.Context) (map[string]bool, error) {
 
 // Adopt rebuilds state after a daemon start from running units and instance dirs.
 // Instances whose unit is gone are cleaned up. A unit without a readable
-// ghr.json is stopped, and its dir is removed only once the stop succeeded;
-// Reconcile retries a failed stop and deletes the registration.
+// metadata record is stopped, and its dir is removed only once the stop
+// succeeded; Reconcile retries a failed stop and deletes the registration.
 func (m *Manager) Adopt(ctx context.Context) error {
 	active, err := m.activeUnits(ctx)
 	if err != nil {
@@ -45,16 +44,6 @@ func (m *Manager) Adopt(ctx context.Context) error {
 	now := m.Now()
 	adopted, exited := 0, 0
 	var toFinish []string
-	// Recording comes first, for every instance: when it fails, the runners
-	// keep running and the daemon does not start until the directory can be
-	// written.
-	for _, e := range entries {
-		if e.IsDir() && idRe.MatchString(e.Name()) {
-			if _, err := m.readMeta(e.Name()); errors.Is(err, errRecordMeta) {
-				return err
-			}
-		}
-	}
 	for _, e := range entries {
 		id := e.Name()
 		if !e.IsDir() || !idRe.MatchString(id) {
@@ -62,22 +51,19 @@ func (m *Manager) Adopt(ctx context.Context) error {
 		}
 		dir := m.instanceDir(id)
 		meta, err := m.readMeta(id)
-		if errors.Is(err, errRecordMeta) {
-			return err
-		}
 		if err != nil {
 			if active[id] {
 				if err := m.SD.Stop(ctx, UnitPrefix+id); err != nil {
-					m.Events.Add("warn", "", "instance %s has no readable %s and its unit did not stop (%v); reconciliation retries", id, MetaFile, err)
+					m.Events.Add("warn", "", "instance %s has no metadata record and its unit did not stop (%v); reconciliation retries", id, err)
 					delete(active, id)
 					continue
 				}
 			}
 			if err := os.RemoveAll(dir); err != nil {
-				m.Events.Add("warn", "", "instance %s had no readable %s; its dir could not be removed (%v); reconciliation retries", id, MetaFile, err)
+				m.Events.Add("warn", "", "instance %s had no metadata record; its dir could not be removed (%v); reconciliation retries", id, err)
 			} else {
 				m.removePrivate(id)
-				m.Events.Add("warn", "", "instance %s had no readable %s; stopped and removed", id, MetaFile)
+				m.Events.Add("warn", "", "instance %s had no metadata record; stopped and removed", id)
 			}
 			delete(active, id)
 			continue

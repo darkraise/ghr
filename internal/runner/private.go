@@ -1,9 +1,7 @@
 package runner
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,27 +33,13 @@ func (m *Manager) writePrivateMeta(meta Meta) error {
 	return writeJSONAtomic(m.privateMeta(meta.ID), meta)
 }
 
-// errRecordMeta marks a failure to write an instance's private record.
-var errRecordMeta = errors.New("record instance metadata")
-
-// readMeta returns the metadata root recorded for an instance. An instance an
-// older ghr spawned has only the copy in its own directory; that copy is
-// trusted this once and recorded, so rewriting it later changes nothing. If
-// it cannot be recorded the error wraps errRecordMeta: trusting the copy
-// without recording it would mean trusting it again at every later start.
+// readMeta returns the metadata root recorded for an instance. The copy in
+// the instance's own directory is never read: its job can rewrite it.
 func (m *Manager) readMeta(id string) (Meta, error) {
 	var meta Meta
 	err := readJSON(m.privateMeta(id), &meta)
-	if errors.Is(err, fs.ErrNotExist) {
-		err = readJobJSON(filepath.Join(m.instanceDir(id), MetaFile), &meta)
-		if err == nil && meta.ID == id {
-			if werr := m.writePrivateMeta(meta); werr != nil {
-				return Meta{}, fmt.Errorf("%w for %s: %w", errRecordMeta, id, werr)
-			}
-		}
-	}
 	if err == nil && meta.ID != id {
-		err = fmt.Errorf("%s names instance %q", MetaFile, meta.ID)
+		err = fmt.Errorf("%s names instance %q", m.privateMeta(id), meta.ID)
 	}
 	return meta, err
 }
