@@ -104,6 +104,7 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
           <NumberField
             id="add-max"
             label="Max"
+            emptyValue={status.data?.mode === "all" ? 0 : 1}
             min={0}
             max={99}
             precision={0}

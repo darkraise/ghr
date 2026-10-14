@@ -145,6 +145,31 @@ describe("repository page", () => {
     expect(screen.getByLabelText("Max")).toHaveValue("")
   })
 
+  it("Down in an empty Warm gives 0, not 98", async () => {
+    const repos = fixtures.config.repos?.map((r) => ({ ...r, warm: undefined }))
+    mockApi(routes({ "GET /api/config": { ...fixtures.config, repos } }))
+    const { user } = renderApp("/repositories/darkmem/settings")
+    const warm = await screen.findByLabelText("Warm")
+    expect(warm).toHaveValue("")
+    await user.click(warm)
+    await user.keyboard("{ArrowDown}")
+    expect(warm).toHaveValue("0")
+  })
+
+  it.each([
+    ["queue", "2"],
+    ["all", "1"],
+  ])("Up in an empty Max steps from the %s mode default", async (mode, shown) => {
+    const repos = fixtures.config.repos?.map((r) => ({ ...r, max: undefined }))
+    mockApi(routes({ "GET /api/config": { ...fixtures.config, mode, repos } }))
+    const { user } = renderApp("/repositories/darkmem/settings")
+    const max = await screen.findByLabelText("Max")
+    expect(max).toHaveValue("")
+    await user.click(max)
+    await user.keyboard("{ArrowUp}")
+    expect(max).toHaveValue(shown)
+  })
+
   it("stops checking warm against max once max is emptied", async () => {
     const { calls } = mockApi(applyingRoutes())
     const { user } = renderApp("/repositories/darkmem/settings")

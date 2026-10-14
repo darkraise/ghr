@@ -30,6 +30,17 @@ describe("Add repository dialog", () => {
     expect(dialog.getByText("No match")).toBeInTheDocument()
   })
 
+  it.each([
+    ["queue", "2"],
+    ["all", "1"],
+  ])("steps an empty Max from the %s mode default", async (mode, shown) => {
+    mockApi(routes({ "GET /api/status": { ...fixtures.status, mode } }))
+    const { dialog, user } = await open()
+    await user.click(dialog.getByLabelText("Max"))
+    await user.keyboard("{ArrowUp}")
+    expect(dialog.getByLabelText("Max")).toHaveValue(shown)
+  })
+
   it("keeps a watched repo pickable, since adding takes it over", async () => {
     mockApi(routes())
     const { dialog } = await open()
