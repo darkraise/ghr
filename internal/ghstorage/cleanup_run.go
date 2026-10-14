@@ -47,13 +47,22 @@ func (s *Service) write(fn func() error) error {
 	return fn()
 }
 
-// activeRuns lists the ids of repo's runs that have not completed.
+// maxStatusRuns is how many runs GitHub returns for one status filter; a
+// listing that long may be cut off.
+const maxStatusRuns = 1000
+
+// activeRuns lists the ids of repo's runs that have not completed. It fails
+// when a status listing may be incomplete, since a missed run would let its
+// artifacts be deleted.
 func (s *Service) activeRuns(ctx context.Context, repo string) (map[int64]bool, error) {
 	active := map[int64]bool{}
 	for _, status := range ActiveStatuses {
 		runs, err := s.GH.ListRuns(ctx, repo, status)
 		if err != nil {
 			return nil, err
+		}
+		if len(runs) >= maxStatusRuns {
+			return nil, errors.New("more than 1,000 active runs; cleanup skipped")
 		}
 		for _, r := range runs {
 			active[r.ID] = true

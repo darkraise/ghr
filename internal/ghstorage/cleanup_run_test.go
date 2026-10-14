@@ -171,6 +171,24 @@ func TestCleanupSkipsARepositoryWhoseRunsCannotBeListed(t *testing.T) {
 	}
 }
 
+func TestCleanupSkipsARepositoryWithAFullPageOfActiveRuns(t *testing.T) {
+	gh := newFakeGH()
+	s, clock := newTestService(t, gh, cleanupConfig())
+	gh.addRepo("darkmem", true, ghArt(1, 10, clock.Now(), 50*time.Hour, 5))
+	full := make([]github.Run, 1000)
+	for i := range full {
+		full[i] = github.Run{ID: int64(5000 + i)}
+	}
+	gh.runs["darkmem"] = map[string][]github.Run{"in_progress": full}
+	s.pass(true, false)
+	if got := gh.callsLike("Delete"); len(got) != 0 {
+		t.Fatalf("deleted %v when the active runs may be cut off at 1,000", got)
+	}
+	if r := row(t, s.Snapshot(), "darkmem"); r.Error != "more than 1,000 active runs; cleanup skipped" {
+		t.Fatalf("row error %q", r.Error)
+	}
+}
+
 func TestWritesStayWithinTheHourlyBudget(t *testing.T) {
 	gh := newFakeGH()
 	s, clock := newTestService(t, gh, testConfig())
