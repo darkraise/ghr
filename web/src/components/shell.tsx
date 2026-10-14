@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { Link, Outlet, useNavigate } from "@tanstack/react-router"
 import { Alert, AlertDescription, AlertTitle } from "darkraise-ui/components/alert"
 import { Button } from "darkraise-ui/components/button"
+import { toast } from "darkraise-ui/components/sonner"
 import { Archive, Boxes, GitBranch, HistoryIcon, LayoutDashboard, LogOut, Settings, Workflow, type LucideIcon } from "lucide-react"
 import { useEffect, useRef } from "react"
 import { ApiError, api } from "@/api/client"
@@ -70,8 +71,12 @@ export function Shell() {
   async function logout() {
     try {
       await api.logout()
-    } catch {
-      // a session that already ended still lands on the login page
+    } catch (err) {
+      // 401: the session had already ended, which is the outcome asked for.
+      if (!(err instanceof ApiError && err.status === 401)) {
+        toast.error(`Not logged out: ${errorText(err)}`)
+        return
+      }
     }
     queryClient.clear()
     await navigate({ to: "/login", ignoreBlocker: true })
