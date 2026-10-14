@@ -243,3 +243,72 @@ func TestFinishArchivesOnlyARealDiagDirectory(t *testing.T) {
 		})
 	}
 }
+
+// The archive path is the job's id under the logs directory, which the job
+// cannot write to; if a link is there all the same, finish must not trim,
+// chown or touch what it points at.
+func TestFinishLeavesASymlinkAtTheArchivePathAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		withDiag bool
+	}{
+		{"no _diag", false},
+		{"a real _diag", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.m.spawn(context.Background(), h.cfg, "darkmem")
+			elsewhere := filepath.Join(h.root, "elsewhere")
+			if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for name, data := range map[string]string{"notes.txt": "notes", "Runner_1.log": "log"} {
+				if err := os.WriteFile(filepath.Join(elsewhere, name), []byte(data), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Truncate(filepath.Join(elsewhere, "Runner_1.log"), maxArchivedLog+100); err != nil {
+				t.Fatal(err)
+			}
+			old := h.now.Add(-72 * time.Hour)
+			if err := os.Chtimes(elsewhere, old, old); err != nil {
+				t.Fatal(err)
+			}
+			archive := filepath.Join(h.m.Paths.Logs, "aaaaaa")
+			if err := os.MkdirAll(h.m.Paths.Logs, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(elsewhere, archive); err != nil {
+				t.Fatal(err)
+			}
+			diag := filepath.Join(h.m.instanceDir("aaaaaa"), "_diag")
+			if err := os.RemoveAll(diag); err != nil {
+				t.Fatal(err)
+			}
+			if tc.withDiag {
+				if err := os.MkdirAll(diag, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.sd.active["ghr-runner-aaaaaa"] = false
+			mustReturn(t, "finish", func() {
+				h.m.refreshUnits(context.Background())
+				h.m.Wait()
+			})
+			if strings.Contains(strings.Join(h.host.chowned, ","), archive) {
+				t.Fatalf("chowned %v", h.host.chowned)
+			}
+			for name, size := range map[string]int64{"notes.txt": 5, "Runner_1.log": maxArchivedLog + 100} {
+				if fi, err := os.Stat(filepath.Join(elsewhere, name)); err != nil || fi.Size() != size {
+					t.Fatalf("%s: %v, %v", name, fi, err)
+				}
+			}
+			if fi, err := os.Stat(elsewhere); err != nil || !fi.ModTime().Equal(old) {
+				t.Fatalf("target touched: %v, %v", fi, err)
+			}
+			if c, err := h.m.RunnerLog("aaaaaa", ""); err == nil && c.Data != "" {
+				t.Fatalf("read %.40q through the link", c.Data)
+			}
+		})
+	}
+}
