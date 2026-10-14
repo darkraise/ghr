@@ -250,8 +250,15 @@ func TestAllModeSkipsWarmSpawnsForFailingRepo(t *testing.T) {
 		h.gh.setErr("ListRuns darkcloud", nil)
 		h.now = h.now.Add(maxBackoff)
 		h.m.Tick(context.Background())
-		if !slices.ContainsFunc(h.gh.jitCalls, func(c string) bool { return strings.Contains(c, "darkcloud") }) {
-			t.Fatalf("%v: no warm runner after recovery: %v", err, h.gh.jitCalls)
+		// darkmem's runner never came online, so the recovery tick replaces it
+		// next to darkcloud's first warm runner.
+		want := []string{
+			"ghr-darkmem-aaaaaa self-hosted,linux,x64,homelab",
+			"ghr-darkcloud-bbbbbb self-hosted,linux,x64,homelab",
+			"ghr-darkmem-cccccc self-hosted,linux,x64,homelab",
+		}
+		if !slices.Equal(h.gh.jitCalls, want) {
+			t.Fatalf("%v: spawns %v, want %v", err, h.gh.jitCalls, want)
 		}
 	}
 }
