@@ -87,36 +87,63 @@ func (e *Env) removeLayout(toolDir, folder string) error {
 	return nil
 }
 
+// operation is one operation's directory under <Root>/.tmp. The runner user
+// owns <Root> and can swap .tmp for a link at any moment, so path is only for
+// the commands that need one; everything ghr does there itself goes through
+// the handles, which stay on the directories ghr made.
+type operation struct {
+	*os.Root // the operation directory
+	tmp      *os.Root
+	id       string
+	path     string
+	rel      string // path, relative to <Root>
+}
+
+// Close removes the operation directory.
+func (o *operation) Close() error {
+	o.Root.Close()
+	err := o.tmp.RemoveAll(o.id)
+	o.tmp.Close()
+	return err
+}
+
 // opDir makes a fresh directory for one operation under <Root>/.tmp. Both
 // are root-owned; .tmp allows only traversal, so jobs cannot reach into a
 // download.
-func (e *Env) opDir() (string, error) {
+func (e *Env) opDir() (*operation, error) {
 	tmp := filepath.Join(e.Root, ".tmp")
 	// A job can plant a symlink or its own directory here; a foreign directory
 	// would let the job swap an operation directory for a link.
 	if fi, err := os.Lstat(tmp); err == nil && (!fi.IsDir() || !ownedByMe(fi)) {
 		if err := os.RemoveAll(tmp); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 	if err := os.MkdirAll(tmp, 0o711); err != nil {
-		return "", err
+		return nil, err
 	}
 	// The job can swap .tmp again after that look, so the rest goes through
 	// one handle on the directory and never through its path.
 	r, err := openOwned(tmp)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	defer r.Close()
 	if err := r.Chmod(".", 0o711); err != nil {
-		return "", err
+		r.Close()
+		return nil, err
 	}
 	id := e.OpID()
 	if err := r.Mkdir(id, 0o700); err != nil {
-		return "", err
+		r.Close()
+		return nil, err
 	}
-	return filepath.Join(tmp, id), nil
+	op, err := r.OpenRoot(id)
+	if err != nil {
+		r.RemoveAll(id)
+		r.Close()
+		return nil, err
+	}
+	return &operation{Root: op, tmp: r, id: id, path: filepath.Join(tmp, id), rel: filepath.Join(".tmp", id)}, nil
 }
 
 // openOwned opens the directory at path, and only one that belongs to this
@@ -147,11 +174,15 @@ func openOwned(path string) (*os.Root, error) {
 // download in progress.
 func (e *Env) CleanTmp() error { return os.RemoveAll(filepath.Join(e.Root, ".tmp")) }
 
-func (e *Env) owner() string { return e.User + ":" + e.User }
-
-func (e *Env) chownTree(ctx context.Context, path string) error {
-	_, err := e.Run(ctx, "chown", "-R", "-h", e.owner(), path)
-	return err
+// chownTree gives rel, inside r, and everything below it to the runner user,
+// following no link.
+func (e *Env) chownTree(r *os.Root, rel string) error {
+	return fs.WalkDir(r.FS(), filepath.ToSlash(rel), func(p string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return e.Chown(r, filepath.FromSlash(p))
+	})
 }
 
 // mkdirOwned creates rel inside r, when missing, owned by the runner user, so
@@ -171,8 +202,8 @@ func (e *Env) mkdirOwned(r *os.Root, rel string) error {
 	return nil
 }
 
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
+func fileSHA256(r *os.Root, name string) (string, error) {
+	f, err := r.Open(name)
 	if err != nil {
 		return "", err
 	}
@@ -184,11 +215,11 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func verify(path, want string) error {
+func verify(r *os.Root, name, want string) error {
 	if want == "" {
 		return nil
 	}
-	got, err := fileSHA256(path)
+	got, err := fileSHA256(r, name)
 	if err != nil {
 		return fmt.Errorf("checksum: %w", err)
 	}
@@ -198,10 +229,15 @@ func verify(path, want string) error {
 	return nil
 }
 
-// singleRoot returns dir's lone subdirectory when dir holds nothing else,
-// as the actions cache an archive's single top folder.
-func singleRoot(dir string) (string, error) {
-	es, err := os.ReadDir(dir)
+// singleRoot returns dir's lone subdirectory when dir, inside r, holds
+// nothing else, as the actions cache an archive's single top folder.
+func singleRoot(r *os.Root, dir string) (string, error) {
+	f, err := r.Open(dir)
+	if err != nil {
+		return "", err
+	}
+	es, err := f.ReadDir(-1)
+	f.Close()
 	if err != nil {
 		return "", err
 	}
@@ -264,28 +300,26 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, from Origin, r
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(op)
+	defer op.Close()
 	progress("downloading")
-	archive := filepath.Join(op, "archive.tar.gz")
-	if err := e.fetch(ctx, from, rel.URL, archive); err != nil {
+	if err := e.fetch(ctx, from, rel.URL, filepath.Join(op.path, "archive.tar.gz")); err != nil {
 		return err
 	}
-	if err := verify(archive, rel.SHA256); err != nil {
+	if err := verify(op.Root, "archive.tar.gz", rel.SHA256); err != nil {
 		return err
 	}
 	progress("extracting")
-	out := filepath.Join(op, "x")
-	if err := os.Mkdir(out, 0o755); err != nil {
+	if err := op.Mkdir("x", 0o755); err != nil {
 		return err
 	}
-	if err := e.Extract(ctx, archive, out); err != nil {
+	if err := e.Extract(ctx, filepath.Join(op.path, "archive.tar.gz"), filepath.Join(op.path, "x")); err != nil {
 		return fmt.Errorf("extract: %w", err)
 	}
-	src, err := singleRoot(out)
+	src, err := singleRoot(op.Root, "x")
 	if err != nil {
 		return fmt.Errorf("extract: %w", err)
 	}
-	if err := e.chownTree(ctx, src); err != nil {
+	if err := e.chownTree(op.Root, src); err != nil {
 		return fmt.Errorf("chown: %w", err)
 	}
 	// The runner user owns the tool cache and can swap any folder in it for a
@@ -296,10 +330,6 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, from Origin, r
 		return err
 	}
 	defer r.Close()
-	srcRel, err := filepath.Rel(e.Root, src)
-	if err != nil {
-		return err
-	}
 	verRel := filepath.Join(toolDir, rel.Folder)
 	for _, d := range []string{toolDir, verRel} {
 		if err := e.mkdirOwned(r, d); err != nil {
@@ -322,7 +352,9 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, from Origin, r
 	// An older target without a marker is a killed install; replace it, as
 	// @actions/tool-cache's _createToolPath does.
 	removeIncomplete(r, target)
-	if err := r.Rename(srcRel, target); err != nil {
+	// Through the tool cache's root, a .tmp swapped meanwhile can only lead
+	// to the runner user's own files.
+	if err := r.Rename(filepath.Join(op.rel, src), target); err != nil {
 		dropFailed(r, target)
 		return err
 	}

@@ -27,7 +27,8 @@ func TestOpDirReplacesAForeignTmp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi, err := os.Lstat(filepath.Dir(op)); err != nil || !fi.IsDir() {
+	defer op.Close()
+	if fi, err := os.Lstat(filepath.Dir(op.path)); err != nil || !fi.IsDir() {
 		t.Fatalf(".tmp is %v, %v", fi, err)
 	}
 }
@@ -39,9 +40,11 @@ func TestOpDirDoesNotFollowASymlinkedTmp(t *testing.T) {
 		t.Fatal(err)
 	}
 	symlinkOrSkip(t, victim, filepath.Join(f.Root, ".tmp"))
-	if _, err := f.opDir(); err != nil {
+	op, err := f.opDir()
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer op.Close()
 	if fi, err := os.Lstat(filepath.Join(f.Root, ".tmp")); err != nil || !fi.IsDir() {
 		t.Fatalf(".tmp is still a link: %v, %v", fi, err)
 	}
@@ -75,7 +78,11 @@ func TestOpDirDoesNotFollowATmpSwappedForALink(t *testing.T) {
 		}
 		return "op1"
 	}
-	f.opDir()
+	op, err := f.opDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer op.Close()
 	if es, _ := os.ReadDir(victim); len(es) != 0 {
 		t.Fatalf("an operation directory was created through the link: %v", es)
 	}
@@ -244,6 +251,91 @@ func TestInstallArchiveDoesNotFollowAVersionFolderSwappedForALink(t *testing.T) 
 	}
 	if exists(filepath.Join(theirs, "bin")) || exists(theirs+".complete") {
 		t.Fatal("the install wrote outside the tool cache")
+	}
+}
+
+// The runner user owns the tool cache, so a job can swap .tmp for a link at
+// any moment; the operation's id shows in tar's command line.
+func TestInstallsDoNotChownThroughATmpSwappedForALink(t *testing.T) {
+	cases := map[string]func(t *testing.T, swap func(root string)) *fixture{
+		"archive": func(t *testing.T, swap func(string)) *fixture {
+			f := newFixture(t)
+			f.Extract = afterwards(f.Extract, func() { swap(f.Root) })
+			rel := demoRelease(f, tarGz(map[string]string{"demo-1.2.3/bin/demo": "bin"}))
+			f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {})
+			return f
+		},
+		"python": func(t *testing.T, swap func(string)) *fixture {
+			f := pythonFixture(t)
+			f.Extract = afterwards(f.Extract, func() { swap(f.Root) })
+			var env map[string]string
+			f.host.scripts["setup.sh"] = fakeSetup("3.13.7", &env, false)
+			p := newPython(f.Env)
+			rel, _ := p.Resolve(context.Background(), "3.13")
+			p.Install(context.Background(), rel, func(string) {})
+			return f
+		},
+		"dotnet": func(t *testing.T, swap func(string)) *fixture {
+			f := dotnetFixture(t)
+			fetch := f.Fetch
+			f.Fetch = func(ctx context.Context, url, dst string) error {
+				err := fetch(ctx, url, dst)
+				swap(f.Root)
+				return err
+			}
+			f.host.scripts["dotnet-install.sh"] = func(string, map[string]string, []string) error { return nil }
+			d := newDotnet(f.Env)
+			rel, _ := d.Resolve(context.Background(), "8.0")
+			d.Install(context.Background(), rel, func(string) {})
+			return f
+		},
+	}
+	for name, install := range cases {
+		t.Run(name, func(t *testing.T) {
+			outside := t.TempDir()
+			planted := []string{"op1/x/evil/file", "op1/dotnet-install.sh", "op1/x/setup.sh"}
+			for _, p := range planted {
+				touch(t, filepath.Join(outside, filepath.FromSlash(p)))
+			}
+			symlinkOrSkip(t, outside, filepath.Join(t.TempDir(), "probe"))
+			var theirs []os.FileInfo
+			filepath.Walk(outside, func(_ string, fi os.FileInfo, err error) error {
+				if err == nil {
+					theirs = append(theirs, fi)
+				}
+				return nil
+			})
+			f := install(t, func(root string) {
+				tmp := filepath.Join(root, ".tmp")
+				if err := os.Rename(tmp, filepath.Join(root, ".moved")); err != nil {
+					t.Error(err)
+				}
+				if err := os.Symlink(outside, tmp); err != nil {
+					t.Error(err)
+				}
+			})
+			for _, got := range f.host.chowned {
+				for _, fi := range theirs {
+					if os.SameFile(got, fi) {
+						t.Errorf("%s outside the tool cache was chowned", fi.Name())
+					}
+				}
+			}
+			for _, p := range planted {
+				if !exists(filepath.Join(outside, filepath.FromSlash(p))) {
+					t.Errorf("%s outside the tool cache was removed", p)
+				}
+			}
+		})
+	}
+}
+
+// afterwards runs then once extract has.
+func afterwards(extract func(context.Context, string, string) error, then func()) func(context.Context, string, string) error {
+	return func(ctx context.Context, archive, dir string) error {
+		err := extract(ctx, archive, dir)
+		then()
+		return err
 	}
 }
 

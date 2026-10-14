@@ -108,7 +108,7 @@ func (d dotnet) Install(ctx context.Context, rel Release, progress func(string))
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(op)
+	defer op.Close()
 	// The runner user owns <Root>/dotnet, and dotnet-install.sh runs as them.
 	r, err := os.OpenRoot(e.Root)
 	if err != nil {
@@ -125,17 +125,17 @@ func (d dotnet) Install(ctx context.Context, rel Release, progress func(string))
 		return err
 	}
 	progress("downloading")
-	if err := e.fetch(ctx, Origin{File: e.Sources.DotnetScript}, rel.URL, filepath.Join(op, "dotnet-install.sh")); err != nil {
+	if err := e.fetch(ctx, Origin{File: e.Sources.DotnetScript}, rel.URL, filepath.Join(op.path, "dotnet-install.sh")); err != nil {
 		return err
 	}
-	if err := e.chownTree(ctx, op); err != nil {
+	if err := e.chownTree(op.Root, "."); err != nil {
 		return fmt.Errorf("chown: %w", err)
 	}
 	if err := e.mkdirOwned(r, "dotnet"); err != nil {
 		return err
 	}
 	progress("running dotnet-install.sh")
-	if _, err := e.runAs(ctx, op, []string{"HOME=" + e.Home}, "dotnet-install.sh",
+	if _, err := e.runAs(ctx, op.path, []string{"HOME=" + e.Home}, "dotnet-install.sh",
 		"--version", rel.Version, "--install-dir", d.root(), "--skip-non-versioned-files"); err != nil {
 		return fail(fmt.Errorf("dotnet-install.sh: %w", err))
 	}

@@ -75,21 +75,21 @@ func (p python) Install(ctx context.Context, rel Release, progress func(string))
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(op)
+	defer op.Close()
 	progress("downloading")
-	archive := filepath.Join(op, "python.tar.gz")
+	archive := filepath.Join(op.path, "python.tar.gz")
 	if err := e.fetch(ctx, Origin{Dir: pythonReleases}, rel.URL, archive); err != nil {
 		return err
 	}
 	progress("extracting")
-	out := filepath.Join(op, "x")
-	if err := os.Mkdir(out, 0o755); err != nil {
+	if err := op.Mkdir("x", 0o755); err != nil {
 		return err
 	}
+	out := filepath.Join(op.path, "x")
 	if err := e.Extract(ctx, archive, out); err != nil {
 		return fmt.Errorf("extract: %w", err)
 	}
-	if err := e.chownTree(ctx, op); err != nil {
+	if err := e.chownTree(op.Root, "."); err != nil {
 		return fmt.Errorf("chown: %w", err)
 	}
 	// The runner user owns <Root>/Python, and setup.sh runs as them.

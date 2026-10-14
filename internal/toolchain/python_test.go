@@ -116,14 +116,14 @@ func TestPythonInstallRunsSetupShAsTheRunnerUser(t *testing.T) {
 		}
 	}
 	cmds := f.host.commands()
-	chown := slices.Index(cmds, "chown -R -h ghrunner:ghrunner "+filepath.Join(f.Root, ".tmp", "op1"))
+	chown := slices.Index(cmds, "lchown "+filepath.Join(f.Root, ".tmp", "op1"))
 	run := slices.IndexFunc(cmds, func(c string) bool {
 		return strings.HasPrefix(c, "runuser -u ghrunner -- env -u AGENT_TOOLSDIRECTORY ")
 	})
 	if chown < 0 || run < 0 || chown > run {
 		t.Fatalf("commands %q: the operation directory must go to ghrunner before setup.sh runs without AGENT_TOOLSDIRECTORY", cmds)
 	}
-	if mk := slices.Index(cmds, "lchown Python"); mk < 0 || mk > run {
+	if mk := slices.Index(cmds, "lchown "+filepath.Join(f.Root, "Python")); mk < 0 || mk > run {
 		t.Fatalf("commands %q: <Root>/Python must exist, owned by ghrunner, before setup.sh runs", cmds)
 	}
 	if !slices.Equal(steps, []string{"downloading", "extracting", "running setup.sh"}) {

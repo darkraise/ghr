@@ -194,15 +194,23 @@ func dotnetFind(dotnetDir, spec string) string {
 	return ""
 }
 
-// host fakes the commands an Env runs: chown is recorded, runuser runs the
-// fake registered for the script it names.
+// host fakes the commands an Env runs and its Chown: each is recorded, and
+// runuser runs the fake registered for the script it names.
 type host struct {
 	mu          sync.Mutex
 	calls       []string
 	scripts     map[string]func(dir string, env map[string]string, args []string) error
 	failExtract error
-	// onChown runs before each chown with the path it is given.
+	// onChown runs before each Chown with the path it names.
 	onChown func(path string)
+	// chowned is what each chown reached, as it was at the time.
+	chowned []os.FileInfo
+}
+
+func (h *host) reached(fi os.FileInfo) {
+	h.mu.Lock()
+	h.chowned = append(h.chowned, fi)
+	h.mu.Unlock()
 }
 
 func (h *host) run(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -210,11 +218,6 @@ func (h *host) run(_ context.Context, name string, args ...string) ([]byte, erro
 	h.calls = append(h.calls, name+" "+strings.Join(args, " "))
 	h.mu.Unlock()
 	switch name {
-	case "chown":
-		if h.onChown != nil {
-			h.onChown(args[len(args)-1])
-		}
-		return nil, nil
 	case "runuser":
 		return nil, h.runAs(args)
 	}
@@ -240,16 +243,20 @@ func (h *host) runAs(args []string) error {
 	return f(args[b+3], env, args[b+5:])
 }
 
-// lchown records the path Env.Chown is given, relative to the tool cache,
-// and fails unless it names something inside r.
+// lchown records the path Env.Chown names and fails unless it is something
+// inside r.
 func (h *host) lchown(r *os.Root, rel string) error {
+	path := filepath.Join(r.Name(), rel)
 	h.mu.Lock()
-	h.calls = append(h.calls, "lchown "+filepath.ToSlash(rel))
+	h.calls = append(h.calls, "lchown "+path)
 	h.mu.Unlock()
 	if h.onChown != nil {
-		h.onChown(filepath.Join(r.Name(), rel))
+		h.onChown(path)
 	}
-	_, err := r.Lstat(rel)
+	fi, err := r.Lstat(rel)
+	if err == nil {
+		h.reached(fi)
+	}
 	return err
 }
 
