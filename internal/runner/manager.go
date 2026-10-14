@@ -313,24 +313,14 @@ func (m *Manager) StartPruneScope(scope string) error {
 		return fmt.Errorf("%w %q", ErrUnknownScope, scope)
 	}
 	m.mu.Lock()
-	err := m.pruneRefusedLocked()
-	m.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	release := func() {}
-	if scope == ScopeUnusedVolumes {
-		if release, err = m.HoldForMaintenance(m.maintCtx); err != nil {
-			return err
-		}
-	}
-	m.mu.Lock()
 	if err := m.pruneRefusedLocked(); err != nil {
 		m.mu.Unlock()
-		release()
 		return err
 	}
+	// Reserved before the hold: the hold stops idle runners, which an
+	// automatic prune taking the reservation meanwhile would make pointless.
 	now := m.Now()
+	prevStarted, prevRec := m.maint.LastStarted, m.lastPruneRec
 	m.pruning = true
 	m.maint.Running = true
 	m.maint.LastStarted = &now
@@ -338,6 +328,19 @@ func (m *Manager) StartPruneScope(scope string) error {
 	ctx := m.maintCtx
 	m.wg.Add(1)
 	m.mu.Unlock()
+	release := func() {}
+	if scope == ScopeUnusedVolumes {
+		var err error
+		if release, err = m.HoldForMaintenance(ctx); err != nil {
+			m.mu.Lock()
+			m.pruning = false
+			m.maint.Running = false
+			m.maint.LastStarted, m.lastPruneRec = prevStarted, prevRec
+			m.mu.Unlock()
+			m.wg.Done()
+			return err
+		}
+	}
 	go func() {
 		defer m.wg.Done()
 		defer release()

@@ -150,8 +150,8 @@ func TestUnusedVolumesRefusedWhileARunnerIsBusy(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 	h.m.Wait()
-	if h.docker.pruneList() != "" || h.m.LastPrune() != nil {
-		t.Fatal("a refused prune ran or recorded")
+	if h.docker.pruneList() != "" || h.m.LastPrune() != nil || h.m.Maintenance().Running || h.m.Maintenance().LastStarted != nil {
+		t.Fatal("a refused prune ran, recorded or left the reservation")
 	}
 	if err := h.m.StartPruneScope(ScopeDanglingImages); err != nil {
 		t.Fatalf("other scopes run while busy: %v", err)
