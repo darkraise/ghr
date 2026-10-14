@@ -33,6 +33,17 @@ function RunPill({ run }: { run: RunDetail }) {
   return <StatusPill state={run.status === "in_progress" ? "running" : "queued"} />
 }
 
+// The router reads a query value as JSON, so a name such as 2048 would come
+// back as a number; quoted, it stays the string the repository filter needs.
+function searchString(value: string): string {
+  try {
+    if (typeof JSON.parse(value) !== "string") return JSON.stringify(value)
+  } catch {
+    // Not JSON: the router keeps it as written.
+  }
+  return value
+}
+
 export function RunFrame({
   run,
   owner,
@@ -57,7 +68,7 @@ export function RunFrame({
   const runPath = `/actions/${encodeURIComponent(run.repo)}/runs/${run.id}`
   const breadcrumbs = [
     { label: "Actions", href: "/actions" },
-    { label: run.repo, href: `/actions?repo=${encodeURIComponent(run.repo)}` },
+    { label: run.repo, href: `/actions?repo=${encodeURIComponent(searchString(run.repo))}` },
     { label: run.workflow },
     job ? { label: `#${run.run_number}`, href: `${runPath}?attempt=${run.attempt}` } : { label: `#${run.run_number}` },
     ...(job ? [{ label: job.name }] : []),

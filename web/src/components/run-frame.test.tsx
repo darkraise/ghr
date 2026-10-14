@@ -59,6 +59,11 @@ describe("RunFrame", () => {
     expect(screen.getByText("Run content")).toBeInTheDocument()
   })
 
+  it("quotes a repository name the router would read as a number", () => {
+    renderFrame({}, { ...fixtures.runDetail, repo: "2048" })
+    expect(screen.getByRole("link", { name: "2048" })).toHaveAttribute("href", "/actions?repo=%222048%22")
+  })
+
   it("adds the job to the breadcrumbs and links the run number on a job page", () => {
     renderFrame({ job: fixtures.runDetail.jobs[1], current: 1002 })
     expect(screen.getByRole("link", { name: "#42" })).toHaveAttribute("href", "/actions/darkmem/runs/102?attempt=2")
