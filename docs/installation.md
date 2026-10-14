@@ -2,7 +2,7 @@
 
 ## Requirements
 
-**Host.** A dedicated LXC or VM running Debian 13 or Ubuntu 22.04, 24.04 or 26.04 on x86-64 (amd64 only), with root access. On Proxmox, the LXC needs `features: nesting=1,keyctl=1` so Docker can run inside it. The host should run nothing else: any job can become root on it through Docker.
+**Host.** A dedicated LXC or VM running Debian 13 or Ubuntu 22.04, 24.04 or 26.04 on x86-64 (amd64 only), with root access. On Proxmox, the LXC needs `features: nesting=1,keyctl=1` so Docker can run inside it. The host should run nothing else: any job can become root on it through Docker. All repositories ghr serves form one trust domain. A job in any of them can read the GitHub token, take over other repositories' runners and read their job secrets, and leave files in the shared home, package caches and tool cache that later jobs of every repository run. "Single-use" means a fresh runner registration and working directory, not a clean host. Serve only repositories whose workflow authors you would trust with root on the host and with every other served repository.
 
 **Repositories.** ghr serves private repositories. It serves a public one only when `allow_public` is set for it. Any repository it serves must **not** enable "Run workflows from fork pull requests", because a fork's pull request could then run its code on your host.
 

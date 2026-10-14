@@ -70,6 +70,7 @@ Job hooks record which job each runner ran. When a runner exits, ghr removes the
 ghr executes your CI jobs natively on the host, so treat the host as trusted by everyone who can run a workflow:
 
 - Any job can become root on the host through Docker. Do not run anything else on it.
+- All repositories ghr serves form one trust domain. A job in any of them can read the GitHub token, take over other repositories' runners and read their job secrets, and leave files in the shared home, package caches and tool cache that later jobs of every repository run. "Single-use" means a fresh runner registration and working directory, not a clean host. Serve only repositories whose workflow authors you would trust with root on the host and with every other served repository.
 - ghr serves public repositories only when `allow_public` is set for them. Never enable "Run workflows from fork pull requests" on a repository ghr serves: a fork's pull request could then run its code on your host.
 - The web UI is plain HTTP. Put a TLS proxy in front of it and keep it on a trusted network; see [Web UI](docs/web-ui.md#behind-a-reverse-proxy).
 
