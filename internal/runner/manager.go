@@ -215,7 +215,6 @@ type Manager struct {
 	pauseUntil     time.Time
 	disk           system.DiskUsage
 	ticks          int
-	lastPrune      time.Time
 	pruning        bool                    // a manual or automatic prune holds the reservation; guarded by mu
 	closed         bool                    // set by Close; StartPrune refuses afterwards so it cannot race Wait; guarded by mu
 	maint          model.MaintenanceStatus // manual prunes; guarded by mu
@@ -253,7 +252,6 @@ func (m *Manager) Init() error {
 	m.lastJob = map[string]model.HistoryEntry{}
 	m.undeleted = map[int64]registration{}
 	m.histIDs = map[string]bool{}
-	m.lastPrune = m.Now()
 	if m.Jobs == nil {
 		m.Jobs = jobs.New(func() config.Jobs { return m.Config().Jobs }, m.Now, nil)
 	}

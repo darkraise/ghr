@@ -68,10 +68,10 @@ func (m *Manager) Tick(ctx context.Context) {
 	if m.apiAllowed(now) {
 		m.finalizePending(ctx)
 	}
-	diskDue := m.ticks%10 == 1
-	m.mu.Lock()
-	retentionDue := now.Sub(m.lastPrune) >= 24*time.Hour
-	m.mu.Unlock()
+	retentionDue := m.Jobs.Due(config.JobPrune, now)
+	// A retention pass measures the disk too, so Run now on prune also
+	// refreshes the disk figure and prunes Docker when the disk is full.
+	diskDue := m.ticks%10 == 1 || retentionDue
 	// Manual and automatic pruning share one reservation, so neither runs
 	// Docker's prune commands or rewrites the history file under the other;
 	// a skipped automatic prune runs on a later tick. The tick measures the
@@ -80,10 +80,17 @@ func (m *Manager) Tick(ctx context.Context) {
 	if (diskDue || retentionDue) && m.reservePrune() {
 		handedOver := false
 		if retentionDue {
-			m.prune(cfg, now)
+			m.Jobs.Started(config.JobPrune, now)
+			var err error
+			if _, ok := m.prune(cfg, now); !ok {
+				err = errPruneIncomplete
+			}
+			m.Jobs.Finished(config.JobPrune, m.Now(), err, nil)
 		}
+		// The disk is measured with the task off too: the status, the
+		// metrics and the Storage page read the figure.
 		if diskDue {
-			if pct, over := m.measureDisk(ctx, cfg); over {
+			if pct, over := m.measureDisk(ctx, cfg); over && cfg.Jobs.Prune.Enabled {
 				handedOver = m.startDiskPrune(cfg, pct)
 			}
 		}

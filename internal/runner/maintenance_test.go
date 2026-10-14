@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/sched"
@@ -98,9 +99,9 @@ func TestStartPruneRunsForcedSequence(t *testing.T) {
 // space and for retention does neither until it ends.
 func TestTickSkipsPruningDuringManualPrune(t *testing.T) {
 	h := newHarness(t)
-	h.m.mu.Lock()
-	h.m.lastPrune = h.now.Add(-48 * time.Hour)
-	h.m.mu.Unlock()
+	if err := h.m.Jobs.RunNow(config.JobPrune); err != nil {
+		t.Fatal(err)
+	}
 	entered, release := holdOn(t, h, "PruneBuildCacheTo")
 	if err := h.m.StartPrune(); err != nil {
 		t.Fatal(err)
@@ -117,10 +118,7 @@ func TestTickSkipsPruningDuringManualPrune(t *testing.T) {
 	if got := h.docker.pruneList(); got != "keep="+h.cfg.BuildCacheKeep {
 		t.Fatalf("automatic pruning ran during a manual prune: %s", got)
 	}
-	h.m.mu.Lock()
-	last := h.m.lastPrune
-	h.m.mu.Unlock()
-	if !last.Equal(h.now.Add(-48 * time.Hour)) {
+	if j := jobStatus(t, h.m.Jobs, config.JobPrune); j.LastStart != nil || !j.Pending {
 		t.Fatal("the retention prune ran during a manual prune")
 	}
 	release()

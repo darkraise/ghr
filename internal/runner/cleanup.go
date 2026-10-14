@@ -343,6 +343,10 @@ func (m *Manager) dataRoot(ctx context.Context) (system.DiskUsage, error) {
 	return system.DiskUsage{Pct: pct}, err
 }
 
+// errPruneIncomplete is the prune task's error when some history or a log
+// archive could not be removed; the events name each failure.
+var errPruneIncomplete = errors.New("some history or log archives could not be removed; see Events")
+
 // prune drops history lines and archived logs older than history_retention.
 // It reports whether it removed anything and whether every step succeeded.
 func (m *Manager) prune(cfg *config.Config, now time.Time) (removed, ok bool) {
@@ -374,9 +378,6 @@ func (m *Manager) prune(cfg *config.Config, now time.Time) (removed, ok bool) {
 			}
 		}
 	}
-	m.mu.Lock()
-	m.lastPrune = now
-	m.mu.Unlock()
 	return removed, ok
 }
 

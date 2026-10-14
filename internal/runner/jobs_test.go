@@ -61,3 +61,54 @@ func TestRunnerCheckFollowsTheJobsBlock(t *testing.T) {
 		t.Fatalf("Run now while off: %v", err)
 	}
 }
+
+func TestPruneOffStillMeasuresTheDisk(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.Jobs.Prune.Enabled = false
+	h.docker.mu.Lock()
+	h.docker.usage = []int{99}
+	h.docker.mu.Unlock()
+	h.now = h.now.Add(48 * time.Hour)
+	h.m.ticks = 0 // the next tick is tick 1, when the disk is measured
+	h.m.Tick(context.Background())
+	h.m.Wait() // a Docker prune would run in the background
+	if pct := h.m.Status().DiskPct; pct != 99 {
+		t.Fatalf("disk %d%%", pct)
+	}
+	if got := h.docker.pruneList(); got != "" {
+		t.Fatalf("pruned with the task off: %s", got)
+	}
+	if j := jobStatus(t, h.m.Jobs, config.JobPrune); j.LastStart != nil {
+		t.Fatalf("the retention prune ran with the task off: %+v", j)
+	}
+}
+
+func TestRetentionPruneFollowsItsInterval(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.cfg.Jobs.Prune.Every = config.Duration(12 * time.Hour)
+	h.m.ticks = 4 // keeps the disk check, on every tenth tick, out of the way
+	h.m.Tick(ctx)
+	if j := jobStatus(t, h.m.Jobs, config.JobPrune); j.LastStart != nil {
+		t.Fatal("pruned before the interval")
+	}
+	h.now = h.now.Add(12 * time.Hour)
+	h.m.Tick(ctx)
+	if j := jobStatus(t, h.m.Jobs, config.JobPrune); j.LastFinish == nil || !j.LastFinish.Equal(h.now) || j.LastError != "" {
+		t.Fatalf("after the interval %+v", j)
+	}
+	if err := h.m.Jobs.RunNow(config.JobPrune); err != nil {
+		t.Fatal(err)
+	}
+	h.docker.mu.Lock()
+	h.docker.usage = []int{42}
+	h.docker.mu.Unlock()
+	h.now = h.now.Add(time.Minute)
+	h.m.Tick(ctx) // tick 7: not a disk-check tick
+	if j := jobStatus(t, h.m.Jobs, config.JobPrune); j.Pending || j.LastFinish == nil || !j.LastFinish.Equal(h.now) {
+		t.Fatalf("after Run now %+v", j)
+	}
+	if pct := h.m.Status().DiskPct; pct != 42 {
+		t.Fatalf("a retention pass did not measure the disk: %d%%", pct)
+	}
+}
