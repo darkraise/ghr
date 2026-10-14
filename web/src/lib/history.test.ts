@@ -31,6 +31,7 @@ describe("parseHistorySearch", () => {
     expect(parseHistorySearch({ repo: "darkmem", result: "failure", window: "30d" })).toEqual({ repo: "darkmem", result: "failure", window: "30d" })
     expect(parseHistorySearch({ repo: "", result: "bogus", window: "2h" })).toEqual({})
     expect(parseHistorySearch({ repo: 4 })).toEqual({})
+    expect(parseHistorySearch({ repo: "*" })).toEqual({})
   })
 })
 
