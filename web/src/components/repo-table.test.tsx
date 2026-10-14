@@ -72,6 +72,16 @@ describe("RepoTable", () => {
     expect(parseFloat((track?.firstElementChild as HTMLElement).style.width)).toBeCloseTo(33.33, 1)
   })
 
+  it("keeps a lone busy runner visible on the track", () => {
+    draw([{ ...darkmem, max: 99, active: 1 }])
+    expect(cell("darkmem", 2).querySelector('[data-slot="runner-track"]')?.firstElementChild).toHaveClass("min-w-px")
+  })
+
+  it("leaves the track empty when no runner is busy", () => {
+    draw([{ ...darkmem, max: 99, active: 0 }])
+    expect(cell("darkmem", 2).querySelector('[data-slot="runner-track"]')?.firstElementChild).toBeNull()
+  })
+
   it("draws the last 24 hours with the hour in progress outlined", () => {
     draw()
     const strip = within(row("darkmem")).getByRole("img", { name: /^darkmem, last 24 hours/ })

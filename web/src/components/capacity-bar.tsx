@@ -48,7 +48,7 @@ export function CapacitySegments({
           key={g.start}
           data-kind={g.kind}
           style={many ? { flexGrow: g.count } : undefined}
-          className={`${many ? "" : "min-w-1 "}flex-1 rounded-[2px] ${g.kind === "free" ? "bg-muted" : KIND_CLASS[g.kind]} ${c.over > 0 && g.start === firstOver ? "ml-[2px]" : ""}`}
+          className={`${many ? "min-w-0.5" : "min-w-1"} flex-1 rounded-[2px] ${g.kind === "free" ? "bg-muted" : KIND_CLASS[g.kind]} ${c.over > 0 && g.start === firstOver ? "ml-[2px]" : ""}`}
         />
       ))}
     </div>

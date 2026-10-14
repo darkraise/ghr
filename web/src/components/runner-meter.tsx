@@ -8,7 +8,7 @@ export function RunnerMeter({ active, max }: { active: number; max: number }) {
   if (max > MAX_CELLS) {
     return (
       <span aria-hidden="true" data-slot="runner-track" className="flex h-2.5 w-16 overflow-hidden rounded-[1px] bg-muted">
-        <span className="bg-primary" style={{ width: `${(Math.min(active, max) / max) * 100}%` }} />
+        {active > 0 && <span className="min-w-px bg-primary" style={{ width: `${(Math.min(active, max) / max) * 100}%` }} />}
       </span>
     )
   }

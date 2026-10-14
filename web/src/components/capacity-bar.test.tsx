@@ -85,6 +85,7 @@ describe("CapacitySegments", () => {
     const segments = [...bar.querySelectorAll<HTMLElement>("[data-kind]")]
     expect(segments.map((s) => s.getAttribute("data-kind"))).toEqual(["busy", "starting", "warm", "free"])
     expect(segments.map((s) => s.style.flexGrow)).toEqual(["3", "1", "2", "93"])
+    for (const s of segments) expect(s).toHaveClass("min-w-0.5")
   })
 
   it("starts the over-max marker on a new group", () => {
