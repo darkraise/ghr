@@ -1,11 +1,13 @@
 package system
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +103,51 @@ func TestDownload(t *testing.T) {
 	err := Download(context.Background(), srv.URL+"/missing", dst)
 	if err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("404: %v", err)
+	}
+}
+
+func TestDownloadRefusesMoreThanTheCap(t *testing.T) {
+	old := maxDownload
+	maxDownload = 64
+	defer func() { maxDownload = old }()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := strconv.Atoi(r.URL.Query().Get("n"))
+		if r.URL.Query().Get("chunked") == "" {
+			w.Header().Set("Content-Length", strconv.Itoa(n))
+		}
+		for i := 0; i < n; i += 16 {
+			w.Write(bytes.Repeat([]byte("x"), min(16, n-i)))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	for _, tc := range []struct {
+		name    string
+		query   string
+		refused bool
+		created bool
+	}{
+		{name: "declared at the cap", query: "n=64"},
+		{name: "declared over the cap", query: "n=65", refused: true},
+		{name: "chunked at the cap", query: "n=64&chunked=1"},
+		{name: "chunked over the cap", query: "n=65&chunked=1", refused: true, created: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := filepath.Join(t.TempDir(), "f")
+			err := Download(context.Background(), srv.URL+"/?"+tc.query, dst)
+			if tc.refused != (err != nil) || (err != nil && !strings.Contains(err.Error(), "larger than")) {
+				t.Fatalf("err %v, refused want %v", err, tc.refused)
+			}
+			_, statErr := os.Stat(dst)
+			if !tc.refused && statErr != nil {
+				t.Fatalf("a download within the cap was not saved: %v", statErr)
+			}
+			if tc.refused && !tc.created && statErr == nil {
+				t.Fatal("a download declared over the cap created its file")
+			}
+		})
 	}
 }
 

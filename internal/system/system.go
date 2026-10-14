@@ -423,6 +423,10 @@ func HTTPSRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+// maxDownload caps one download; the largest archives ghr fetches, a .NET
+// SDK or a JDK, are a few hundred megabytes.
+var maxDownload int64 = 2 << 30
+
 var downloadClient = &http.Client{CheckRedirect: HTTPSRedirect}
 
 // Download saves url to dst, following redirects to https URLs. It sends no
@@ -453,11 +457,18 @@ func download(ctx context.Context, timeout time.Duration, url, dst string) error
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
+	if resp.ContentLength > maxDownload {
+		return fmt.Errorf("GET %s: download is larger than %d bytes", url, maxDownload)
+	}
 	f, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	n, err := io.Copy(f, io.LimitReader(resp.Body, maxDownload+1))
+	if err == nil && n > maxDownload {
+		err = fmt.Errorf("GET %s: download is larger than %d bytes", url, maxDownload)
+	}
+	if err != nil {
 		f.Close()
 		return err
 	}
