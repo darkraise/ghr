@@ -160,13 +160,17 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 	}
 	if err := m.SD.Start(ctx, spec); err != nil {
 		// systemd-run can fail after the unit started, which would then run
-		// from dir with the registration. Reconcile stops an untracked unit
-		// and removes what it leaves once it is down.
+		// from dir with the registration. A unit that does not stop stays
+		// tracked as starting: maintenance and the caps must still see it,
+		// and the exit and start-timeout paths clean it up once it is down.
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
 		serr := m.SD.Stop(dctx, spec.Unit)
 		cancel()
 		if serr != nil {
-			m.Events.Add("warn", r.Name, "spawn %s: stop after a failed start: %v; left for reconciliation", id, serr)
+			m.mu.Lock()
+			m.insts[id] = &instance{Meta: meta, State: sched.Starting, StateSince: m.Now()}
+			m.mu.Unlock()
+			m.Events.Add("warn", r.Name, "spawn %s: stop after a failed start: %v; tracked until the unit is down", id, serr)
 			return err
 		}
 		return fail(err)

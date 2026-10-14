@@ -71,7 +71,7 @@ func TestSpawnFailureCleansUp(t *testing.T) {
 // A failed systemd-run may have started the unit, which would then run from
 // the instance dir with the registration. The rollback stops it first, and
 // runs to its end even when the tick is cancelled; a unit that does not stop
-// keeps everything it may be using for reconciliation.
+// stays tracked, with everything it may be using, until it is down.
 func TestSpawnStopsTheUnitBeforeRollingBackAFailedStart(t *testing.T) {
 	for _, c := range []struct {
 		name    string
@@ -108,20 +108,22 @@ func TestSpawnStopsTheUnitBeforeRollingBackAFailedStart(t *testing.T) {
 				return
 			}
 			if len(h.gh.deleted) != 0 || dirErr != nil || privErr != nil ||
-				!strings.Contains(h.eventText(), "left for reconciliation") {
+				!strings.Contains(h.eventText(), "tracked until the unit is down") {
 				t.Fatalf("deleted %v dir %v record %v\n%s", h.gh.deleted, dirErr, privErr, h.eventText())
 			}
-			// Reconciliation stops the unit, removes the dir and its record,
-			// and deletes the registration once it is offline twice.
+			if i := h.m.snapshot(); len(i) != 1 || i[0].ID != "aaaaaa" || i[0].State != sched.Starting {
+				t.Fatalf("instances %+v", i)
+			}
+			// Once the unit is confirmed down the ordinary exit path removes
+			// the dir and its record and deletes the registration.
 			delete(h.sd.stopErr, "ghr-runner-aaaaaa")
-			h.gh.listed["darkmem"] = []github.Runner{{ID: 101, Name: "ghr-darkmem-aaaaaa", Status: "offline"}}
-			h.m.Reconcile(context.Background(), h.cfg)
-			h.m.Reconcile(context.Background(), h.cfg)
+			h.sd.active["ghr-runner-aaaaaa"] = false
+			h.m.refreshUnits(context.Background())
+			h.m.Wait()
 			_, dirErr = os.Stat(h.m.instanceDir("aaaaaa"))
 			_, privErr = os.Stat(filepath.Join(h.m.Paths.Private, "aaaaaa.json"))
-			if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || !reflect.DeepEqual(h.gh.deleted, []int64{101}) ||
-				!os.IsNotExist(dirErr) || !os.IsNotExist(privErr) {
-				t.Fatalf("after reconciling: stopped %v deleted %v dir %v record %v", h.sd.stopped, h.gh.deleted, dirErr, privErr)
+			if !reflect.DeepEqual(h.gh.deleted, []int64{101}) || !os.IsNotExist(dirErr) || !os.IsNotExist(privErr) || len(h.m.snapshot()) != 0 {
+				t.Fatalf("after the unit exited: deleted %v dir %v record %v instances %+v", h.gh.deleted, dirErr, privErr, h.m.snapshot())
 			}
 		})
 	}
