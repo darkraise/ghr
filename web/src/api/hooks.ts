@@ -1,4 +1,5 @@
 import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query"
+import { useEffect, useRef } from "react"
 import { api } from "./client"
 import { useLive } from "./live"
 import type { ActivityWindow, Config, GhrEvent, GitHubStorage, LogChunk, RunAnnotations, RunDetail, Status, Storage } from "./types"
@@ -244,11 +245,12 @@ export function appendLog(prev: LogTail, chunk: LogChunk): LogTail {
 // A runner that has ended writes no more log, so the caller stops the polling
 // with poll=false while the text already read stays on screen. An answer
 // holds at most one chunk, so the archive of an ended runner is still read
-// on until a read comes back empty.
+// on until a read comes back empty. The runner may have flushed lines after
+// the last read of its live run, so the end itself always asks once more.
 export function useLogTail(id: string, enabled: boolean, poll = true) {
   const queryClient = useQueryClient()
   const key = keys.log(id)
-  return useQuery({
+  const query = useQuery({
     queryKey: key,
     queryFn: async ({ signal }) => {
       const prev = queryClient.getQueryData<LogTail>(key) ?? { text: "", next: "", drained: false }
@@ -257,6 +259,13 @@ export function useLogTail(id: string, enabled: boolean, poll = true) {
     enabled,
     refetchInterval: (q) => (enabled && (poll || (q.state.status !== "error" && q.state.data?.drained === false)) ? POLL_FAST : false),
   })
+  const polled = useRef(poll)
+  const { refetch } = query
+  useEffect(() => {
+    if (polled.current && !poll && enabled) void refetch()
+    polled.current = poll
+  }, [poll, enabled, refetch])
+  return query
 }
 
 export function useToken() {

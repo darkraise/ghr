@@ -128,6 +128,30 @@ describe("useLogTail", () => {
     expect(calls).toHaveLength(1)
   })
 
+  it("reads once more when the runner ends after an empty read", { timeout: 10_000 }, async () => {
+    let flushed = false
+    const { calls } = mockApi({
+      "GET /api/runners/aaaaaa/log": ({ url }: { url: URL }) => {
+        const cursor = url.searchParams.get("cursor")
+        if (cursor === "") return { data: "one\n", next: "c1" }
+        if (cursor === "c1" && flushed) return { data: "two\n", next: "c2" }
+        return { data: "", next: cursor }
+      },
+    })
+    const { wrapper } = withQuery()
+    const { result, rerender } = renderHook(({ poll }: { poll: boolean }) => useLogTail("aaaaaa", true, poll), {
+      wrapper,
+      initialProps: { poll: true },
+    })
+    await waitFor(() => expect(result.current.data?.drained).toBe(true), { timeout: 4000 })
+    flushed = true
+    rerender({ poll: false })
+    await waitFor(() => expect(result.current.data?.text).toBe("one\ntwo\n"), { timeout: 4000 })
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(result.current.data?.drained).toBe(true)
+    expect(calls.map((c) => c.search)).toEqual(["?cursor=", "?cursor=c1", "?cursor=c1", "?cursor=c2"])
+  })
+
   it("stops reading a finished runner's log once a read fails", { timeout: 10_000 }, async () => {
     const { calls } = mockApi({
       "GET /api/runners/aaaaaa/log": ({ url }: { url: URL }) =>
