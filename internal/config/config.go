@@ -281,7 +281,11 @@ func labelFault(l string) string {
 	return ""
 }
 
-func validRepoName(name string) bool {
+// RepoNameRule describes what ValidRepoName accepts, for error messages.
+const RepoNameRule = "1 to 100 letters, digits, '.', '_' or '-', and not . or .."
+
+// ValidRepoName reports whether name can be a repository name under an owner.
+func ValidRepoName(name string) bool {
 	return repoNameRe.MatchString(name) && name != "." && name != ".."
 }
 
@@ -548,8 +552,8 @@ func (c *Config) Validate() ([]string, error) {
 			errs = append(errs, "repo name is required")
 			continue
 		}
-		if !validRepoName(r.Name) {
-			errs = append(errs, "repos: "+r.Name+" must be a repository name under owner, 1 to 100 letters, digits, '.', '_' or '-', and not . or ..")
+		if !ValidRepoName(r.Name) {
+			errs = append(errs, "repos: "+r.Name+" must be a repository name under owner, "+RepoNameRule)
 		}
 		key := strings.ToLower(r.Name)
 		if seen[key] {
@@ -611,8 +615,8 @@ func (c *Config) Validate() ([]string, error) {
 		if name != w {
 			errs = append(errs, "watch_repos: "+w+" must not have surrounding spaces")
 		}
-		if !validRepoName(name) {
-			errs = append(errs, "watch_repos: "+w+" must be a repository name under owner, 1 to 100 letters, digits, '.', '_' or '-', and not . or ..")
+		if !ValidRepoName(name) {
+			errs = append(errs, "watch_repos: "+w+" must be a repository name under owner, "+RepoNameRule)
 		}
 		key := strings.ToLower(name)
 		if watched[key] {

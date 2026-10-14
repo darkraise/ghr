@@ -608,6 +608,9 @@ func (b *Backend) AddRepo(ctx context.Context, req model.AddRepoRequest) error {
 	if typed == "" {
 		return api.BadRequest("repo name is required")
 	}
+	if !config.ValidRepoName(typed) {
+		return api.BadRequest("repo name must be a repository name under owner, " + config.RepoNameRule)
+	}
 	cfg := b.Store.Config()
 	// A fast path that saves the GitHub call. It knows only the typed name;
 	// the check inside the update decides.
@@ -658,8 +661,8 @@ func (b *Backend) WatchRepo(ctx context.Context, name string) error {
 	if name == "" {
 		return api.BadRequest("repo name is required")
 	}
-	if strings.Contains(name, "/") {
-		return api.BadRequest("repo name must be a repository name under owner, without a slash")
+	if !config.ValidRepoName(name) {
+		return api.BadRequest("repo name must be a repository name under owner, " + config.RepoNameRule)
 	}
 	cfg := b.Store.Config()
 	if cfg.Repo(name) != nil {

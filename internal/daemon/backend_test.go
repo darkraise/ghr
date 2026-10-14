@@ -1495,6 +1495,22 @@ func TestRunnerStepsCarryTimes(t *testing.T) {
 	}
 }
 
+func TestRepoNamesAreCheckedBeforeGitHub(t *testing.T) {
+	b, _, gh := newBackend(t)
+	ctx := context.Background()
+	for _, name := range []string{"owner/repo", "a b", "..", "."} {
+		if err := b.AddRepo(ctx, model.AddRepoRequest{Name: name}); apiStatus(err) != 400 || !strings.Contains(err.Error(), "letters, digits") {
+			t.Errorf("AddRepo(%q) = %v", name, err)
+		}
+		if err := b.WatchRepo(ctx, name); apiStatus(err) != 400 || !strings.Contains(err.Error(), "letters, digits") {
+			t.Errorf("WatchRepo(%q) = %v", name, err)
+		}
+	}
+	if gh.getCalls != 0 {
+		t.Fatalf("GetRepo called %d times for names that cannot exist", gh.getCalls)
+	}
+}
+
 func TestWatchRepo(t *testing.T) {
 	b, _, _ := newBackend(t)
 	ctx := context.Background()
@@ -1504,7 +1520,9 @@ func TestWatchRepo(t *testing.T) {
 		text   string
 	}{
 		{" ", 400, "required"},
-		{"other/docs", 400, "without a slash"},
+		{"other/docs", 400, "letters, digits"},
+		{"a b", 400, "letters, digits"},
+		{"..", 400, "letters, digits"},
 		{"missing", 400, "repository access"},
 		{"DarkCloud", 409, "already configured"},
 	} {
