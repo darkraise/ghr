@@ -204,9 +204,25 @@ export interface LogTail {
   next: string
 }
 
+const LOG_HEADER = /^==> (?:Runner|Worker)_.*\.log <==$/gm
+
+// The daemon opens the text with a "==> file <==" header and writes another
+// at every switch of file. A text over MAX_LOG loses its start at a line
+// boundary, and the header that governed the cut stands in front of what
+// is left, so a line is never shown under the wrong file.
+function trimLog(text: string): string {
+  const want = text.length - MAX_LOG
+  const newline = text.indexOf("\n", want)
+  const cut = newline >= 0 ? newline + 1 : want
+  const kept = text.slice(cut)
+  if (kept.search(LOG_HEADER) === 0) return kept
+  const header = text.slice(0, cut).match(LOG_HEADER)?.at(-1)
+  return header === undefined ? kept : `${header}\n${kept}`
+}
+
 export function appendLog(prev: LogTail, chunk: LogChunk): LogTail {
   const text = prev.text + chunk.data
-  return { text: text.length > MAX_LOG ? text.slice(-MAX_LOG) : text, next: chunk.next }
+  return { text: text.length > MAX_LOG ? trimLog(text) : text, next: chunk.next }
 }
 
 // A runner that has ended writes no more log, so the caller stops the polling

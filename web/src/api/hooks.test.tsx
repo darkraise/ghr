@@ -27,6 +27,25 @@ describe("appendLog", () => {
     expect(appendLog({ text: "a", next: "" }, { data: "b", next: "c1" })).toEqual({ text: "ab", next: "c1" })
     expect(appendLog({ text: "x".repeat(MAX_LOG), next: "c1" }, { data: "yz", next: "c2" }).text).toHaveLength(MAX_LOG)
   })
+
+  const rows = (c: string, n: number) => `${c.repeat(99)}\n`.repeat(n)
+
+  it("cuts an over-long text at a line and puts the header that governs the cut in front", () => {
+    const prev = { text: `==> Runner_1.log <==\n${rows("r", 100)}\n==> Worker_2.log <==\n${rows("w", 2800)}`, next: "c1" }
+    const out = appendLog(prev, { data: rows("x", 10), next: "c2" }).text
+    const lines = out.split("\n")
+    expect(lines[0]).toBe("==> Worker_2.log <==")
+    expect(lines.slice(1, -1).every((l) => l === "w".repeat(99) || l === "x".repeat(99))).toBe(true)
+    expect(out.endsWith(rows("x", 10))).toBe(true)
+    expect(out.length).toBeLessThanOrEqual(MAX_LOG + 21)
+  })
+
+  it("does not repeat a header the kept part opens with", () => {
+    const front = `==> Runner_1.log <==\n${rows("r", 50)}\n`
+    const kept = `==> Worker_2.log <==\n${"w".repeat(MAX_LOG - 23)}\n`
+    const out = appendLog({ text: front, next: "c1" }, { data: kept, next: "c2" }).text
+    expect(out).toBe(kept)
+  })
 })
 
 describe("useEvents", () => {
