@@ -2014,3 +2014,44 @@ func TestCheckTokenOnBoundsTheChecksInFlight(t *testing.T) {
 		t.Fatalf("%d results, peak %d in flight, want %d and %d", len(errs), peak.Load(), len(repos), tokenCheckWorkers)
 	}
 }
+
+func TestPatchConfigJobs(t *testing.T) {
+	b, _, _ := newBackend(t)
+	ctx := context.Background()
+	off, every := false, "12h"
+	if err := b.PatchConfig(ctx, model.ConfigPatch{Jobs: map[string]model.JobPatch{
+		config.JobPrune:          {Every: &every, Enabled: &off},
+		config.JobStorageMeasure: {Enabled: &off},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	j := b.Store.Config().Jobs
+	if j.Prune.Every.D() != 12*time.Hour || j.Prune.Enabled || j.StorageMeasure.Enabled || !j.GhrUpdateCheck.Enabled || j.StorageMeasure.Every.D() != 30*time.Minute {
+		t.Fatalf("jobs %+v", j)
+	}
+	var warned bool
+	for _, e := range b.Events.After(0) {
+		warned = warned || e.Msg == "config: jobs.prune is off: "+config.PruneOffReason
+	}
+	if !warned {
+		t.Fatal("turning prune off wrote no warning")
+	}
+
+	soon, short := "soon", "30m"
+	for _, tc := range []struct {
+		patch map[string]model.JobPatch
+		want  string
+	}{
+		{map[string]model.JobPatch{"nightly": {Enabled: &off}}, `jobs: no background task "nightly"`},
+		{map[string]model.JobPatch{config.JobPrune: {Every: &soon}}, `jobs.prune.every: invalid duration "soon"`},
+		{map[string]model.JobPatch{config.JobPrune: {Every: &short}}, "jobs.prune.every must be >= 1h"},
+	} {
+		err := b.PatchConfig(ctx, model.ConfigPatch{Jobs: tc.patch})
+		if apiStatus(err) != http.StatusBadRequest || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%v: err %v, want 400 %q", tc.patch, err, tc.want)
+		}
+	}
+	if b.Store.Config().Jobs.Prune.Every.D() != 12*time.Hour {
+		t.Fatal("a rejected patch changed the config")
+	}
+}

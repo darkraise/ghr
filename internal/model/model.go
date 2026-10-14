@@ -234,6 +234,12 @@ type WebPatch struct {
 	Hosts  *[]string `json:"hosts,omitempty"`
 }
 
+// JobPatch changes one background task's schedule; a nil field is unchanged.
+type JobPatch struct {
+	Enabled *bool   `json:"enabled,omitempty"`
+	Every   *string `json:"every,omitempty"`
+}
+
 type ConfigPatch struct {
 	Mode             *string              `json:"mode,omitempty"`
 	GlobalMax        *int                 `json:"global_max,omitempty"`
@@ -248,6 +254,7 @@ type ConfigPatch struct {
 	Web              *WebPatch            `json:"web,omitempty"`
 	GitHubStorage    *GitHubStoragePatch  `json:"github_storage,omitempty"`
 	Repos            map[string]RepoPatch `json:"repos,omitempty"`
+	Jobs             map[string]JobPatch  `json:"jobs,omitempty"`
 }
 
 type AddRepoRequest struct {

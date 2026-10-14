@@ -554,6 +554,24 @@ func (b *Backend) PatchConfig(ctx context.Context, p model.ConfigPatch) error {
 				return err
 			}
 		}
+		// Sorted, so the unknown task or bad interval reported is always the same one.
+		for _, name := range slices.Sorted(maps.Keys(p.Jobs)) {
+			jp := p.Jobs[name]
+			j := c.Jobs.Ref(name)
+			if j == nil {
+				return api.BadRequest(fmt.Sprintf("jobs: no background task %q", name))
+			}
+			if jp.Enabled != nil {
+				j.Enabled = *jp.Enabled
+			}
+			if jp.Every != nil {
+				d, err := config.ParseDuration(*jp.Every)
+				if err != nil {
+					return api.BadRequest("jobs." + name + ".every: " + err.Error())
+				}
+				j.Every = d
+			}
+		}
 		// Sorted, so the unknown repository reported is always the same one.
 		for _, name := range slices.Sorted(maps.Keys(p.Repos)) {
 			rp := p.Repos[name]
