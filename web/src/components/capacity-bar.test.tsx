@@ -74,4 +74,25 @@ describe("CapacitySegments", () => {
     const { container } = render(<CapacitySegments status={free} />)
     expect(container.querySelector('[data-kind="free"]')).toHaveClass("bg-muted")
   })
+
+  it("groups the segments of one kind once there are too many to tell apart", () => {
+    const many = status({
+      global_max: 99,
+      instances: [inst("busy", "a"), inst("busy", "b"), inst("busy", "c"), inst("starting", "d"), inst("idle", "e"), inst("idle", "f")],
+    })
+    render(<CapacitySegments status={many} />)
+    const bar = screen.getByRole("img", { name: "3 of 99 busy, 1 starting, 2 warm, 93 free" })
+    const segments = [...bar.querySelectorAll<HTMLElement>("[data-kind]")]
+    expect(segments.map((s) => s.getAttribute("data-kind"))).toEqual(["busy", "starting", "warm", "free"])
+    expect(segments.map((s) => s.style.flexGrow)).toEqual(["3", "1", "2", "93"])
+  })
+
+  it("starts the over-max marker on a new group", () => {
+    const flood = status({ global_max: 1, instances: Array.from({ length: 20 }, (_, i) => inst("busy", `r${i}`)) })
+    const { container } = render(<CapacitySegments status={flood} />)
+    const segments = [...container.querySelectorAll<HTMLElement>("[data-kind]")]
+    expect(segments.map((s) => s.style.flexGrow)).toEqual(["1", "19"])
+    expect(segments[1]).toHaveClass("ml-[2px]")
+    expect(segments[0]).not.toHaveClass("ml-[2px]")
+  })
 })

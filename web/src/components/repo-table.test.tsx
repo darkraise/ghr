@@ -62,6 +62,16 @@ describe("RepoTable", () => {
     expect(cell("darkcloud", 2).textContent).toBe("1")
   })
 
+  it("draws one track instead of a cell per runner when there are many", () => {
+    draw([{ ...darkmem, max: 99, active: 33 }])
+    const meter = cell("darkmem", 2)
+    expect(meter).toHaveTextContent("33/99")
+    expect(meter.querySelectorAll('[data-slot="runner"]')).toHaveLength(0)
+    const track = meter.querySelector('[data-slot="runner-track"]')
+    expect(track).toBeInTheDocument()
+    expect(parseFloat((track?.firstElementChild as HTMLElement).style.width)).toBeCloseTo(33.33, 1)
+  })
+
   it("draws the last 24 hours with the hour in progress outlined", () => {
     draw()
     const strip = within(row("darkmem")).getByRole("img", { name: /^darkmem, last 24 hours/ })
