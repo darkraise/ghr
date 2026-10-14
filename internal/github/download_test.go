@@ -364,18 +364,44 @@ func TestLogBlobRefusesARedirectOffHTTPS(t *testing.T) {
 	}
 }
 
+func TestLogBlobRuleSurvivesAReplacedBlobClient(t *testing.T) {
+	var hits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		fmt.Fprint(w, "log")
+	}))
+	defer target.Close()
+	store := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/log", http.StatusFound)
+	}))
+	defer store.Close()
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, store.URL+"/log", http.StatusFound)
+	})
+	c.Blob = &http.Client{}
+	if _, err := c.JobLog(context.Background(), "darkmem", 1, 10); err == nil || !strings.Contains(err.Error(), "refus") {
+		t.Fatalf("err %v", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("the redirect target got %d requests", hits.Load())
+	}
+	if c.Blob.CheckRedirect != nil {
+		t.Fatal("OpenJobLog changed the caller's Blob client")
+	}
+}
+
 func TestLogBlobRefusesARedirectToAnotherHost(t *testing.T) {
 	c, _ := newClient(t, nil)
 	req, _ := http.NewRequest(http.MethodGet, "https://example.com/log", nil)
 	c.blobHost = BlobHost
-	if err := c.Blob.CheckRedirect(req, nil); err == nil {
+	if err := c.blobRedirect(req, nil); err == nil {
 		t.Fatal("a redirect to example.com was allowed")
 	}
 	req, _ = http.NewRequest(http.MethodGet, "https://productionresultssa1.blob.core.windows.net/log", nil)
-	if err := c.Blob.CheckRedirect(req, nil); err != nil {
+	if err := c.blobRedirect(req, nil); err != nil {
 		t.Fatalf("a redirect to a blob host: %v", err)
 	}
-	if err := c.Blob.CheckRedirect(req, make([]*http.Request, 10)); err == nil {
+	if err := c.blobRedirect(req, make([]*http.Request, 10)); err == nil {
 		t.Fatal("an eleventh redirect was allowed")
 	}
 }

@@ -166,7 +166,8 @@ type Client struct {
 	Token   func() string
 	HTTP    *http.Client
 	// Blob fetches the signed download URLs GitHub redirects to. It sends no
-	// token, and the caller's context bounds the whole download.
+	// token, and the caller's context bounds the whole download. OpenJobLog
+	// sets the redirect rule on a copy, so the rule holds for any client.
 	Blob *http.Client
 	Now  func() time.Time
 	// Sleep waits d. When ctx ends first it returns at once with ctx's error.
@@ -191,7 +192,7 @@ type Client struct {
 }
 
 func New(owner string, token func() string) *Client {
-	c := &Client{
+	return &Client{
 		BaseURL: "https://api.github.com", Owner: owner, Token: token,
 		HTTP: &http.Client{Timeout: 30 * time.Second}, Blob: newBlobClient(), Now: time.Now, Sleep: sleep,
 		blobHost:  BlobHost,
@@ -199,8 +200,6 @@ func New(owner string, token func() string) *Client {
 		remaining: -1,
 		mutSlot:   make(chan struct{}, 1),
 	}
-	c.Blob.CheckRedirect = c.blobRedirect
-	return c
 }
 
 func sleep(ctx context.Context, d time.Duration) error {

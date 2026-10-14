@@ -110,7 +110,9 @@ func (c *Client) OpenJobLog(ctx context.Context, repo string, jobID int64) (io.R
 	if err != nil {
 		return nil, 0, hideURL(err, "log")
 	}
-	resp, err := c.Blob.Do(req)
+	blob := *c.Blob
+	blob.CheckRedirect = c.blobRedirect
+	resp, err := blob.Do(req)
 	if err != nil {
 		return nil, 0, hideURL(err, "log")
 	}
