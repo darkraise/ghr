@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/darkraise/ghr/internal/changes"
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/metrics"
 	"github.com/darkraise/ghr/internal/model"
@@ -210,4 +211,15 @@ func TestSubscribeNeedsAHub(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
+}
+
+func TestStatusFingerprintFollowsTheJobs(t *testing.T) {
+	b, _, _ := newBackend(t)
+	before := b.fingerprints()["status"]
+	if err := b.Jobs.RunNow(config.JobPrune); err != nil {
+		t.Fatal(err)
+	}
+	if b.fingerprints()["status"] == before {
+		t.Fatal("a Run now left the status fingerprint unchanged")
+	}
 }

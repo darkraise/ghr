@@ -25,6 +25,7 @@ import (
 	"github.com/darkraise/ghr/internal/events"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/history"
+	"github.com/darkraise/ghr/internal/jobs"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/runner"
 )
@@ -316,6 +317,7 @@ func newBackend(t *testing.T) (*Backend, *fakeManager, *fakeGH) {
 			return nil
 		},
 	}
+	b.Jobs = jobs.New(func() config.Jobs { return b.Store.Config().Jobs }, time.Now, nil)
 	return b, m, gh
 }
 
@@ -2053,5 +2055,66 @@ func TestPatchConfigJobs(t *testing.T) {
 	}
 	if b.Store.Config().Jobs.Prune.Every.D() != 12*time.Hour {
 		t.Fatal("a rejected patch changed the config")
+	}
+}
+
+// statusJob is the named task in the status.
+func statusJob(t *testing.T, st model.Status, name string) model.JobStatus {
+	t.Helper()
+	for _, j := range st.Jobs {
+		if j.Name == name {
+			return j
+		}
+	}
+	t.Fatalf("no task %s in %+v", name, st.Jobs)
+	return model.JobStatus{}
+}
+
+func TestRunJob(t *testing.T) {
+	b, m, _ := newBackend(t)
+	if err := b.RunJob("nightly"); apiStatus(err) != http.StatusNotFound {
+		t.Fatalf("unknown task: %v", err)
+	}
+	if err := b.RunJob(config.JobPrune); err != nil {
+		t.Fatal(err)
+	}
+	if j := statusJob(t, b.Status(), config.JobPrune); !j.Pending {
+		t.Fatalf("prune %+v", j)
+	}
+	if err := b.RunJob(config.JobPrune); apiStatus(err) != http.StatusConflict {
+		t.Fatalf("second Run now: %v", err)
+	}
+	off := false
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{Jobs: map[string]model.JobPatch{config.JobStorageMeasure: {Enabled: &off}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.RunJob(config.JobStorageMeasure); apiStatus(err) != http.StatusConflict || !strings.Contains(err.Error(), "is off") {
+		t.Fatalf("task off: %v", err)
+	}
+	m.paused = time.Now().Add(time.Hour)
+	if err := b.RunJob(config.JobRunnerUpdateCheck); apiStatus(err) != http.StatusTooManyRequests {
+		t.Fatalf("runner check while GitHub calls are paused: %v", err)
+	}
+}
+
+func TestConfigChangesWakeJobOwners(t *testing.T) {
+	b, _, _ := newBackend(t)
+	woke := 0
+	b.Jobs.Register(config.JobStorageMeasure, func() { woke++ })
+	every := "2h"
+	if err := b.PatchConfig(context.Background(), model.ConfigPatch{Jobs: map[string]model.JobPatch{config.JobPrune: {Every: &every}}}); err != nil {
+		t.Fatal(err)
+	}
+	if woke != 1 {
+		t.Fatalf("a patch woke the owners %d times", woke)
+	}
+	if err := os.WriteFile(b.Store.ConfigPath, []byte(cfgYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if woke != 2 {
+		t.Fatalf("a reload woke the owners %d times in all", woke)
 	}
 }

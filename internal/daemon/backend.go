@@ -24,6 +24,7 @@ import (
 	"github.com/darkraise/ghr/internal/events"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/history"
+	"github.com/darkraise/ghr/internal/jobs"
 	"github.com/darkraise/ghr/internal/metrics"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/runner"
@@ -132,8 +133,10 @@ type Backend struct {
 	SetupPending func() bool
 	// Changes is the hub GET /changes subscribes to; nil until the daemon has started.
 	Changes *changes.Hub
-	flags   setupFlagCache
-	checks  labelChecks
+	// Jobs schedules the background tasks; nil in tests that do not use it.
+	Jobs   *jobs.Registry
+	flags  setupFlagCache
+	checks labelChecks
 
 	stepsMu    sync.Mutex
 	steps      map[string]stepsEntry
@@ -296,8 +299,39 @@ func (b *Backend) Status() model.Status {
 	if b.GHS != nil {
 		st.GitHubStorage = b.GHS.Alert()
 	}
+	b.daemonStatus(&st)
 	return st
 }
+
+// daemonStatus fills in the parts of the status the daemon keeps itself, for
+// GET /status and the status topic's fingerprint alike.
+func (b *Backend) daemonStatus(st *model.Status) {
+	st.Jobs = b.Jobs.Snapshot()
+}
+
+// RunJob runs a background task now. The runner check needs GitHub, so it is
+// refused for the reasons a runner update is.
+func (b *Backend) RunJob(name string) error {
+	if b.Jobs == nil {
+		return api.NotFound(fmt.Sprintf("no background task %q", name))
+	}
+	if name == config.JobRunnerUpdateCheck {
+		if err := b.githubErr(); err != nil {
+			return err
+		}
+	}
+	err := b.Jobs.RunNow(name)
+	switch {
+	case errors.Is(err, jobs.ErrUnknown):
+		return api.NotFound(fmt.Sprintf("no background task %q", name))
+	case errors.Is(err, jobs.ErrOff):
+		return api.Conflict(name + " is off; turn it on first")
+	case errors.Is(err, jobs.ErrBusy):
+		return api.Conflict(name + " is already running or about to run")
+	}
+	return err
+}
+
 func (b *Backend) EventsAfter(seq int64) []model.Event { return b.Events.After(seq) }
 func (b *Backend) Config() any                         { return b.Store.Config() }
 
@@ -479,6 +513,9 @@ func (b *Backend) updateThen(fn func(c *config.Config) error, saved func()) erro
 		if !slices.Contains(before, w) {
 			b.Events.Add("warn", "", "config: %s", w)
 		}
+	}
+	if b.Jobs != nil {
+		b.Jobs.Changed()
 	}
 	if b.Wake != nil {
 		b.Wake()
@@ -950,6 +987,9 @@ func (b *Backend) Reload() ([]string, error) {
 	}
 	b.dropLabelChecks()
 	b.M.ClearDegraded()
+	if b.Jobs != nil {
+		b.Jobs.Changed()
+	}
 	b.Events.Add("info", "", "config and token reloaded")
 	if b.GHS != nil {
 		if tokenChanged {

@@ -25,6 +25,7 @@ import (
 	"github.com/darkraise/ghr/internal/ghstorage"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/history"
+	"github.com/darkraise/ghr/internal/jobs"
 	"github.com/darkraise/ghr/internal/metrics"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/runner"
@@ -203,9 +204,11 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 	}
 	hist := &history.Store{Path: o.HistoryPath}
 	hist.SetOnChange(hub.Wake)
+	reg := jobs.New(func() config.Jobs { return store.Config().Jobs }, time.Now, hub.Wake)
 	m := &runner.Manager{
 		Config: store.Config, GH: gh, SD: o.Systemd, Docker: o.Docker, Disk: o.Disk, Host: o.Host, Fetch: o.Fetch,
 		Paths: o.Paths, Events: ev, History: hist, Now: time.Now, NewID: runner.RandomID, Epoch: epoch,
+		Jobs: reg,
 	}
 	if m.SD == nil {
 		m.SD = system.Systemd{Run: system.Exec}
@@ -232,7 +235,7 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 	tools := toolchain.New(toolchain.NewEnv(o.Paths.ToolCache, o.Paths.Home, runner.RunnerUser,
 		system.ExecGroupFor(InstallTimeout), system.ExecGroupIOFor(InstallTimeout), system.DownloadFor(InstallTimeout)))
 	space := &storage.Service{Tools: tools, Docker: m.Disk, Home: o.Paths.Home, User: runner.RunnerUser,
-		Hold: m.HoldForMaintenance, Events: ev}
+		Hold: m.HoldForMaintenance, Events: ev, Jobs: reg}
 	space.Start()
 	m.PruneDone = space.Trigger
 
@@ -279,6 +282,7 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 		WebSetupRequired: webSetupRequired,
 		SetupPending:     func() bool { return exists(o.SetupPendingPath) },
 		Changes:          hub,
+		Jobs:             reg,
 		Wake: func() {
 			select {
 			case wake <- struct{}{}:
@@ -286,6 +290,8 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 			}
 		},
 	}
+	reg.Register(config.JobRunnerUpdateCheck, b.Wake)
+	reg.Register(config.JobPrune, b.Wake)
 	hub.SetSources(b.fingerprints, b.staleActivity)
 	return &running{m: m, space: space, ghs: ghs, b: b, sampled: sampled, wake: wake}, nil
 }

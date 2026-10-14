@@ -71,6 +71,7 @@ func (b *Backend) fingerprints() map[string]uint64 {
 		st := status()
 		st.WebSetupRequired, st.SetupPending = b.setupFlags()
 		st.Restart, st.WebListenError = b.restartStatus(st), b.WebListenErr
+		b.daemonStatus(&st)
 		if b.GHS != nil {
 			st.GitHubStorage = b.GHS.Alert()
 		}
