@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -226,6 +227,59 @@ func TestMeasureCacheWalksThroughTheOpenRoot(t *testing.T) {
 	}
 	if len(noted) != 1 || !strings.HasPrefix(noted[0], "pip: ") {
 		t.Fatalf("noted %q, want the refused walk named once", noted)
+	}
+}
+
+// swapFS is an fs.FS over a root that runs after() once the listing of dir
+// was read, as a job replacing that directory with a link would.
+type swapFS struct {
+	fs.FS
+	dir   string
+	after func()
+}
+
+func (f *swapFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	entries, err := fs.ReadDir(f.FS, name)
+	if name == f.dir && f.after != nil {
+		f.after()
+		f.after = nil
+	}
+	return entries, err
+}
+
+// A directory replaced by a link after its listing was read must not lead
+// the sizing of its entries out of the home. Entries of a directory opened
+// in an os.Root carry the size read through that directory, not one looked
+// up again by path.
+func TestWalkFSDoesNotSizeThroughAReplacedDirectory(t *testing.T) {
+	outside := t.TempDir()
+	big := make([]byte, 256<<10)
+	rand.Read(big)
+	writeFile(t, filepath.Join(outside, "f"), string(big))
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, "c", "sub", "f"), "x")
+	r, err := os.OpenRoot(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	swapped := false
+	fsys := &swapFS{FS: r.FS(), dir: "c/sub", after: func() {
+		sub := filepath.Join(home, "c", "sub")
+		if err := os.RemoveAll(sub); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, sub); err != nil {
+			t.Skip("no symlinks here:", err)
+		}
+		swapped = true
+	}}
+	u, _, _ := walkFS(context.Background(), fsys, "c")
+	if !swapped {
+		t.Fatal("the directory was not replaced")
+	}
+	if u.Bytes >= int64(len(big)) {
+		t.Fatalf("counted %d bytes, the size of a file outside the home", u.Bytes)
 	}
 }
 
