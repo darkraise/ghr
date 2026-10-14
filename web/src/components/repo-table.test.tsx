@@ -72,6 +72,15 @@ describe("RepoTable", () => {
     expect(parseFloat((track?.firstElementChild as HTMLElement).style.width)).toBeCloseTo(33.33, 1)
   })
 
+  it.each([
+    [16, 16, 0],
+    [17, 0, 1],
+  ])("with max %i draws %i cells and %i tracks", (max, cells, tracks) => {
+    draw([{ ...darkmem, max, active: 3 }])
+    expect(cell("darkmem", 2).querySelectorAll('[data-slot="runner"]')).toHaveLength(cells)
+    expect(cell("darkmem", 2).querySelectorAll('[data-slot="runner-track"]')).toHaveLength(tracks)
+  })
+
   it("keeps a lone busy runner visible on the track", () => {
     draw([{ ...darkmem, max: 99, active: 1 }])
     expect(cell("darkmem", 2).querySelector('[data-slot="runner-track"]')?.firstElementChild).toHaveClass("min-w-px")

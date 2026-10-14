@@ -96,4 +96,13 @@ describe("CapacitySegments", () => {
     expect(segments[1]).toHaveClass("ml-[2px]")
     expect(segments[0]).not.toHaveClass("ml-[2px]")
   })
+
+  it.each([
+    [16, 16],
+    [17, 3],
+  ])("with %i slots draws %i segments", (max, drawn) => {
+    const edge = status({ global_max: max, instances: [inst("busy", "a"), inst("busy", "b"), inst("idle", "c")] })
+    const { container } = render(<CapacitySegments status={edge} />)
+    expect(container.querySelectorAll("[data-kind]")).toHaveLength(drawn)
+  })
 })
