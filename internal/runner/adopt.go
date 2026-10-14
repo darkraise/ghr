@@ -145,8 +145,11 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 		}
 		prefix := "ghr-" + r.Name + "-"
 		for _, rn := range runners {
-			id := strings.TrimPrefix(rn.Name, prefix)
-			if !strings.HasPrefix(rn.Name, prefix) || !idRe.MatchString(id) {
+			if len(rn.Name) <= len(prefix) || !strings.EqualFold(rn.Name[:len(prefix)], prefix) {
+				continue
+			}
+			id := rn.Name[len(prefix):]
+			if !idRe.MatchString(id) {
 				continue
 			}
 			i, tracked := known[id]

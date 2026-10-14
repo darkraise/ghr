@@ -339,6 +339,19 @@ func TestReconcileLeavesAnotherHostsRunners(t *testing.T) {
 	}
 }
 
+// GitHub repository names are case-insensitive, so a registration named in
+// another case than the config's is still one of ours.
+func TestReconcileSweepsARegistrationNamedInAnotherCase(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.Repos[1].Name = "MyRepo"
+	h.gh.listed["MyRepo"] = []github.Runner{{ID: 31, Name: "ghr-myrepo-abc123", Status: "offline"}}
+	h.m.Reconcile(context.Background(), h.cfg)
+	h.m.Reconcile(context.Background(), h.cfg)
+	if !reflect.DeepEqual(h.gh.deleted, []int64{31}) {
+		t.Fatalf("deleted %v\n%s", h.gh.deleted, h.eventText())
+	}
+}
+
 func adoptedMeta(h *harness, id string) Meta {
 	h.m.mu.Lock()
 	defer h.m.mu.Unlock()
