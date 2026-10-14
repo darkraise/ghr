@@ -13,7 +13,7 @@
       store.setItem("ghr-theme-v2", "1")
     }
     mode = store.getItem("mode")
-  } catch (e) {
+  } catch {
     mode = null
   }
   var dark =

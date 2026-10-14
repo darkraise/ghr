@@ -21,6 +21,10 @@ export default tseslint.config(
     },
   },
   {
+    files: ["public/**/*.js"],
+    languageOptions: { sourceType: "script", globals: { ...globals.browser } },
+  },
+  {
     files: ["src/test/**", "src/**/*.test.{ts,tsx}"],
     rules: { "react-refresh/only-export-components": "off" },
   },
