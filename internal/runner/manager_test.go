@@ -3,6 +3,9 @@ package runner
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -164,5 +167,25 @@ func TestRateLimitTheClientDroppedDoesNotPause(t *testing.T) {
 	h.m.apiErr("darkcloud", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Hour)}, h.now)
 	if !h.m.apiAllowed(h.now) || strings.Contains(h.eventText(), "rate limit") {
 		t.Fatalf("paused until %v\n%s", h.m.PausedUntil(), h.eventText())
+	}
+}
+
+// A temp file a crash left behind does not lend its mode to the next write.
+func TestWriteFileAtomicReplacesAStaleTempFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "record")
+	if err := os.WriteFile(path+".tmp", []byte("stale leftover"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileAtomic(path, []byte("new\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(path); err != nil || string(b) != "new\n" {
+		t.Fatalf("content %q, %v", b, err)
+	}
+	if fi, err := os.Stat(path); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
+		t.Fatalf("mode %v, %v", fi.Mode(), err)
+	}
+	if _, err := os.Lstat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temp file left: %v", err)
 	}
 }

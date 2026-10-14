@@ -288,7 +288,8 @@ func TestUpdateCancelledBeforeTheSwitchKeepsCurrent(t *testing.T) {
 func TestFailedQueueClearSurvivesRestart(t *testing.T) {
 	h := newHarness(t)
 	queuedUpdate(t, h, "")
-	if err := os.MkdirAll(h.m.Paths.UpdateState+".tmp", 0o755); err != nil {
+	// A non-empty directory where the temp file goes cannot be removed or written.
+	if err := os.MkdirAll(filepath.Join(h.m.Paths.UpdateState+".tmp", "x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	h.m.runUpdate(h.m.maintCtx)

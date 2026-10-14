@@ -692,6 +692,9 @@ func writeJSONAtomic(path string, v any) error {
 // a truncated file.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	tmp := path + ".tmp"
+	// A leftover from a crash would keep its own mode: WriteFile applies perm
+	// only to a file it creates.
+	os.Remove(tmp)
 	defer os.Remove(tmp)
 	if err := writeFile(tmp, data, perm); err != nil {
 		return err
