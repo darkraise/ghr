@@ -231,16 +231,11 @@ func TestJobCompletedExitsZeroWhenDateFails(t *testing.T) {
 // The runner invokes .sh hooks as `bash -e <file>`. A job.json directory holding a
 // job.json.tmp directory makes the final mv fail; the hooks must still exit 0.
 func TestHooksExitZeroUnderErrexitWhenRenameFails(t *testing.T) {
-	runHook(t, "job-started.sh", "GHR_INSTANCE_DIR=") // applies runHook's bash/jq skip rules
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "job.json", "job.json.tmp"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for _, script := range []string{"job-started.sh", "job-completed.sh"} {
-		cmd := exec.Command("bash", "-e", script)
-		cmd.Env = append(os.Environ(), "GHR_INSTANCE_DIR="+dir)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("%s under bash -e exited non-zero: %v\n%s", script, err, out)
-		}
+		runHook(t, script, "GHR_INSTANCE_DIR="+dir)
 	}
 }
