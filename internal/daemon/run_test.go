@@ -880,7 +880,6 @@ func setupStateOver(socket string) (model.SetupState, bool) {
 	return st, true
 }
 
-// webCall calls the web listener with the X-GHR header and an optional session.
 // claimBody is a browser's setup request, carrying the code the socket gives.
 func claimBody(t *testing.T, socket string) string {
 	t.Helper()
@@ -891,6 +890,7 @@ func claimBody(t *testing.T, socket string) string {
 	return `{"code":"` + code + `","password":"correct horse battery"}`
 }
 
+// webCall calls the web listener with the X-GHR header and an optional session.
 func webCall(t *testing.T, addr, method, path, body, session string) (*http.Response, string) {
 	t.Helper()
 	var rd io.Reader
