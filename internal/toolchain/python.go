@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // pythonReleases is where every download_url of the python-versions manifest
@@ -111,9 +112,18 @@ func (p python) Install(ctx context.Context, rel Release, progress func(string))
 	// at work.
 	_, statErr := r.Lstat(verRel)
 	existed := !errors.Is(statErr, fs.ErrNotExist)
+	x64 := filepath.Join(verRel, arch)
+	var x64Time time.Time
+	if fi, err := r.Lstat(x64); err == nil {
+		x64Time = fi.ModTime()
+	}
 	fail := func(err error) error {
 		if !existed {
 			r.RemoveAll(verRel)
+		} else if !x64Time.IsZero() {
+			// Kept, but not made to look fresh: a recent mtime would make
+			// checkUnfinished refuse every retry for an hour.
+			r.Chtimes(x64, x64Time, x64Time)
 		}
 		return err
 	}

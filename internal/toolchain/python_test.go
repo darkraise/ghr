@@ -185,6 +185,27 @@ func TestPythonFailedSetupKeepsAFolderThatWasThere(t *testing.T) {
 	}
 }
 
+// A kept stale folder that setup.sh wrote into must not look like a running
+// job's install, or every retry is refused for an hour.
+func TestPythonFailedSetupOverAStaleFolderAllowsARetry(t *testing.T) {
+	f := pythonFixture(t)
+	theirs := mkInstall(t, f.Root, "Python", "3.13.7", false)
+	backdate(t, theirs, 2*time.Hour)
+	f.host.scripts["setup.sh"] = func(string, map[string]string, []string) error {
+		if err := os.WriteFile(filepath.Join(theirs, "written-by-setup"), nil, 0o644); err != nil {
+			return err
+		}
+		return errors.New("ensurepip failed")
+	}
+	p := newPython(f.Env)
+	rel, _ := p.Resolve(context.Background(), "3.13")
+	for i := range 2 {
+		if err := p.Install(context.Background(), rel, func(string) {}); err == nil || errors.Is(err, ErrInstallInProgress) {
+			t.Fatalf("attempt %d: got %v, want the setup.sh failure", i, err)
+		}
+	}
+}
+
 // setup.sh deletes the x64 folder first, which may be a running job's own
 // setup-python at work.
 func TestPythonInstallLeavesAFreshFolderWithoutMarker(t *testing.T) {
