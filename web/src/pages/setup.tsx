@@ -22,6 +22,7 @@ import { keys, setupStart, useConfig, useSetupState, useStatus, useStorage } fro
 import { AddRepoDialog } from "@/components/add-repo-dialog"
 import { Brand } from "@/components/brand"
 import { SettingsSections } from "@/components/settings-form"
+import { ErrorLine } from "@/components/page/error-line"
 import { ToolchainActions } from "@/components/toolchain-actions"
 import { InstalledSection } from "@/components/toolchain-sections"
 import { useSettingsForm } from "@/lib/settings-form"
@@ -150,18 +151,40 @@ function RepositoriesStep() {
 
 function SettingsStep({ nav }: { nav: NavProps }) {
   const form = useSettingsForm()
-  const [asking, setAsking] = useState(false)
-  if (!form.config) return <p className="text-sm text-muted-foreground">loading…</p>
+  const [leaving, setLeaving] = useState<(() => void) | null>(null)
+  const [after, setAfter] = useState<(() => void) | null>(null)
 
-  async function saveAndNext() {
-    setAsking(false)
-    if (await form.save()) nav.onNext()
+  // Advance once the save has settled and no edit made meanwhile is left:
+  // the closure that started the save still sees the earlier draft.
+  useEffect(() => {
+    if (!after || form.saving) return
+    setAfter(null)
+    if (form.changed.length === 0) after()
+  }, [after, form.saving, form.changed.length])
+
+  if (!form.config) {
+    if (!form.configError) return <p className="text-sm text-muted-foreground">loading…</p>
+    return (
+      <>
+        <ErrorLine onRetry={form.retryConfig}>{form.configError}</ErrorLine>
+        <Nav {...nav} />
+      </>
+    )
   }
 
-  function discardAndNext() {
+  const guard = (go: () => void) => () => (form.changed.length > 0 ? setLeaving(() => go) : go())
+
+  async function saveAndLeave() {
+    const go = leaving
+    setLeaving(null)
+    if (go && (await form.save())) setAfter(() => go)
+  }
+
+  function discardAndLeave() {
+    const go = leaving
     form.discard()
-    setAsking(false)
-    nav.onNext()
+    setLeaving(null)
+    go?.()
   }
 
   return (
@@ -175,11 +198,11 @@ function SettingsStep({ nav }: { nav: NavProps }) {
       >
         Save settings
       </Button>
-      <Nav {...nav} onNext={() => (form.changed.length > 0 ? setAsking(true) : nav.onNext())} />
+      <Nav onBack={nav.onBack && guard(nav.onBack)} onNext={guard(nav.onNext)} onSkip={nav.onSkip && guard(nav.onSkip)} />
       <AlertDialog
-        open={asking}
+        open={leaving !== null}
         onOpenChange={(open) => {
-          if (!open) setAsking(false)
+          if (!open) setLeaving(null)
         }}
       >
         <AlertDialogContent>
@@ -189,10 +212,10 @@ function SettingsStep({ nav }: { nav: NavProps }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Stay</AlertDialogCancel>
-            <Button variant="outline" onClick={discardAndNext}>
+            <Button variant="outline" onClick={discardAndLeave}>
               Discard
             </Button>
-            <AlertDialogAction onClick={() => void saveAndNext()}>Save</AlertDialogAction>
+            <AlertDialogAction onClick={() => void saveAndLeave()}>Save</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

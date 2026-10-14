@@ -138,6 +138,54 @@ describe("setup wizard", () => {
     expect(finished).toEqual({ toolchains: "popular" })
   })
 
+  it("asks before Back drops unsaved settings; Discard goes back", async () => {
+    const { calls } = mockApi(authedRoutes({ "GET /api/setup": { ...base, configured: true, owner: "DarkRaise" }, "GET /api/storage": fixtures.storage }))
+    const { user } = renderApp("/setup")
+    await user.click(await screen.findByRole("button", { name: "Next" }))
+    const max = await screen.findByLabelText("Max concurrent runners")
+    await user.clear(max)
+    await user.type(max, "3")
+    await user.click(screen.getByRole("button", { name: "Back" }))
+    const dialog = within(await screen.findByRole("alertdialog"))
+    expect(screen.queryByRole("heading", { name: "Repositories", level: 2 })).toBeNull()
+    await user.click(dialog.getByRole("button", { name: "Discard" }))
+    expect(await screen.findByRole("heading", { name: "Repositories", level: 2 })).toBeInTheDocument()
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false)
+  })
+
+  it("asks before Skip drops unsaved settings", async () => {
+    const { calls } = mockApi(authedRoutes({ "GET /api/setup": { ...base, configured: true, owner: "DarkRaise" }, "GET /api/storage": fixtures.storage }))
+    const { user } = renderApp("/setup")
+    await user.click(await screen.findByRole("button", { name: "Next" }))
+    const max = await screen.findByLabelText("Max concurrent runners")
+    await user.clear(max)
+    await user.type(max, "3")
+    await user.click(screen.getByRole("button", { name: "Skip the rest" }))
+    const dialog = within(await screen.findByRole("alertdialog"))
+    expect(calls.some((c) => c.path === "/api/setup/finish")).toBe(false)
+    await user.click(dialog.getByRole("button", { name: "Stay" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(screen.getByLabelText("Max concurrent runners")).toHaveValue("3")
+    expect(calls.some((c) => c.path === "/api/setup/finish")).toBe(false)
+  })
+
+  it("shows the settings error with a retry, and still lets the steps move on", async () => {
+    mockApi(
+      authedRoutes({
+        "GET /api/setup": { ...base, configured: true, owner: "DarkRaise" },
+        "GET /api/storage": fixtures.storage,
+        "GET /api/config": () => json({ error: "config unreadable" }, 500),
+      }),
+    )
+    const { user } = renderApp("/setup")
+    await user.click(await screen.findByRole("button", { name: "Next" }))
+    expect(await screen.findByText("config unreadable")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
+    expect(screen.queryByText("loading…")).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Next" }))
+    expect(await screen.findByRole("heading", { name: "Toolchains", level: 2 })).toBeInTheDocument()
+  })
+
   it("leaves Web access out of the settings step", async () => {
     mockApi(authedRoutes({ "GET /api/setup": { ...base, configured: true, owner: "DarkRaise" }, "GET /api/storage": fixtures.storage }))
     const { user } = renderApp("/setup")
