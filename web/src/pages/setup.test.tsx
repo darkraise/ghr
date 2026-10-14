@@ -96,6 +96,14 @@ describe("setup wizard", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
   })
 
+  it("arms the start timeout when the page loads while ghr is starting", async () => {
+    setupStart.limitMs = 50
+    mockApi(authedRoutes({ "GET /api/setup": { ...base, starting: true } }))
+    renderApp("/setup")
+    expect(await screen.findByText("ghr is still starting; check journalctl -u ghr on the host")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+  })
+
   it("walks repositories, settings and toolchains, and finishes with the popular set", { timeout: 15_000 }, async () => {
     let finished: unknown
     const { calls } = mockApi(

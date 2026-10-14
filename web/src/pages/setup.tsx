@@ -229,6 +229,10 @@ export function SetupPage() {
   const configured = state.data?.configured ?? false
 
   useEffect(() => {
+    if (state.data?.starting && !state.data.configured && startedAt === null) setStartedAt(Date.now())
+  }, [state.data, startedAt])
+
+  useEffect(() => {
     if (startedAt === null) return
     const id = setTimeout(() => setTimedOut(true), setupStart.limitMs)
     return () => clearTimeout(id)
