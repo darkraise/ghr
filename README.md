@@ -47,7 +47,7 @@ As root on the host:
 curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh | bash
 ```
 
-Then open `http://<host>:8080/setup` to set the web password, enter your GitHub owner and token, and pick repositories and toolchains. To answer those questions in the terminal instead, or to install unattended, see [Installation](docs/installation.md).
+Then open `http://<host>:8080/setup`, enter the setup code `setup.sh` printed (or run `ghr code` on the host), set the web password, enter your GitHub owner and token, and pick repositories and toolchains. To answer those questions in the terminal instead, or to install unattended, see [Installation](docs/installation.md).
 
 Point your workflows at the runners by label. Every runner carries `self-hosted`, `linux` and `x64`, the labels in the config's `labels` list, and its repository's own labels:
 

@@ -503,31 +503,37 @@ web_ghr() {
     echo "web password set; every browser was logged out"
   }
 }
-out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run set_web_password) </dev/null 2>&1)
+# main reads WEB_UNCLAIMED in print_next; run's subshell would drop it.
+web_password() {
+  set_web_password
+  echo "unclaimed=${WEB_UNCLAIMED:-}"
+}
+out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
 check "h: without the marker the web password is left alone" absent "$MARK_DIR/ghr-calls"
-check "h: and nothing is printed" [ -z "$out" ]
+check "h: and nothing is printed" [ "$out" = "unclaimed=" ]
 
 touch "$pending"
-out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run set_web_password) </dev/null 2>&1)
+out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
 check "h: GHR_WEB_PASSWORD goes to ghr web set-password" [ "$(cat "$MARK_DIR/ghr-calls")" = "web set-password" ]
 check "h: the password is piped without a newline" [ "$(wc -c < "$MARK_DIR/ghr-stdin")" -eq 13 ]
 check "h: success is reported" contains "$out" "web password set"
+check "h: a password that is set leaves nothing for print_next" [ "$(tail -n 1 <<<"$out")" = "unclaimed=" ]
 check "h: no reminder after success" lacks "$out" "has no password"
 check "h: a password that is set clears the marker" absent "$pending"
 
 rm -f "$MARK_DIR/ghr-calls"
 touch "$pending" "$MARK_DIR/fail-web"
-out=$( (web_ghr; GHR_WEB_PASSWORD='short'; run set_web_password) </dev/null 2>&1)
+out=$( (web_ghr; GHR_WEB_PASSWORD='short'; run web_password) </dev/null 2>&1)
 rc=$?
 check "h: a refused password does not fail the install" [ "$rc" -eq 0 ]
 check "h: the refusal is shown" contains "$out" "password must be 12 to 1024 characters"
-check "h: the reminder follows a refusal" contains "$out" "set it now with: ghr web set-password"
+check "h: a refusal leaves the UI to print_next" contains "$out" "unclaimed=1"
 check "h: a refused password keeps the marker" [ -f "$pending" ]
 
 rm -f "$MARK_DIR/ghr-calls" "$MARK_DIR/fail-web"
-out=$( (web_ghr; GHR_WEB_PASSWORD=; run set_web_password) </dev/null 2>&1)
+out=$( (web_ghr; GHR_WEB_PASSWORD=; run web_password) </dev/null 2>&1)
 check "h: with no terminal and no GHR_WEB_PASSWORD nothing is sent" absent "$MARK_DIR/ghr-calls"
-check "h: and the reminder is printed" contains "$out" "web UI on :8080 has no password; set it now with: ghr web set-password"
+check "h: and the UI is left to print_next" [ "$out" = "unclaimed=1" ]
 check "h: and the marker stays for the next run" [ -f "$pending" ]
 
 (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) <<<'a long secret' >/dev/null 2>&1
@@ -536,30 +542,35 @@ check "h: and clears the marker" absent "$pending"
 
 touch "$pending"
 rm -f "$MARK_DIR/ghr-calls"
-out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) <<<'' 2>&1)
+out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run web_password) <<<'' 2>&1)
 check "h: Enter at the prompt sends nothing" absent "$MARK_DIR/ghr-calls"
 check "h: Enter at the prompt clears the marker" absent "$pending"
-check "h: Enter at the prompt still prints the reminder" contains "$out" "has no password"
+check "h: Enter at the prompt still leaves the UI to print_next" contains "$out" "unclaimed=1"
 
 # End of input and a failed read are not an Enter: the marker stays.
 for ending in "end of input:/dev/null" "closed input:-" "a partial line:partial"; do
   touch "$pending"
   rm -f "$MARK_DIR/ghr-calls"
   case "${ending##*:}" in
-    /dev/null) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) </dev/null 2>&1) ;;
-    -) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) <&- 2>&1) ;;
-    partial) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) < <(printf 'a long secret') 2>&1) ;;
+    /dev/null) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run web_password) </dev/null 2>&1) ;;
+    -) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run web_password) <&- 2>&1) ;;
+    partial) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run web_password) < <(printf 'a long secret') 2>&1) ;;
   esac
   check "h: ${ending%%:*} at the prompt sends nothing" absent "$MARK_DIR/ghr-calls"
   check "h: ${ending%%:*} at the prompt keeps the marker" [ -f "$pending" ]
-  check "h: ${ending%%:*} at the prompt still prints the reminder" contains "$out" "has no password"
+  check "h: ${ending%%:*} at the prompt still leaves the UI to print_next" contains "$out" "unclaimed=1"
 done
 
 # setup_ghr answers `ghr setup` from the mark files configured, wizard, owner
-# and web, and records `ghr setup github` and `ghr toolchain` calls.
+# and web, and `ghr code` from the mark file code (absent: a password is set),
+# and records `ghr setup github` and `ghr toolchain` calls.
 setup_ghr() {
   ghr() {
     case "$1 ${2:-}" in
+      "code ")
+        [ -f "$MARK_DIR/code" ] || { echo "ghr: a web password is already set" >&2; return 1; }
+        cat "$MARK_DIR/code"
+        ;;
       "setup ")
         printf 'configured: %s\nwizard: %s\nowner: %s\nweb: %s\n' "$(cat "$MARK_DIR/configured")" \
           "$(cat "$MARK_DIR/wizard")" "$(cat "$MARK_DIR/owner")" "$(cat "$MARK_DIR/web")"
@@ -583,7 +594,7 @@ setup_marks() {
   echo "$2" > "$MARK_DIR/wizard"
   echo "$3" > "$MARK_DIR/owner"
   echo "$4" > "$MARK_DIR/web"
-  rm -f "$MARK_DIR/ghr-calls" "$MARK_DIR/ghr-stdin"
+  rm -f "$MARK_DIR/ghr-calls" "$MARK_DIR/ghr-stdin" "$MARK_DIR/code"
 }
 
 # (i) configure_github asks for owner and token while ghr is not configured.
@@ -680,6 +691,30 @@ check "k: a wildcard with an IPv6 first address brackets it" contains "$out" "ht
 hostname() { :; }
 out=$( (setup_ghr; run print_next) 2>&1)
 check "k: a wildcard with no host address says this host" contains "$out" "http://<this host>:8080/setup"
+hostname() { echo "192.168.0.99"; }
+code_line="web UI setup code: ABCDE-FGHJK-MNPQR-STVWX (the browser asks for it once; or set a password now with: ghr web set-password)"
+setup_marks no pending - 0.0.0.0:8080
+echo ABCDE-FGHJK-MNPQR-STVWX > "$MARK_DIR/code"
+out=$( (setup_ghr; run print_next) 2>&1)
+check "k: an unclaimed web UI gets its setup code" contains "$out" "$code_line"
+check "k: as the last line, after the address" [ "$(tail -n 1 <<<"$out")" = "$(log "$code_line")" ]
+check "k: and the address comes first" contains "$(head -n 1 <<<"$out")" "http://192.168.0.99:8080/setup"
+setup_marks yes "done" DarkRaise 0.0.0.0:8080
+echo ABCDE-FGHJK-MNPQR-STVWX > "$MARK_DIR/code"
+out=$( (setup_ghr; run print_next) 2>&1)
+check "k: a finished setup with an unclaimed web UI prints only the code" [ "$out" = "$(log "$code_line")" ]
+setup_marks no pending - 0.0.0.0:8080
+out=$( (setup_ghr; run print_next) 2>&1)
+check "k: a claimed web UI gets no setup code" lacks "$out" "setup code"
+check "k: and no reminder" lacks "$out" "has no password"
+out=$( (setup_ghr; WEB_UNCLAIMED=1; run print_next) 2>&1)
+check "k: when ghr code fails after set_web_password left no password, the reminder is printed" \
+  [ "$(tail -n 1 <<<"$out")" = "$(log "the web UI has no password; set one with: ghr web set-password")" ]
+setup_marks no pending - -
+echo ABCDE-FGHJK-MNPQR-STVWX > "$MARK_DIR/code"
+out=$( (setup_ghr; WEB_UNCLAIMED=1; run print_next) 2>&1)
+check "k: without the web UI there is no code to print" lacks "$out" "setup code"
+check "k: nor a reminder" lacks "$out" "has no password"
 unset -f hostname
 
 # (n) The unit comes back with Docker. It is rewritten only when its content
@@ -756,6 +791,19 @@ check "c: new version kept" [ -x "$DIST_DIR/$FIXTURE_VERSION/run.sh" ]
 check "c: current kept and points at the new version" [ "$(target_of_current)" = "$FIXTURE_VERSION" ]
 check "c: ghr stopped before the runner download" [ -f "$MARK_DIR/fetched-after-stop" ]
 check "c: the stopped unit is ghr.service" [ "$(cat "$MARK_DIR/stopped")" = ghr.service ]
+
+new_case c-main-order
+order_stubs() {
+  set_web_password() { echo set_web_password >> "$MARK_DIR/order"; }
+  configure_github() { echo configure_github >> "$MARK_DIR/order"; }
+  preinstall_toolchains() { echo preinstall_toolchains >> "$MARK_DIR/order"; }
+  print_next() { echo print_next >> "$MARK_DIR/order"; }
+}
+out=$( (order_stubs; run main) 2>&1)
+rc=$?
+check "c: main with the steps stubbed succeeds" [ "$rc" -eq 0 ]
+check "c: the web password is set before GitHub is configured, and print_next ends the install" \
+  [ "$(cat "$MARK_DIR/order")" = $'set_web_password\nconfigure_github\npreinstall_toolchains\nprint_next' ]
 
 new_case c-first-install
 out=$( (systemctl() { return 5; }; run stop_ghr) 2>&1)

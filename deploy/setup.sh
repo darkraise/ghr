@@ -2,15 +2,18 @@
 # Installs or upgrades ghr and native GitHub Actions runners on a Debian 13 or
 # Ubuntu 22.04, 24.04 or 26.04 LXC.
 # Idempotent: re-run to upgrade Docker, the runner and ghr. Never overwrites config or token.
-#   bash setup.sh   (asks for the GitHub owner, the PAT and the web password; Enter skips any)
+#   bash setup.sh   (asks for the web password, the GitHub owner and the PAT; Enter skips any)
 #   curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh | bash
-#     (no prompts: finish in the browser; bash <(curl -fsSL ...) keeps the prompts)
+#     (no prompts: finish in the browser with the setup code printed at the end; only
+#     stdin is the pipe, so the output still reaches the terminal;
+#     bash <(curl -fsSL ...) keeps the prompts)
 # Optional: GHR_VERSION=v0.1.1 RUNNER_VERSION=2.337.0
 #   GHR_TOOLCHAINS=popular|none (default: popular on a first install, none on an upgrade)
 #   GHR_OWNER=... and GHR_TOKEN=... configure GitHub for scripts that cannot answer the
 #     prompts; GHR_TOKEN is ignored without an owner. Whatever is skipped is finished in
 #     the web UI at /setup, or with: ghr setup github --owner <owner>
-#   GHR_WEB_PASSWORD=... sets the web UI password on a first install (else it asks; Enter skips).
+#   GHR_WEB_PASSWORD=... sets the web UI password on a first install (else it asks; Enter skips),
+#     so the browser does not ask for the setup code.
 set -euo pipefail
 
 GHR_REPO="darkraise/ghr"
@@ -34,6 +37,8 @@ KEYRING_DIR=/etc/apt/keyrings
 OS_RELEASE=/etc/os-release
 DOCKER_KEY_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 READY_TIMEOUT=60
+# set_web_password sets it when it leaves the web UI without a password.
+WEB_UNCLAIMED=
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -269,9 +274,9 @@ wait_ready() {
 }
 
 # A first install turns the web UI on (config.example.yaml); until a password
-# is set, the first visitor to the web UI sets it. The marker stays until a
-# password is set or the owner skipped the prompt, so a re-run after a failed
-# first install, or one without a terminal, asks again.
+# is set, the browser asks for the setup code print_next shows. The marker stays
+# until a password is set or the owner skipped the prompt, so a re-run after a
+# failed first install, or one without a terminal, asks again.
 set_web_password() {
   local pending="$STATE_DIR/web-password-pending" pw="${GHR_WEB_PASSWORD:-}" out
   [ -f "$pending" ] || return 0
@@ -293,7 +298,7 @@ set_web_password() {
     fi
     warn "${out#ghr: }"
   fi
-  log "web UI on :8080 has no password; set it now with: ghr web set-password"
+  WEB_UNCLAIMED=1
 }
 
 stdin_is_tty() { [ -t 0 ]; }
@@ -332,27 +337,39 @@ configure_github() {
   fi
 }
 
-# Says what is left of first-run setup.
+# Says what is left of first-run setup and, while the web UI has no password,
+# ends with the setup code its browser asks for.
 print_next() {
-  local configured wizard web host
+  local configured wizard web host code
   configured=$(setup_field configured)
   [ -n "$configured" ] || return 0
   wizard=$(setup_field wizard)
   web=$(setup_field web)
-  [ "$configured" != yes ] || [ "$wizard" = pending ] || return 0
-  if [ -n "$web" ] && [ "$web" != - ]; then
-    host=${web%:*}
-    case "$host" in
-      "" | 0.0.0.0 | :: | "[::]")
-        host=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
-        [[ "$host" != *:* ]] || host="[$host]"
-        ;;
-    esac
-    log "finish setup in the browser: http://${host:-<this host>}:${web##*:}/setup"
-  elif [ "$configured" != yes ]; then
-    log "finish setup with: ghr setup github --owner <owner>"
-  else
-    log "end first-run setup with: ghr setup finish"
+  [ "$web" != - ] || web=
+  if [ "$configured" != yes ] || [ "$wizard" = pending ]; then
+    if [ -n "$web" ]; then
+      host=${web%:*}
+      case "$host" in
+        "" | 0.0.0.0 | :: | "[::]")
+          host=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+          [[ "$host" != *:* ]] || host="[$host]"
+          ;;
+      esac
+      log "finish setup in the browser: http://${host:-<this host>}:${web##*:}/setup"
+    elif [ "$configured" != yes ]; then
+      log "finish setup with: ghr setup github --owner <owner>"
+    else
+      log "end first-run setup with: ghr setup finish"
+    fi
+  fi
+  [ -n "$web" ] || return 0
+  # ghr code also fails once a password is set, so only a password this run
+  # left unset makes the failure worth a reminder.
+  code=$(timeout 10 ghr code 2>/dev/null) || code=
+  if [ -n "$code" ]; then
+    log "web UI setup code: $code (the browser asks for it once; or set a password now with: ghr web set-password)"
+  elif [ -n "$WEB_UNCLAIMED" ]; then
+    log "the web UI has no password; set one with: ghr web set-password"
   fi
 }
 
@@ -421,8 +438,8 @@ main() {
   install_service
   trap - EXIT
   wait_ready
-  configure_github
   set_web_password
+  configure_github
   preinstall_toolchains
   print_next
 }

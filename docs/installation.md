@@ -34,7 +34,7 @@ curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh | 
 wget -qO- https://github.com/darkraise/ghr/releases/latest/download/setup.sh | bash
 ```
 
-`setup.sh` installs Docker Engine from Docker's apt repository, then the GitHub Actions runner and ghr after checking their checksums, starts the `ghr` service and prints the address that finishes setup in the browser.
+`setup.sh` installs Docker Engine from Docker's apt repository, then the GitHub Actions runner and ghr after checking their checksums, starts the `ghr` service and prints the address that finishes setup in the browser, with the one-time setup code the browser asks for before the web password is set.
 
 Piped like this, the script asks nothing. To answer its prompts in the terminal instead, run:
 
@@ -42,9 +42,9 @@ Piped like this, the script asks nothing. To answer its prompts in the terminal 
 bash <(curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh)
 ```
 
-or `bash deploy/setup.sh` from a checkout. The prompts ask for the GitHub owner (a user or organization), the token (without echo) and the web UI password; press Enter at any prompt to skip it.
+or `bash deploy/setup.sh` from a checkout. The prompts ask for the web UI password, then the GitHub owner (a user or organization) and the token (both passwords without echo); press Enter at any prompt to skip it.
 
-Finish whatever you skipped at `http://<host>:8080/setup`: the first visitor sets the web password, then enters the owner and token, adds repositories, adjusts settings and chooses toolchains.
+Finish whatever you skipped at `http://<host>:8080/setup`: enter the setup code `setup.sh` printed (or run `ghr code` on the host), set the web password, then enter the owner and token, add repositories, adjust settings and choose toolchains.
 
 ### Unattended install
 
@@ -55,7 +55,7 @@ Scripts set these variables instead of answering prompts:
 | `GHR_VERSION` | ghr release to install, such as `v0.1.22`; `latest` by default |
 | `RUNNER_VERSION` | actions/runner version, such as `2.337.0`; `latest` by default |
 | `GHR_OWNER`, `GHR_TOKEN` | configure GitHub; `GHR_TOKEN` is ignored without an owner |
-| `GHR_WEB_PASSWORD` | web UI password, on a first install |
+| `GHR_WEB_PASSWORD` | web UI password, on a first install; the browser then needs no setup code |
 | `GHR_TOOLCHAINS` | `popular` or `none`; by default `popular` on a first install, `none` on an upgrade |
 
 Then run `ghr setup finish` to end first-run setup without the browser.
