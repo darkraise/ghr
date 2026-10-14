@@ -7,7 +7,6 @@ import {
   NumberInputSuffix,
   NumberInputTriggerGroup,
 } from "darkraise-ui/components/number-input"
-import type { ReactNode } from "react"
 
 interface NumberFieldProps {
   id?: string
@@ -22,7 +21,9 @@ interface NumberFieldProps {
   max?: number
   step?: number
   precision?: number
-  suffix?: ReactNode
+  suffix?: string
+  // Read in place of suffix where the shown unit reads badly aloud, such as "s".
+  spokenSuffix?: string
   placeholder?: string
   disabled?: boolean
   className?: string
@@ -33,7 +34,8 @@ interface NumberFieldProps {
 // NumberInput reports each number as it is typed and clamps to min and max
 // only when the field loses focus. It rounds to precision only then too, so a
 // whole-number field truncates what it reports while the typed text stays.
-export function NumberField({ id, label, value, onValueChange, min, max, step, precision, suffix, placeholder, disabled, className, ...aria }: NumberFieldProps) {
+export function NumberField({ id, label, value, onValueChange, min, max, step, precision, suffix, spokenSuffix, placeholder, disabled, className, ...aria }: NumberFieldProps) {
+  const unit = spokenSuffix ?? suffix
   const report = (n: number) => onValueChange(precision === 0 && Number.isFinite(n) ? Math.trunc(n) : n)
   return (
     <NumberInput
@@ -47,7 +49,13 @@ export function NumberField({ id, label, value, onValueChange, min, max, step, p
       disabled={disabled}
     >
       <NumberInputControl>
-        <NumberInputField id={id} aria-label={label} placeholder={placeholder} {...aria} />
+        <NumberInputField
+          id={id}
+          aria-label={label}
+          aria-valuetext={unit !== undefined && !Number.isNaN(value) ? `${value} ${unit}` : undefined}
+          placeholder={placeholder}
+          {...aria}
+        />
         {suffix !== undefined && <NumberInputSuffix>{suffix}</NumberInputSuffix>}
         <NumberInputTriggerGroup>
           <NumberInputIncrementTrigger aria-label={`Increase ${label}`} />

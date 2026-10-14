@@ -23,6 +23,15 @@ function applyingDaemon(initial: Config = fixtures.config) {
 }
 
 describe("Settings page", () => {
+  it("announces each number with its unit", async () => {
+    mockApi(routes())
+    renderApp("/settings")
+    expect(await screen.findByLabelText("Poll interval")).toHaveAttribute("aria-valuetext", "10 seconds")
+    expect(screen.getByLabelText("History retention")).toHaveAttribute("aria-valuetext", "30 days")
+    expect(screen.getByLabelText("Disk high-water")).toHaveAttribute("aria-valuetext", "80 %")
+    expect(screen.getByLabelText("Max concurrent runners")).not.toHaveAttribute("aria-valuetext")
+  })
+
   it("shows the loaded settings", async () => {
     mockApi(routes())
     renderApp("/settings")

@@ -33,6 +33,18 @@ describe("NumberField", () => {
     expect(screen.getByText("days")).toBeInTheDocument()
   })
 
+  it("announces the value with its unit, and no value text when empty", () => {
+    const { rerender } = render(<NumberField label="Disk" value={80} suffix="%" onValueChange={() => {}} />)
+    const field = screen.getByRole("spinbutton", { name: "Disk" })
+    expect(field).toHaveAttribute("aria-valuetext", "80 %")
+    rerender(<NumberField label="Disk" value={Number.NaN} suffix="%" onValueChange={() => {}} />)
+    expect(field).not.toHaveAttribute("aria-valuetext")
+    rerender(<NumberField label="Disk" value={10} suffix="s" spokenSuffix="seconds" onValueChange={() => {}} />)
+    expect(field).toHaveAttribute("aria-valuetext", "10 seconds")
+    rerender(<NumberField label="Disk" value={10} onValueChange={() => {}} />)
+    expect(field).not.toHaveAttribute("aria-valuetext")
+  })
+
   it("reports typed numbers, and NaN once emptied", async () => {
     const onValue = vi.fn()
     const user = userEvent.setup()

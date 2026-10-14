@@ -34,6 +34,7 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
           label={label}
           min={0}
           suffix={UNIT_SETTINGS[key]?.unit}
+          spokenSuffix={UNIT_SETTINGS[key]?.spoken}
           className={FIELD_WIDTH}
           placeholder={typeof v === "string" ? v : empty}
           value={num(key)}
