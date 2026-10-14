@@ -383,7 +383,17 @@ func Save(path string, c *Config) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// Syncing the directory makes the rename survive a power loss. Some
+	// platforms, Windows among them, cannot sync a directory, so it is best
+	// effort.
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		d.Sync()
+		d.Close()
+	}
+	return nil
 }
 
 // Clone returns a deep copy.

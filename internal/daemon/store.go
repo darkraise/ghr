@@ -219,8 +219,22 @@ func (s *Store) writeTokenFile(tok string) error {
 		tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), s.TokenPath)
+	if err := os.Rename(tmp.Name(), s.TokenPath); err != nil {
+		return err
+	}
+	// Syncing the directory makes the rename survive a power loss. Some
+	// platforms, Windows among them, cannot sync a directory, so it is best
+	// effort.
+	if d, err := os.Open(filepath.Dir(s.TokenPath)); err == nil {
+		d.Sync()
+		d.Close()
+	}
+	return nil
 }
