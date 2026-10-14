@@ -384,3 +384,177 @@ func TestAppendLeavesTheFile0600(t *testing.T) {
 		}
 	}
 }
+
+// rewriteInPlace swaps old for new, which must be as long, in the file and
+// restores its modification time, so only a read of the content can tell.
+func rewriteInPlace(t *testing.T, path, old, new string) {
+	t.Helper()
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(old) != len(new) || !bytes.Contains(b, []byte(old)) {
+		t.Fatalf("cannot swap %q for %q in %q", old, new, b)
+	}
+	if err := os.WriteFile(path, bytes.Replace(b, []byte(old), []byte(new), 1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, st.ModTime(), st.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func ids(es []model.HistoryEntry) string {
+	var out []string
+	for _, e := range es {
+		out = append(out, e.ID)
+	}
+	return strings.Join(out, ",")
+}
+
+func TestStoreAgreesWithAFreshReaderAfterEveryWrite(t *testing.T) {
+	s := &Store{Path: filepath.Join(t.TempDir(), "history.jsonl")}
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	check := func(step, want string) {
+		t.Helper()
+		got, err := s.Query("", "", time.Time{}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fresh, err := (&Store{Path: s.Path}).Query("", "", time.Time{}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ids(got) != want || ids(fresh) != want {
+			t.Fatalf("%s: store has %q, a fresh reader %q, want %q", step, ids(got), ids(fresh), want)
+		}
+	}
+	check("empty", "")
+	for i, id := range []string{"e1", "e2", "e3"} {
+		if err := s.Append(model.HistoryEntry{ID: id, Repo: "a", RunID: int64(i), FinishedAt: t0.Add(time.Duration(i) * time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		check("append "+id, map[string]string{"e1": "e1", "e2": "e2,e1", "e3": "e3,e2,e1"}[id])
+	}
+	if err := s.Prune(t0.Add(30 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	check("prune", "e3,e2")
+	if err := s.Append(model.HistoryEntry{ID: "e4", Repo: "a", RunID: 4, FinishedAt: t0.Add(4 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	check("append after prune", "e4,e3,e2")
+	if err := s.Append(model.HistoryEntry{ID: "e4", Repo: "a", RunID: 4}); err != nil {
+		t.Fatal(err)
+	}
+	check("a duplicate", "e4,e3,e2")
+}
+
+func TestQueryResultsAreCopies(t *testing.T) {
+	s := &Store{Path: filepath.Join(t.TempDir(), "history.jsonl")}
+	if err := s.Append(model.HistoryEntry{ID: "keep", Repo: "a", RunID: 1}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Query("", "", time.Time{}, 0)
+	got[0].ID = "changed"
+	if again, _ := s.Query("", "", time.Time{}, 0); ids(again) != "keep" {
+		t.Fatalf("a caller's edit reached the store: %q", ids(again))
+	}
+}
+
+// A read parses the file only when its size, modification time or identity
+// changed; the cache is what these tests catch by changing the content
+// without changing those.
+func TestReadsAreServedFromTheCacheUntilTheFileChanges(t *testing.T) {
+	s := &Store{Path: filepath.Join(t.TempDir(), "history.jsonl")}
+	if err := s.Append(model.HistoryEntry{ID: "aa", Repo: "a", RunID: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Query("", "", time.Time{}, 0); ids(got) != "aa" {
+		t.Fatalf("first read %q", ids(got))
+	}
+	rewriteInPlace(t, s.Path, `"aa"`, `"bb"`)
+	if got, _ := s.Query("", "", time.Time{}, 0); ids(got) != "aa" {
+		t.Fatalf("an unchanged file was parsed again: %q", ids(got))
+	}
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(s.Path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Query("", "", time.Time{}, 0); ids(got) != "bb" {
+		t.Fatalf("a newer modification time was not read: %q", ids(got))
+	}
+}
+
+func TestAppendAndPruneLeaveTheCacheValid(t *testing.T) {
+	s := &Store{Path: filepath.Join(t.TempDir(), "history.jsonl")}
+	t0 := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, e := range []model.HistoryEntry{
+		{ID: "aa", Repo: "a", RunID: 1, FinishedAt: t0},
+		{ID: "cc", Repo: "a", RunID: 2, FinishedAt: t0.Add(time.Hour)},
+	} {
+		if err := s.Append(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Query("", "", time.Time{}, 0)
+	if err := s.Append(model.HistoryEntry{ID: "dd", Repo: "a", RunID: 3, FinishedAt: t0.Add(2 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	rewriteInPlace(t, s.Path, `"aa"`, `"xx"`)
+	if got, _ := s.Query("", "", time.Time{}, 0); ids(got) != "dd,cc,aa" {
+		t.Fatalf("after an append the file was parsed again: %q", ids(got))
+	}
+	if err := s.Prune(t0.Add(30 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	rewriteInPlace(t, s.Path, `"cc"`, `"yy"`)
+	if got, _ := s.Query("", "", time.Time{}, 0); ids(got) != "dd,cc" {
+		t.Fatalf("after a prune the file was parsed again: %q", ids(got))
+	}
+}
+
+func TestFileRewrittenOutsideTheStoreIsReadAgain(t *testing.T) {
+	s := &Store{Path: filepath.Join(t.TempDir(), "history.jsonl")}
+	if err := s.Append(model.HistoryEntry{ID: "aa", Repo: "a", RunID: 1}); err != nil {
+		t.Fatal(err)
+	}
+	s.Query("", "", time.Time{}, 0)
+
+	other := `{"id":"zzzz","repo":"a","run_id":9}` + "\n"
+	if err := os.WriteFile(s.Path, []byte(other), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Query("", "", time.Time{}, 0); ids(got) != "zzzz" {
+		t.Fatalf("a file of another size: %q", ids(got))
+	}
+
+	st, err := os.Stat(s.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	swap := filepath.Join(filepath.Dir(s.Path), "swap")
+	if err := os.WriteFile(swap, []byte(strings.Replace(other, "zzzz", "wwww", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(swap, st.ModTime(), st.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(swap, s.Path); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Query("", "", time.Time{}, 0); ids(got) != "wwww" {
+		t.Fatalf("a replacement file of the same size and time: %q", ids(got))
+	}
+
+	if err := os.Remove(s.Path); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Query("", "", time.Time{}, 0); len(got) != 0 {
+		t.Fatalf("a removed file: %q", ids(got))
+	}
+}
