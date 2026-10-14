@@ -76,6 +76,25 @@ func TestRestartPendingComparesTheSavedWebBlock(t *testing.T) {
 	}
 }
 
+func TestRestartPendingComparesTrustedProxiesAsPrefixes(t *testing.T) {
+	b, _, _ := newBackend(t)
+	b.WebApplied = config.Web{Listen: "0.0.0.0:8080", TrustedProxies: []string{"10.0.0.2", "10.1.0.0/16", "fd00::1"}}
+	for _, tc := range []struct {
+		name    string
+		proxies []string
+		want    []string
+	}{
+		{"the same prefixes spelled differently", []string{"10.0.0.2/32", "10.1.2.3/16", "::ffff:10.0.0.2", "FD00::1/128"}, nil},
+		{"a prefix widened", []string{"10.0.0.2", "10.1.0.0/15", "fd00::1"}, []string{"web.trusted_proxies"}},
+		{"a proxy removed", []string{"10.0.0.2/32", "fd00::1"}, []string{"web.trusted_proxies"}},
+	} {
+		setWeb(t, b, config.Web{Listen: "0.0.0.0:8080", TrustedProxies: tc.proxies})
+		if got := b.Status().Restart.Pending; !slices.Equal(got, tc.want) {
+			t.Errorf("%s: pending %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestRestartBlockedBy(t *testing.T) {
 	b, m, _ := newBackend(t)
 	rm := &restartManager{fakeManager: m}

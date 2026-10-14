@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"net/netip"
 	"os"
 	"slices"
 	"strconv"
@@ -40,7 +41,8 @@ func (b *Backend) setRestartFailure(why string) {
 
 // webPending names the web settings whose saved value differs from the one
 // the running listener applied. Hosts compare as sets ignoring case, as the
-// listener matches them, and trusted proxies as sets too.
+// listener matches them, and trusted proxies as sets of the prefixes the
+// listener parses them to.
 func webPending(saved, applied config.Web) []string {
 	var out []string
 	if saved.Listen != applied.Listen {
@@ -49,7 +51,7 @@ func webPending(saved, applied config.Web) []string {
 	if !slices.Equal(hostSet(saved.Hosts), hostSet(applied.Hosts)) {
 		out = append(out, "web.hosts")
 	}
-	if !slices.Equal(hostSet(saved.TrustedProxies), hostSet(applied.TrustedProxies)) {
+	if !slices.Equal(prefixSet(saved), prefixSet(applied)) {
 		out = append(out, "web.trusted_proxies")
 	}
 	return out
@@ -61,6 +63,12 @@ func hostSet(hosts []string) []string {
 		out = append(out, strings.ToLower(h))
 	}
 	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+func prefixSet(w config.Web) []netip.Prefix {
+	out := w.TrustedProxyPrefixes()
+	slices.SortFunc(out, netip.Prefix.Compare)
 	return slices.Compact(out)
 }
 
