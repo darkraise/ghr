@@ -367,7 +367,7 @@ func (h Host) CopyTree(ctx context.Context, src, dst string) error {
 }
 
 func (h Host) ChownR(ctx context.Context, path, user string) error {
-	_, err := h.Run(ctx, "chown", "-R", user+":"+user, path)
+	_, err := h.Run(ctx, "chown", "-R", "-h", user+":"+user, path)
 	return err
 }
 

@@ -35,6 +35,16 @@ func TestHostExtractAndRunScriptArgs(t *testing.T) {
 	}
 }
 
+func TestHostChownRActsOnLinksThemselves(t *testing.T) {
+	run, calls := fake(nil)
+	if err := (Host{Run: run}).ChownR(context.Background(), "/var/lib/ghr/logs/abc123", "root"); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 1 || (*calls)[0].String() != "chown -R -h root:root /var/lib/ghr/logs/abc123" {
+		t.Fatalf("calls %v", *calls)
+	}
+}
+
 func TestHostRunScriptReportsFailure(t *testing.T) {
 	run, _ := fake(map[string]string{filepath.Join("/d", "bin/installdependencies.sh"): "ERR:exit status 1"})
 	if err := (Host{Run: run}).RunScript(context.Background(), "/d", "bin/installdependencies.sh"); err == nil {
