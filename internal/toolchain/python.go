@@ -77,18 +77,14 @@ func (p python) Install(ctx context.Context, rel Release, progress func(string))
 	}
 	defer op.Close()
 	progress("downloading")
-	archive := filepath.Join(op.path, "python.tar.gz")
 	if err := e.fetch(ctx, Origin{Dir: pythonReleases}, rel.URL, op, "python.tar.gz"); err != nil {
 		return err
 	}
 	progress("extracting")
-	if err := op.Mkdir("x", 0o755); err != nil {
+	if err := e.unpack(ctx, op, "python.tar.gz"); err != nil {
 		return err
 	}
 	out := filepath.Join(op.path, "x")
-	if err := e.Extract(ctx, archive, out); err != nil {
-		return fmt.Errorf("extract: %w", err)
-	}
 	if err := e.chownTree(op.Root, "."); err != nil {
 		return fmt.Errorf("chown: %w", err)
 	}

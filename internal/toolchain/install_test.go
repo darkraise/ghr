@@ -145,7 +145,7 @@ func TestInstallArchiveCancelledLateLeavesNoVersionFolder(t *testing.T) {
 	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
 	ctx, cancel := context.WithCancel(context.Background())
 	extract := f.Extract
-	f.Extract = func(c context.Context, archive, dir string) error {
+	f.Extract = func(c context.Context, archive io.Reader, dir *os.Root) error {
 		defer cancel()
 		return extract(c, archive, dir)
 	}

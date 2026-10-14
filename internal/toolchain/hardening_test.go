@@ -170,7 +170,7 @@ func TestInstallArchiveCancelledKeepsAnExistingMarkerlessFolder(t *testing.T) {
 	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
 	ctx, cancel := context.WithCancel(context.Background())
 	extract := f.Extract
-	f.Extract = func(c context.Context, archive, dir string) error {
+	f.Extract = func(c context.Context, archive io.Reader, dir *os.Root) error {
 		defer cancel()
 		return extract(c, archive, dir)
 	}
@@ -357,7 +357,7 @@ func TestInstallsDoNotWriteThroughATmpSwappedForALink(t *testing.T) {
 	fixtures := map[string]func(*testing.T) *fixture{"archive": newFixture, "python": pythonFixture, "dotnet": dotnetFixture}
 	steps := map[string]func(f *fixture, then func()){"download": onFetch, "tar": onExtract}
 	for _, tc := range []struct{ install, step string }{
-		{"dotnet", "download"},
+		{"archive", "download"}, {"archive", "tar"}, {"python", "download"}, {"python", "tar"}, {"dotnet", "download"},
 	} {
 		t.Run(tc.install+" "+tc.step, func(t *testing.T) {
 			outside := t.TempDir()
@@ -432,15 +432,15 @@ func onFetch(f *fixture, then func()) {
 // onExtract runs then as each extraction starts.
 func onExtract(f *fixture, then func()) {
 	extract := f.Extract
-	f.Extract = func(ctx context.Context, archive, dir string) error {
+	f.Extract = func(ctx context.Context, archive io.Reader, dir *os.Root) error {
 		then()
 		return extract(ctx, archive, dir)
 	}
 }
 
 // afterwards runs then once extract has.
-func afterwards(extract func(context.Context, string, string) error, then func()) func(context.Context, string, string) error {
-	return func(ctx context.Context, archive, dir string) error {
+func afterwards(extract func(context.Context, io.Reader, *os.Root) error, then func()) func(context.Context, io.Reader, *os.Root) error {
+	return func(ctx context.Context, archive io.Reader, dir *os.Root) error {
 		err := extract(ctx, archive, dir)
 		then()
 		return err

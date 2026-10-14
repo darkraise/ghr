@@ -314,7 +314,7 @@ func newFixture(t *testing.T) *fixture {
 		Allow: func(string, Origin) error { return nil },
 		Run:   f.host.run,
 		Chown: f.host.lchown,
-		Extract: func(_ context.Context, archive, dir string) error {
+		Extract: func(_ context.Context, archive io.Reader, dir *os.Root) error {
 			if f.host.failExtract != nil {
 				return f.host.failExtract
 			}
@@ -372,13 +372,8 @@ func tarGz(files map[string]string) []byte {
 	return buf.Bytes()
 }
 
-func extractTarGz(archive, dir string) error {
-	f, err := os.Open(archive)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
+func extractTarGz(archive io.Reader, dir *os.Root) error {
+	gz, err := gzip.NewReader(archive)
 	if err != nil {
 		return err
 	}
@@ -391,15 +386,15 @@ func extractTarGz(archive, dir string) error {
 		if err != nil {
 			return err
 		}
-		p := filepath.Join(dir, filepath.FromSlash(h.Name))
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		p := filepath.FromSlash(h.Name)
+		if err := dir.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return err
 		}
 		b, err := io.ReadAll(tr)
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(p, b, 0o755); err != nil {
+		if err := dir.WriteFile(p, b, 0o755); err != nil {
 			return err
 		}
 	}

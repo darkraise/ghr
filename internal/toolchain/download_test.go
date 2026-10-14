@@ -29,7 +29,7 @@ func strictInstall(t *testing.T, tool, version, url string, sources func(*Source
 		fetched = append(fetched, url)
 		return errFetched
 	}
-	e := NewEnv(t.TempDir(), "/home/ghrunner", "ghrunner", (&host{}).run, fetch)
+	e := NewEnv(t.TempDir(), "/home/ghrunner", "ghrunner", (&host{}).run, nil, fetch)
 	if sources != nil {
 		sources(&e.Sources)
 	}

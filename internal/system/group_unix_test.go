@@ -42,3 +42,24 @@ func TestExecGroupKillsTheScriptsChildren(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// A command can read what it gets on stdin and from fd 3 on, with no path
+// naming either.
+func TestExecGroupIOForPassesStdinAndExtraFiles(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not on PATH")
+	}
+	extra := filepath.Join(t.TempDir(), "extra")
+	if err := os.WriteFile(extra, []byte(" and fd 3"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	out, err := ExecGroupIOFor(time.Minute)(context.Background(), strings.NewReader("stdin"), []*os.File{f}, "sh", "-c", "cat && cat <&3")
+	if err != nil || string(out) != "stdin and fd 3" {
+		t.Fatalf("got %q, %v", out, err)
+	}
+}

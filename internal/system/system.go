@@ -46,10 +46,27 @@ func ExecGroupFor(d time.Duration) Runner {
 	}
 }
 
+// IORunner is a Runner for a command that also reads in on stdin and gets
+// extra as its open files from fd 3 on.
+type IORunner func(ctx context.Context, in io.Reader, extra []*os.File, name string, args ...string) ([]byte, error)
+
+// ExecGroupIOFor is ExecGroupFor as an IORunner.
+func ExecGroupIOFor(d time.Duration) IORunner {
+	return func(ctx context.Context, in io.Reader, extra []*os.File, name string, args ...string) ([]byte, error) {
+		return executeIO(ctx, d, true, in, extra, name, args)
+	}
+}
+
 func execute(ctx context.Context, timeout time.Duration, group bool, name string, args []string) ([]byte, error) {
+	return executeIO(ctx, timeout, group, nil, nil, name, args)
+}
+
+func executeIO(ctx context.Context, timeout time.Duration, group bool, in io.Reader, extra []*os.File, name string, args []string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = in
+	cmd.ExtraFiles = extra
 	if group {
 		killGroup(cmd)
 	}

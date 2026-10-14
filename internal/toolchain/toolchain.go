@@ -60,7 +60,7 @@ type Env struct {
 	// Chown gives rel, inside r, to the runner user without following a
 	// link at rel.
 	Chown   func(r *os.Root, rel string) error
-	Extract func(ctx context.Context, archive, dir string) error
+	Extract func(ctx context.Context, archive io.Reader, dir *os.Root) error
 	OpID    func() string
 	// PythonPlatform is the Ubuntu release whose python-versions builds this
 	// host runs; empty means 24.04.

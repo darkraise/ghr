@@ -212,7 +212,7 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 	m.Reconcile(ctx, store.Config())
 
 	tools := toolchain.New(toolchain.NewEnv(o.Paths.ToolCache, o.Paths.Home, runner.RunnerUser,
-		system.ExecGroupFor(InstallTimeout), system.DownloadFor(InstallTimeout)))
+		system.ExecGroupFor(InstallTimeout), system.ExecGroupIOFor(InstallTimeout), system.DownloadFor(InstallTimeout)))
 	space := &storage.Service{Tools: tools, Docker: m.Disk, Home: o.Paths.Home, User: runner.RunnerUser,
 		Busy: m.BusyCount, Events: ev}
 	space.Start()

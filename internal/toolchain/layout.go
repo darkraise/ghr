@@ -299,6 +299,27 @@ func (e *Env) fetch(ctx context.Context, from Origin, rawURL string, op *operati
 	return nil
 }
 
+// unpack extracts name, a .tar.gz in op, into op's x, which it creates.
+func (e *Env) unpack(ctx context.Context, op *operation, name string) error {
+	if err := op.Mkdir("x", 0o755); err != nil {
+		return err
+	}
+	archive, err := op.Open(name)
+	if err != nil {
+		return err
+	}
+	defer archive.Close()
+	x, err := op.OpenRoot("x")
+	if err != nil {
+		return err
+	}
+	defer x.Close()
+	if err := e.Extract(ctx, archive, x); err != nil {
+		return fmt.Errorf("extract: %w", err)
+	}
+	return nil
+}
+
 // installArchive installs rel's archive, which must come from from, at
 // <Root>/<toolDir>/<rel.Folder>/x64, the layout @actions/tool-cache find()
 // reads, writing the marker last.
@@ -322,11 +343,8 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, from Origin, r
 		return err
 	}
 	progress("extracting")
-	if err := op.Mkdir("x", 0o755); err != nil {
+	if err := e.unpack(ctx, op, "archive.tar.gz"); err != nil {
 		return err
-	}
-	if err := e.Extract(ctx, filepath.Join(op.path, "archive.tar.gz"), filepath.Join(op.path, "x")); err != nil {
-		return fmt.Errorf("extract: %w", err)
 	}
 	src, err := singleRoot(op.Root, "x")
 	if err != nil {

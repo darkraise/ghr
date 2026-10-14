@@ -92,12 +92,23 @@ func TestNewEnvWiresTheRunnerAndFetch(t *testing.T) {
 		calls = append(calls, "fetch "+url)
 		return nil
 	}
-	e := NewEnv("/var/lib/ghr/toolcache", "/home/ghrunner", "ghrunner", run, fetch)
+	var in io.Reader
+	var extra []*os.File
+	runIO := func(_ context.Context, r io.Reader, files []*os.File, name string, args ...string) ([]byte, error) {
+		in, extra = r, files
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return nil, nil
+	}
+	e := NewEnv("/var/lib/ghr/toolcache", "/home/ghrunner", "ghrunner", run, runIO, fetch)
 	if e.Root != "/var/lib/ghr/toolcache" || e.Home != "/home/ghrunner" || e.User != "ghrunner" || e.Sources != DefaultSources() {
 		t.Fatalf("env %+v", e)
 	}
-	if err := e.Extract(context.Background(), "a.tar.gz", "dir"); err != nil {
+	archive := strings.NewReader("archive")
+	if err := e.Extract(context.Background(), archive, openRoot(t, t.TempDir())); err != nil {
 		t.Fatal(err)
+	}
+	if in != archive || len(extra) != 1 {
+		t.Fatalf("tar got stdin %v and files %v, want the archive and the directory", in, extra)
 	}
 	if _, err := e.Run(context.Background(), "chown", "x"); err != nil {
 		t.Fatal(err)
@@ -105,7 +116,7 @@ func TestNewEnvWiresTheRunnerAndFetch(t *testing.T) {
 	if err := e.Fetch(context.Background(), "https://example.test/a.tar.gz", io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"tar --no-same-owner -xzf a.tar.gz -C dir", "chown x", "fetch https://example.test/a.tar.gz"}; !slices.Equal(calls, want) {
+	if want := []string{"tar --no-same-owner -xzf - -C /proc/self/fd/3", "chown x", "fetch https://example.test/a.tar.gz"}; !slices.Equal(calls, want) {
 		t.Fatalf("calls %q", calls)
 	}
 	if a, b := e.OpID(), e.OpID(); a == b || a == "" {
@@ -114,8 +125,8 @@ func TestNewEnvWiresTheRunnerAndFetch(t *testing.T) {
 }
 
 func TestNewEnvExtractsWithRealTar(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("GNU tar on Linux is the target")
+	if runtime.GOOS != "linux" {
+		t.Skip("GNU tar on Linux is the target, with /proc")
 	}
 	if _, err := exec.LookPath("tar"); err != nil {
 		t.Skip("tar not on PATH")
@@ -129,11 +140,29 @@ func TestNewEnvExtractsWithRealTar(t *testing.T) {
 	if err := os.Mkdir(out, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := NewEnv(dir, "", "", system.Exec, system.DownloadFor(time.Minute)).Extract(context.Background(), archive, out); err != nil {
+	f, err := os.Open(archive)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !exists(filepath.Join(out, "node-22", "bin", "node")) {
+	defer f.Close()
+	// tar must extract into the directory it was handed, whatever its path
+	// leads to by then.
+	r := openRoot(t, out)
+	moved, decoy := filepath.Join(dir, "moved"), t.TempDir()
+	if err := os.Rename(out, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(decoy, out); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewEnv(dir, "", "", system.Exec, system.ExecGroupIOFor(time.Minute), system.DownloadFor(time.Minute)).Extract(context.Background(), f, r); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(filepath.Join(moved, "node-22", "bin", "node")) {
 		t.Fatal("not extracted")
+	}
+	if es, _ := os.ReadDir(decoy); len(es) != 0 {
+		t.Fatalf("tar followed the path: %v", es)
 	}
 }
 
@@ -148,10 +177,10 @@ func TestNewEnvChownsToTheRunnerUser(t *testing.T) {
 	dir := t.TempDir()
 	touch(t, filepath.Join(dir, "f"))
 	r := openRoot(t, dir)
-	if err := NewEnv(dir, "", me.Username, nil, nil).Chown(r, "f"); err != nil {
+	if err := NewEnv(dir, "", me.Username, nil, nil, nil).Chown(r, "f"); err != nil {
 		t.Fatal(err)
 	}
-	if err := NewEnv(dir, "", "ghr-no-such-user", nil, nil).Chown(r, "f"); err == nil {
+	if err := NewEnv(dir, "", "ghr-no-such-user", nil, nil, nil).Chown(r, "f"); err == nil {
 		t.Fatal("chowned to a user that does not exist")
 	}
 }
