@@ -14,6 +14,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -264,6 +266,49 @@ func testOptions(t *testing.T, cfg string) Options {
 		GitHubURL: fakeGitHub(t).URL, Systemd: &recSD{}, Docker: nopDocker{}, Disk: nopDisk{}, Host: dirHost{}, Reload: make(chan os.Signal, 1),
 		SetupPendingPath: filepath.Join(dir, "setup-pending"), ToolchainsPendingPath: filepath.Join(dir, "toolchains-pending"),
 	}
+}
+
+// The startup reconcile lists runners at GitHub, which can be slow; the
+// socket must answer before it finishes, because the installer waits for it.
+func TestRunServesWhileReconcileLists(t *testing.T) {
+	o := testOptions(t, cfgYAML)
+	upstream, err := url.Parse(fakeGitHub(t).URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/actions/runners") {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(gh.Close)
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	o.GitHubURL = gh.URL
+	startRun(t, o)
+
+	c := api.NewUnixClient(o.Socket)
+	waitFor(t, "the socket to serve status while runners are being listed", func() bool {
+		_, err := c.Status(context.Background())
+		return err == nil
+	})
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the startup reconcile never listed runners")
+	}
+	releaseOnce.Do(func() { close(release) })
 }
 
 func TestRunServesTheWebUI(t *testing.T) {

@@ -174,8 +174,9 @@ type running struct {
 	wake    chan struct{}
 }
 
-// start reads the owner once, then adopts and reconciles the runners already
-// on the host before anything serves the full API.
+// start reads the owner once, then adopts the runners already on the host
+// before anything serves the full API. Reconcile, which asks GitHub, is left
+// to Run so a slow answer does not keep the socket from serving.
 func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *changes.Hub, epoch string, webCfg config.Web, webErr *model.WebListenError, webSetupRequired func() bool) (*running, error) {
 	owner := store.Config().Owner
 	gh := github.New(owner, store.Token)
@@ -209,7 +210,6 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 	if err := m.Adopt(ctx); err != nil {
 		return nil, err
 	}
-	m.Reconcile(ctx, store.Config())
 
 	tools := toolchain.New(toolchain.NewEnv(o.Paths.ToolCache, o.Paths.Home, runner.RunnerUser,
 		system.ExecGroupFor(InstallTimeout), system.DownloadFor(InstallTimeout)))
@@ -489,6 +489,8 @@ func Run(ctx context.Context, o Options) error {
 	ev.Add("info", "", "ghr daemon started (owner %s, mode %s)", owner, store.Config().Mode)
 
 	m := rt.m
+	// It clears what the last run left behind, so it goes before the first tick.
+	m.Reconcile(ctx, store.Config())
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	tick := func() {
