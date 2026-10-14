@@ -15,7 +15,7 @@ Include the ghr version, what an attacker can do, and the steps to reproduce it.
 ghr runs CI jobs natively on its host, so some risks are part of its design rather than vulnerabilities:
 
 - Any job can become root on the host through Docker. Run ghr on a dedicated host.
-- A repository that lets fork pull requests run workflows lets anyone run code on the host. ghr refuses public repositories unless `allow_public` is set for them, and refuses jobs whose event comes from a fork whatever the repository's visibility. A runner that is already idle when a private repository turns public may still take one job before the next poll pauses it, so never enable fork pull request workflows.
+- A repository that lets fork pull requests run workflows lets anyone run code on the host. ghr refuses public repositories unless `allow_public` is set for them, and refuses jobs whose event comes from a fork whatever the repository's visibility. The job-started hook refuses a job by ending the runner's worker process, because a hook that only exits non-zero fails the job but still lets its `if: always()` and `if: failure()` steps run. This was verified from the actions/runner source, not with a real fork pull request; a check against a test repository is still due before release. A runner that is already idle when a private repository turns public may still take one job before the next poll pauses it, so never enable fork pull request workflows.
 - An `issue_comment` workflow on a fork's pull request runs the base branch's code and is not refused; it is safe only while it does not check out the pull request's code.
 - The web UI is plain HTTP unless a TLS proxy is put in front of it.
 

@@ -8,12 +8,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
 
-// hookCmd runs script the way the runner runs .sh hooks. The GITHUB_* event
-// variables are cleared so a CI run of these tests does not leak its own event.
+// wrapper stands in for the runner's worker as the hook's parent process, so a
+// hook that kills its parent kills the wrapper and never the test binary.
+const wrapper = `"$1" --noprofile --norc -e -o pipefail "$2"; s=$?; echo "wrapper: hook exited $s"; exit $s`
+
+// hookCmd runs script the way the runner runs .sh hooks, under wrapper. The
+// GITHUB_* event variables are cleared so a CI run of these tests does not
+// leak its own event.
 func hookCmd(t *testing.T, script string, env ...string) *exec.Cmd {
 	t.Helper()
 	// Skip on a developer machine without the tools; CI (GitHub sets CI=true) must run these.
@@ -28,7 +34,7 @@ func hookCmd(t *testing.T, script string, env ...string) *exec.Cmd {
 	if _, err := exec.LookPath("jq"); err != nil {
 		skip("jq not available")
 	}
-	cmd := exec.Command(bash, "--noprofile", "--norc", "-e", "-o", "pipefail", script)
+	cmd := exec.Command(bash, "-c", wrapper, "wrapper", bash, script)
 	cmd.Env = append(os.Environ(), "GITHUB_EVENT_NAME=", "GITHUB_EVENT_PATH=", "GITHUB_REPOSITORY=")
 	cmd.Env = append(cmd.Env, env...)
 	return cmd
@@ -115,16 +121,27 @@ func TestJobStartedRefusesForkEvents(t *testing.T) {
 				env = append(env, "GITHUB_EVENT_PATH="+path)
 			}
 			if !tc.refuse {
-				runHook(t, "job-started.sh", env...)
+				out, err := hookCmd(t, "job-started.sh", env...).CombinedOutput()
+				if err != nil || !strings.Contains(string(out), "wrapper: hook exited 0") {
+					t.Fatalf("want the hook to exit 0 under a live parent, got %v\n%s", err, out)
+				}
 				if rec := readRecord(t, dir); rec["run_id"] != "123" {
 					t.Fatalf("record %v", rec)
 				}
 				return
 			}
+			// A plain non-zero exit would leave the job's always() steps to run,
+			// so the hook must kill its parent, the worker.
 			out, err := hookCmd(t, "job-started.sh", env...).CombinedOutput()
 			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != 1 {
-				t.Fatalf("want exit 1, got %v\n%s", err, out)
+			if !errors.As(err, &exit) {
+				t.Fatalf("want the parent killed, got %v\n%s", err, out)
+			}
+			if ws, ok := exit.Sys().(syscall.WaitStatus); !ok || !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
+				t.Fatalf("want the parent killed by SIGKILL, got %v\n%s", err, out)
+			}
+			if strings.Contains(string(out), "wrapper:") {
+				t.Fatalf("the parent outlived the hook: %s", out)
 			}
 			if !strings.Contains(string(out), "refusing") {
 				t.Fatalf("no refusal message: %s", out)
