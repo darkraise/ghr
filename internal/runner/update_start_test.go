@@ -451,6 +451,9 @@ func TestSpawnsWhileTheUpdatePrepares(t *testing.T) {
 	entered, release := holdFetch(t, h)
 	h.m.Tick(context.Background())
 	waitOrFail(t, entered, "the version to download")
+	if u := h.m.Status().RunnerUpdate; !u.Preparing || u.Running {
+		t.Fatalf("status while preparing %+v", u)
+	}
 	queuedRun(h, "darkmem", 7, github.Job{ID: 70, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
 	h.m.Tick(context.Background())
 	if n := jitCalls(h); n != 1 {
@@ -461,6 +464,9 @@ func TestSpawnsWhileTheUpdatePrepares(t *testing.T) {
 	}
 	release()
 	h.m.Wait()
+	if u := h.m.Status().RunnerUpdate; u.Preparing {
+		t.Fatalf("status after preparing %+v", u)
+	}
 }
 
 // A failed prepare keeps the queue and shows in the status as a failed

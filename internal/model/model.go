@@ -95,6 +95,7 @@ type RunnerUpdate struct {
 	Queued       bool       `json:"queued,omitempty"`
 	QueuedAt     *time.Time `json:"queued_at,omitempty"`
 	Running      bool       `json:"running,omitempty"`
+	Preparing    bool       `json:"preparing,omitempty"`
 	LastOutcome  string     `json:"last_outcome,omitempty"` // "ok", "failed", "current"
 	LastError    string     `json:"last_error,omitempty"`
 	LastFinished *time.Time `json:"last_finished,omitempty"`

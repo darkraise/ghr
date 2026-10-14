@@ -66,6 +66,7 @@ export interface RunnerUpdate {
   queued?: boolean
   queued_at?: string
   running?: boolean
+  preparing?: boolean
   last_outcome?: string
   last_error?: string
   last_finished?: string

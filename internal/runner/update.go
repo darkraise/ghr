@@ -324,7 +324,7 @@ func (m *Manager) runnerUpdate() model.RunnerUpdate {
 	r := model.RunnerUpdate{
 		Installed: u.installed, Latest: u.latest, LatestPublished: timePtr(u.latestPub), Deadline: timePtr(u.deadline),
 		CheckedAt: timePtr(u.checkedAt), CheckError: u.checkErr,
-		Queued: u.file.QueuedAt != nil, QueuedAt: u.file.QueuedAt, Running: u.running,
+		Queued: u.file.QueuedAt != nil, QueuedAt: u.file.QueuedAt, Running: u.running, Preparing: u.preparing,
 		LastOutcome: u.lastOutcome, LastError: u.lastErr, LastFinished: timePtr(u.lastFinished),
 	}
 	if u.prepareErr != "" {

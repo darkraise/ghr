@@ -89,6 +89,11 @@ func (b *Backend) blockedBy(st model.Status) []string {
 	if st.RunnerUpdate.Running {
 		out = append(out, "updating the runner software")
 	}
+	// Preparing runs the runner's dependency script, which installs packages;
+	// a restart kills its process group mid-install.
+	if st.RunnerUpdate.Preparing {
+		out = append(out, "preparing the runner update")
+	}
 	return out
 }
 

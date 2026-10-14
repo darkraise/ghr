@@ -18,16 +18,17 @@ import (
 	"github.com/darkraise/ghr/internal/system"
 )
 
-// restartManager is fakeManager with a runner update that can be running;
-// the prune flag is fakeManager's own pruning field.
+// restartManager is fakeManager with a runner update that can be running or
+// preparing; the prune flag is fakeManager's own pruning field.
 type restartManager struct {
 	*fakeManager
-	update bool
+	update, preparing bool
 }
 
 func (r *restartManager) Status() model.Status {
 	st := r.fakeManager.Status()
 	st.RunnerUpdate.Running = r.update
+	st.RunnerUpdate.Preparing = r.preparing
 	return st
 }
 
@@ -104,6 +105,10 @@ func TestRestartBlockedBy(t *testing.T) {
 	m.pruning = true
 	if got := b.Status().Restart.BlockedBy; !slices.Equal(got, []string{"pruning"}) {
 		t.Fatalf("a prune: %v", got)
+	}
+	m.pruning, rm.preparing = false, true
+	if got := b.Status().Restart.BlockedBy; !slices.Equal(got, []string{"preparing the runner update"}) {
+		t.Fatalf("a runner update preparing: %v", got)
 	}
 }
 
