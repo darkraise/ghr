@@ -255,7 +255,7 @@ export function useLogTail(id: string, enabled: boolean, poll = true) {
       return appendLog(prev, await api.log(id, prev.next, signal))
     },
     enabled,
-    refetchInterval: (q) => (enabled && (poll || q.state.data?.drained === false) ? POLL_FAST : false),
+    refetchInterval: (q) => (enabled && (poll || (q.state.status !== "error" && q.state.data?.drained === false)) ? POLL_FAST : false),
   })
 }
 

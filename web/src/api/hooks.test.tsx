@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
-import { mockApi } from "@/test/api"
+import { json, mockApi } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
 import { appendEvents, appendLog, browserZone, MAX_EVENTS, MAX_LOG, useActivity, useEvents, useHistory, useLogTail } from "./hooks"
@@ -126,6 +126,19 @@ describe("useLogTail", () => {
     renderHook(() => useLogTail("aaaaaa", true, false), { wrapper })
     await new Promise((r) => setTimeout(r, 2500))
     expect(calls).toHaveLength(1)
+  })
+
+  it("stops reading a finished runner's log once a read fails", { timeout: 10_000 }, async () => {
+    const { calls } = mockApi({
+      "GET /api/runners/aaaaaa/log": ({ url }: { url: URL }) =>
+        url.searchParams.get("cursor") === "" ? { data: "one\n", next: "c1" } : json({ error: "log gone" }, 404),
+    })
+    const { wrapper } = withQuery()
+    const { result } = renderHook(() => useLogTail("aaaaaa", true, false), { wrapper })
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 4000 })
+    await new Promise((r) => setTimeout(r, 2500))
+    expect(result.current.data?.text).toBe("one\n")
+    expect(calls.map((c) => c.search)).toEqual(["?cursor=", "?cursor=c1"])
   })
 
   it("does not poll while the log is closed", { timeout: 10_000 }, async () => {
