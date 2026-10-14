@@ -211,6 +211,44 @@ func TestCleanupWaitsWhenTheInventoryHitTheRateReserve(t *testing.T) {
 	}
 }
 
+func TestCleanupRechecksTheRateReserveDuringThePass(t *testing.T) {
+	lower := func(gh *fakeGH) {
+		gh.mu.Lock()
+		gh.remaining = MinRateLeft - 1
+		gh.mu.Unlock()
+	}
+	setup := func() (*fakeGH, *Service) {
+		gh := newFakeGH()
+		cfg := testConfig()
+		s, clock := newTestService(t, gh, cfg)
+		now := clock.Now()
+		gh.addRepo("darkmem", true, ghArt(1, 10, now, 30*time.Hour, 5), ghArt(2, 20, now, 31*time.Hour, 5))
+		gh.addRepo("chicken", true, ghArt(3, 30, now, 40*time.Hour, 5))
+		s.pass(true, false)
+		cfg.GitHubStorage = cleanupConfig().GitHubStorage
+		return gh, s
+	}
+	t.Run("while listing active runs", func(t *testing.T) {
+		gh, s := setup()
+		gh.onRuns = func() { lower(gh) }
+		s.pass(true, false)
+		if got := gh.callsLike("ListRuns chicken"); len(got) != 0 {
+			t.Fatalf("listed runs %v after the rate fell below the reserve", got)
+		}
+		if got := gh.callsLike("Delete"); len(got) != 0 {
+			t.Fatalf("deleted %v after the rate fell below the reserve", got)
+		}
+	})
+	t.Run("between deletes", func(t *testing.T) {
+		gh, s := setup()
+		gh.onDelete = func(context.Context, string, int64) error { lower(gh); return nil }
+		s.pass(true, false)
+		if got := gh.callsLike("Delete"); len(got) != 1 {
+			t.Fatalf("deletes %v, want only the first", got)
+		}
+	})
+}
+
 func TestWritesStayWithinTheHourlyBudget(t *testing.T) {
 	gh := newFakeGH()
 	s, clock := newTestService(t, gh, testConfig())

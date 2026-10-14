@@ -97,6 +97,10 @@ func (s *Service) cleanup(cfg *config.Config, gen uint64) {
 	s.mu.Unlock()
 	var picks []Pick
 	for _, d := range todo {
+		if s.rateLow() {
+			log.Printf("github storage: cleanup stopped: the token is below the rate reserve")
+			return
+		}
 		active, err := s.activeRuns(ctx, d.repo)
 		if err != nil {
 			s.setRowError(d.repo, s.describe(err, d.repo), gen)
@@ -118,6 +122,10 @@ func (s *Service) cleanup(cfg *config.Config, gen uint64) {
 			continue
 		}
 		if !s.keep(gen) {
+			break
+		}
+		if s.rateLow() {
+			log.Printf("github storage: cleanup stopped: the token is below the rate reserve")
 			break
 		}
 		// The policy may have been saved since the pass read it. A pick that
