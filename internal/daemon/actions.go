@@ -169,8 +169,10 @@ type actionsCall struct {
 
 // Actions shares one build between callers, so the fetch runs detached from
 // any one request and the cache age counts from when the build finished. The
-// lock is not held during the fetch: a caller that joins a build leaves when
-// its own request ends.
+// lock is not held during the fetch. The caller that starts a build waits for
+// its fan-out whatever happens to its request; a caller that joins a build
+// leaves when its own request ends. A panic in the build reaches the request
+// that started it, and the callers waiting on it get an error.
 func (b *Backend) Actions(ctx context.Context) (model.Actions, error) {
 	c := &b.actions
 	for {
