@@ -1,13 +1,14 @@
 import { Spinner } from "darkraise-ui/components/spinner"
-import { Circle } from "lucide-react"
+import { Circle, CircleDot } from "lucide-react"
 import type { Step } from "@/api/types"
 import { ResultIcon } from "@/components/result-icon"
 import { dur } from "@/lib/format"
 import { stepPhase, stepTimeline } from "@/lib/steps"
 
-function StepIcon({ step }: { step: Step }) {
+function StepIcon({ step, live }: { step: Step; live: boolean }) {
   const phase = stepPhase(step)
   if (phase === "running") {
+    if (!live) return <CircleDot role="img" aria-label="Last seen running" size={15} className="shrink-0 text-muted-foreground" />
     return (
       <span className="inline-flex">
         <Spinner size="sm" label={<span className="sr-only">Running</span>} />
@@ -31,14 +32,14 @@ export function StepList({ steps, now, live }: { steps: Step[]; now: number; liv
             key={s.number}
             className="grid grid-cols-[1.25rem_minmax(0,1fr)_4.5rem_minmax(6rem,35%)] items-center gap-2 border-b border-border py-1.5 text-sm last:border-b-0"
           >
-            <StepIcon step={s} />
+            <StepIcon step={s} live={live} />
             <span className={`break-words ${pending ? "text-muted-foreground" : ""}`}>{s.name}</span>
             <span className="text-right font-mono text-xs text-muted-foreground">{took === null || took === undefined ? "" : dur(took)}</span>
             <span aria-hidden="true" className="relative h-1.5 rounded-[2px] bg-muted">
               {bar && (
                 <span
                   data-bar="true"
-                  className={`absolute inset-y-0 rounded-[2px] ${stepPhase(s) === "running" ? "bg-primary" : "bg-primary/60"}`}
+                  className={`absolute inset-y-0 rounded-[2px] ${live && stepPhase(s) === "running" ? "bg-primary" : "bg-primary/60"}`}
                   style={{ left: `${bar.offset * 100}%`, width: `max(2px, ${bar.width * 100}%)` }}
                 />
               )}

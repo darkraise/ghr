@@ -180,7 +180,7 @@ export function RunnerPanel({ id, tab, backLink }: { id: string; tab: DetailTab;
           <TabsTrigger value="containers">Containers</TabsTrigger>
         </TabsList>
         <TabsContent value="steps">
-          <Steps steps={steps} live={live} finished={finished} now={now} />
+          <Steps steps={steps} live={live} finished={finished} now={end} />
         </TabsContent>
         <TabsContent value="log">
           <div className="mb-2 flex items-center gap-2">

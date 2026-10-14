@@ -160,6 +160,35 @@ describe("RunnerPanel", () => {
     expect(screen.getByRole("button", { name: "Stop runner" })).toBeDisabled()
   })
 
+  it("stops counting a step's time once the runner ends", { timeout: 15_000 }, async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-10-03T14:05:00Z") })
+    try {
+      let gone = false
+      mockApi(
+        routes({
+          "GET /api/status": () => ({
+            ...fixtures.status,
+            now: new Date().toISOString(),
+            instances: gone ? fixtures.status.instances.filter((i) => i.id !== "aaaaaa") : fixtures.status.instances,
+          }),
+        }),
+      )
+      draw()
+      const took = async () => within((await screen.findByText("Run tests")).closest("li") as HTMLElement).getByText(/^\d+m\d{2}s$/).textContent
+      expect(await took()).toBe("3m54s")
+      gone = true
+      await screen.findByText("This runner has finished")
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+      const frozen = await took()
+      vi.setSystemTime(Date.now() + 60_000)
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+      expect(await took()).toBe(frozen)
+      expect(screen.getByRole("img", { name: "Last seen running" })).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("says a runner never seen live keeps no steps", async () => {
     mockApi(routes({ "GET /api/runners/zzzzzz/log": fixtures.log }))
     const { user } = draw("/runners/zzzzzz?tab=steps")
