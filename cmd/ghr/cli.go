@@ -266,29 +266,43 @@ func logs(ctx context.Context, c *api.Client, args []string, out io.Writer) erro
 		return usageError("usage: ghr logs <id> [-f]")
 	}
 	safe := stdoutText()
+	// A chunk can end between the CR and the LF of a CRLF. At a terminal the
+	// CR waits for the next chunk, so the pair is still one line break.
+	atTerminal := fdIsTerminal(os.Stdout.Fd())
+	held := ""
+	flush := func() error {
+		_, err := io.WriteString(out, safe(held))
+		held = ""
+		return err
+	}
 	cursor := ""
 	for {
 		chunk, err := c.Log(ctx, id, cursor)
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				return flush()
 			}
 			return err
 		}
-		if _, err := io.WriteString(out, safe(chunk.Data)); err != nil {
+		data := held + chunk.Data
+		held = ""
+		if atTerminal && strings.HasSuffix(data, "\r") {
+			data, held = data[:len(data)-1], "\r"
+		}
+		if _, err := io.WriteString(out, safe(data)); err != nil {
 			return err
 		}
 		cursor = chunk.Next
 		if !follow {
 			// One response is capped, so read until the daemon has nothing more.
 			if chunk.Data == "" {
-				return nil
+				return flush()
 			}
 			continue
 		}
 		select {
 		case <-ctx.Done():
-			return nil
+			return flush()
 		case <-time.After(logPollInterval):
 		}
 	}
@@ -322,15 +336,22 @@ func printHistory(out io.Writer, h []model.HistoryEntry) error {
 }
 
 // termSafe replaces every control character a job could use to drive the
-// terminal reading its output: C0 controls except newline and tab, DEL and
-// C1. That takes ESC, so no CSI or OSC sequence survives.
+// terminal reading its output: C0 controls except newline and tab, DEL, C1
+// and the bidirectional overrides and isolates that reorder what is shown.
+// That takes ESC, so no CSI or OSC sequence survives. A carriage return
+// would redraw a line already printed, so it becomes a newline, with CRLF
+// as one.
 func termSafe(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 && r != '\n' && r != '\t' || r == 0x7f || r >= 0x80 && r <= 0x9f {
+		switch {
+		case r == '\r':
+			return '\n'
+		case r < 0x20 && r != '\n' && r != '\t', r == 0x7f, r >= 0x80 && r <= 0x9f,
+			r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069:
 			return utf8.RuneError
 		}
 		return r
-	}, s)
+	}, strings.ReplaceAll(s, "\r\n", "\n"))
 }
 
 // stdoutText returns termSafe when stdout is a terminal. A pipe or a file

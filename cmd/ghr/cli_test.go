@@ -52,6 +52,14 @@ func fakeDaemon(t *testing.T) *[]recorded {
 				chunk = model.LogChunk{Data: hostileLog, Next: "evil=1"}
 			}
 			json.NewEncoder(w).Encode(chunk)
+		case r.URL.Path == "/runners/split/log":
+			// RunnerLog cuts chunks at arbitrary offsets, here inside a CRLF.
+			chunks := map[string]model.LogChunk{
+				"":    {Data: "one\r", Next: "s=1"},
+				"s=1": {Data: "\ntwo\r", Next: "s=2"},
+				"s=2": {Data: "three\r", Next: "s=3"},
+			}
+			json.NewEncoder(w).Encode(chunks[r.URL.Query().Get("cursor")])
 		case strings.HasSuffix(r.URL.Path, "/log"):
 			// Two chunks, then nothing new: an unknown cursor gets an empty chunk.
 			chunks := map[string]model.LogChunk{
@@ -315,6 +323,34 @@ func TestLogsEscapeControlsAtATerminal(t *testing.T) {
 	want := "ok\tline\n\ufffd[2Jcleared\ufffd\ufffd]52;c;aGk=\ufffdbell\ufffd31mc1\ufffddel\n"
 	if code != 0 || out != want {
 		t.Fatalf("logs %d %q, want %q", code, out, want)
+	}
+}
+
+func TestTermSafeLineEndingsAndBidi(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"crlf", "a\r\nb\r\n", "a\nb\n"},
+		{"lone cr", "pass\rFAIL\n", "pass\nFAIL\n"},
+		{"cr before crlf", "a\r\r\nb", "a\n\nb"},
+		{"embedding and override", "a\u202ab\u202bc\u202dd\u202ee\u202cf", "a\ufffdb\ufffdc\ufffdd\ufffde\ufffdf"},
+		{"isolates", "a\u2066b\u2067c\u2068d\u2069e", "a\ufffdb\ufffdc\ufffdd\ufffde"},
+		{"other text", "caf\u00e9 \u2713 \u200f\n\t", "caf\u00e9 \u2713 \u200f\n\t"},
+	} {
+		if got := termSafe(tc.in); got != tc.want {
+			t.Errorf("%s: termSafe(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestLogsHoldACarriageReturnAcrossChunks(t *testing.T) {
+	fakeDaemon(t)
+	stubStdoutTerminal(t, true)
+	code, out, _ := runCLI(t, "", "logs", "split")
+	if want := "one\ntwo\nthree\n"; code != 0 || out != want {
+		t.Fatalf("logs %d %q, want %q", code, out, want)
+	}
+	stubStdoutTerminal(t, false)
+	if code, out, _ := runCLI(t, "", "logs", "split"); code != 0 || out != "one\r\ntwo\rthree\r" {
+		t.Fatalf("logs in a pipe %d %q, want the raw bytes", code, out)
 	}
 }
 
