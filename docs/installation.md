@@ -42,7 +42,7 @@ Piped like this, the script asks nothing. To answer its prompts in the terminal 
 bash <(curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh)
 ```
 
-or `bash deploy/setup.sh` from a checkout. The prompts ask for the web UI password, then the GitHub owner (a user or organization) and the token (both passwords without echo); press Enter at any prompt to skip it.
+or `bash deploy/setup.sh` from a checkout. The prompts ask for the web UI password, then the GitHub owner (a user or organization) and the token (the password and the token without echo); press Enter at any prompt to skip it.
 
 Finish whatever you skipped at `http://<host>:8080/setup`: enter the setup code `setup.sh` printed (or run `ghr code` on the host), set the web password, then enter the owner and token, add repositories, adjust settings and choose toolchains.
 
