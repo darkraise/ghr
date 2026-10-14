@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -73,8 +74,25 @@ func (m *Manager) projects(ctx context.Context, id string) ([]string, error) {
 	return names, nil
 }
 
-// cleanupDocker removes the compose projects started from an instance's work dir
-// and the repo's prefix-matched containers. It returns how many containers it
+// dockerInstanceLabel returns the label the actions runner puts on the job and
+// service containers it creates and on the job network: a bare key of the
+// first six hex digits of the SHA-256 of its lower-cased .runner file. It
+// returns "" when the runner never wrote the file, and then created nothing.
+// Containers a job starts itself with docker run do not carry it.
+func (m *Manager) dockerInstanceLabel(id string) (string, error) {
+	data, err := readJobFile(filepath.Join(m.instanceDir(id), ".runner"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read .runner: %w", err)
+	}
+	sum := sha256.Sum256([]byte(strings.ToLower(string(data))))
+	return fmt.Sprintf("%x", sum[:3]), nil
+}
+
+// cleanupDocker removes the compose projects started from an instance's work dir,
+// the containers and network the runner itself created, and the repo's prefix-matched containers. It returns how many containers it
 // removed and every failure joined; the caller retries the whole cleanup on error.
 func (m *Manager) cleanupDocker(ctx context.Context, cfg *config.Config, id, repo string) (int, error) {
 	names, err := m.projects(ctx, id)
@@ -122,6 +140,21 @@ func (m *Manager) cleanupDocker(ctx context.Context, cfg *config.Config, id, rep
 	if recordAgain {
 		if err := record(); err != nil {
 			errs = append(errs, err)
+		}
+	}
+	if label, err := m.dockerInstanceLabel(id); err != nil {
+		errs = append(errs, err)
+	} else if label != "" {
+		ids, err := m.Docker.ContainerIDsByLabel(ctx, label)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("list containers of the runner: %w", err))
+		} else if err := m.Docker.RemoveContainers(ctx, ids); err != nil {
+			errs = append(errs, fmt.Errorf("remove containers of the runner: %w", err))
+		} else {
+			removed += len(ids)
+		}
+		if err := m.Docker.RemoveNetworksByLabel(ctx, label); err != nil {
+			errs = append(errs, fmt.Errorf("remove networks of the runner: %w", err))
 		}
 	}
 	r := cfg.Repo(repo)

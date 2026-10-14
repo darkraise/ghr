@@ -685,41 +685,50 @@ func readJSON(path string, v any) error {
 // maxJobFile bounds a file read from an instance directory.
 const maxJobFile = 1 << 20
 
-// readJobJSON reads a JSON file from an instance directory. The job can
+// readJobFile reads a file from an instance directory. The job can
 // write that directory and root reads the file, so it gets the checks
 // readFrom makes for logs: a link is refused, only a regular file is
 // read, and at most maxJobFile of it. A FIFO would block the caller, which is
 // the tick, and a device would feed it for ever. The check is repeated on the
 // open file, because the job can swap the name between the two; whatever it
 // swaps in, the root lets the open reach only a file inside that directory.
-func readJobJSON(path string, v any) error {
+func readJobFile(path string) ([]byte, error) {
 	root, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer root.Close()
 	name := filepath.Base(path)
 	fi, err := root.Lstat(name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !fi.Mode().IsRegular() {
-		return fs.ErrInvalid
+		return nil, fs.ErrInvalid
 	}
 	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer f.Close()
 	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
-		return fs.ErrInvalid
+		return nil, fs.ErrInvalid
 	}
 	data, err := io.ReadAll(io.LimitReader(f, maxJobFile+1))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(data) > maxJobFile {
-		return fmt.Errorf("%s is larger than %d bytes", path, maxJobFile)
+		return nil, fmt.Errorf("%s is larger than %d bytes", path, maxJobFile)
+	}
+	return data, nil
+}
+
+// readJobJSON reads a JSON file from an instance directory the way readJobFile does.
+func readJobJSON(path string, v any) error {
+	data, err := readJobFile(path)
+	if err != nil {
+		return err
 	}
 	return json.Unmarshal(data, v)
 }

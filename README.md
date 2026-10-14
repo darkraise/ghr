@@ -61,7 +61,7 @@ jobs:
 
 ghr runs as a systemd service. Every few seconds it asks the GitHub API for queued jobs in the configured repositories. When a job is waiting and the caps allow it, ghr requests a just-in-time runner configuration from GitHub, copies the runner software into a fresh instance directory and starts it with `systemd-run` as the `ghrunner` user, under the configured memory and CPU limits. The runner takes exactly one job; GitHub removes its registration afterwards.
 
-Job hooks record which job each runner ran. When a runner exits, ghr removes the Docker compose projects and containers the job started, then the instance directory. The `ghr` command talks to the daemon over a Unix socket, and the web UI over HTTP.
+Job hooks record which job each runner ran. When a runner exits, ghr removes the Docker compose projects the job started and the service and `container:` job containers and networks the runner created, then the instance directory. Containers the job starts with plain `docker run` are removed only if their names match the repository's `cleanup_name_prefixes`, so give them a prefix or use `--rm`. The `ghr` command talks to the daemon over a Unix socket, and the web UI over HTTP.
 
 ## Security
 

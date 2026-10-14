@@ -42,6 +42,62 @@ func TestCleanupDockerProjectsAndPrefixes(t *testing.T) {
 	}
 }
 
+// A .runner file in the shape the runner writes, and the label the runner puts
+// on its service containers and job network: the first six hex digits of the
+// sha256 of the lower-cased file (DockerInstanceLabel in actions/runner's
+// DockerCommandManager.cs).
+const (
+	runnerFile  = `{"AgentId":"1","AgentName":"example-runner-abc123","DisableUpdate":"True","Ephemeral":"True","PoolId":"1","PoolName":null,"ServerUrl":"https://pipelines.actions.example/token/","WorkFolder":"_work","GitHubUrl":"https://github.example/example/repo","ServerUrlV2":"https://broker.actions.example/","UseV2Flow":"true"}`
+	runnerLabel = "c6b47a"
+)
+
+func TestCleanupRemovesTheRunnersOwnContainersAndNetworks(t *testing.T) {
+	h := newHarness(t)
+	dir := h.m.instanceDir("abc123")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".runner"), []byte(runnerFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.docker.byLabel[runnerLabel] = []string{"svc1", "job1"}
+
+	removed, err := h.m.cleanupDocker(context.Background(), h.cfg, "abc123", "darkcloud")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 2 || !reflect.DeepEqual(h.docker.removed, []string{"svc1", "job1"}) {
+		t.Fatalf("removed %d %v", removed, h.docker.removed)
+	}
+	want := []string{"com.docker.compose.project=ghr-abc123", runnerLabel}
+	if !reflect.DeepEqual(h.docker.netLabels, want) {
+		t.Fatalf("networks %v, want %v", h.docker.netLabels, want)
+	}
+}
+
+func TestCleanupWithoutRunnerFileSkipsTheRunnerLabel(t *testing.T) {
+	h := newHarness(t)
+	if err := os.MkdirAll(h.m.instanceDir("abc123"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.m.cleanupDocker(context.Background(), h.cfg, "abc123", "darkcloud"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"com.docker.compose.project=ghr-abc123"}; !reflect.DeepEqual(h.docker.netLabels, want) {
+		t.Fatalf("networks %v, want %v", h.docker.netLabels, want)
+	}
+}
+
+func TestCleanupReportsAnUnreadableRunnerFile(t *testing.T) {
+	h := newHarness(t)
+	if err := os.MkdirAll(filepath.Join(h.m.instanceDir("abc123"), ".runner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.m.cleanupDocker(context.Background(), h.cfg, "abc123", "darkcloud"); err == nil || !strings.Contains(err.Error(), ".runner") {
+		t.Fatalf("err %v", err)
+	}
+}
+
 func TestCleanupSkipsPrefixesForOtherRepos(t *testing.T) {
 	h := newHarness(t)
 	h.docker.named = []system.NamedContainer{{ID: "c3", Name: "dc-e2e-web"}}
