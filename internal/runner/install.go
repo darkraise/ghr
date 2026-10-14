@@ -2,13 +2,12 @@ package runner
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/darkraise/ghr/internal/system"
 )
 
 // stepError names the update step that failed.
@@ -29,19 +28,6 @@ func complete(dir string) bool {
 	fi, err := os.Stat(filepath.Join(dir, "run.sh"))
 	// Windows has no execute bit; ghr runs on Linux, its tests on Windows too.
 	return err == nil && fi.Mode().IsRegular() && (fi.Mode().Perm()&0o111 != 0 || runtime.GOOS == "windows")
-}
-
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // installLatest installs the latest runner release and points dist/current
@@ -115,7 +101,7 @@ func (m *Manager) stage(ctx, scriptCtx context.Context, distDir, ver, sum string
 	if err := m.Fetch(ctx, fmt.Sprintf(tarballURL, ver), tarball); err != nil {
 		return fail("download", err)
 	}
-	got, err := fileSHA256(tarball)
+	got, err := system.FileSHA256(tarball)
 	if err != nil {
 		return fail("checksum", err)
 	}

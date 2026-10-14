@@ -3,7 +3,9 @@ package system
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -313,5 +315,15 @@ func TestSystemdStopOfAnUnloadedUnitSucceeds(t *testing.T) {
 		if err := script(s).Stop(context.Background(), "ghr-runner-busy00"); err == nil {
 			t.Fatalf("%s must stay an error", name)
 		}
+	}
+}
+
+func TestFileSHA256(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(path, []byte("abc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := FileSHA256(path); err != nil || got != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" {
+		t.Fatalf("%q %v", got, err)
 	}
 }

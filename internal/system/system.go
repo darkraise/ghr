@@ -4,6 +4,8 @@ package system
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -450,6 +452,20 @@ var downloadClient = &http.Client{CheckRedirect: HTTPSRedirect}
 // credentials: it fetches public release assets.
 func Download(ctx context.Context, url, dst string) error {
 	return download(ctx, DownloadTimeout, url, dst)
+}
+
+// FileSHA256 is the hex SHA-256 of the file at path.
+func FileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // DownloadFor is Download with its own timeout d in place of
