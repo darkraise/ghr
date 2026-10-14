@@ -50,7 +50,7 @@ func TestRunDetailAssemblesTheLatestAttempt(t *testing.T) {
 	b, m, gh := newBackend(t)
 	frozenClock(b, actionsT0)
 	detailRun(gh, "completed")
-	if err := b.Hist.Append(model.HistoryEntry{ID: "h", Repo: "DarkMem", RunID: 102, JobName: "Build", Conclusion: "success",
+	if err := b.Hist.Append(model.HistoryEntry{ID: "a1b2c3", Repo: "DarkMem", RunID: 102, JobName: "Build", Conclusion: "success",
 		StartedAt: actionsT0.Add(-9 * time.Minute), FinishedAt: actionsT0.Add(-8 * time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +77,64 @@ func TestRunDetailAssemblesTheLatestAttempt(t *testing.T) {
 	}
 	if gh.count("GetRunAttempt") != 0 || len(gh.jobCalls) != 1 {
 		t.Fatalf("calls %v, ListJobs %v", gh.calls, gh.jobCalls)
+	}
+}
+
+// A ghr runner runs one job, and a re-run attempt lists the jobs it did not
+// re-run under their first runner's name. So a job is ghr's when a runner
+// ghr recorded for the run ran it: a re-run of the same job name on another
+// runner is not.
+func TestRunDetailMarksTheJobsGhrRunnersRan(t *testing.T) {
+	job := func(id int64, attempt int, name, runner string) github.Job {
+		return github.Job{ID: id, RunID: 102, RunAttempt: attempt, Name: name, Status: "completed", Conclusion: "success", RunnerName: runner}
+	}
+	records := []model.HistoryEntry{
+		{ID: "a1b2c3", Repo: "DarkMem", RunID: 102, RunAttempt: 1, JobName: "Build", Conclusion: "failure"},
+		{ID: "d4e5f6", Repo: "darkmem", RunID: 102, RunAttempt: 1, JobName: "Lint", Conclusion: "success"},
+	}
+	for _, c := range []struct {
+		name   string
+		record func(b *Backend, m *fakeManager, e model.HistoryEntry)
+	}{
+		{"history", func(b *Backend, _ *fakeManager, e model.HistoryEntry) {
+			if err := b.Hist.Append(e); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"history written without the attempt", func(b *Backend, _ *fakeManager, e model.HistoryEntry) {
+			e.RunAttempt = 0
+			if err := b.Hist.Append(e); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"pending", func(_ *Backend, m *fakeManager, e model.HistoryEntry) { m.pending = append(m.pending, e) }},
+		{"instance", func(_ *Backend, m *fakeManager, e model.HistoryEntry) {
+			m.insts = append(m.insts, model.InstanceStatus{ID: e.ID, Repo: e.Repo, RunnerName: "ghr-" + e.Repo + "-" + e.ID,
+				Job: &model.JobInfo{RunID: e.RunID, RunAttempt: e.RunAttempt, Name: e.JobName}})
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			b, m, gh := newBackend(t)
+			detailRun(gh, "completed")
+			gh.attemptJobs[attemptKey(102, 1)] = []github.Job{job(1001, 1, "Build", "ghr-darkmem-a1b2c3"), job(1002, 1, "Lint", "ghr-darkmem-d4e5f6")}
+			gh.jobs[102] = []github.Job{job(2001, 2, "Build", "GitHub Actions 7"), job(2002, 2, "Lint", "ghr-darkmem-d4e5f6")}
+			for _, e := range records {
+				c.record(b, m, e)
+			}
+			for attempt, want := range map[int]string{0: "Build:false Lint:true", 1: "Build:true Lint:true"} {
+				d, err := b.RunDetail(context.Background(), "darkmem", 102, attempt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := ""
+				for _, j := range d.Jobs {
+					got += fmt.Sprintf(" %s:%t", j.Name, j.GHR)
+				}
+				if got[1:] != want {
+					t.Fatalf("attempt %d: %s, want %s", attempt, got[1:], want)
+				}
+			}
+		})
 	}
 }
 

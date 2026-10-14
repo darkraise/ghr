@@ -105,13 +105,16 @@ func detailErr(err error, owner, repo string) error {
 	return &api.Error{Status: http.StatusBadGateway, Msg: msg}
 }
 
-func ghrJobKey(repo string, runID int64, name string) string {
-	return strings.ToLower(repo) + "#" + strconv.FormatInt(runID, 10) + "#" + name
+// ghrJobKey names the job a runner ran in a run. A ghr runner runs one job,
+// and a re-run attempt lists each job it did not re-run under the runner
+// that ran it, so the runner tells ghr's jobs apart from re-runs of the same
+// job name on other runners.
+func ghrJobKey(repo string, runID int64, runner string) string {
+	return strings.ToLower(repo) + "#" + strconv.FormatInt(runID, 10) + "#" + strings.ToLower(runner)
 }
 
-// ghrJobs reads the same sources as ghrRuns, in the same order, keyed by
-// job. History has no job ID, so two attempts of one job name are both
-// marked.
+// ghrJobs reads the same sources as ghrRuns, in the same order, keyed by the
+// runner that ran each job.
 func (b *Backend) ghrJobs() (map[string]bool, error) {
 	insts := b.M.Status().Instances
 	pend := b.M.Pending()
@@ -122,17 +125,17 @@ func (b *Backend) ghrJobs() (map[string]bool, error) {
 	}
 	for _, i := range insts {
 		if i.Job != nil && i.Job.RunID != 0 {
-			ours[ghrJobKey(i.Repo, i.Job.RunID, i.Job.Name)] = true
+			ours[ghrJobKey(i.Repo, i.Job.RunID, i.RunnerName)] = true
 		}
 	}
 	for _, p := range pend {
 		if p.RunID != 0 {
-			ours[ghrJobKey(p.Repo, p.RunID, p.JobName)] = true
+			ours[ghrJobKey(p.Repo, p.RunID, "ghr-"+p.Repo+"-"+p.ID)] = true
 		}
 	}
 	for _, h := range hist {
 		if h.RunID != 0 {
-			ours[ghrJobKey(h.Repo, h.RunID, h.JobName)] = true
+			ours[ghrJobKey(h.Repo, h.RunID, "ghr-"+h.Repo+"-"+h.ID)] = true
 		}
 	}
 	return ours, nil
@@ -155,7 +158,7 @@ func runJob(repo string, runID int64, j github.Job, ours map[string]bool) model.
 	return model.RunJob{
 		ID: j.ID, Name: j.Name, Status: j.Status, Conclusion: j.Conclusion,
 		StartedAt: j.StartedAt, CompletedAt: j.CompletedAt, RunnerName: j.RunnerName, Labels: labels,
-		HTMLURL: j.HTMLURL, GHR: ours[ghrJobKey(repo, runID, j.Name)], Steps: modelSteps(j.Steps),
+		HTMLURL: j.HTMLURL, GHR: j.RunnerName != "" && ours[ghrJobKey(repo, runID, j.RunnerName)], Steps: modelSteps(j.Steps),
 	}
 }
 
