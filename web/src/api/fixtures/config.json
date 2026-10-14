@@ -49,5 +49,23 @@
         "cleanup": "6h"
       }
     }
+  },
+  "jobs": {
+    "ghr_update_check": {
+      "enabled": true,
+      "every": "1d"
+    },
+    "runner_update_check": {
+      "enabled": true,
+      "every": "1d"
+    },
+    "prune": {
+      "enabled": true,
+      "every": "1d"
+    },
+    "storage_measure": {
+      "enabled": true,
+      "every": "30m0s"
+    }
   }
 }

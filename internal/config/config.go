@@ -73,6 +73,8 @@ type Config struct {
 	Web Web `yaml:"web,omitempty" json:"web,omitzero"`
 	// GitHubStorage sets the artifact storage allowance, warnings and cleanup.
 	GitHubStorage GitHubStorage `yaml:"github_storage,omitempty" json:"github_storage,omitzero"`
+	// Jobs schedules ghr's background tasks.
+	Jobs Jobs `yaml:"jobs" json:"jobs"`
 }
 
 type RunnerLimits struct {
@@ -218,6 +220,7 @@ func defaults() *Config {
 		BuildCacheKeep:   "20GB",
 		HistoryRetention: Duration(30 * 24 * time.Hour),
 		RunnerLimits:     RunnerLimits{MemoryMax: "6G", CPUQuota: "200%"},
+		Jobs:             DefaultJobs(),
 	}
 }
 
@@ -683,6 +686,9 @@ func (c *Config) Validate() ([]string, error) {
 		}
 	}
 	errs = append(errs, c.GitHubStorage.validate()...)
+	jobErrs, jobWarnings := c.Jobs.validate()
+	errs = append(errs, jobErrs...)
+	warnings = append(warnings, jobWarnings...)
 	if len(errs) > 0 {
 		return nil, errors.New(strings.Join(sortedUnique(errs), "; "))
 	}

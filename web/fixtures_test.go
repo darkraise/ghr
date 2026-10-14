@@ -160,6 +160,7 @@ func fixtureValues() map[string]any {
 			Web:        config.Web{Listen: "0.0.0.0:8080", Hosts: []string{"ghr.lan"}},
 			GitHubStorage: config.GitHubStorage{CleanupMaxAge: config.Duration(48 * time.Hour),
 				Repos: map[string]config.StorageOverride{"darkmem": {Cleanup: "6h"}}},
+			Jobs: config.DefaultJobs(),
 		},
 		"storage": model.Storage{
 			Toolchains: []model.Toolchain{{Tool: "node", Version: "22.11.0", Arch: "x64",
