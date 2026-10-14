@@ -118,8 +118,22 @@ export function useRunAnnotations(repo: string, id: number, attempt: number | un
   })
 }
 
-export function useJobLog(repo: string, jobId: number, enabled: boolean) {
-  return useQuery({ queryKey: keys.jobLog(repo, jobId), queryFn: ({ signal }) => api.jobLog(repo, jobId, signal), enabled })
+// GitHub may not have stored the log of a job that has only just completed.
+// The daemon keeps such a "no log" answer for 15 seconds, so asking again
+// at that pace for a few minutes finds the log once it is there.
+const LOG_SETTLE = 3 * 60_000
+
+export function logSettling(completedAt: string | undefined, now: number): boolean {
+  return completedAt !== undefined && now - Date.parse(completedAt) < LOG_SETTLE
+}
+
+export function useJobLog(repo: string, jobId: number, enabled: boolean, completedAt?: string) {
+  return useQuery({
+    queryKey: keys.jobLog(repo, jobId),
+    queryFn: ({ signal }) => api.jobLog(repo, jobId, signal),
+    enabled,
+    refetchInterval: (q) => (q.state.data?.no_log && logSettling(completedAt, Date.now()) ? 15_000 : false),
+  })
 }
 
 export function browserZone(): string {

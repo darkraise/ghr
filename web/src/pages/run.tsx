@@ -5,7 +5,7 @@ import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { useId, type ReactNode } from "react"
 import { ApiError, api } from "@/api/client"
-import { useConfig, useJobLog, useRunAnnotations, useRunDetail } from "@/api/hooks"
+import { logSettling, useConfig, useJobLog, useRunAnnotations, useRunDetail } from "@/api/hooks"
 import type { RunDetail, RunJob } from "@/api/types"
 import { LogViewer } from "@/components/log-viewer"
 import { ErrorLine } from "@/components/page/error-line"
@@ -251,8 +251,8 @@ function saveBlob(blob: Blob, fileName: string) {
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-function JobLogs({ repo, job, search, ms }: { repo: string; job: RunJob; search: JobSearch; ms: number | undefined }) {
-  const log = useJobLog(repo, job.id, true)
+function JobLogs({ repo, job, search, ms, now }: { repo: string; job: RunJob; search: JobSearch; ms: number | undefined; now: number }) {
+  const log = useJobLog(repo, job.id, true, job.completed_at)
   const raw = useMutation({
     mutationFn: () => api.rawJobLog(repo, job.id),
     onSuccess: (blob) => saveBlob(blob, rawLogFileName(repo, job.id)),
@@ -266,7 +266,18 @@ function JobLogs({ repo, job, search, ms }: { repo: string; job: RunJob; search:
     return log.isError ? <ErrorLine onRetry={() => void log.refetch()}>{runError(log.error)}</ErrorLine> : <Spinner label="Loading" />
   }
   if (log.data.expired) return <p className="text-sm text-muted-foreground">GitHub no longer keeps this job&apos;s log.</p>
-  if (log.data.no_log) return <p className="text-sm text-muted-foreground">This job produced no log.</p>
+  if (log.data.no_log) {
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <p className="text-sm text-muted-foreground">
+          {logSettling(job.completed_at, now) ? "GitHub has not stored this job's log yet; checking again." : "This job produced no log."}
+        </p>
+        <Button size="sm" variant="outline" loading={log.isFetching} onClick={() => void log.refetch()}>
+          Check again
+        </Button>
+      </div>
+    )
+  }
   if (log.data.too_large) {
     return (
       <div className="flex flex-col items-start gap-2">
@@ -326,7 +337,7 @@ function JobView({ run, owner, jobId, search }: { run: RunDetail; owner: string;
         <JobMeta job={job} />
         <div className="mt-4">
           {job.status === "completed" ? (
-            <JobLogs repo={run.repo} job={job} search={search} ms={ms} />
+            <JobLogs repo={run.repo} job={job} search={search} ms={ms} now={now} />
           ) : (
             <div className="ghr-log-panel flex flex-col gap-2 overflow-hidden rounded-md border border-border p-3">
               <p className="text-sm text-muted-foreground">Logs appear when the job finishes.</p>

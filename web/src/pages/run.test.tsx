@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react"
+import { act, screen, waitFor, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { json, mockApi, type Call } from "@/test/api"
 import { fixtures, runRoutes } from "@/test/fixtures"
@@ -225,6 +225,45 @@ describe("Job page", () => {
     expect(await screen.findByText("This job produced no log.")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Raw log" })).toBeNull()
     expect(screen.queryByLabelText("Search logs")).toBeNull()
+  })
+
+  it("reads the log again on Check again", async () => {
+    let stored = false
+    const { calls } = mockApi(
+      runRoutes({ "GET /api/actions/darkmem/jobs/1002/log": () => (stored ? fixtures.jobLog : { ...fixtures.jobLog, no_log: true, steps: [] }) }),
+    )
+    const { user } = renderApp("/actions/darkmem/runs/102/jobs/1002")
+    expect(await screen.findByText("This job produced no log.")).toBeInTheDocument()
+    stored = true
+    await user.click(screen.getByRole("button", { name: "Check again" }))
+    expect(await screen.findByLabelText("Search logs")).toBeInTheDocument()
+    expect(calls.filter((c) => c.path.endsWith("/log"))).toHaveLength(2)
+  })
+
+  it("asks again for the log of a job that finished moments ago", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
+    try {
+      const recent = {
+        ...fixtures.runDetail,
+        jobs: fixtures.runDetail.jobs.map((j) => (j.id === 1002 ? { ...j, completed_at: new Date(Date.now() - 30_000).toISOString() } : j)),
+      }
+      let stored = false
+      const { calls } = mockApi(
+        runRoutes({
+          "GET /api/actions/darkmem/runs/102": recent,
+          "GET /api/actions/darkmem/jobs/1002/log": () => (stored ? fixtures.jobLog : { ...fixtures.jobLog, no_log: true, steps: [] }),
+        }),
+      )
+      renderApp("/actions/darkmem/runs/102/jobs/1002")
+      expect(await screen.findByText("GitHub has not stored this job's log yet; checking again.")).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument()
+      stored = true
+      await act(() => vi.advanceTimersByTimeAsync(15_000))
+      expect(await screen.findByLabelText("Search logs")).toBeInTheDocument()
+      expect(calls.filter((c) => c.path.endsWith("/log"))).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("saves the raw log through a Blob", async () => {
