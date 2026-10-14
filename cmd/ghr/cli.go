@@ -325,7 +325,7 @@ func historyCmd(ctx context.Context, c *api.Client, args []string, out io.Writer
 }
 
 func printHistory(out io.Writer, h []model.HistoryEntry) error {
-	safe := stdoutText()
+	safe := stdoutLine()
 	w := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(w, "FINISHED\tREPO\tRUN\tJOB\tRESULT\tDURATION")
 	for _, e := range h {
@@ -354,11 +354,31 @@ func termSafe(s string) string {
 	}, strings.ReplaceAll(s, "\r\n", "\n"))
 }
 
+// termSafeLine is termSafe for a field that must stay on its line and in its
+// column, so newline and tab become a space as well.
+func termSafeLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, termSafe(s))
+}
+
 // stdoutText returns termSafe when stdout is a terminal. A pipe or a file
 // keeps the raw bytes.
 func stdoutText() func(string) string {
+	return ifTerminal(termSafe)
+}
+
+// stdoutLine is stdoutText for a single-line field.
+func stdoutLine() func(string) string {
+	return ifTerminal(termSafeLine)
+}
+
+func ifTerminal(f func(string) string) func(string) string {
 	if fdIsTerminal(os.Stdout.Fd()) {
-		return termSafe
+		return f
 	}
 	return func(s string) string { return s }
 }
@@ -371,7 +391,7 @@ func maxText(n int) string {
 }
 
 func printStatus(out io.Writer, st model.Status) {
-	safe := stdoutText()
+	safe := stdoutLine()
 	if st.Unconfigured {
 		fmt.Fprintln(out, "warning: ghr is not configured. Run: ghr setup github --owner <owner>, or open the web UI")
 	}
@@ -408,7 +428,7 @@ func printStatus(out io.Writer, st model.Status) {
 			state = "paused"
 		}
 		if r.Error != "" {
-			state = "error: " + r.Error
+			state = "error: " + safe(r.Error)
 		}
 		last := "-"
 		if r.LastJob != nil {

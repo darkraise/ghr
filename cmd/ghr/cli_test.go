@@ -384,6 +384,37 @@ func TestJobNamesEscapeControlsAtATerminal(t *testing.T) {
 	}
 }
 
+func TestSingleLineFieldsCannotAddARowAtATerminal(t *testing.T) {
+	build := func(sep string) (model.Status, []model.HistoryEntry) {
+		name := "build" + sep + "FAKE" + sep + "failure"
+		st := model.Status{Mode: "queue", GlobalMax: 1,
+			Repos: []model.RepoStatus{
+				{Name: "r" + sep + "fake", Error: "boom" + sep + "ERR"},
+				{Name: "s", LastJob: &model.HistoryEntry{Conclusion: "success", RunNumber: "1" + sep + "2", JobName: name}}},
+			Instances: []model.InstanceStatus{{ID: "a3f9c1", Repo: "r" + sep + "x", State: "busy",
+				Job: &model.JobInfo{Name: "wf" + sep + "/ " + name, RunNumber: "2" + sep + "3"}}}}
+		return st, []model.HistoryEntry{{Repo: "r" + sep + "x", RunNumber: "1" + sep + "2", JobName: name, Conclusion: "success"}}
+	}
+	render := func(sep string) (string, string) {
+		st, hist := build(sep)
+		var status, history bytes.Buffer
+		printStatus(&status, st)
+		printHistory(&history, hist)
+		return status.String(), history.String()
+	}
+	oneLineStatus, oneLineHistory := render(" ")
+	for _, sep := range []string{"\n", "\t"} {
+		stubStdoutTerminal(t, true)
+		if status, history := render(sep); status != oneLineStatus || history != oneLineHistory {
+			t.Errorf("at a terminal a %q in a field changed the layout:\n%s%s", sep, status, history)
+		}
+		stubStdoutTerminal(t, false)
+		if status, _ := render(sep); status == oneLineStatus {
+			t.Errorf("in a pipe a %q in a field was changed", sep)
+		}
+	}
+}
+
 type failWriter struct{}
 
 func (failWriter) Write([]byte) (int, error) { return 0, errors.New("closed") }
