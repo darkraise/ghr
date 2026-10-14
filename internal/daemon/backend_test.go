@@ -966,7 +966,7 @@ func TestRegistrationsListed(t *testing.T) {
 }
 
 // A successful delete posts an event; a failed one returns GitHub's error and
-// posts nothing.
+// posts nothing, and one that finds the runner already gone posts nothing.
 func TestDeleteRegistrationEventAndFailure(t *testing.T) {
 	b, _, gh := newBackend(t)
 	registrationGH(gh)
@@ -977,6 +977,13 @@ func TestDeleteRegistrationEventAndFailure(t *testing.T) {
 	}
 	if evs := b.Events.After(0); len(evs) != 0 {
 		t.Fatalf("a failed delete posted %+v", evs)
+	}
+	gh.delErr = &github.APIError{Status: 404, Kind: github.ErrNotFound}
+	if err := b.DeleteRegistration(ctx, "darkcloud", 1); err != nil {
+		t.Fatalf("a runner removed between the check and the delete: %v", err)
+	}
+	if evs := b.Events.After(0); len(evs) != 0 {
+		t.Fatalf("a delete that found nothing posted %+v", evs)
 	}
 	gh.delErr = nil
 	if err := b.DeleteRegistration(ctx, "DarkCloud", 1); err != nil {

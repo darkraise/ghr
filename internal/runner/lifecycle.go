@@ -89,7 +89,7 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 		} else {
 			m.Events.Add("warn", r.Name, "spawn %s: remove dir: %v; reconciliation retries", id, rerr)
 		}
-		if derr := m.GH.DeleteRunner(ctx, r.Name, jit.Runner.ID); derr != nil {
+		if derr := m.GH.DeleteRunner(ctx, r.Name, jit.Runner.ID); derr != nil && !github.IsKind(derr, github.ErrNotFound) {
 			m.Events.Add("warn", r.Name, "spawn %s: delete registration: %v", id, derr)
 		}
 		return err
@@ -519,7 +519,8 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 		return fmt.Errorf("remove %s: %w", dir, err)
 	}
 	m.removePrivate(id)
-	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil && !github.IsKind(err, github.ErrUnprocessable) {
+	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil &&
+		!github.IsKind(err, github.ErrUnprocessable) && !github.IsKind(err, github.ErrNotFound) {
 		m.Events.Add("warn", i.Repo, "delete registration %s: %v (reconciliation retries)", i.RunnerName, err)
 	}
 
@@ -750,9 +751,16 @@ func (m *Manager) deregisterIdle(ctx context.Context, i instance, now time.Time)
 		return idleBusy, false
 	}
 	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil {
-		if github.IsKind(err, github.ErrUnprocessable) {
+		switch {
+		case github.IsKind(err, github.ErrUnprocessable):
 			m.move(i.ID, sched.Busy, sched.Starting, sched.Idle)
 			return idleBusy, false
+		case github.IsKind(err, github.ErrNotFound):
+			if !m.registrationGone(ctx, i.Repo, i.RunnerID, now) {
+				return idleKept, false
+			}
+			m.markLost(i.ID)
+			return idleStopped, true
 		}
 		m.apiErr(i.Repo, err, now)
 		return idleKept, false

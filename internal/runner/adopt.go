@@ -180,7 +180,7 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 			}
 			err := m.GH.DeleteRunner(ctx, r.Name, rn.ID)
 			switch {
-			case err == nil:
+			case err == nil, github.IsKind(err, github.ErrNotFound):
 				m.Events.Add("info", r.Name, "removed stale registration %s", rn.Name)
 			case github.IsKind(err, github.ErrUnprocessable):
 				// busy; retried at the next reconciliation

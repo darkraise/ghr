@@ -1140,7 +1140,9 @@ func (b *Backend) DeleteRegistration(ctx context.Context, repo string, id int64)
 	case r.Status != "offline":
 		return api.Conflict(r.Name + " is " + r.Status + "; only offline runners can be deleted")
 	}
-	if err := b.GH.DeleteRunner(ctx, name, id); err != nil {
+	if err := b.GH.DeleteRunner(ctx, name, id); github.IsKind(err, github.ErrNotFound) {
+		return nil
+	} else if err != nil {
 		return err
 	}
 	b.Events.Add("info", name, "deleted runner registration %s", r.Name)

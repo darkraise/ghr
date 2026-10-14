@@ -568,6 +568,33 @@ func TestStopIdleKeepsRunnerGitHubWillNotDeregister(t *testing.T) {
 	}
 }
 
+// The check answered, so a 404 from the delete means the registration is gone
+// only when the runner list confirms it: GitHub also answers 404 when the
+// token lost access to the repository.
+func TestStopIdleChecksTheListAfterADeleteAnswers404(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		listed  []github.Runner
+		stopped int
+	}{
+		{"still listed", []github.Runner{{ID: 101, Name: "ghr-darkmem-aaaaaa", Status: "online"}}, 0},
+		{"not listed", nil, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			idleOnline(t, h, "darkmem")
+			h.now = h.now.Add(6 * time.Minute)
+			h.gh.setErr("DeleteRunner darkmem", &github.APIError{Status: 404, Kind: github.ErrNotFound})
+			h.gh.listed["darkmem"] = c.listed
+			h.m.beginTick()
+			h.m.stopIdle(context.Background(), h.cfg, h.now)
+			if len(h.sd.stopped) != c.stopped {
+				t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
+			}
+		})
+	}
+}
+
 // A tick stops its idle runners from a snapshot, and a stop a person asked for
 // can start a runner's cleanup after that snapshot was taken.
 func TestStopIdleRunnerLeavesARunnerInCleanupAlone(t *testing.T) {

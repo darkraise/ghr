@@ -147,6 +147,18 @@ func TestReconcileStopsUntrackedUnitBeforeDeletingRegistration(t *testing.T) {
 	}
 }
 
+// A registration that is gone by the time it is deleted is removed all the same.
+func TestReconcileTakesA404FromTheDeleteAsRemoved(t *testing.T) {
+	h := newHarness(t)
+	h.gh.listed["darkmem"] = []github.Runner{{ID: 3, Name: "ghr-darkmem-ffffff", Status: "offline"}}
+	h.gh.setErr("DeleteRunner darkmem", &github.APIError{Status: 404, Kind: github.ErrNotFound})
+	h.m.Reconcile(context.Background(), h.cfg)
+	h.m.Reconcile(context.Background(), h.cfg)
+	if ev := h.eventText(); !strings.Contains(ev, "info darkmem removed stale registration ghr-darkmem-ffffff") || strings.Contains(ev, "warn") {
+		t.Fatalf("events:\n%s", ev)
+	}
+}
+
 func TestReconcileReportsListRunnersFailure(t *testing.T) {
 	h := newHarness(t)
 	h.gh.setErr("ListRunners darkmem", errors.New("boom"))

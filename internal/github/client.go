@@ -575,12 +575,10 @@ func (c *Client) GetRunner(ctx context.Context, repo string, id int64) (*Runner,
 	return &r, json.Unmarshal(data, &r)
 }
 
-// DeleteRunner removes a registration; an already-removed runner (404) is success.
+// DeleteRunner removes a registration. A 404 is returned: GitHub answers it
+// both for a runner already removed and for a repository the token cannot see.
 func (c *Client) DeleteRunner(ctx context.Context, repo string, id int64) error {
 	_, err := c.mutate(ctx, http.MethodDelete, c.repoURL(repo, fmt.Sprintf("/actions/runners/%d", id)), nil)
-	if IsKind(err, ErrNotFound) {
-		return nil
-	}
 	return err
 }
 
