@@ -145,11 +145,7 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 			if err := c.ResetWebPassword(ctx); err != nil {
 				return err
 			}
-			code, err := c.SetupCode(ctx)
-			if err != nil {
-				return fmt.Errorf("web password removed, but reading the new setup code failed: %w", err)
-			}
-			fmt.Fprintln(out, "web password removed; set a new one with: ghr web set-password, or in the browser with setup code "+code)
+			fmt.Fprintln(out, "web password removed; set a new one with: ghr web set-password, or in the browser with the code from: ghr code")
 			return nil
 		case "set-password":
 			pw, err := readNewPassword(ctx, stdin, errOut)

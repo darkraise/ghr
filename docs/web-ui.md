@@ -20,7 +20,7 @@ Until a password is set, the UI asks for a one-time setup code along with the ne
 
 - `ghr status` warns while the UI has no password.
 - `ghr web set-password` (12 to 1024 characters) sets it over SSH.
-- `ghr web reset-password` deletes the password, logs every browser out and prints a new setup code; set a new password with `ghr web set-password`, or in the browser with that code.
+- `ghr web reset-password` deletes the password, logs every browser out and replaces the setup code; set a new password with `ghr web set-password`, or in the browser with the new code from `ghr code`.
 - Five wrong passwords, at login or when changing it, from one address within 15 minutes lock that address out for 15 minutes.
 - Changing the password logs out every other browser and session.
 - A session ends after 24 hours without use, and after 30 days in any case. A tab kept in view keeps its session in use.

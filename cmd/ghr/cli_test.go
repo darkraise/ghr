@@ -550,12 +550,16 @@ func TestCodeWithAPasswordSet(t *testing.T) {
 func TestWebResetPassword(t *testing.T) {
 	reqs := fakeDaemon(t)
 	code, out, errOut := runCLI(t, "", "web", "reset-password")
-	if code != 0 || out != "web password removed; set a new one with: ghr web set-password, or in the browser with setup code ABCDE-FGHJK-MNPQR-STVWX\n" {
+	if code != 0 || out != "web password removed; set a new one with: ghr web set-password, or in the browser with the code from: ghr code\n" {
 		t.Fatalf("exit %d out %q err %q", code, out, errOut)
 	}
-	if n := len(*reqs); n < 2 || (*reqs)[n-2].method != "POST" || (*reqs)[n-2].path != "/web/reset-password" ||
-		(*reqs)[n-1].method != "GET" || (*reqs)[n-1].path != "/web/setup-code" {
+	if n := len(*reqs); n == 0 || (*reqs)[n-1].method != "POST" || (*reqs)[n-1].path != "/web/reset-password" {
 		t.Fatalf("requests %+v", *reqs)
+	}
+	for _, r := range *reqs {
+		if r.path == "/web/setup-code" {
+			t.Fatalf("read the setup code: %+v", *reqs)
+		}
 	}
 	for _, args := range [][]string{{"web"}, {"web", "reset"}, {"web", "reset-password", "now"}} {
 		code, _, errOut := runCLI(t, "", args...)

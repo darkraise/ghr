@@ -67,7 +67,7 @@ ghr history [--repo r] [--conclusion c] [--limit n]
 ghr runner-update [--cancel]  # queue a runner update; downloaded in the background, installed when no job is running or queued
 ghr code                      # the web UI setup code, until a password is set
 ghr web set-password          # prompts, or reads stdin
-ghr web reset-password        # prints a new setup code
+ghr web reset-password        # forget the password; the browser then needs a new code from ghr code
 ghr setup                     # first-run state: configured, wizard, owner
 ghr setup github [--owner <owner>]          # set the owner and token (prompts, or reads stdin)
 ghr setup finish [--toolchains popular|none]
