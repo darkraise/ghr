@@ -517,10 +517,10 @@ func (f *fakeDocker) pruneList() string {
 type fakeHost struct {
 	mu       sync.Mutex
 	chowned  []string
-	calls    []string          // Extract and RunScript calls, as "<method> <dir>"
-	errs     map[string]error  // by method name
-	onScript func()            // runs inside RunScript
-	onChown  func(path string) // runs inside ChownR
+	calls    []string                  // Extract and RunScript calls, as "<method> <dir>"
+	errs     map[string]error          // by method name
+	onScript func(ctx context.Context) // runs inside RunScript, with its context
+	onChown  func(path string)         // runs inside ChownR
 }
 
 func (f *fakeHost) err(method string) error {
@@ -559,13 +559,13 @@ func (f *fakeHost) Extract(_ context.Context, _, dir string) error {
 	return os.WriteFile(filepath.Join(dir, "run.sh"), []byte("#!/bin/sh\n"), 0o755)
 }
 
-func (f *fakeHost) RunScript(_ context.Context, dir, _ string) error {
+func (f *fakeHost) RunScript(ctx context.Context, dir, _ string) error {
 	f.record("RunScript", dir)
 	f.mu.Lock()
 	hook := f.onScript
 	f.mu.Unlock()
 	if hook != nil {
-		hook()
+		hook(ctx)
 	}
 	return f.err("RunScript")
 }

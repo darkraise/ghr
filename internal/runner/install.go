@@ -71,7 +71,7 @@ func (m *Manager) installLatest(ctx context.Context) (string, string, error) {
 	distDir := filepath.Dir(m.Paths.Dist)
 	dir := filepath.Join(distDir, ver)
 	if !complete(dir) {
-		if err := m.stage(ctx, distDir, ver, sum); err != nil {
+		if err := m.stage(ctx, ctx, distDir, ver, sum); err != nil {
 			return "", "", err
 		}
 	}
@@ -93,8 +93,10 @@ func (m *Manager) installLatest(ctx context.Context) (string, string, error) {
 
 // stage downloads, verifies, unpacks and prepares version ver in
 // dist/<ver>.tmp, then renames it to dist/<ver>. Every failure removes the
-// staging dir.
-func (m *Manager) stage(ctx context.Context, distDir, ver, sum string) error {
+// staging dir. The dependency script runs under scriptCtx, which may leave
+// out a cancel of ctx: killing apt midway can leave dpkg half-configured. A
+// ctx that ended meanwhile still fails the stage right after the script.
+func (m *Manager) stage(ctx, scriptCtx context.Context, distDir, ver, sum string) error {
 	leftovers, _ := filepath.Glob(filepath.Join(distDir, "*.tmp"))
 	for _, l := range leftovers {
 		if err := removeAll(l); err != nil {
@@ -126,7 +128,10 @@ func (m *Manager) stage(ctx context.Context, distDir, ver, sum string) error {
 	if err := os.Remove(tarball); err != nil {
 		return fail("extract", err)
 	}
-	if err := m.Host.RunScript(ctx, staging, "bin/installdependencies.sh"); err != nil {
+	if err := m.Host.RunScript(scriptCtx, staging, "bin/installdependencies.sh"); err != nil {
+		return fail("dependencies", err)
+	}
+	if err := ctx.Err(); err != nil {
 		return fail("dependencies", err)
 	}
 	final := filepath.Join(distDir, ver)

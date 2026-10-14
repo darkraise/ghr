@@ -580,3 +580,29 @@ func TestPrepareEndsWithShutdownOrCancel(t *testing.T) {
 		})
 	}
 }
+
+// A cancel during the dependency script lets the script finish, since
+// killing apt midway can leave dpkg half-configured; the prepare ends right
+// after it.
+func TestCancelLetsTheDependencyScriptFinish(t *testing.T) {
+	h := newHarness(t)
+	dist, _ := queuedUpdate(t, h, tarballSum())
+	var scriptErr error
+	h.host.onScript = func(ctx context.Context) {
+		if err := h.m.CancelUpdate(); err != nil {
+			t.Error(err)
+		}
+		scriptErr = ctx.Err()
+	}
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if scriptErr != nil {
+		t.Fatalf("the cancel ended the dependency script: %v", scriptErr)
+	}
+	if u := h.m.Status().RunnerUpdate; u.Queued || u.LastOutcome != "" {
+		t.Fatalf("status %+v", u)
+	}
+	if got := distEntries(t, dist); got != "2.330.0,2.337.0,current" || strings.Contains(h.eventText(), "is ready") || strings.Contains(h.eventText(), "failed") {
+		t.Fatalf("dist holds %s\n%s", got, h.eventText())
+	}
+}

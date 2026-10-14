@@ -448,16 +448,20 @@ func (m *Manager) prepareUpdate(now time.Time) {
 		m.mu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithTimeout(m.maintCtx, prepareTimeout)
+	// A cancel ends ctx only; the dependency script runs under base, which
+	// still ends with the timeout and a shutdown.
+	base, cancelBase := context.WithTimeout(m.maintCtx, prepareTimeout)
+	ctx, cancel := context.WithCancel(base)
 	m.upd.preparing, m.upd.prepareStop = true, cancel
 	m.wg.Add(1)
 	m.mu.Unlock()
 	m.Events.Add("info", "", "runner update: downloading %s", ver)
 	go func() {
 		defer m.wg.Done()
-		err := m.stage(ctx, filepath.Dir(m.Paths.Dist), ver, sum)
+		err := m.stage(ctx, base, filepath.Dir(m.Paths.Dist), ver, sum)
 		stopped := errors.Is(ctx.Err(), context.Canceled)
 		cancel()
+		cancelBase()
 		now := m.Now()
 		retry := releaseCheckRetry
 		m.mu.Lock()

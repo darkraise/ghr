@@ -250,7 +250,7 @@ func TestUpdateCancelledBeforeTheSwitchKeepsCurrent(t *testing.T) {
 		name  string
 		setup func(t *testing.T, h *harness, dist string)
 	}{
-		{"after the dependency script", func(t *testing.T, h *harness, _ string) { h.host.onScript = h.m.Close }},
+		{"after the dependency script", func(t *testing.T, h *harness, _ string) { h.host.onScript = func(context.Context) { h.m.Close() } }},
 		{"reusing a complete version", func(t *testing.T, h *harness, dist string) {
 			ready := filepath.Join(dist, "2.338.0")
 			if err := os.MkdirAll(ready, 0o755); err != nil {
