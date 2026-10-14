@@ -173,3 +173,73 @@ func TestArchiveKeepsOnlyTheRunnerLogs(t *testing.T) {
 		t.Fatalf("data %.80q err %v", c.Data, err)
 	}
 }
+
+// finish moves _diag into the logs directory and then trims, chowns and
+// touches the archive as root. A _diag the job swapped for a link or a file
+// is not archived, so none of that reaches what it points at.
+func TestFinishArchivesOnlyARealDiagDirectory(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		plant func(t *testing.T, diag, elsewhere string)
+	}{
+		{"symlink", func(t *testing.T, diag, elsewhere string) {
+			if err := os.Symlink(elsewhere, diag); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"regular file", func(t *testing.T, diag, _ string) {
+			if err := os.WriteFile(diag, []byte("not a directory"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.m.spawn(context.Background(), h.cfg, "darkmem")
+			elsewhere := filepath.Join(h.root, "elsewhere")
+			if err := os.MkdirAll(filepath.Join(elsewhere, "keep"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for name, data := range map[string]string{"notes.txt": "notes", "Runner_1.log": "log", "keep/x": "x"} {
+				if err := os.WriteFile(filepath.Join(elsewhere, name), []byte(data), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Truncate(filepath.Join(elsewhere, "Runner_1.log"), maxArchivedLog+100); err != nil {
+				t.Fatal(err)
+			}
+			old := h.now.Add(-72 * time.Hour)
+			if err := os.Chtimes(elsewhere, old, old); err != nil {
+				t.Fatal(err)
+			}
+			diag := filepath.Join(h.m.instanceDir("aaaaaa"), "_diag")
+			if err := os.RemoveAll(diag); err != nil {
+				t.Fatal(err)
+			}
+			tc.plant(t, diag, elsewhere)
+			h.sd.active["ghr-runner-aaaaaa"] = false
+			mustReturn(t, "finish", func() {
+				h.m.refreshUnits(context.Background())
+				h.m.Wait()
+			})
+			archive := filepath.Join(h.m.Paths.Logs, "aaaaaa")
+			if _, err := os.Lstat(archive); !os.IsNotExist(err) {
+				t.Fatalf("archive created: %v\n%s", err, h.eventText())
+			}
+			if strings.Contains(strings.Join(h.host.chowned, ","), archive) {
+				t.Fatalf("chowned %v", h.host.chowned)
+			}
+			for name, size := range map[string]int64{"notes.txt": 5, "Runner_1.log": maxArchivedLog + 100, "keep/x": 1} {
+				if fi, err := os.Stat(filepath.Join(elsewhere, name)); err != nil || fi.Size() != size {
+					t.Fatalf("%s: %v, %v", name, fi, err)
+				}
+			}
+			if fi, err := os.Stat(elsewhere); err != nil || !fi.ModTime().Equal(old) {
+				t.Fatalf("target touched: %v, %v", fi, err)
+			}
+			if _, err := h.m.RunnerLog("aaaaaa", ""); err == nil {
+				t.Fatal("a log was read")
+			}
+		})
+	}
+}

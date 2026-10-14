@@ -562,12 +562,25 @@ func (m *Manager) openLogs(id string) (*os.Root, error) {
 	return os.OpenRoot(dir)
 }
 
-// trimArchive removes from an archived _diag everything but its regular
-// files named by logPatterns, and cuts each of those to its first
-// maxArchivedLog bytes. The job filled the directory, so it works through an
-// os.Root, which follows no symlink out of it.
-func trimArchive(dir string) error {
-	root, err := os.OpenRoot(dir)
+// trimArchive removes from the archive id under logs everything but its
+// regular files named by logPatterns, cuts each of those to its first
+// maxArchivedLog bytes, and sets its mtime to now. The job filled the
+// archive, so only a real directory is opened, through an os.Root of logs,
+// and it is worked on through its own os.Root, which follows no symlink out
+// of it and keeps the directory it opened even if the name is swapped.
+func trimArchive(logs, id string, now time.Time) error {
+	parent, err := os.OpenRoot(logs)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	if fi, err := parent.Lstat(id); err != nil || !fi.IsDir() {
+		if err == nil {
+			err = fmt.Errorf("%s: not a directory", id)
+		}
+		return err
+	}
+	root, err := parent.OpenRoot(id)
 	if err != nil {
 		return err
 	}
@@ -588,7 +601,10 @@ func trimArchive(dir string) error {
 			return err
 		}
 	}
-	return nil
+	// The rename keeps _diag's mtime, the time its last log file was
+	// created, often the job's start. prune ages archives as it ages
+	// history: from the job's end.
+	return root.Chtimes(".", now, now)
 }
 
 func isLogName(name string) bool {

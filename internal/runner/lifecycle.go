@@ -50,6 +50,20 @@ func exists(path string) bool {
 	return !os.IsNotExist(err)
 }
 
+// realDirOrRemove returns nil when path is a directory itself, not a link to
+// one. Anything else there is removed, a link without following it, and
+// reported as fs.ErrNotExist.
+func realDirOrRemove(path string) error {
+	fi, err := os.Lstat(path)
+	if err != nil || fi.IsDir() {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return fs.ErrNotExist
+}
+
 // uniqueID returns an ID with no live instance, instance dir, log archive,
 // pending history record or history entry, so retained logs and history never
 // collide. An unreadable path counts as taken, so the attempts are bounded.
@@ -479,29 +493,31 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 		}
 	}
 
+	// The job owns _diag and may have swapped it for a link or a file. Only a
+	// real directory is archived: what follows runs as root on the archive.
 	archive := filepath.Join(m.Paths.Logs, id)
-	if diag := filepath.Join(dir, "_diag"); exists(diag) {
+	diag := filepath.Join(dir, "_diag")
+	if err := realDirOrRemove(diag); err == nil {
 		if err := os.MkdirAll(m.Paths.Logs, 0o755); err != nil {
 			return fmt.Errorf("archive logs: %w", err)
 		}
 		if err := os.Rename(diag, archive); err != nil {
 			return fmt.Errorf("archive logs: %w", err)
 		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("archive logs: %w", err)
 	}
-	if exists(archive) {
+	// Checked again, as a swap between the check and the rename moves the
+	// link instead.
+	if err := realDirOrRemove(archive); err == nil {
 		if err := m.Host.ChownR(ctx, archive, "root"); err != nil {
 			return fmt.Errorf("chown archived logs: %w", err)
 		}
-		if err := trimArchive(archive); err != nil {
+		if err := trimArchive(m.Paths.Logs, id, m.Now()); err != nil {
 			return fmt.Errorf("trim archived logs: %w", err)
 		}
-		// The rename keeps _diag's mtime, the time its last log file was
-		// created, often the job's start. prune ages archives as it ages
-		// history: from the job's end.
-		now := m.Now()
-		if err := os.Chtimes(archive, now, now); err != nil {
-			return fmt.Errorf("archive logs: %w", err)
-		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("archive logs: %w", err)
 	}
 
 	removed, err := m.cleanupDocker(ctx, cfg, id, i.Repo)
