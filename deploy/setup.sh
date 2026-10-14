@@ -189,6 +189,7 @@ install_runner() {
     tar --no-same-owner -xzf "$staging/runner.tar.gz" -C "$staging"
     rm -f "$staging/runner.tar.gz"
     "$staging/bin/installdependencies.sh" >/dev/null || die "actions-runner $version: bin/installdependencies.sh failed"
+    rm -rf "$dir"
     mv -T "$staging" "$dir"
   fi
   chown -R root:root "$dir"

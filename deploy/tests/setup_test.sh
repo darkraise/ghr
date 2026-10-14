@@ -203,6 +203,17 @@ check "a: no dist dir carries the v" absent "$DIST_DIR/v$FIXTURE_VERSION"
 check "a: the runner is fetched by its bare number" [ "$(cat "$MARK_DIR/fetched-versions")" = "$FIXTURE_VERSION" ]
 check "a: current points at the bare number" [ "$(target_of_current)" = "$FIXTURE_VERSION" ]
 
+# A dist dir without an executable run.sh is incomplete: it is replaced, not a reason to fail.
+new_case a-partial-dir
+mkdir -p "$DIST_DIR/$FIXTURE_VERSION"
+touch "$DIST_DIR/$FIXTURE_VERSION/partial"
+out=$(run install_runner 2>&1)
+rc=$?
+check "a: an incomplete dist dir does not block the install" [ "$rc" -eq 0 ]
+check "a: the incomplete dist dir is replaced by a complete one" [ -x "$DIST_DIR/$FIXTURE_VERSION/run.sh" ]
+check "a: nothing of the incomplete dist dir is kept" absent "$DIST_DIR/$FIXTURE_VERSION/partial"
+check "a: current points at the replaced version" [ "$(target_of_current)" = "$FIXTURE_VERSION" ]
+
 # (b) Readiness loop.
 new_case b-ready-after-polls
 READY_AFTER=3
