@@ -16,7 +16,7 @@ ghr installs toolchains into the runners' shared tool cache, `/var/lib/ghr/toolc
 | `ghr storage [refresh]` | Docker's disk (images, containers, volumes, build cache by type), the last prune, toolchains, other tool-cache folders, package caches and the running operation; `refresh` measures now |
 | `ghr prune [--scope <scope>]` | `standard` (the default), `build-cache-keep`, `build-cache-all`, `dangling-images` or `unused-volumes` (anonymous volumes no container uses) |
 
-Installs, removals and clears queue and run one at a time; follow them with `ghr storage`. Removing a toolchain, clearing a cache and `--scope unused-volumes` are refused while any runner has a job or is starting. While one runs, idle runners are stopped and no runner starts; they come back on the next tick after it ends. Stopping idle runners needs GitHub to answer, so these actions fail while it does not if idle runners exist. The same actions are under Settings → Toolchains and Settings → Storage in the web UI.
+Installs, removals and clears queue and run one at a time; follow them with `ghr storage`. Removing a toolchain, clearing a cache and `--scope unused-volumes` are refused while any runner has a job or is starting. While one runs, idle runners are stopped and no runner starts; they come back on the next tick after it ends. These actions are refused when GitHub does not answer and idle runners exist. The same actions are under Settings → Toolchains and Settings → Storage in the web UI.
 
 ghr also prunes Docker on its own when the disk use of Docker's data root passes `disk_high_water`, keeping `build_cache_keep` of build cache.
 
