@@ -36,6 +36,16 @@ wget -qO- https://github.com/darkraise/ghr/releases/latest/download/setup.sh | b
 
 `setup.sh` installs Docker Engine from Docker's apt repository, then the GitHub Actions runner and ghr after checking their checksums, starts the `ghr` service and prints the address that finishes setup in the browser, with the one-time setup code the browser asks for before the web password is set.
 
+To check the script before it runs, download it, verify its build provenance with the [GitHub CLI](https://cli.github.com/) and then run it:
+
+```bash
+curl -fsSLO https://github.com/darkraise/ghr/releases/latest/download/setup.sh
+gh attestation verify setup.sh -R darkraise/ghr
+bash setup.sh
+```
+
+Verify the release tarball the same way: download `ghr_linux_amd64.tar.gz` from the release and run `gh attestation verify ghr_linux_amd64.tar.gz -R darkraise/ghr`. Releases before attestations were added have none to verify. `setup.sh` checks the tarball against the release's `checksums.txt`, which comes from the same place as the tarball, so only the attestation proves where a file was built.
+
 Piped like this, the script asks nothing. To answer its prompts in the terminal instead, run:
 
 ```bash

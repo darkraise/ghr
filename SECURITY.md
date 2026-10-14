@@ -20,4 +20,4 @@ ghr runs CI jobs natively on its host, so some risks are part of its design rath
 
 Claiming an unclaimed web UI needs the setup code, which only root on the host can read.
 
-Reports about ways around these protections, such as reaching the web UI without the password or claiming it without the setup code, running jobs for a repository ghr should refuse, or a download ghr installs without checking it, are in scope.
+Reports about ways around these protections, such as reaching the web UI without the password or claiming it without the setup code, running jobs for a repository ghr should refuse, or a download ghr installs without the check that [docs/toolchains.md](docs/toolchains.md#download-integrity) describes for it, are in scope.
