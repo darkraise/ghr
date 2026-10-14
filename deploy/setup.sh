@@ -29,6 +29,7 @@ RUNNER_USER=ghrunner
 OPT_DIR=/opt/ghr
 DIST_DIR="$OPT_DIR/dist"
 HOOKS_DIR="$OPT_DIR/hooks"
+BIN_DIR=/usr/local/bin
 STATE_DIR=/var/lib/ghr
 ETC_DIR=/etc/ghr
 APT_SOURCES_DIR=/etc/apt/sources.list.d
@@ -37,6 +38,8 @@ KEYRING_DIR=/etc/apt/keyrings
 OS_RELEASE=/etc/os-release
 DOCKER_KEY_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 READY_TIMEOUT=60
+# Temporary directories the exit trap removes if the script dies before it can.
+CLEANUP=()
 # set_web_password sets it when it leaves the web UI without a password.
 WEB_UNCLAIMED=
 
@@ -148,7 +151,7 @@ fetch_runner() {
 # does not install a runner version over the one this script just installed.
 # The version it already warned about is kept, or it would warn again.
 stop_ghr() {
-  trap 'systemctl start ghr.service 2>/dev/null || true' EXIT
+  trap 'rm -rf "${CLEANUP[@]}"; systemctl start ghr.service 2>/dev/null || true' EXIT
   if systemctl cat ghr.service >/dev/null 2>&1; then
     systemctl stop ghr.service || die "could not stop ghr.service; stop it and re-run"
     case "$(systemctl is-active ghr.service || true)" in
@@ -199,7 +202,7 @@ install_runner() {
 }
 
 install_ghr() {
-  local base tmp
+  local base tmp hook
   if [ "$GHR_VERSION" = latest ]; then
     base="https://github.com/$GHR_REPO/releases/latest/download"
   else
@@ -207,12 +210,19 @@ install_ghr() {
   fi
   log "installing ghr ($GHR_VERSION)"
   tmp=$(mktemp -d)
+  CLEANUP+=("$tmp")
   curl -fsSL -o "$tmp/ghr_linux_amd64.tar.gz" "$base/ghr_linux_amd64.tar.gz"
   curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
   (cd "$tmp" && sha256sum -c checksums.txt >/dev/null) || die "ghr checksum mismatch"
   tar -xzf "$tmp/ghr_linux_amd64.tar.gz" -C "$tmp"
-  install -m 0755 "$tmp/ghr/ghr" /usr/local/bin/ghr
-  install -m 0755 "$tmp/ghr/job-started.sh" "$tmp/ghr/job-completed.sh" "$HOOKS_DIR/"
+  # Written beside the target and renamed over it, so an interrupted run leaves
+  # the old file or the complete new one, never half of it.
+  install -m 0755 "$tmp/ghr/ghr" "$BIN_DIR/.ghr.new"
+  mv -f "$BIN_DIR/.ghr.new" "$BIN_DIR/ghr"
+  for hook in job-started.sh job-completed.sh; do
+    install -m 0755 "$tmp/ghr/$hook" "$HOOKS_DIR/.$hook.new"
+    mv -f "$HOOKS_DIR/.$hook.new" "$HOOKS_DIR/$hook"
+  done
   if [ -f "$tmp/ghr/config.example.yaml" ]; then
     install -m 0644 "$tmp/ghr/config.example.yaml" "$OPT_DIR/config.example.yaml"
   fi

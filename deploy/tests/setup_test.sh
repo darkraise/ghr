@@ -21,6 +21,8 @@ DEFAULT_KEYRING_DIR=$KEYRING_DIR
 KEYRING_DIR="$T/keyrings"
 DEFAULT_SYSTEMD_DIR=$SYSTEMD_DIR
 SYSTEMD_DIR="$T/systemd"
+BIN_DIR="$T/bin"
+HOOKS_DIR="$T/hooks"
 
 FAILS=0
 check() {
@@ -41,9 +43,9 @@ bump() { echo $(($(count "$1") + 1)) > "$MARK_DIR/$1"; }
 # Runs a setup.sh function the way main runs: errexit on, die exits a subshell.
 # It refuses to run while a redirected directory points outside the temporary tree.
 run() {
-  case "$KEYRING_DIR:$SYSTEMD_DIR" in
-    "$T"/*:"$T"/*) ;;
-    *) echo "refusing to run: KEYRING_DIR=$KEYRING_DIR or SYSTEMD_DIR=$SYSTEMD_DIR is outside $T" >&2; return 99 ;;
+  case "$KEYRING_DIR:$SYSTEMD_DIR:$BIN_DIR:$HOOKS_DIR" in
+    "$T"/*:"$T"/*:"$T"/*:"$T"/*) ;;
+    *) echo "refusing to run: KEYRING_DIR=$KEYRING_DIR, SYSTEMD_DIR=$SYSTEMD_DIR, BIN_DIR=$BIN_DIR or HOOKS_DIR=$HOOKS_DIR is outside $T" >&2; return 99 ;;
   esac
   (set -e; "$@")
 }
@@ -138,7 +140,9 @@ new_case() {
   OPT_DIR="$T/$1/opt"
   KEYRING_DIR="$T/$1/keyrings"
   SYSTEMD_DIR="$T/$1/systemd"
-  mkdir -p "$DIST_DIR" "$MARK_DIR" "$STATE_DIR" "$OPT_DIR"
+  BIN_DIR="$T/$1/bin"
+  HOOKS_DIR="$T/$1/hooks"
+  mkdir -p "$DIST_DIR" "$MARK_DIR" "$STATE_DIR" "$OPT_DIR" "$BIN_DIR" "$HOOKS_DIR"
   cp "$HERE/../config.example.yaml" "$OPT_DIR/"
   echo 0 > "$MARK_DIR/fetches"
   echo 0 > "$MARK_DIR/polls"
@@ -286,7 +290,7 @@ for variant in with without; do
   (cd "$T/l-$variant" && sha256sum ghr_linux_amd64.tar.gz > checksums.txt)
 done
 # fake_release serves the l-$1 release: curl copies the requested file and
-# records the URL; install into OPT_DIR is real, anything else is recorded.
+# records the URL.
 fake_release() {
   RELEASE="$1"
   curl() {
@@ -298,12 +302,6 @@ fake_release() {
     echo "$url" >> "$MARK_DIR/urls"
     cp "$T/l-$RELEASE/${url##*/}" "$out"
   }
-  install() {
-    case "${*: -1}" in
-      "$OPT_DIR"/*) command install "$@" ;;
-      *) echo "install $*" >> "$MARK_DIR/installs" ;;
-    esac
-  }
 }
 rm "$OPT_DIR/config.example.yaml"
 out=$( (fake_release with; GHR_VERSION=v0.1.17; run install_ghr) 2>&1)
@@ -311,12 +309,45 @@ rc=$?
 check "l: install_ghr succeeds" [ "$rc" -eq 0 ]
 check "l: the bundled example lands in OPT_DIR" [ -f "$OPT_DIR/config.example.yaml" ]
 check "l: a pinned version downloads that release" contains "$(cat "$MARK_DIR/urls")" "releases/download/v0.1.17/ghr_linux_amd64.tar.gz"
-check "l: the binary is installed" contains "$(cat "$MARK_DIR/installs")" "/usr/local/bin/ghr"
+check "l: the binary is installed" [ -x "$BIN_DIR/ghr" ]
+check "l: the start hook is installed" [ -x "$HOOKS_DIR/job-started.sh" ]
+check "l: the completion hook is installed" [ -x "$HOOKS_DIR/job-completed.sh" ]
 rm -f "$OPT_DIR/config.example.yaml"
 out=$( (fake_release without; GHR_VERSION=latest; run install_ghr) 2>&1)
 rc=$?
 check "l: a release without the example still installs" [ "$rc" -eq 0 ]
 check "l: and installs no example" absent "$OPT_DIR/config.example.yaml"
+
+# The binary and the hooks replace the old ones in one step, so an interrupted
+# install leaves a complete file, never half a binary.
+new_case l-atomic
+fake_release with
+echo old > "$BIN_DIR/ghr"
+echo old > "$HOOKS_DIR/job-started.sh"
+out=$( (GHR_VERSION=v0.1.17; run install_ghr) 2>&1)
+rc=$?
+check "l: an upgrade succeeds" [ "$rc" -eq 0 ]
+check "l: an upgrade replaces the binary" [ "$(cat "$BIN_DIR/ghr")" = '#!/bin/sh' ]
+check "l: an upgrade replaces a hook" [ ! -s "$HOOKS_DIR/job-started.sh" ]
+check "l: the binary is left executable" [ "$(stat -c %a "$BIN_DIR/ghr")" = 755 ]
+check "l: no staging file is left next to the binary" [ "$(ls -A "$BIN_DIR")" = ghr ]
+check "l: nor next to the hooks" [ "$(ls -A "$HOOKS_DIR" | tr '\n' ' ')" = "job-completed.sh job-started.sh " ]
+
+# A failed download leaves nothing in the temporary directory; the exit trap
+# stop_ghr sets removes it.
+new_case l-cleanup
+mkdir -p "$T/l-badsum/ghr" "$T/l-tmp"
+cp "$T/l-with/ghr/"* "$T/l-badsum/ghr/"
+cp "$T/l-with/ghr_linux_amd64.tar.gz" "$T/l-badsum/"
+echo "0000000000000000000000000000000000000000000000000000000000000000  ghr_linux_amd64.tar.gz" > "$T/l-badsum/checksums.txt"
+stop_then_install() { stop_ghr; install_ghr; }
+out=$( (fake_release badsum; export TMPDIR="$T/l-tmp"; GHR_VERSION=v0.1.17; run stop_then_install) 2>&1)
+rc=$?
+check "l: a checksum mismatch fails the install" [ "$rc" -ne 0 ]
+check "l: and says so" contains "$out" "ghr checksum mismatch"
+check "l: the downloaded files are removed" [ -z "$(ls -A "$T/l-tmp")" ]
+check "l: ghr is started again" [ "$(cat "$MARK_DIR/started" 2>/dev/null)" = ghr.service ]
+check "l: the old binary is not touched" absent "$BIN_DIR/ghr"
 
 # (m) Piped into bash (curl ... | bash), setup.sh runs main instead of nothing.
 if [ "$(id -u)" -ne 0 ]; then
