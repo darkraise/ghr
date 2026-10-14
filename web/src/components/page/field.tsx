@@ -1,6 +1,8 @@
+import { Input } from "darkraise-ui/components/input"
 import { Label } from "darkraise-ui/components/label"
 import { CircleAlert } from "lucide-react"
-import type { ReactNode } from "react"
+import { type ComponentProps, type ReactNode, useId } from "react"
+import { FieldAriaContext, useFieldAria } from "./field-aria"
 
 // The heading takes focus when the section index jumps here, so it carries
 // tabIndex -1 and an id the index can find.
@@ -33,26 +35,38 @@ export function Field({
   changed?: boolean
   children: ReactNode
 }) {
+  const id = useId()
+  const describedBy = [help && `${id}-help`, error && `${id}-error`].filter(Boolean).join(" ")
   return (
-    <div className="grid gap-1 py-3 sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-baseline sm:gap-4">
-      {htmlFor ? (
-        <Label htmlFor={htmlFor}>{label}</Label>
-      ) : (
-        <span className="text-sm font-semibold">{label}</span>
-      )}
-      <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2">
-          {children}
-          {changed && <span className="text-xs text-warning">Changed</span>}
-        </div>
-        {help && <p className="text-xs text-muted-foreground">{help}</p>}
-        {error && (
-          <p className="flex items-center gap-1 text-xs text-destructive">
-            <CircleAlert size={13} aria-hidden="true" className="shrink-0" />
-            {error}
-          </p>
+    <FieldAriaContext.Provider value={{ "aria-describedby": describedBy || undefined, "aria-invalid": error ? true : undefined }}>
+      <div className="grid gap-1 py-3 sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-baseline sm:gap-4">
+        {htmlFor ? (
+          <Label htmlFor={htmlFor}>{label}</Label>
+        ) : (
+          <span className="text-sm font-semibold">{label}</span>
         )}
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {children}
+            {changed && <span className="text-xs text-warning">Changed</span>}
+          </div>
+          {help && (
+            <p id={`${id}-help`} className="text-xs text-muted-foreground">
+              {help}
+            </p>
+          )}
+          {error && (
+            <p id={`${id}-error`} className="flex items-center gap-1 text-xs text-destructive">
+              <CircleAlert size={13} aria-hidden="true" className="shrink-0" />
+              {error}
+            </p>
+          )}
+        </div>
       </div>
-    </div>
+    </FieldAriaContext.Provider>
   )
+}
+
+export function FieldInput(props: ComponentProps<typeof Input>) {
+  return <Input {...useFieldAria()} {...props} />
 }

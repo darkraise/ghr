@@ -2,6 +2,7 @@ import { Badge } from "darkraise-ui/components/badge"
 import { Button } from "darkraise-ui/components/button"
 import { Input } from "darkraise-ui/components/input"
 import { useState } from "react"
+import { useFieldAria } from "@/components/page/field-aria"
 
 const MAX_TAG = 100
 
@@ -19,6 +20,7 @@ export function TagField({
   className?: string
 }) {
   const [text, setText] = useState("")
+  const fieldAria = useFieldAria()
 
   function add() {
     const tag = text.trim()
@@ -49,6 +51,7 @@ export function TagField({
       )}
       <div className="flex gap-2">
         <Input
+          {...fieldAria}
           aria-label={label}
           placeholder="+ add"
           className="min-w-0 flex-1"

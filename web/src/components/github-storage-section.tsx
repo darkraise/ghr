@@ -1,12 +1,11 @@
 import { Link } from "@tanstack/react-router"
-import { Input } from "darkraise-ui/components/input"
 import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { CleanupPreview } from "@/components/cleanup-preview"
 import { ConfirmDialog, type Confirm } from "@/components/confirm-dialog"
 import { NumberField } from "@/components/number-field"
 import { ErrorLine } from "@/components/page/error-line"
-import { Field, FieldGroup } from "@/components/page/field"
+import { Field, FieldGroup, FieldInput } from "@/components/page/field"
 import { SaveBar } from "@/components/save-bar"
 import { UnsavedGuard } from "@/components/unsaved-guard"
 import { FIELD_WIDTH } from "@/lib/field-width"
@@ -48,7 +47,7 @@ export function GitHubStorageSection() {
                 <NumberField label="Critical at" min={1} max={100} precision={0} suffix="%" className="w-32" value={numberFromText(values.critical)} disabled={offline} onValueChange={(n) => form.set("critical")(textFromNumber(n))} />
               </Field>
               <Field label="Cleanup age" htmlFor="cleanup_max_age" help={`Delete artifacts older than this, such as 2d; empty is off, and at least 24h. ${CLEANUP_WARNING}`} changed={changed("age")}>
-                <Input id="cleanup_max_age" className={`${FIELD_WIDTH} font-mono`} placeholder="off" value={values.age} disabled={offline} onChange={(e) => form.set("age")(e.target.value)} />
+                <FieldInput id="cleanup_max_age" className={`${FIELD_WIDTH} font-mono`} placeholder="off" value={values.age} disabled={offline} onChange={(e) => form.set("age")(e.target.value)} />
               </Field>
             </FieldGroup>
             <p className="text-sm text-muted-foreground">

@@ -8,6 +8,7 @@ import {
   NumberInputTriggerGroup,
 } from "darkraise-ui/components/number-input"
 import type { KeyboardEvent, PointerEvent } from "react"
+import { useFieldAria } from "@/components/page/field-aria"
 
 interface NumberFieldProps {
   id?: string
@@ -61,6 +62,8 @@ export function NumberField({
   className,
   ...aria
 }: NumberFieldProps) {
+  const field = useFieldAria()
+  const describedBy = [field["aria-describedby"], aria["aria-describedby"]].filter(Boolean).join(" ")
   const unit = spokenSuffix ?? suffix
   const report = (n: number) => onValueChange(precision === 0 && Number.isFinite(n) ? Math.trunc(n) : n)
 
@@ -95,7 +98,8 @@ export function NumberField({
           aria-valuetext={unit !== undefined && !Number.isNaN(value) ? `${value} ${unit}` : undefined}
           placeholder={placeholder}
           onKeyDown={onKeyDown}
-          {...aria}
+          aria-invalid={aria["aria-invalid"] || field["aria-invalid"]}
+          aria-describedby={describedBy || undefined}
         />
         {suffix !== undefined && <NumberInputSuffix>{suffix}</NumberInputSuffix>}
         <NumberInputTriggerGroup>

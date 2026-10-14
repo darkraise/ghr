@@ -1,8 +1,7 @@
-import { Input } from "darkraise-ui/components/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "darkraise-ui/components/select"
 import { useStatus } from "@/api/hooks"
 import { NumberField } from "@/components/number-field"
-import { Field, FieldGroup } from "@/components/page/field"
+import { Field, FieldGroup, FieldInput } from "@/components/page/field"
 import { RestartControl } from "@/components/restart-banner"
 import { RejectedAlert } from "@/components/save-bar"
 import { TagField } from "@/components/tag-field"
@@ -126,7 +125,7 @@ export function SettingsSections({ form, webAccess = false }: { form: SettingsFo
             changed={is("web_listen")}
             error={errors.web_listen ?? form.rejectedFields.web_listen}
           >
-            <Input
+            <FieldInput
               id="web_listen"
               className={`${FIELD_WIDTH} font-mono`}
               value={text("web_listen")}

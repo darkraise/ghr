@@ -125,6 +125,19 @@ describe("Settings page", () => {
     expect(calls.some((c) => c.method === "PATCH")).toBe(false)
   })
 
+  it("marks Max concurrent runners at 0 invalid and describes it by its error", async () => {
+    mockApi(routes())
+    const { user } = renderApp("/settings")
+    const globalMax = await screen.findByRole("spinbutton", { name: "Max concurrent runners" })
+    expect(globalMax).not.toHaveAttribute("aria-invalid")
+    await user.clear(globalMax)
+    await user.type(globalMax, "0")
+    expect(globalMax).toHaveAttribute("aria-invalid", "true")
+    expect(globalMax).toHaveAccessibleDescription(
+      "The most runners running at once across all repositories. Applies in queue mode. Enter a whole number from 1 to 99",
+    )
+  })
+
   it("lists the daemon's reasons when it rejects a save, and keeps the edits", async () => {
     mockApi(
       routes({

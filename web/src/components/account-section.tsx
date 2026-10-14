@@ -1,10 +1,9 @@
 import { Button } from "darkraise-ui/components/button"
-import { Input } from "darkraise-ui/components/input"
 import { toast } from "darkraise-ui/components/sonner"
 import { useState, type FormEvent } from "react"
 import { ApiError, api } from "@/api/client"
 import { ErrorLine } from "@/components/page/error-line"
-import { Field, FieldGroup } from "@/components/page/field"
+import { Field, FieldGroup, FieldInput } from "@/components/page/field"
 import { FIELD_WIDTH } from "@/lib/field-width"
 import { passwordLengthOk } from "@/lib/password"
 import { errorText } from "@/query"
@@ -39,7 +38,7 @@ export function AccountSection() {
     <FieldGroup id="account" title="Password" note="Changing the password takes effect at once, outside the save bar.">
       <form className="divide-y divide-border" onSubmit={(e) => void change(e)}>
         <Field label="Current password" htmlFor="current-password">
-          <Input
+          <FieldInput
             id="current-password"
             type="password"
             autoComplete="current-password"
@@ -49,10 +48,10 @@ export function AccountSection() {
           />
         </Field>
         <Field label="New password" htmlFor="new-password" help="12 to 1024 characters">
-          <Input id="new-password" type="password" autoComplete="new-password" className={FIELD_WIDTH} value={next} onChange={(e) => setNext(e.target.value)} />
+          <FieldInput id="new-password" type="password" autoComplete="new-password" className={FIELD_WIDTH} value={next} onChange={(e) => setNext(e.target.value)} />
         </Field>
         <Field label="Confirm new password" htmlFor="confirm-password">
-          <Input
+          <FieldInput
             id="confirm-password"
             type="password"
             autoComplete="new-password"
