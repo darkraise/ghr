@@ -180,10 +180,11 @@ func pruneLine(lp *model.LastPrune) string {
 	if lp.FinishedAt == nil {
 		return head + " · pruning…"
 	}
+	safe := stdoutLine()
 	var steps []string
 	for _, s := range lp.Steps {
 		if s.Error != "" {
-			steps = append(steps, s.Name+" failed: "+s.Error)
+			steps = append(steps, s.Name+" failed: "+safe(s.Error))
 		} else {
 			steps = append(steps, s.Name+" "+model.HumanBytes(s.Freed))
 		}
@@ -198,11 +199,12 @@ func pruneLine(lp *model.LastPrune) string {
 // printToolchains prints the installed toolchains and the tool-cache
 // folders no installer owns, which have no Remove.
 func printToolchains(out io.Writer, st model.Storage) {
+	safe := stdoutLine()
 	fmt.Fprintln(out, "TOOLCHAINS")
 	w := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(w, "TOOL\tVERSION\tSIZE\tINSTALLED")
 	for _, tc := range st.Toolchains {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", tc.Tool, tc.Version, model.HumanBytes(tc.Bytes), stamp(tc.InstalledAt))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", safe(tc.Tool), safe(tc.Version), model.HumanBytes(tc.Bytes), stamp(tc.InstalledAt))
 	}
 	w.Flush()
 	if len(st.OtherToolCache) == 0 {
@@ -213,7 +215,7 @@ func printToolchains(out io.Writer, st model.Storage) {
 	w = tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(w, "NAME\tSIZE")
 	for _, f := range st.OtherToolCache {
-		fmt.Fprintf(w, "%s\t%s\n", f.Name, model.HumanBytes(f.Bytes))
+		fmt.Fprintf(w, "%s\t%s\n", safe(f.Name), model.HumanBytes(f.Bytes))
 	}
 	w.Flush()
 }
@@ -248,16 +250,17 @@ func measuredLine(st model.Storage) string {
 		s = "measured " + stamp(*st.MeasuredAt)
 	}
 	if st.MeasureError != "" {
-		s += "  measure error: " + st.MeasureError
+		s += "  measure error: " + stdoutLine()(st.MeasureError)
 	}
 	return s
 }
 
 func printOperations(out io.Writer, ops model.Operations) {
+	safe := stdoutLine()
 	if c := ops.Current; c != nil {
-		line := "running: " + c.Kind + " " + c.Target
+		line := "running: " + c.Kind + " " + safe(c.Target)
 		if c.Progress != "" {
-			line += " — " + c.Progress
+			line += " — " + safe(c.Progress)
 		}
 		fmt.Fprintf(out, "%s (%d queued)\n", line, ops.Queued)
 	} else {
@@ -273,7 +276,7 @@ func printOperations(out io.Writer, ops model.Operations) {
 		if o.FinishedAt != nil {
 			finished = stamp(*o.FinishedAt)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", finished, o.Kind, o.Target, o.Outcome, o.Message)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", finished, o.Kind, safe(o.Target), o.Outcome, safe(o.Message))
 	}
 	w.Flush()
 }

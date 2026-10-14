@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +58,32 @@ func TestStorageCommandPrintsEverySection(t *testing.T) {
 	}
 	if got := (*reqs)[0]; got.method != "GET" || got.path != "/storage" {
 		t.Fatalf("request %+v", got)
+	}
+}
+
+// Tool-cache folder names, and the targets and messages built from them, are
+// written by jobs.
+func TestStorageEscapesControlsAtATerminal(t *testing.T) {
+	const evil = "x\x1b]52;c;aGk=\a\nFAKE"
+	st := sampleStorage(time.Now())
+	st.Toolchains[0].Version = evil
+	st.OtherToolCache[0].Name = evil
+	st.MeasureError = evil
+	st.Operations.Current.Target, st.Operations.Current.Progress = evil, evil
+	st.Operations.Recent[0].Target, st.Operations.Recent[0].Message = evil, evil
+	st.LastPrune.Steps[1].Error = evil
+	print := func() string {
+		var out bytes.Buffer
+		printStorage(&out, st)
+		return out.String()
+	}
+	stubStdoutTerminal(t, true)
+	if out := print(); strings.ContainsAny(out, "\x1b\a") || strings.Contains(out, "\nFAKE") {
+		t.Errorf("at a terminal a control reached the output:\n%q", out)
+	}
+	stubStdoutTerminal(t, false)
+	if out := print(); strings.Count(out, "\x1b") != 8 {
+		t.Errorf("in a pipe the raw bytes were changed:\n%q", out)
 	}
 }
 
