@@ -73,7 +73,7 @@ export function BucketsChart({
   const start = first ? Date.parse(first.start) : now
   const end = last ? Date.parse(last.end) : now
   const historyFrom = Date.parse(activity.history_from)
-  const totalRuns = buckets.reduce((n, b) => n + b.succeeded + b.failed + b.cancelled, 0)
+  const totalRuns = buckets.reduce((n, b) => n + b.succeeded + b.failed + b.cancelled + b.unknown, 0)
   const nowX = last
     ? colX(buckets.length - 1) + colW * Math.min(1, Math.max(0, (now - Date.parse(last.start)) / (Date.parse(last.end) - Date.parse(last.start))))
     : GUTTER + plotW
