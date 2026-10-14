@@ -30,7 +30,7 @@ repos:
     max: 1                  # jobs at once; 0 = unlimited
     warm: 1                 # all mode: idle runners kept ready
     labels: [my-repo-linux]
-    cleanup_name_prefixes: [my-repo-]   # when a runner ends, also remove containers whose names start with these; with max above 1 this can hit a concurrent job's
+    cleanup_name_prefixes: [my-repo-]   # when a runner ends, also remove containers whose names start with these; with max above 1 this can hit a concurrent job's containers, including another repository's whose names share the prefix
     allow_public: true      # required to serve a public repository
 watch_repos: [other-repo]   # shown on the Actions page; ghr runs no runners for them
 ```

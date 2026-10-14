@@ -594,6 +594,13 @@ func (c *Config) Validate() ([]string, error) {
 			warnings = append(warnings, r.Name+": cleanup_name_prefixes can remove a concurrent job's containers when max is not 1")
 		}
 	}
+	for i, a := range c.Repos {
+		for _, b := range c.Repos[i+1:] {
+			if p, q, ok := overlappingPrefixes(a.CleanupNamePrefixes, b.CleanupNamePrefixes); ok {
+				warnings = append(warnings, fmt.Sprintf("%s: cleanup_name_prefixes %q and %s's %q overlap, so ending a runner can remove the other repository's containers", a.Name, p, b.Name, q))
+			}
+		}
+	}
 	watched := map[string]bool{}
 	for _, w := range c.WatchRepos {
 		name := strings.TrimSpace(w)
@@ -633,6 +640,23 @@ func (c *Config) Validate() ([]string, error) {
 		return nil, errors.New(strings.Join(sortedUnique(errs), "; "))
 	}
 	return warnings, nil
+}
+
+// overlappingPrefixes returns the first pair, one from each list, where one
+// prefix starts with the other. Blank prefixes are skipped; Validate rejects
+// them separately.
+func overlappingPrefixes(a, b []string) (string, string, bool) {
+	for _, p := range a {
+		for _, q := range b {
+			if strings.TrimSpace(p) == "" || strings.TrimSpace(q) == "" {
+				continue
+			}
+			if strings.HasPrefix(p, q) || strings.HasPrefix(q, p) {
+				return p, q, true
+			}
+		}
+	}
+	return "", "", false
 }
 
 func sortedUnique(in []string) []string {

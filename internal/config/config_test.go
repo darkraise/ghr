@@ -410,6 +410,26 @@ func TestPrefixWarningWhenMaxNotOne(t *testing.T) {
 	}
 }
 
+func TestPrefixOverlapAcrossReposWarns(t *testing.T) {
+	c, _, _ := Parse([]byte(sample))
+	one := 1
+	c.Repos[0].Max, c.Repos[1].Max = &one, &one
+	c.Repos[0].CleanupNamePrefixes = []string{"ci-"}
+	c.Repos[1].CleanupNamePrefixes = []string{"ci-db-"}
+	warnings, err := c.Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "darkcloud") || !strings.Contains(warnings[0], "darkmem") {
+		t.Fatalf("warnings = %v", warnings)
+	}
+
+	c.Repos[1].CleanupNamePrefixes = []string{"other-"}
+	if warnings, err = c.Validate(); err != nil || len(warnings) != 0 {
+		t.Fatalf("disjoint prefixes: warnings %v err %v", warnings, err)
+	}
+}
+
 func TestSaveRoundTrip(t *testing.T) {
 	c, _, err := Parse([]byte(sample))
 	if err != nil {
