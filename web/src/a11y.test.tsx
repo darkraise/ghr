@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react"
+import { screen, within } from "@testing-library/react"
 import axe from "axe-core"
 import { beforeEach, describe, expect, it } from "vitest"
 import { mockApi } from "@/test/api"
@@ -6,12 +6,12 @@ import { authedRoutes, fixtures, runRoutes } from "@/test/fixtures"
 import { setViewport } from "@/test/media"
 import { renderApp } from "@/test/render"
 
-async function violations(): Promise<string[]> {
-  const main = document.getElementById("main-content")
-  if (!main) throw new Error("no main content")
+async function violations(root?: Element): Promise<string[]> {
+  const target = root ?? document.getElementById("main-content")
+  if (!target) throw new Error("no main content")
   // jsdom computes no layout or colour, so contrast is checked by the
   // palette test in src/styles/theme.test.ts instead.
-  const results = await axe.run(main, { rules: { "color-contrast": { enabled: false } } })
+  const results = await axe.run(target, { rules: { "color-contrast": { enabled: false } } })
   return results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)
 }
 
@@ -253,6 +253,54 @@ describe("Run details accessibility", () => {
       renderApp("/actions/darkmem/runs/102/jobs/1002?attempt=2&step=3&line=5")
       await screen.findByLabelText("Search logs")
       expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})
+
+// The kit portals dialogs out of #main-content, so they are audited by root.
+describe("Dialog accessibility", () => {
+  it(
+    "has no axe violations in the Add repository dialog",
+    async () => {
+      mockApi(authedRoutes({ "GET /api/history": [], "GET /api/repos/available": fixtures.availableRepos }))
+      const { user } = renderApp("/repositories")
+      await user.click(await screen.findByRole("button", { name: "Add repository" }))
+      const dialog = await screen.findByRole("dialog")
+      await within(dialog).findByRole("option", { name: /new-repo/ })
+      expect(await violations(dialog)).toEqual([])
+    },
+    30_000,
+  )
+
+  it(
+    "has no axe violations in the Stop runner confirmation",
+    async () => {
+      mockApi(
+        authedRoutes({
+          "GET /api/runners/aaaaaa/steps": fixtures.steps,
+          "GET /api/runners/aaaaaa/containers": fixtures.containers,
+        }),
+      )
+      const { user } = renderApp("/runners/aaaaaa")
+      await screen.findByText("Run tests")
+      await user.click(screen.getByRole("button", { name: "Stop runner" }))
+      expect(await violations(await screen.findByRole("alertdialog"))).toEqual([])
+    },
+    30_000,
+  )
+
+  it(
+    "has no axe violations in the Unsaved changes prompt",
+    async () => {
+      mockApi(authedRoutes())
+      const { user } = renderApp("/settings/github-storage")
+      await screen.findByRole("region", { name: "Policy" })
+      const included = screen.getByRole("spinbutton", { name: "Included storage" })
+      await user.clear(included)
+      await user.type(included, "1024")
+      await user.click(screen.getAllByRole("link", { name: "Dashboard" })[0] as HTMLElement)
+      expect(await violations(await screen.findByRole("alertdialog", { name: "Unsaved changes" }))).toEqual([])
     },
     30_000,
   )
