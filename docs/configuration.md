@@ -10,8 +10,8 @@ After editing the file by hand, apply it with `systemctl reload ghr`. The `web` 
 owner: my-user              # GitHub user or organization
 mode: queue                 # queue | all
 global_max: 2               # queue mode only; at most 99, like a repository's max and warm
-poll_interval: 10s          # how often GitHub is checked; at least 5s
-start_timeout: 2m           # a runner not online by then is replaced
+poll_interval: 10s          # how often GitHub is checked, at least 5s; demand is read every second tick below 1,000 API calls left
+start_timeout: 2m           # a runner not online by then is stopped; the next spawn waits, longer after each failure
 idle_timeout: 5m            # idle runners beyond warm stop after this
 disk_high_water: 80         # percent of Docker's data-root filesystem that triggers pruning
 build_cache_keep: 20GB      # Docker build cache kept when pruning
