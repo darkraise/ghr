@@ -56,9 +56,10 @@ type detailCache struct {
 
 // detailTTL is how long d is kept under k. The latest-attempt key (attempt
 // 0) is always short-lived, because a re-run of a finished run changes which
-// attempt it stands for; a numbered attempt that has completed never changes.
+// attempt it stands for; a numbered attempt that has completed never changes,
+// unless its graph could not be read, which the next call tries again.
 func detailTTL(k detailKey, d model.RunDetail) time.Duration {
-	if k.attempt != 0 && d.Status == "completed" {
+	if k.attempt != 0 && d.Status == "completed" && d.GraphNote != noteUnavailable {
 		return detailDoneTTL
 	}
 	return detailActiveTTL

@@ -21,6 +21,7 @@ const (
 	noteMismatch     = "The workflow file at this commit does not match the run's jobs."
 	noteInvalid      = "ghr could not read %s."
 	noteNoJobs       = "This run has no jobs yet."
+	noteUnavailable  = "ghr could not read the workflow file just now; reload to try again."
 
 	wfFileEntries = 64
 	wfMissingTTL  = 10 * time.Minute
@@ -82,8 +83,8 @@ func (b *Backend) workflowFile(ctx context.Context, repo, sha, path string) ([]b
 }
 
 // runGraph builds the job graph of a run from its workflow file at sha. When
-// no graph can be drawn it returns the note that says why; an error means
-// the run details call fails as a whole.
+// no graph can be drawn it returns the note that says why, so a file that
+// cannot be read costs the graph and not the run page.
 func (b *Backend) runGraph(ctx context.Context, repo, sha, path string, jobs []github.Job) (graph *model.RunGraph, note string, err error) {
 	// A defect in reading a workflow file costs the graph, not the run page.
 	defer func() {
@@ -109,7 +110,7 @@ func (b *Backend) runGraph(ctx context.Context, repo, sha, path string, jobs []g
 	case errors.Is(err, github.ErrBadContent):
 		return nil, fmt.Sprintf(noteInvalid, path), nil
 	case err != nil:
-		return nil, "", err
+		return nil, noteUnavailable, nil
 	}
 	w, err := wfgraph.Parse(data)
 	if err != nil {

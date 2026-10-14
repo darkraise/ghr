@@ -70,11 +70,22 @@ func TestRunGraphBuildsFromTheFile(t *testing.T) {
 	}
 }
 
-func TestRunGraphFailsOnRateLimit(t *testing.T) {
-	b, _, gh := newBackend(t)
-	gh.contentErr = &github.APIError{Status: 429, Kind: github.ErrRateLimit}
-	if _, _, err := b.runGraph(context.Background(), "darkmem", "abc", ciPath, ciJobs()); !github.IsKind(err, github.ErrRateLimit) {
-		t.Fatalf("err %v", err)
+func TestRunGraphNotesATransientError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"bad gateway", &github.APIError{Status: 502, Kind: github.ErrOther}},
+		{"rate limit", &github.APIError{Status: 429, Kind: github.ErrRateLimit}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _, gh := newBackend(t)
+			gh.contentErr = tc.err
+			g, note, err := b.runGraph(context.Background(), "darkmem", "abc", ciPath, ciJobs())
+			if err != nil || g != nil || note != noteUnavailable {
+				t.Fatalf("graph %+v note %q err %v", g, note, err)
+			}
+		})
 	}
 }
 

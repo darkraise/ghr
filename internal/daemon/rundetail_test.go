@@ -273,6 +273,26 @@ func TestRunDetailCacheLifetime(t *testing.T) {
 	}
 }
 
+// A workflow file GitHub could not deliver costs the graph, not the run
+// page, and the note is not kept for the long lifetime of a completed attempt.
+func TestRunDetailSurvivesAWorkflowFileError(t *testing.T) {
+	b, _, gh := newBackend(t)
+	clock := frozenClock(b, actionsT0)
+	detailRun(gh, "completed")
+	gh.contentErr = &github.APIError{Status: 502, Kind: github.ErrOther}
+	ctx := context.Background()
+	d, err := b.RunDetail(ctx, "darkmem", 102, 2)
+	if err != nil || len(d.Jobs) != 2 || d.Graph != nil || d.GraphNote != noteUnavailable {
+		t.Fatalf("detail %+v err %v", d, err)
+	}
+	gh.contentErr = nil
+	clock.Store(actionsT0.Add(detailActiveTTL).UnixNano())
+	d, err = b.RunDetail(ctx, "darkmem", 102, 2)
+	if err != nil || d.Graph == nil || d.GraphNote != "" || gh.count("GetRun") != 2 {
+		t.Fatalf("after 15 s: graph %+v note %q err %v, %d GetRun calls", d.Graph, d.GraphNote, err, gh.count("GetRun"))
+	}
+}
+
 // A fetch of the latest attempt also fills that attempt's numbered entry,
 // which outlives the latest-attempt entry once the attempt has completed.
 func TestRunDetailNumberedEntryOutlivesTheLatest(t *testing.T) {
