@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/sched"
 )
@@ -125,15 +126,15 @@ func TestQueuedUpdateWaitsUntilFree(t *testing.T) {
 		// The release check runs after the demand poll, so every repo answered
 		// and only the API condition holds the update.
 		{"rate limited after the poll", func(t *testing.T, h *harness) {
-			h.m.mu.Lock()
-			h.m.upd.nextCheck = time.Time{}
-			h.m.mu.Unlock()
+			if err := h.m.Jobs.RunNow(config.JobRunnerUpdateCheck); err != nil {
+				t.Fatal(err)
+			}
 			h.gh.setErr("ListRunnerReleases ", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Minute)})
 		}},
 		{"degraded after the poll", func(t *testing.T, h *harness) {
-			h.m.mu.Lock()
-			h.m.upd.nextCheck = time.Time{}
-			h.m.mu.Unlock()
+			if err := h.m.Jobs.RunNow(config.JobRunnerUpdateCheck); err != nil {
+				t.Fatal(err)
+			}
 			h.gh.setErr("ListRunnerReleases ", &github.APIError{Status: 401, Kind: github.ErrAuth})
 		}},
 		{"prune running", func(t *testing.T, h *harness) {

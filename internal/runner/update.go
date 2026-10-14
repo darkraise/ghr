@@ -52,7 +52,6 @@ type updateState struct {
 	deadline     time.Time // zero unless a release newer than installed exists
 	checkedAt    time.Time
 	checkErr     string
-	nextCheck    time.Time
 	running      bool
 	lastOutcome  string
 	lastErr      string
@@ -167,16 +166,12 @@ func (m *Manager) releaseChecked() bool {
 	return !m.upd.checkedAt.IsZero()
 }
 
-func (m *Manager) releaseCheckDue(now time.Time) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return !now.Before(m.upd.nextCheck)
-}
-
 // checkRelease lists the runner releases and records what they say about the
 // installed version, warning once per newer version. A failure keeps the last
-// good facts and retries after an hour.
+// good facts and retries after an hour. Every call reports to the
+// runner_update_check task, the tick's and QueueUpdate's alike.
 func (m *Manager) checkRelease(ctx context.Context) ([]github.Release, error) {
+	m.Jobs.Started(config.JobRunnerUpdateCheck, m.Now())
 	m.mu.Lock()
 	gen := m.upd.gen
 	m.mu.Unlock()
@@ -199,12 +194,18 @@ func (m *Manager) checkRelease(ctx context.Context) ([]github.Release, error) {
 		if installed != m.upd.installed {
 			m.upd.latest, m.upd.latestSum, m.upd.latestPub, m.upd.deadline, m.upd.checkedAt = "", "", time.Time{}, time.Time{}, time.Time{}
 		}
-		m.upd.installed, m.upd.checkErr, m.upd.nextCheck = installed, err.Error(), now.Add(releaseCheckRetry)
+		m.upd.installed, m.upd.checkErr = installed, err.Error()
 	default:
 		m.upd.installed, m.upd.latest, m.upd.latestSum, m.upd.latestPub, m.upd.deadline = installed, latest, sum, f.latest.PublishedAt, f.deadline
-		m.upd.checkedAt, m.upd.checkErr, m.upd.nextCheck = now, "", now.Add(releaseCheckEvery)
+		m.upd.checkedAt, m.upd.checkErr = now, ""
 	}
 	m.mu.Unlock()
+	var retry *time.Time
+	if err != nil {
+		at := now.Add(releaseCheckRetry)
+		retry = &at
+	}
+	m.Jobs.Finished(config.JobRunnerUpdateCheck, now, err, retry)
 	if err != nil {
 		// A 403 here refuses the release listing only; it is already recorded
 		// as the check's error and belongs to no repository.

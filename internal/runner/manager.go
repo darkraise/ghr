@@ -23,6 +23,7 @@ import (
 	"github.com/darkraise/ghr/internal/events"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/history"
+	"github.com/darkraise/ghr/internal/jobs"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/sched"
 	"github.com/darkraise/ghr/internal/system"
@@ -188,6 +189,9 @@ type Manager struct {
 	// PruneDone, when set, is called after every manual prune and after an
 	// automatic prune that pruned.
 	PruneDone func()
+	// Jobs schedules the runner release check and the retention prune; Init
+	// makes one from Config when the daemon sets none.
+	Jobs *jobs.Registry
 	// Epoch, when set, is the status epoch Init uses instead of minting one,
 	// so a daemon that served before the manager started keeps one epoch.
 	Epoch string
@@ -250,6 +254,9 @@ func (m *Manager) Init() error {
 	m.undeleted = map[int64]registration{}
 	m.histIDs = map[string]bool{}
 	m.lastPrune = m.Now()
+	if m.Jobs == nil {
+		m.Jobs = jobs.New(func() config.Jobs { return m.Config().Jobs }, m.Now, nil)
+	}
 	m.maintCtx, m.maintCancel = context.WithCancel(context.Background())
 	m.epoch = m.Epoch
 	if m.epoch == "" {
