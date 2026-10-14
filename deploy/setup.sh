@@ -2,15 +2,20 @@
 # Installs or upgrades ghr and native GitHub Actions runners on a Debian 13 or
 # Ubuntu 22.04, 24.04 or 26.04 LXC.
 # Idempotent: re-run to upgrade Docker, the runner and ghr. Never overwrites config or token.
-#   bash setup.sh   (asks for the GitHub owner, the PAT and the web password; Enter skips any)
+#   bash setup.sh   (asks for the web password, the GitHub owner and the PAT; Enter skips any)
 #   curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh | bash
-#     (no prompts: finish in the browser; bash <(curl -fsSL ...) keeps the prompts)
+#     (no prompts: finish in the browser with the setup code printed at the end; only
+#     stdin is the pipe, so the output still reaches the terminal;
+#     bash <(curl -fsSL ...) keeps the prompts)
 # Optional: GHR_VERSION=v0.1.1 RUNNER_VERSION=2.337.0
 #   GHR_TOOLCHAINS=popular|none (default: popular on a first install, none on an upgrade)
 #   GHR_OWNER=... and GHR_TOKEN=... configure GitHub for scripts that cannot answer the
 #     prompts; GHR_TOKEN is ignored without an owner. Whatever is skipped is finished in
 #     the web UI at /setup, or with: ghr setup github --owner <owner>
-#   GHR_WEB_PASSWORD=... sets the web UI password on a first install (else it asks; Enter skips).
+#   GHR_WEB_PASSWORD=... sets the web UI password on a first install (else it asks; Enter skips),
+#     so the browser does not ask for the setup code.
+#   GHR_WEB_LISTEN=host:port sets the web UI's listen address on a first install (default
+#     0.0.0.0:8080), such as 127.0.0.1:8080 when a TLS proxy runs on this host.
 set -euo pipefail
 
 GHR_REPO="darkraise/ghr"
@@ -26,6 +31,7 @@ RUNNER_USER=ghrunner
 OPT_DIR=/opt/ghr
 DIST_DIR="$OPT_DIR/dist"
 HOOKS_DIR="$OPT_DIR/hooks"
+BIN_DIR=/usr/local/bin
 STATE_DIR=/var/lib/ghr
 ETC_DIR=/etc/ghr
 APT_SOURCES_DIR=/etc/apt/sources.list.d
@@ -34,6 +40,10 @@ KEYRING_DIR=/etc/apt/keyrings
 OS_RELEASE=/etc/os-release
 DOCKER_KEY_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 READY_TIMEOUT=60
+# Temporary directories the exit trap removes if the script dies before it can.
+CLEANUP=()
+# set_web_password sets it when it leaves the web UI without a password.
+WEB_UNCLAIMED=
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -49,6 +59,8 @@ check_host() {
     ubuntu:22.04) PYTHON_RUNTIME_LIBS=(libssl3 libffi8 libsqlite3-0 liblzma5 libbz2-1.0 libgdbm6 libncursesw6 libreadline8 libtcl8.6 libtk8.6) ;;
     *) die "Debian 13 or Ubuntu 22.04, 24.04 or 26.04 required (found ${PRETTY_NAME:-unknown})" ;;
   esac
+  [ "$(dpkg --print-architecture)" = amd64 ] ||
+    die "ghr supports amd64 (x86_64) hosts only (found $(dpkg --print-architecture))"
   DOCKER_DISTRO=$ID
 }
 
@@ -127,10 +139,11 @@ create_user_and_dirs() {
 
 # Downloads the actions-runner tarball for $1 to $2 and verifies its SHA-256.
 fetch_runner() {
-  local version="$1" out="$2" tgz="actions-runner-linux-x64-$1.tar.gz" want
+  local version="$1" out="$2" tgz="actions-runner-linux-x64-$1.tar.gz" notes want
   curl -fsSL -o "$out" "https://github.com/actions/runner/releases/download/v$version/$tgz"
-  want=$(curl -fsSL "https://api.github.com/repos/actions/runner/releases/tags/v$version" | jq -r .body |
-    grep -oP '(?<=<!-- BEGIN SHA linux-x64 -->)[0-9a-f]{64}(?=<!-- END SHA linux-x64 -->)') || true
+  notes=$(curl -fsSL "https://api.github.com/repos/actions/runner/releases/tags/v$version" | jq -r .body) ||
+    die "could not read the actions/runner v$version release notes (GitHub API rate limit?); try again later"
+  want=$(grep -oP '(?<=<!-- BEGIN SHA linux-x64 -->)[0-9a-f]{64}(?=<!-- END SHA linux-x64 -->)' <<<"$notes") || true
   [ -n "$want" ] || die "no linux-x64 checksum in the v$version release notes"
   echo "$want  $out" | sha256sum -c - >/dev/null || die "actions-runner checksum mismatch"
 }
@@ -141,10 +154,19 @@ fetch_runner() {
 # If a later step fails, the exit trap starts the old daemon again.
 # A queued update is dropped while the daemon is down, so the restarted daemon
 # does not install a runner version over the one this script just installed.
+# The version it already warned about is kept, or it would warn again.
 stop_ghr() {
-  systemctl stop ghr.service 2>/dev/null || true
-  rm -f "$STATE_DIR/runner-update.json"
-  trap 'systemctl start ghr.service 2>/dev/null || true' EXIT
+  trap 'rm -rf "${CLEANUP[@]}"; systemctl start ghr.service 2>/dev/null || true' EXIT
+  if systemctl cat ghr.service >/dev/null 2>&1; then
+    systemctl stop ghr.service || die "could not stop ghr.service; stop it and re-run"
+    case "$(systemctl is-active ghr.service || true)" in
+      active | deactivating) die "could not stop ghr.service; stop it and re-run" ;;
+    esac
+  fi
+  local update="$STATE_DIR/runner-update.json"
+  if [ -e "$update" ]; then
+    jq 'del(.queued_at)' "$update" > "$update.tmp" && mv -f "$update.tmp" "$update" || rm -f "$update" "$update.tmp"
+  fi
 }
 
 # A version an older setup.sh extracted kept the tarball's owner ids (1001),
@@ -157,7 +179,9 @@ tree_is_root_owned() {
 install_runner() {
   local version="${RUNNER_VERSION#v}"
   if [ "$version" = latest ]; then
-    version=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name)
+    local lookup_failed="could not read the latest actions/runner release (GitHub API rate limit?); set RUNNER_VERSION=<x.y.z>"
+    version=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest | jq -r .tag_name) || die "$lookup_failed"
+    [ -n "$version" ] && [ "$version" != null ] || die "$lookup_failed"
     version="${version#v}"
   fi
   local dir="$DIST_DIR/$version" staging="$DIST_DIR/$version.tmp"
@@ -175,6 +199,7 @@ install_runner() {
     tar --no-same-owner -xzf "$staging/runner.tar.gz" -C "$staging"
     rm -f "$staging/runner.tar.gz"
     "$staging/bin/installdependencies.sh" >/dev/null || die "actions-runner $version: bin/installdependencies.sh failed"
+    rm -rf "$dir"
     mv -T "$staging" "$dir"
   fi
   chown -R root:root "$dir"
@@ -184,7 +209,7 @@ install_runner() {
 }
 
 install_ghr() {
-  local base tmp
+  local base tmp hook
   if [ "$GHR_VERSION" = latest ]; then
     base="https://github.com/$GHR_REPO/releases/latest/download"
   else
@@ -192,12 +217,19 @@ install_ghr() {
   fi
   log "installing ghr ($GHR_VERSION)"
   tmp=$(mktemp -d)
+  CLEANUP+=("$tmp")
   curl -fsSL -o "$tmp/ghr_linux_amd64.tar.gz" "$base/ghr_linux_amd64.tar.gz"
   curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt"
   (cd "$tmp" && sha256sum -c checksums.txt >/dev/null) || die "ghr checksum mismatch"
   tar -xzf "$tmp/ghr_linux_amd64.tar.gz" -C "$tmp"
-  install -m 0755 "$tmp/ghr/ghr" /usr/local/bin/ghr
-  install -m 0755 "$tmp/ghr/job-started.sh" "$tmp/ghr/job-completed.sh" "$HOOKS_DIR/"
+  # Written beside the target and renamed over it, so an interrupted run leaves
+  # the old file or the complete new one, never half of it.
+  install -m 0755 "$tmp/ghr/ghr" "$BIN_DIR/.ghr.new"
+  mv -f "$BIN_DIR/.ghr.new" "$BIN_DIR/ghr"
+  for hook in job-started.sh job-completed.sh; do
+    install -m 0755 "$tmp/ghr/$hook" "$HOOKS_DIR/.$hook.new"
+    mv -f "$HOOKS_DIR/.$hook.new" "$HOOKS_DIR/$hook"
+  done
   if [ -f "$tmp/ghr/config.example.yaml" ]; then
     install -m 0644 "$tmp/ghr/config.example.yaml" "$OPT_DIR/config.example.yaml"
   fi
@@ -208,7 +240,13 @@ install_config() {
   if [ ! -f "$ETC_DIR/config.yaml" ]; then
     [ -f "$OPT_DIR/config.example.yaml" ] ||
       die "the ghr $GHR_VERSION release has no config.example.yaml; install a newer GHR_VERSION"
+    if [ -n "${GHR_WEB_LISTEN:-}" ]; then
+      grep -q '^  listen: ' "$OPT_DIR/config.example.yaml" ||
+        die "config.example.yaml has no web.listen line to set GHR_WEB_LISTEN on; set web.listen in $ETC_DIR/config.yaml instead"
+    fi
     install -m 0600 "$OPT_DIR/config.example.yaml" "$ETC_DIR/config.yaml"
+    # Quoted: a bracketed IPv6 address is a YAML flow sequence otherwise.
+    [ -z "${GHR_WEB_LISTEN:-}" ] || sed -i "s|^  listen: .*|  listen: \"$GHR_WEB_LISTEN\"|" "$ETC_DIR/config.yaml"
     log "wrote $ETC_DIR/config.yaml from config.example.yaml"
     # Files, not variables: a first install that dies before preinstall_toolchains,
     # the setup wizard or the web password prompt must still find them when re-run.
@@ -218,7 +256,7 @@ install_config() {
 
 install_service() {
   local unit="$SYSTEMD_DIR/ghr.service" want reload=0
-  want=$(cat <<'EOF'
+  want=$(cat <<EOF
 [Unit]
 Description=ghr GitHub Actions runner manager
 After=network-online.target docker.service
@@ -226,8 +264,8 @@ Wants=network-online.target
 Requires=docker.service
 
 [Service]
-ExecStart=/usr/local/bin/ghr daemon
-ExecReload=/bin/kill -HUP $MAINPID
+ExecStart=$BIN_DIR/ghr daemon
+ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
 RestartSec=5
 
@@ -269,12 +307,20 @@ wait_ready() {
 }
 
 # A first install turns the web UI on (config.example.yaml); until a password
-# is set, the first visitor to the web UI sets it. The marker stays until a
-# password is set or the owner skipped the prompt, so a re-run after a failed
-# first install, or one without a terminal, asks again.
+# is set, the browser asks for the setup code print_next shows. The marker stays
+# until a password is set (here or in the browser) or the owner skipped the
+# prompt, so a re-run after a failed first install, or one without a terminal,
+# asks again.
 set_web_password() {
   local pending="$STATE_DIR/web-password-pending" pw="${GHR_WEB_PASSWORD:-}" out
   [ -f "$pending" ] || return 0
+  # A password set in the browser since an earlier run is the owner's: the
+  # marker is stale, and a prompt here would replace that password.
+  if ! out=$(timeout 10 ghr code 2>&1) && [[ "$out" == *"a web password is already set"* ]]; then
+    rm -f "$pending"
+    return 0
+  fi
+  warn_web_exposed "$(setup_field web)"
   if [ -z "$pw" ] && stdin_is_tty; then
     # Only a line that was read and is empty is a skip. End of input or a failed
     # read keeps the marker and drops whatever it left in $pw.
@@ -293,10 +339,28 @@ set_web_password() {
     fi
     warn "${out#ghr: }"
   fi
-  log "web UI on :8080 has no password; set it now with: ghr web set-password"
+  WEB_UNCLAIMED=1
 }
 
 stdin_is_tty() { [ -t 0 ]; }
+
+# True for a listen host that accepts connections on every interface.
+wildcard_host() {
+  case "$1" in
+    "" | 0.0.0.0 | :: | "[::]") ;;
+    *) return 1 ;;
+  esac
+}
+
+# Warns when listen address $1 (the web field of `ghr setup`) is a wildcard: the
+# web UI is plain HTTP, so every network the host is on can read what a browser
+# sends it.
+warn_web_exposed() {
+  [ -n "$1" ] && [ "$1" != - ] || return 0
+  if wildcard_host "${1%:*}"; then
+    warn "the web UI is plain HTTP on every interface; put a TLS proxy in front (https://github.com/$GHR_REPO/blob/master/docs/web-ui.md#behind-a-reverse-proxy)"
+  fi
+}
 
 # Prints one field of `ghr setup` (configured, wizard, owner, web), or nothing
 # when the daemon does not answer.
@@ -321,7 +385,7 @@ configure_github() {
     return 0
   fi
   if [ -z "$tok" ] && stdin_is_tty; then
-    read -rsp "GitHub fine-grained PAT (Administration: read/write, Actions: read; Enter to finish in the browser): " tok || true
+    read -rsp "GitHub fine-grained PAT (Administration: read/write, Actions: read/write; Enter to finish in the browser): " tok || true
     echo
   fi
   [ -n "$tok" ] || return 0
@@ -332,27 +396,42 @@ configure_github() {
   fi
 }
 
-# Says what is left of first-run setup.
+# Says what is left of first-run setup and, while the web UI has no password,
+# ends with the setup code its browser asks for.
 print_next() {
-  local configured wizard web host
+  local configured wizard web host code
+  local unclaimed="the web UI has no password; set one with: ghr web set-password"
   configured=$(setup_field configured)
-  [ -n "$configured" ] || return 0
+  if [ -z "$configured" ]; then
+    [ -z "$WEB_UNCLAIMED" ] || log "$unclaimed"
+    return 0
+  fi
   wizard=$(setup_field wizard)
   web=$(setup_field web)
-  [ "$configured" != yes ] || [ "$wizard" = pending ] || return 0
-  if [ -n "$web" ] && [ "$web" != - ]; then
-    host=${web%:*}
-    case "$host" in
-      "" | 0.0.0.0 | :: | "[::]")
+  [ "$web" != - ] || web=
+  if [ "$configured" != yes ] || [ "$wizard" = pending ]; then
+    if [ -n "$web" ]; then
+      host=${web%:*}
+      if wildcard_host "$host"; then
         host=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
         [[ "$host" != *:* ]] || host="[$host]"
-        ;;
-    esac
-    log "finish setup in the browser: http://${host:-<this host>}:${web##*:}/setup"
-  elif [ "$configured" != yes ]; then
-    log "finish setup with: ghr setup github --owner <owner>"
-  else
-    log "end first-run setup with: ghr setup finish"
+      fi
+      log "finish setup in the browser: http://${host:-<this host>}:${web##*:}/setup"
+      warn_web_exposed "$web"
+    elif [ "$configured" != yes ]; then
+      log "finish setup with: ghr setup github --owner <owner>"
+    else
+      log "end first-run setup with: ghr setup finish"
+    fi
+  fi
+  [ -n "$web" ] || return 0
+  # ghr code also fails once a password is set, so only a password this run
+  # left unset makes the failure worth a reminder.
+  code=$(timeout 10 ghr code 2>/dev/null) || code=
+  if [ -n "$code" ]; then
+    log "web UI setup code: $code (the browser asks for it once; or set a password now with: ghr web set-password)"
+  elif [ -n "$WEB_UNCLAIMED" ]; then
+    log "$unclaimed"
   fi
 }
 
@@ -371,6 +450,15 @@ gc_dist() {
       rm -rf "${DIST_DIR:?}/$old"
     fi
   done
+}
+
+check_web_listen() {
+  local listen="${GHR_WEB_LISTEN:-}" shape='^(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]*):([0-9]{1,5})$'
+  [ -n "$listen" ] || return 0
+  if [[ "$listen" =~ $shape ]] && [ "$((10#${BASH_REMATCH[2]}))" -ge 1 ] && [ "$((10#${BASH_REMATCH[2]}))" -le 65535 ]; then
+    return 0
+  fi
+  die "GHR_WEB_LISTEN must be host:port with a port from 1 to 65535, such as 127.0.0.1:8080"
 }
 
 check_toolchains() {
@@ -411,6 +499,7 @@ preinstall_toolchains() {
 main() {
   check_host
   check_toolchains
+  check_web_listen
   install_docker
   create_user_and_dirs
   stop_ghr
@@ -421,8 +510,8 @@ main() {
   install_service
   trap - EXIT
   wait_ready
-  configure_github
   set_web_password
+  configure_github
   preinstall_toolchains
   print_next
 }

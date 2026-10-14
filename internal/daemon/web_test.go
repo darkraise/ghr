@@ -17,16 +17,83 @@ import (
 	"github.com/darkraise/ghr/internal/webui"
 )
 
-func TestResetRouteIsSocketOnly(t *testing.T) {
-	b, _, _ := newBackend(t)
-	auth := webui.NewAuth(filepath.Join(t.TempDir(), "web-password"), time.Now, rand.Reader)
-	id, err := auth.Setup("correct horse battery")
+// claimAuth sets auth's first password with its setup code and returns the
+// session the claim started.
+func claimAuth(t *testing.T, auth *webui.Auth) string {
+	t.Helper()
+	code, err := auth.SetupCode()
 	if err != nil {
 		t.Fatal(err)
 	}
+	id, err := auth.Setup(code, "correct horse battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestSetupCodeRoute(t *testing.T) {
+	b, _, _ := newBackend(t)
+	auth := webui.NewAuth(filepath.Join(t.TempDir(), "web-password"), time.Now, rand.Reader)
+	apiHandler := api.NewServer(b)
+	sock := httptest.NewServer(socketHandler(apiHandler, auth, b.Events))
+	defer sock.Close()
+	get := func() (int, string) {
+		t.Helper()
+		resp, err := sock.Client().Get(sock.URL + "/web/setup-code")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		data, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(data)
+	}
+	status, body := get()
+	var got struct {
+		Code string `json:"code"`
+	}
+	json.Unmarshal([]byte(body), &got)
+	if status != http.StatusOK || got.Code == "" {
+		t.Fatalf("over the socket: %d %s", status, body)
+	}
+	if _, err := auth.Setup(got.Code, "correct horse battery"); err != nil {
+		t.Fatalf("setup with the code the socket gave: %v", err)
+	}
+	for _, e := range b.Events.After(0) {
+		if strings.Contains(e.Msg, got.Code) {
+			t.Fatalf("an event carries the setup code: %q", e.Msg)
+		}
+	}
+	if status, body := get(); status != http.StatusConflict || !strings.Contains(body, `"error":"a web password is already set"`) {
+		t.Fatalf("with a password set: %d %s", status, body)
+	}
+
+	id, err := auth.Login("10.0.0.1", "correct horse battery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	web := httptest.NewServer(webui.Handler(auth, apiHandler, fstest.MapFS{}, nil, nil, nil))
+	defer web.Close()
+	req, _ := http.NewRequest(http.MethodGet, web.URL+"/api/web/setup-code", nil)
+	req.Header.Set("X-GHR", "1")
+	req.AddCookie(&http.Cookie{Name: "ghr_session", Value: id})
+	resp, err := web.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("over TCP: %d", resp.StatusCode)
+	}
+}
+
+func TestResetRouteIsSocketOnly(t *testing.T) {
+	b, _, _ := newBackend(t)
+	auth := webui.NewAuth(filepath.Join(t.TempDir(), "web-password"), time.Now, rand.Reader)
+	id := claimAuth(t, auth)
 	apiHandler := api.NewServer(b)
 
-	web := httptest.NewServer(webui.Handler(auth, apiHandler, fstest.MapFS{}, nil, nil))
+	web := httptest.NewServer(webui.Handler(auth, apiHandler, fstest.MapFS{}, nil, nil, nil))
 	defer web.Close()
 	req, _ := http.NewRequest(http.MethodPost, web.URL+"/api/web/reset-password", bytes.NewReader(nil))
 	req.Header.Set("X-GHR", "1")
@@ -75,13 +142,10 @@ func TestResetRouteIsSocketOnly(t *testing.T) {
 func TestSetPasswordRoute(t *testing.T) {
 	b, _, _ := newBackend(t)
 	auth := webui.NewAuth(filepath.Join(t.TempDir(), "web-password"), time.Now, rand.Reader)
-	id, err := auth.Setup("correct horse battery")
-	if err != nil {
-		t.Fatal(err)
-	}
+	id := claimAuth(t, auth)
 	apiHandler := api.NewServer(b)
 
-	web := httptest.NewServer(webui.Handler(auth, apiHandler, fstest.MapFS{}, nil, nil))
+	web := httptest.NewServer(webui.Handler(auth, apiHandler, fstest.MapFS{}, nil, nil, nil))
 	defer web.Close()
 	req, _ := http.NewRequest(http.MethodPost, web.URL+"/api/web/set-password", strings.NewReader(`{"password":"over the network"}`))
 	req.Header.Set("X-GHR", "1")

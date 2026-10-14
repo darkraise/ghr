@@ -259,7 +259,7 @@ func NewServer(b Backend) http.Handler {
 	mux.HandleFunc("GET /config", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.Config()) })
 	mux.HandleFunc("PATCH /config", func(w http.ResponseWriter, r *http.Request) {
 		var p model.ConfigPatch
-		if err := decode(r, &p); err != nil {
+		if err := decode(w, r, &p); err != nil {
 			respond(w, nil, err)
 			return
 		}
@@ -267,7 +267,7 @@ func NewServer(b Backend) http.Handler {
 	})
 	mux.HandleFunc("POST /repos", func(w http.ResponseWriter, r *http.Request) {
 		var req model.AddRepoRequest
-		if err := decode(r, &req); err != nil {
+		if err := decode(w, r, &req); err != nil {
 			respond(w, nil, err)
 			return
 		}
@@ -285,7 +285,7 @@ func NewServer(b Backend) http.Handler {
 	})
 	mux.HandleFunc("POST /watch", func(w http.ResponseWriter, r *http.Request) {
 		var req model.WatchRequest
-		if err := decode(r, &req); err != nil {
+		if err := decode(w, r, &req); err != nil {
 			respond(w, nil, err)
 			return
 		}
@@ -303,7 +303,7 @@ func NewServer(b Backend) http.Handler {
 	mux.HandleFunc("POST /pause-all", func(w http.ResponseWriter, r *http.Request) { respond(w, nil, b.SetPausedAll(true)) })
 	mux.HandleFunc("POST /resume-all", func(w http.ResponseWriter, r *http.Request) { respond(w, nil, b.SetPausedAll(false)) })
 	mux.HandleFunc("PUT /token", func(w http.ResponseWriter, r *http.Request) {
-		data, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
+		data, err := readBody(w, r, 64*1024)
 		if err != nil {
 			respond(w, nil, err)
 			return
@@ -381,13 +381,18 @@ func NewServer(b Backend) http.Handler {
 		}
 		respond(w, cs, err)
 	})
-	mux.HandleFunc("POST /toolchains", accepted(func(r *http.Request) error {
+	mux.HandleFunc("POST /toolchains", func(w http.ResponseWriter, r *http.Request) {
 		var req model.InstallRequest
-		if err := decode(r, &req); err != nil {
-			return err
+		if err := decode(w, r, &req); err != nil {
+			respond(w, nil, err)
+			return
 		}
-		return b.InstallToolchain(req)
-	}))
+		if err := b.InstallToolchain(req); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	})
 	mux.HandleFunc("DELETE /toolchains/{tool}/{version}", accepted(func(r *http.Request) error {
 		return b.RemoveToolchain(r.PathValue("tool"), r.PathValue("version"))
 	}))
@@ -407,7 +412,7 @@ func NewServer(b Backend) http.Handler {
 	})
 	mux.HandleFunc("POST /github-storage/retention", func(w http.ResponseWriter, r *http.Request) {
 		var req model.RetentionRequest
-		if err := decode(r, &req); err != nil {
+		if err := decode(w, r, &req); err != nil {
 			respond(w, nil, err)
 			return
 		}
@@ -415,7 +420,7 @@ func NewServer(b Backend) http.Handler {
 	})
 	mux.HandleFunc("POST /github-storage/{repo}/artifacts/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req model.DeleteArtifactsRequest
-		if err := decode(r, &req); err != nil {
+		if err := decode(w, r, &req); err != nil {
 			respond(w, nil, err)
 			return
 		}
@@ -431,7 +436,7 @@ func NewServer(b Backend) http.Handler {
 	})
 	mux.HandleFunc("POST /github-storage/{repo}/caches/delete", func(w http.ResponseWriter, r *http.Request) {
 		var req model.DeleteCachesRequest
-		if err := decode(r, &req); err != nil {
+		if err := decode(w, r, &req); err != nil {
 			respond(w, nil, err)
 			return
 		}
@@ -447,7 +452,7 @@ func NewServer(b Backend) http.Handler {
 	})
 	mux.HandleFunc("PUT /github-storage/{repo}/retention", func(w http.ResponseWriter, r *http.Request) {
 		var req model.RetentionRequest
-		if err := decode(r, &req); err != nil {
+		if err := decode(w, r, &req); err != nil {
 			respond(w, nil, err)
 			return
 		}
@@ -515,8 +520,26 @@ func started(w http.ResponseWriter) func(op model.OperationStarted, err error) {
 	}
 }
 
-func decode(r *http.Request, v any) error {
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(v); err != nil {
+// readBody reads a request body in full, refusing one over limit. Reading
+// it whole lets decode see data after the first JSON value.
+func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		return nil, &Error{Status: http.StatusRequestEntityTooLarge, Msg: "request body too large"}
+	}
+	if err != nil {
+		return nil, BadRequest("cannot read the request body: " + err.Error())
+	}
+	return data, nil
+}
+
+func decode(w http.ResponseWriter, r *http.Request, v any) error {
+	data, err := readBody(w, r, 1<<20)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, v); err != nil {
 		return BadRequest("invalid JSON: " + err.Error())
 	}
 	return nil

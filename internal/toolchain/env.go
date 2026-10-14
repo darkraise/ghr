@@ -29,11 +29,11 @@ func DefaultSources() Sources {
 	}
 }
 
-// NewEnv is the daemon's Env for the tool cache at root. run should kill a
-// command's whole process group on cancel (system.ExecGroupFor), because the
-// install scripts start children of their own; run and fetch carry the
-// install-length timeouts.
-func NewEnv(root, home, user string, run system.Runner, fetch func(ctx context.Context, url, dst string) error) *Env {
+// NewEnv is the daemon's Env for the tool cache at root. run and runIO should
+// kill a command's whole process group on cancel (system.ExecGroupFor and
+// ExecGroupIOFor), because the install scripts start children of their own;
+// run, runIO and fetch carry the install-length timeouts.
+func NewEnv(root, home, user string, run system.Runner, runIO system.IORunner, fetch func(ctx context.Context, url string, w io.Writer) error) *Env {
 	return &Env{
 		Root:    root,
 		Home:    home,
@@ -43,10 +43,18 @@ func NewEnv(root, home, user string, run system.Runner, fetch func(ctx context.C
 		Fetch:   fetch,
 		Allow:   httpsFrom,
 		Run:     run,
-		Extract: func(ctx context.Context, archive, dir string) error {
-			// As root, tar would otherwise give each file the owner the
+		Chown:   lchownTo(user),
+		Extract: func(ctx context.Context, archive io.Reader, dir *os.Root) error {
+			d, err := dir.Open(".")
+			if err != nil {
+				return err
+			}
+			defer d.Close()
+			// tar runs as root, so it gets no path through the runner user's
+			// tool cache: the archive comes on stdin and dir as fd 3. As
+			// root, tar would otherwise also give each file the owner the
 			// archive names.
-			_, err := run(ctx, "tar", "--no-same-owner", "-xzf", archive, "-C", dir)
+			_, err = runIO(ctx, archive, []*os.File{d}, "tar", "--no-same-owner", "-xzf", "-", "-C", "/proc/self/fd/3")
 			return err
 		},
 		OpID:           newOpID,

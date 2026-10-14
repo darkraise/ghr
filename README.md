@@ -47,7 +47,9 @@ As root on the host:
 curl -fsSL https://github.com/darkraise/ghr/releases/latest/download/setup.sh | bash
 ```
 
-Then open `http://<host>:8080/setup` to set the web password, enter your GitHub owner and token, and pick repositories and toolchains. To answer those questions in the terminal instead, or to install unattended, see [Installation](docs/installation.md).
+Then open `http://<host>:8080/setup`, enter the setup code `setup.sh` printed (or run `ghr code` on the host), set the web password, enter your GitHub owner and token, and pick repositories and toolchains. To answer those questions in the terminal instead, or to install unattended, see [Installation](docs/installation.md).
+
+The web UI is plain HTTP on every interface by default, so the setup code, password and token cross the network in clear: finish setup from a trusted network or through a [TLS proxy](docs/web-ui.md#behind-a-reverse-proxy), and set `GHR_WEB_LISTEN` to bind another address.
 
 Point your workflows at the runners by label. Every runner carries `self-hosted`, `linux` and `x64`, the labels in the config's `labels` list, and its repository's own labels:
 
@@ -68,6 +70,7 @@ Job hooks record which job each runner ran. When a runner exits, ghr removes the
 ghr executes your CI jobs natively on the host, so treat the host as trusted by everyone who can run a workflow:
 
 - Any job can become root on the host through Docker. Do not run anything else on it.
+- All repositories ghr serves form one trust domain. A job in any of them can read the GitHub token, take over other repositories' runners and read their job secrets, and leave files in the shared home, package caches and tool cache that later jobs of every repository run. "Single-use" means a fresh runner registration and working directory, not a clean host. Serve only repositories whose workflow authors you would trust with root on the host and with every other served repository.
 - ghr serves public repositories only when `allow_public` is set for them. Never enable "Run workflows from fork pull requests" on a repository ghr serves: a fork's pull request could then run its code on your host.
 - The web UI is plain HTTP. Put a TLS proxy in front of it and keep it on a trusted network; see [Web UI](docs/web-ui.md#behind-a-reverse-proxy).
 

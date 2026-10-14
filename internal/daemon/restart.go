@@ -40,7 +40,7 @@ func (b *Backend) setRestartFailure(why string) {
 
 // webPending names the web settings whose saved value differs from the one
 // the running listener applied. Hosts compare as sets ignoring case, as the
-// listener matches them.
+// listener matches them, and trusted proxies as sets too.
 func webPending(saved, applied config.Web) []string {
 	var out []string
 	if saved.Listen != applied.Listen {
@@ -48,6 +48,9 @@ func webPending(saved, applied config.Web) []string {
 	}
 	if !slices.Equal(hostSet(saved.Hosts), hostSet(applied.Hosts)) {
 		out = append(out, "web.hosts")
+	}
+	if !slices.Equal(hostSet(saved.TrustedProxies), hostSet(applied.TrustedProxies)) {
+		out = append(out, "web.trusted_proxies")
 	}
 	return out
 }

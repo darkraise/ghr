@@ -3,6 +3,7 @@ package toolchain
 import (
 	"context"
 	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -24,11 +25,11 @@ var errFetched = errors.New("fetched")
 func strictInstall(t *testing.T, tool, version, url string, sources func(*Sources)) ([]string, error) {
 	t.Helper()
 	var fetched []string
-	fetch := func(_ context.Context, url, _ string) error {
+	fetch := func(_ context.Context, url string, _ io.Writer) error {
 		fetched = append(fetched, url)
 		return errFetched
 	}
-	e := NewEnv(t.TempDir(), "/home/ghrunner", "ghrunner", (&host{}).run, fetch)
+	e := NewEnv(t.TempDir(), "/home/ghrunner", "ghrunner", (&host{}).run, nil, fetch)
 	if sources != nil {
 		sources(&e.Sources)
 	}

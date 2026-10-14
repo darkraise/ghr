@@ -6,10 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/model"
@@ -123,6 +125,16 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 		return pruneCmd(ctx, c, args[1:], out)
 	case "setup":
 		return setupCmd(ctx, c, args[1:], stdin, out, errOut)
+	case "code":
+		if err := need(args, 1, "code"); err != nil {
+			return err
+		}
+		code, err := c.SetupCode(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(out, code)
+		return nil
 	case "web":
 		const webUsage = "usage: ghr web <reset-password|set-password>"
 		if len(args) != 2 {
@@ -133,7 +145,11 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 			if err := c.ResetWebPassword(ctx); err != nil {
 				return err
 			}
-			fmt.Fprintln(out, "web password removed; set a new one with: ghr web set-password")
+			code, err := c.SetupCode(ctx)
+			if err != nil {
+				return fmt.Errorf("web password removed, but reading the new setup code failed: %w", err)
+			}
+			fmt.Fprintln(out, "web password removed; set a new one with: ghr web set-password, or in the browser with setup code "+code)
 			return nil
 		case "set-password":
 			pw, err := readNewPassword(ctx, stdin, errOut)
@@ -249,29 +265,45 @@ func logs(ctx context.Context, c *api.Client, args []string, out io.Writer) erro
 	if id == "" {
 		return usageError("usage: ghr logs <id> [-f]")
 	}
+	safe := stdoutText()
+	// A chunk can end between the CR and the LF of a CRLF. At a terminal the
+	// CR waits for the next chunk, so the pair is still one line break.
+	atTerminal := fdIsTerminal(os.Stdout.Fd())
+	held := ""
+	flush := func() error {
+		_, err := io.WriteString(out, safe(held))
+		held = ""
+		return err
+	}
 	cursor := ""
 	for {
 		chunk, err := c.Log(ctx, id, cursor)
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil
+				return flush()
 			}
+			flush()
 			return err
 		}
-		if _, err := io.WriteString(out, chunk.Data); err != nil {
+		data := held + chunk.Data
+		held = ""
+		if atTerminal && strings.HasSuffix(data, "\r") {
+			data, held = data[:len(data)-1], "\r"
+		}
+		if _, err := io.WriteString(out, safe(data)); err != nil {
 			return err
 		}
 		cursor = chunk.Next
 		if !follow {
 			// One response is capped, so read until the daemon has nothing more.
 			if chunk.Data == "" {
-				return nil
+				return flush()
 			}
 			continue
 		}
 		select {
 		case <-ctx.Done():
-			return nil
+			return flush()
 		case <-time.After(logPollInterval):
 		}
 	}
@@ -290,13 +322,66 @@ func historyCmd(ctx context.Context, c *api.Client, args []string, out io.Writer
 	if err != nil {
 		return err
 	}
+	return printHistory(out, h)
+}
+
+func printHistory(out io.Writer, h []model.HistoryEntry) error {
+	safe := stdoutLine()
 	w := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(w, "FINISHED\tREPO\tRUN\tJOB\tRESULT\tDURATION")
 	for _, e := range h {
-		fmt.Fprintf(w, "%s\t%s\t#%s\t%s\t%s\t%s\n", e.FinishedAt.Local().Format("2006-01-02 15:04"), e.Repo, e.RunNumber, e.JobName,
-			e.Conclusion, e.FinishedAt.Sub(e.StartedAt).Round(time.Second))
+		fmt.Fprintf(w, "%s\t%s\t#%s\t%s\t%s\t%s\n", e.FinishedAt.Local().Format("2006-01-02 15:04"), safe(e.Repo), safe(e.RunNumber), safe(e.JobName),
+			safe(e.Conclusion), e.FinishedAt.Sub(e.StartedAt).Round(time.Second))
 	}
 	return w.Flush()
+}
+
+// termSafe replaces every control character a job could use to drive the
+// terminal reading its output: C0 controls except newline and tab, DEL, C1
+// and the bidirectional overrides and isolates that reorder what is shown.
+// That takes ESC, so no CSI or OSC sequence survives. A carriage return
+// would redraw a line already printed, so it becomes a newline, with CRLF
+// as one.
+func termSafe(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\r':
+			return '\n'
+		case r < 0x20 && r != '\n' && r != '\t', r == 0x7f, r >= 0x80 && r <= 0x9f,
+			r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069:
+			return utf8.RuneError
+		}
+		return r
+	}, strings.ReplaceAll(s, "\r\n", "\n"))
+}
+
+// termSafeLine is termSafe for a field that must stay on its line and in its
+// column, so newline and tab become a space as well.
+func termSafeLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return ' '
+		}
+		return r
+	}, termSafe(s))
+}
+
+// stdoutText returns termSafe when stdout is a terminal. A pipe or a file
+// keeps the raw bytes.
+func stdoutText() func(string) string {
+	return ifTerminal(termSafe)
+}
+
+// stdoutLine is stdoutText for a single-line field.
+func stdoutLine() func(string) string {
+	return ifTerminal(termSafeLine)
+}
+
+func ifTerminal(f func(string) string) func(string) string {
+	if fdIsTerminal(os.Stdout.Fd()) {
+		return f
+	}
+	return func(s string) string { return s }
 }
 
 func maxText(n int) string {
@@ -307,11 +392,12 @@ func maxText(n int) string {
 }
 
 func printStatus(out io.Writer, st model.Status) {
+	safe := stdoutLine()
 	if st.Unconfigured {
 		fmt.Fprintln(out, "warning: ghr is not configured. Run: ghr setup github --owner <owner>, or open the web UI")
 	}
 	if st.WebSetupRequired {
-		fmt.Fprintln(out, "warning: the web UI has no password. Run: ghr web set-password")
+		fmt.Fprintln(out, "warning: the web UI has no password. Run: ghr web set-password, or open the web UI with the code from: ghr code")
 	}
 	if st.Unconfigured {
 		return
@@ -332,7 +418,7 @@ func printStatus(out io.Writer, st model.Status) {
 		fmt.Fprintln(out, artifactsLine(*a))
 	}
 	if st.Degraded {
-		fmt.Fprintf(out, "DEGRADED: %s\n", st.DegradedReason)
+		fmt.Fprintf(out, "DEGRADED: %s\n", safe(st.DegradedReason))
 	}
 	fmt.Fprintln(out)
 	w := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
@@ -343,14 +429,14 @@ func printStatus(out io.Writer, st model.Status) {
 			state = "paused"
 		}
 		if r.Error != "" {
-			state = "error: " + r.Error
+			state = "error: " + safe(r.Error)
 		}
 		last := "-"
 		if r.LastJob != nil {
-			last = fmt.Sprintf("%s #%s %s (%s ago)", r.LastJob.Conclusion, r.LastJob.RunNumber, r.LastJob.JobName,
+			last = fmt.Sprintf("%s #%s %s (%s ago)", safe(r.LastJob.Conclusion), safe(r.LastJob.RunNumber), safe(r.LastJob.JobName),
 				st.Now.Sub(r.LastJob.FinishedAt).Round(time.Minute))
 		}
-		fmt.Fprintf(w, "%s\t%s\t%d/%s\t%d\t%s\n", r.Name, state, r.Active, maxText(r.Max), r.Queued, last)
+		fmt.Fprintf(w, "%s\t%s\t%d/%s\t%d\t%s\n", safe(r.Name), state, r.Active, maxText(r.Max), r.Queued, last)
 	}
 	w.Flush()
 	if len(st.Instances) == 0 {
@@ -362,24 +448,25 @@ func printStatus(out io.Writer, st model.Status) {
 	for _, i := range st.Instances {
 		job := "-"
 		if i.Job != nil {
-			job = fmt.Sprintf("%s #%s", i.Job.Name, i.Job.RunNumber)
+			job = fmt.Sprintf("%s #%s", safe(i.Job.Name), safe(i.Job.RunNumber))
 		}
-		state := i.State
+		state := safe(i.State)
 		if i.Stopping {
 			state = "stopping"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", i.ID, i.Repo, state, job, st.Now.Sub(i.Since).Round(time.Second))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", i.ID, safe(i.Repo), state, job, st.Now.Sub(i.Since).Round(time.Second))
 	}
 	w.Flush()
 }
 
 // runnerLine is the status line about the GitHub Actions runner version.
 func runnerLine(st model.Status) string {
+	checkError := stdoutLine()(st.RunnerUpdate.CheckError)
 	u := st.RunnerUpdate
 	if u.Installed == "" {
 		s := "runner version unknown (no dist/current)"
 		if u.CheckError != "" {
-			s += "  last check failed: " + u.CheckError
+			s += "  last check failed: " + checkError
 		}
 		return s
 	}
@@ -399,7 +486,7 @@ func runnerLine(st model.Status) string {
 		s += "  queued: runs when no job is running or queued"
 	}
 	if u.CheckError != "" {
-		s += "  last check failed: " + u.CheckError
+		s += "  last check failed: " + checkError
 	}
 	return s
 }

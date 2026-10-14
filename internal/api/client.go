@@ -331,6 +331,16 @@ func (c *Client) SetWebPassword(ctx context.Context, password string) error {
 	return c.call(ctx, http.MethodPost, "/web/set-password", jsonBody(map[string]string{"password": password}), nil)
 }
 
+// SetupCode returns the code the web UI asks for before its first password is
+// set. The route exists on the Unix socket only.
+func (c *Client) SetupCode(ctx context.Context) (string, error) {
+	var r struct {
+		Code string `json:"code"`
+	}
+	err := c.call(ctx, http.MethodGet, "/web/setup-code", nil, &r)
+	return r.Code, err
+}
+
 // SetupState reports how far first-run setup has got.
 func (c *Client) SetupState(ctx context.Context) (model.SetupState, error) {
 	var s model.SetupState

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -292,5 +293,115 @@ func TestDownloadsShareTheRateLimitSuspension(t *testing.T) {
 	}
 	if len(f.requests) != 1 {
 		t.Fatalf("requests sent during suspension: %v", f.requests)
+	}
+}
+
+func TestBlobHost(t *testing.T) {
+	for u, want := range map[string]bool{
+		"https://productionresultssa1.blob.core.windows.net/actions-results/x.zip?sig=1": true,
+		"https://pipelines.actions.githubusercontent.com/x":                              true,
+		"https://PIPELINES.ACTIONS.GITHUBUSERCONTENT.COM/x":                              true,
+		"http://productionresultssa1.blob.core.windows.net/x":                            false,
+		"https://blob.core.windows.net.example.com/x":                                    false,
+		"https://evilblob.core.windows.net/x":                                            false,
+		"https://example.com/x":                                                          false,
+		"https://evilgithubusercontent.com/x":                                            false,
+		"https://githubusercontent.com/x":                                                false,
+		"https://pipelines.actions.githubusercontent.com@example.com/x":                  false,
+		"https://pipelines.actions.githubusercontent.com:8443/x":                         true,
+		"https://example.com#.githubusercontent.com":                                     false,
+		"https://example.com/.githubusercontent.com":                                     false,
+		"/relative": false,
+		"":          false,
+	} {
+		if got := BlobHost(u); got != want {
+			t.Errorf("%q: got %v", u, got)
+		}
+	}
+}
+
+func TestJobLogRefusesAnUnexpectedAddress(t *testing.T) {
+	var hits atomic.Int32
+	blob := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		fmt.Fprint(w, "log")
+	}))
+	defer blob.Close()
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", blob.URL+"/log?sig=secret")
+		w.WriteHeader(http.StatusFound)
+	})
+	c.blobHost = BlobHost
+	_, _, err := c.OpenJobLog(context.Background(), "darkmem", 1)
+	if err == nil || err.Error() != "github: GitHub returned an unexpected log address" {
+		t.Fatalf("err %v", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("the address got %d requests", hits.Load())
+	}
+}
+
+func TestLogBlobRefusesARedirectOffHTTPS(t *testing.T) {
+	var hits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		fmt.Fprint(w, "log")
+	}))
+	defer target.Close()
+	store := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/log?sig=secret", http.StatusFound)
+	}))
+	defer store.Close()
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, store.URL+"/log", http.StatusFound)
+	})
+	_, err := c.JobLog(context.Background(), "darkmem", 1, 10)
+	if err == nil || strings.Contains(err.Error(), "secret") || !strings.Contains(err.Error(), "refus") {
+		t.Fatalf("err %v", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("the redirect target got %d requests", hits.Load())
+	}
+}
+
+func TestLogBlobRuleSurvivesAReplacedBlobClient(t *testing.T) {
+	var hits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		fmt.Fprint(w, "log")
+	}))
+	defer target.Close()
+	store := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/log", http.StatusFound)
+	}))
+	defer store.Close()
+	c, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, store.URL+"/log", http.StatusFound)
+	})
+	c.Blob = &http.Client{}
+	if _, err := c.JobLog(context.Background(), "darkmem", 1, 10); err == nil || !strings.Contains(err.Error(), "refus") {
+		t.Fatalf("err %v", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("the redirect target got %d requests", hits.Load())
+	}
+	if c.Blob.CheckRedirect != nil {
+		t.Fatal("OpenJobLog changed the caller's Blob client")
+	}
+}
+
+func TestLogBlobRefusesARedirectToAnotherHost(t *testing.T) {
+	c, _ := newClient(t, nil)
+	req, _ := http.NewRequest(http.MethodGet, "https://example.com/log", nil)
+	c.blobHost = BlobHost
+	if err := c.blobRedirect(req, nil); err == nil {
+		t.Fatal("a redirect to example.com was allowed")
+	}
+	req, _ = http.NewRequest(http.MethodGet, "https://productionresultssa1.blob.core.windows.net/log", nil)
+	if err := c.blobRedirect(req, nil); err != nil {
+		t.Fatalf("a redirect to a blob host: %v", err)
+	}
+	if err := c.blobRedirect(req, make([]*http.Request, 10)); err == nil {
+		t.Fatal("an eleventh redirect was allowed")
 	}
 }

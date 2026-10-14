@@ -122,6 +122,7 @@ const usage = `usage: ghr [command]
   cache list | clear <name>       clear is refused while jobs run
   prune [--scope <scope>]         standard (default), build-cache-keep,
                                   build-cache-all, dangling-images, unused-volumes
+  code                            web UI setup code, until a password is set
   web reset-password              forget the web UI password
   web set-password                set the web UI password (prompts, or reads stdin)
   setup                           first-run state: configured, wizard, owner

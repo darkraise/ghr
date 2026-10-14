@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func pythonManifest(url string) []byte {
@@ -115,14 +116,14 @@ func TestPythonInstallRunsSetupShAsTheRunnerUser(t *testing.T) {
 		}
 	}
 	cmds := f.host.commands()
-	chown := slices.Index(cmds, "chown -R -h ghrunner:ghrunner "+filepath.Join(f.Root, ".tmp", "op1"))
+	chown := slices.Index(cmds, "lchown "+filepath.Join(f.Root, ".tmp", "op1"))
 	run := slices.IndexFunc(cmds, func(c string) bool {
 		return strings.HasPrefix(c, "runuser -u ghrunner -- env -u AGENT_TOOLSDIRECTORY ")
 	})
 	if chown < 0 || run < 0 || chown > run {
 		t.Fatalf("commands %q: the operation directory must go to ghrunner before setup.sh runs without AGENT_TOOLSDIRECTORY", cmds)
 	}
-	if mk := slices.Index(cmds, "chown -h ghrunner:ghrunner "+filepath.Join(f.Root, "Python")); mk < 0 || mk > run {
+	if mk := slices.Index(cmds, "lchown "+filepath.Join(f.Root, "Python")); mk < 0 || mk > run {
 		t.Fatalf("commands %q: <Root>/Python must exist, owned by ghrunner, before setup.sh runs", cmds)
 	}
 	if !slices.Equal(steps, []string{"downloading", "extracting", "running setup.sh"}) {
@@ -165,6 +166,7 @@ func TestPythonFailedSetupKeepsAFolderThatWasThere(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := pythonFixture(t)
 			theirs := mkInstall(t, f.Root, "Python", "3.13.7", false)
+			backdate(t, theirs, 2*time.Hour)
 			f.host.scripts["setup.sh"] = func(string, map[string]string, []string) error {
 				if fail {
 					return errors.New("ensurepip failed")
@@ -180,6 +182,26 @@ func TestPythonFailedSetupKeepsAFolderThatWasThere(t *testing.T) {
 				t.Fatal("a version folder that was there before the install was removed")
 			}
 		})
+	}
+}
+
+// setup.sh deletes the x64 folder first, which may be a running job's own
+// setup-python at work.
+func TestPythonInstallLeavesAFreshFolderWithoutMarker(t *testing.T) {
+	f := pythonFixture(t)
+	theirs := mkInstall(t, f.Root, "Python", "3.13.7", false)
+	ran := false
+	f.host.scripts["setup.sh"] = func(string, map[string]string, []string) error {
+		ran = true
+		return nil
+	}
+	p := newPython(f.Env)
+	rel, _ := p.Resolve(context.Background(), "3.13")
+	if err := p.Install(context.Background(), rel, func(string) {}); !errors.Is(err, ErrInstallInProgress) {
+		t.Fatalf("got %v", err)
+	}
+	if ran || !exists(filepath.Join(theirs, "file")) {
+		t.Fatal("setup.sh ran over the unfinished folder")
 	}
 }
 

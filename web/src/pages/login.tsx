@@ -23,6 +23,7 @@ function loginError(err: unknown): string {
 export function LoginPage() {
   const auth = useQuery({ queryKey: keys.auth, queryFn: ({ signal }) => api.authState(signal) })
   const { redirect } = useSearch({ from: "/login" })
+  const [code, setCode] = useState("")
   const [password, setPassword] = useState("")
   const [confirm, setConfirm] = useState("")
   const [error, setError] = useState("")
@@ -47,7 +48,7 @@ export function LoginPage() {
     if (setup && password !== confirm) return setError("the passwords do not match")
     setBusy(true)
     try {
-      await (setup ? api.setup(password) : api.login(password))
+      await (setup ? api.setup(code, password) : api.login(password))
       // A full load rather than a route change: a daemon restart for a deploy
       // ends every session, and this way the tab sent here picks up the web
       // build that came with it. The button stays busy until the page goes.
@@ -66,12 +67,28 @@ export function LoginPage() {
           <CardTitle>{setup ? "Set a password" : "Log in"}</CardTitle>
           <CardDescription>
             {setup
-              ? "No password is set. Choose one to claim this ghr."
+              ? "No password is set. Enter the setup code from this host and choose one to claim this ghr."
               : "Log in to manage this runner host."}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form className="flex flex-col gap-4" onSubmit={(e) => void submit(e)}>
+            {setup && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="setup-code">Setup code</Label>
+                <Input
+                  id="setup-code"
+                  autoComplete="one-time-code"
+                  spellCheck={false}
+                  aria-describedby="setup-code-help"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                />
+                <p id="setup-code-help" className="text-sm text-muted-foreground">
+                  Printed by setup.sh. On the host, run <code className="font-mono">ghr code</code>.
+                </p>
+              </div>
+            )}
             <div className="flex flex-col gap-2">
               <Label htmlFor="password">Password</Label>
               <Input

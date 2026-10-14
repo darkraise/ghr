@@ -51,6 +51,7 @@ func TestRestartPendingComparesTheSavedWebBlock(t *testing.T) {
 		{"a new listen", config.Web{Listen: "0.0.0.0:9090", Hosts: []string{"ghr.lan", "ghr.example"}}, []string{"web.listen"}},
 		{"a host removed", config.Web{Listen: "0.0.0.0:8080", Hosts: []string{"ghr.lan"}}, []string{"web.hosts"}},
 		{"both", config.Web{Listen: "127.0.0.1:8080"}, []string{"web.listen", "web.hosts"}},
+		{"a trusted proxy added", config.Web{Listen: "0.0.0.0:8080", Hosts: []string{"ghr.lan", "ghr.example"}, TrustedProxies: []string{"10.0.0.2"}}, []string{"web.trusted_proxies"}},
 	} {
 		setWeb(t, b, tc.web)
 		st := b.Status()

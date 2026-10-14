@@ -3,6 +3,7 @@ package daemon
 import (
 	"net"
 	"net/netip"
+	"slices"
 	"sync"
 )
 
@@ -18,10 +19,13 @@ const (
 // limitListener keeps at most cap(slots) accepted connections open, and at
 // most perClient of them from one client. With every slot taken it does not
 // call the inner Accept, so further clients wait in the kernel's accept queue.
+// A trusted proxy has no per-client bound: it carries every client behind it,
+// and bounds them itself.
 type limitListener struct {
 	net.Listener
 	slots     chan struct{}
 	perClient int
+	trusted   []netip.Prefix
 	closed    chan struct{}
 	closeOnce sync.Once
 
@@ -29,9 +33,9 @@ type limitListener struct {
 	clients map[string]int // open connections by clientKey; no entry is 0
 }
 
-func limitConns(l net.Listener, total, perClient int) *limitListener {
+func limitConns(l net.Listener, total, perClient int, trusted []netip.Prefix) *limitListener {
 	return &limitListener{
-		Listener: l, slots: make(chan struct{}, total), perClient: perClient,
+		Listener: l, slots: make(chan struct{}, total), perClient: perClient, trusted: trusted,
 		closed: make(chan struct{}), clients: map[string]int{},
 	}
 }
@@ -57,6 +61,9 @@ func (l *limitListener) Accept() (net.Conn, error) {
 			<-l.slots
 			return nil, err
 		}
+		if l.isTrusted(c.RemoteAddr()) {
+			return &limitConn{Conn: c, release: func() { <-l.slots }}, nil
+		}
 		key := clientKey(c.RemoteAddr())
 		if !l.admit(key) {
 			c.Close()
@@ -68,6 +75,11 @@ func (l *limitListener) Accept() (net.Conn, error) {
 			<-l.slots
 		}}, nil
 	}
+}
+
+func (l *limitListener) isTrusted(remote net.Addr) bool {
+	ip, ok := remoteIP(remote)
+	return ok && slices.ContainsFunc(l.trusted, func(p netip.Prefix) bool { return p.Contains(ip) })
 }
 
 func (l *limitListener) admit(key string) bool {
@@ -115,15 +127,22 @@ func (c *limitConn) Close() error {
 // because one host can use every address of its /64. An address that does
 // not parse counts under its own text.
 func clientKey(remote net.Addr) string {
-	text := remote.String()
-	ap, err := netip.ParseAddrPort(text)
-	if err != nil {
-		return text
+	ip, ok := remoteIP(remote)
+	if !ok {
+		return remote.String()
 	}
-	ip := ap.Addr().Unmap().WithZone("")
 	if ip.Is4() {
 		return ip.String()
 	}
 	prefix, _ := ip.Prefix(64)
 	return prefix.String()
+}
+
+// remoteIP is the address of a remote host:port, unmapped and without a zone.
+func remoteIP(remote net.Addr) (netip.Addr, bool) {
+	ap, err := netip.ParseAddrPort(remote.String())
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return ap.Addr().Unmap().WithZone(""), true
 }

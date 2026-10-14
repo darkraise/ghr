@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -42,38 +43,55 @@ func newTestAuth(t *testing.T) (*Auth, *clock) {
 	return a, c
 }
 
+// claim sets the first password with the current setup code.
+func claim(a *Auth, password string) (string, error) {
+	code, err := a.SetupCode()
+	if err != nil {
+		return "", err
+	}
+	return a.Setup(code, password)
+}
+
 func TestSetupOnce(t *testing.T) {
 	a, _ := newTestAuth(t)
 	if req, err := a.SetupRequired(); !req || err != nil {
 		t.Fatalf("fresh: required %v err %v", req, err)
 	}
-	if _, err := a.Setup("short"); !errors.Is(err, ErrPasswordLength) {
+	code, err := a.SetupCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Setup(code, "short"); !errors.Is(err, ErrPasswordLength) {
 		t.Fatalf("short: %v", err)
 	}
-	if _, err := a.Setup(strings.Repeat("x", MaxPasswordLen+1)); !errors.Is(err, ErrPasswordLength) {
+	if _, err := a.Setup(code, strings.Repeat("x", MaxPasswordLen+1)); !errors.Is(err, ErrPasswordLength) {
 		t.Fatalf("long: %v", err)
 	}
 	if _, err := a.Login("10.0.0.1", pw); !errors.Is(err, ErrSetupRequired) {
 		t.Fatalf("login before setup: %v", err)
 	}
-	id, err := a.Setup(pw)
+	id, err := a.Setup(code, pw)
 	if err != nil || !a.Valid(id) {
 		t.Fatalf("setup: id valid %v err %v", a.Valid(id), err)
 	}
 	if req, _ := a.SetupRequired(); req {
 		t.Fatal("setup still required after setup")
 	}
-	if _, err := a.Setup(pw); !errors.Is(err, ErrPasswordSet) {
+	if _, err := a.Setup(code, pw); !errors.Is(err, ErrPasswordSet) {
 		t.Fatalf("second setup: %v", err)
 	}
 }
 
 func TestConcurrentSetupHasOneWinner(t *testing.T) {
 	a, _ := newTestAuth(t)
+	code, err := a.SetupCode()
+	if err != nil {
+		t.Fatal(err)
+	}
 	errs := make(chan error, 2)
 	for range 2 {
 		go func() {
-			_, err := a.Setup(pw)
+			_, err := a.Setup(code, pw)
 			errs <- err
 		}()
 	}
@@ -83,9 +101,87 @@ func TestConcurrentSetupHasOneWinner(t *testing.T) {
 	}
 }
 
+var setupCodeFormat = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{5}(-[0-9A-HJKMNP-TV-Z]{5}){3}$`)
+
+func TestSetupNeedsTheCode(t *testing.T) {
+	a, _ := newTestAuth(t)
+	if _, err := a.Setup("", pw); !errors.Is(err, ErrSetupCode) {
+		t.Fatalf("before any code was issued: %v", err)
+	}
+	old, err := a.SetupCode()
+	if err != nil || !setupCodeFormat.MatchString(old) {
+		t.Fatalf("code %q err %v", old, err)
+	}
+	if again, _ := a.SetupCode(); again != old {
+		t.Fatalf("the code changed between calls: %q then %q", old, again)
+	}
+	if err := a.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	code, err := a.SetupCode()
+	if err != nil || code == old {
+		t.Fatalf("after reset: code %q (was %q) err %v", code, old, err)
+	}
+	for _, c := range []string{"", "WRONG-CODE0-WRONG-CODE0", old, code[:len(code)-1]} {
+		if _, err := a.Setup(c, pw); !errors.Is(err, ErrSetupCode) || !strings.Contains(err.Error(), "ghr code") {
+			t.Errorf("code %q: %v", c, err)
+		}
+	}
+	if _, err := os.Stat(a.path); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a refused setup wrote the password file: %v", err)
+	}
+	if _, err := a.Setup(strings.ToLower(code), pw); err != nil {
+		t.Fatalf("lower case: %v", err)
+	}
+	os.Remove(a.path)
+	if _, err := a.Setup(code, pw); !errors.Is(err, ErrSetupCode) {
+		t.Fatalf("a used code worked again: %v", err)
+	}
+
+	for _, form := range []func(string) string{
+		func(c string) string { return strings.ReplaceAll(c, "-", "") },
+		func(c string) string { return " " + strings.ReplaceAll(c, "-", " ") + " " },
+	} {
+		a, _ := newTestAuth(t)
+		code, err := a.SetupCode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.Setup(form(code), pw); err != nil {
+			t.Errorf("code %q: %v", form(code), err)
+		}
+	}
+}
+
+func TestSetupCodeIsRefusedOnceAPasswordIsSet(t *testing.T) {
+	a, _ := newTestAuth(t)
+	if _, err := claim(a, pw); err != nil {
+		t.Fatal(err)
+	}
+	if code, err := a.SetupCode(); !errors.Is(err, ErrPasswordSet) || code != "" {
+		t.Fatalf("code %q err %v", code, err)
+	}
+}
+
+func TestSetEndsTheSetupCode(t *testing.T) {
+	a, _ := newTestAuth(t)
+	code, err := a.SetupCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Set(pw); err != nil {
+		t.Fatal(err)
+	}
+	// A password file removed by hand, not by Reset, must not revive the code.
+	os.Remove(a.path)
+	if _, err := a.Setup(code, pw); !errors.Is(err, ErrSetupCode) {
+		t.Fatalf("setup with the code from before set-password: %v", err)
+	}
+}
+
 func TestLoginThrottle(t *testing.T) {
 	a, c := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	for i := range maxFailures {
@@ -126,7 +222,7 @@ func TestFailuresUseARollingWindow(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, c := newTestAuth(t)
-			if _, err := a.Setup(pw); err != nil {
+			if _, err := claim(a, pw); err != nil {
 				t.Fatal(err)
 			}
 			done := 0
@@ -166,7 +262,7 @@ func TestBurstCannotExceedTheLimit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, _ := newTestAuth(t)
-			if _, err := a.Setup(pw); err != nil {
+			if _, err := claim(a, pw); err != nil {
 				t.Fatal(err)
 			}
 			start := make(chan struct{})
@@ -204,7 +300,7 @@ func TestBurstCannotExceedTheLimit(t *testing.T) {
 
 func TestSuccessClearsFailures(t *testing.T) {
 	a, _ := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	for range maxFailures - 1 {
@@ -237,7 +333,7 @@ func failureCounters(a *Auth) int {
 // the client a.b.c.d: one counter, locked at maxFailures.
 func TestIPv4MappedAddressIsItsIPv4Client(t *testing.T) {
 	a, _ := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	keys := []string{ClientKey("10.0.0.1:5555"), ClientKey("[::ffff:10.0.0.1]:5555")}
@@ -268,7 +364,7 @@ func TestOnlyAnIPv6AddressHasAPrefixCounter(t *testing.T) {
 		{v6(1), 2},
 	} {
 		a, _ := newTestAuth(t)
-		if _, err := a.Setup(pw); err != nil {
+		if _, err := claim(a, pw); err != nil {
 			t.Fatal(err)
 		}
 		a.Login(tc.key, "wrong password!")
@@ -296,7 +392,7 @@ func TestLockedClientIsRefusedBeforeThePasswordCheck(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, c := newTestAuth(t)
-			if _, err := a.Setup(pw); err != nil {
+			if _, err := claim(a, pw); err != nil {
 				t.Fatal(err)
 			}
 			for i := range tc.failures {
@@ -349,7 +445,7 @@ func TestALockLandingMidLoginRefusesIt(t *testing.T) {
 		for check := 1; check <= 3; check++ {
 			t.Run(fmt.Sprintf("%s before check %d", tc.name, check), func(t *testing.T) {
 				a, c := newTestAuth(t)
-				if _, err := a.Setup(pw); err != nil {
+				if _, err := claim(a, pw); err != nil {
 					t.Fatal(err)
 				}
 				until := c.now().Add(lockout)
@@ -415,7 +511,7 @@ func TestRefusalNamesTheLaterRetryTime(t *testing.T) {
 // must lock that host's address and nobody else's.
 func TestIPv6AddressLocksAlone(t *testing.T) {
 	a, c := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	for i := range maxFailures {
@@ -442,7 +538,7 @@ func TestIPv6AddressLocksAlone(t *testing.T) {
 // locked.
 func TestIPv6PrefixLocksAtFifty(t *testing.T) {
 	a, c := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	fail := func(key string) {
@@ -504,7 +600,7 @@ func TestIPv6PrefixLocksAtFifty(t *testing.T) {
 // fresh count for the /64.
 func TestSuccessClearsTheAddressNotThePrefix(t *testing.T) {
 	a, _ := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
@@ -538,7 +634,7 @@ func TestSuccessClearsTheAddressNotThePrefix(t *testing.T) {
 
 func TestFailuresExpireAndAreSwept(t *testing.T) {
 	a, c := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	for range maxFailures - 1 {
@@ -562,7 +658,7 @@ func TestFailuresExpireAndAreSwept(t *testing.T) {
 
 func TestSessionsExpireAndEnd(t *testing.T) {
 	a, c := newTestAuth(t)
-	id1, err := a.Setup(pw)
+	id1, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,9 +682,49 @@ func TestSessionsExpireAndEnd(t *testing.T) {
 	}
 }
 
+func TestSessionsEndWhenIdle(t *testing.T) {
+	a, c := newTestAuth(t)
+	used, err := claim(a, pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle, err := a.Login("10.0.0.1", pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := c.now()
+	c.add(idleTTL - time.Nanosecond)
+	if !a.Valid(used) {
+		t.Fatal("a session ended before it was idle for idleTTL")
+	}
+	c.add(time.Nanosecond)
+	if a.Valid(idle) {
+		t.Fatal("a session idle for idleTTL is still valid")
+	}
+	a.Login("10.0.0.2", "wrong password!")
+	a.mu.Lock()
+	_, kept := a.sessions[idle]
+	a.mu.Unlock()
+	if kept {
+		t.Fatal("a sweep kept an idle session")
+	}
+	for {
+		c.add(idleTTL - time.Minute)
+		if c.now().Sub(start) >= sessionTTL {
+			break
+		}
+		if !a.Valid(used) {
+			t.Fatalf("a session in use ended after %v", c.now().Sub(start))
+		}
+	}
+	if a.Valid(used) {
+		t.Fatal("a session in use outlived sessionTTL")
+	}
+}
+
 func TestFailedLoginSweepsExpiredSessions(t *testing.T) {
 	a, c := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	c.add(sessionTTL)
@@ -603,7 +739,7 @@ func TestFailedLoginSweepsExpiredSessions(t *testing.T) {
 
 func TestChangePassword(t *testing.T) {
 	a, _ := newTestAuth(t)
-	keep, err := a.Setup(pw)
+	keep, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,20 +747,21 @@ func TestChangePassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.ChangePassword(keep, "wrong password!", "another long secret"); !errors.Is(err, ErrWrongPassword) {
-		t.Fatalf("wrong current: %v", err)
+	if id, err := a.ChangePassword("10.0.0.9", "wrong password!", "another long secret"); !errors.Is(err, ErrWrongPassword) || id != "" {
+		t.Fatalf("wrong current: id %q err %v", id, err)
 	}
 	if !a.Valid(keep) || !a.Valid(other) {
 		t.Fatal("a refused change ended sessions")
 	}
-	if err := a.ChangePassword(keep, pw, "short"); !errors.Is(err, ErrPasswordLength) {
-		t.Fatalf("short new: %v", err)
+	if id, err := a.ChangePassword("10.0.0.9", pw, "short"); !errors.Is(err, ErrPasswordLength) || id != "" {
+		t.Fatalf("short new: id %q err %v", id, err)
 	}
-	if err := a.ChangePassword(keep, pw, "another long secret"); err != nil {
+	id, err := a.ChangePassword("10.0.0.9", pw, "another long secret")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !a.Valid(keep) || a.Valid(other) {
-		t.Fatalf("after change: keep %v other %v", a.Valid(keep), a.Valid(other))
+	if a.Valid(keep) || a.Valid(other) || !a.Valid(id) || id == keep {
+		t.Fatalf("after change: old %v other %v new %v", a.Valid(keep), a.Valid(other), a.Valid(id))
 	}
 	if _, err := a.Login("10.0.0.2", pw); !errors.Is(err, ErrWrongPassword) {
 		t.Fatalf("old password: %v", err)
@@ -634,9 +771,77 @@ func TestChangePassword(t *testing.T) {
 	}
 }
 
+// A wrong current password counts against the client like a wrong login, on
+// the same counters: once either has locked the client out, a password change
+// from it is refused before any key derivation, and so is a login.
+func TestPasswordChangeIsThrottled(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fail func(a *Auth) error
+	}{
+		{"wrong current passwords", func(a *Auth) error {
+			_, err := a.ChangePassword(v6(1), "wrong password!", "another long secret")
+			return err
+		}},
+		{"wrong logins", func(a *Auth) error {
+			_, err := a.Login(v6(1), "wrong password!")
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, c := newTestAuth(t)
+			id, err := claim(a, pw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range maxFailures {
+				if err := tc.fail(a); !errors.Is(err, ErrWrongPassword) {
+					t.Fatalf("failure %d: %v", i+1, err)
+				}
+			}
+			until := c.now().Add(lockout)
+			if f := a.fails[v6Prefix]; f == nil || len(f.times) != maxFailures {
+				t.Fatalf("the /64 counted %+v, want %d failures", f, maxFailures)
+			}
+			fillSlots(a)
+			type change struct {
+				id  string
+				err error
+			}
+			changed := make(chan change, 1)
+			go func() {
+				id, err := a.ChangePassword(v6(1), pw, "another long secret")
+				changed <- change{id, err}
+			}()
+			var te *ThrottledError
+			select {
+			case ch := <-changed:
+				if !errors.As(ch.err, &te) || !te.RetryAt.Equal(until) || ch.id != "" {
+					t.Fatalf("change from a locked client: id %q err %v", ch.id, ch.err)
+				}
+			case <-time.After(2 * time.Second):
+				<-a.sem
+				<-a.sem
+				t.Fatal("a change from a locked client waited for a derivation slot")
+			}
+			if _, err := a.Login(v6(1), pw); !errors.As(err, &te) || !te.RetryAt.Equal(until) {
+				t.Fatalf("login from a locked client: %v", err)
+			}
+			<-a.sem
+			<-a.sem
+			if !a.Valid(id) {
+				t.Fatal("refused changes ended the session")
+			}
+			if _, err := a.Login(v6(2), pw); err != nil {
+				t.Fatalf("another address in the /64: %v", err)
+			}
+		})
+	}
+}
+
 func TestResetEndsEverything(t *testing.T) {
 	a, _ := newTestAuth(t)
-	id, err := a.Setup(pw)
+	id, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,7 +869,7 @@ func fillSlots(a *Auth) {
 
 func TestLoginRacingAResetCreatesNoSession(t *testing.T) {
 	a, _ := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	fillSlots(a)
@@ -694,13 +899,19 @@ func TestLoginRacingAResetCreatesNoSession(t *testing.T) {
 // it to the login.
 func TestLoginRacingAPasswordChangeCreatesNoSession(t *testing.T) {
 	a, _ := newTestAuth(t)
-	keep, err := a.Setup(pw)
-	if err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	fillSlots(a)
-	changed := make(chan error, 1)
-	go func() { changed <- a.ChangePassword(keep, pw, "another long secret") }()
+	type change struct {
+		id  string
+		err error
+	}
+	changed := make(chan change, 1)
+	go func() {
+		id, err := a.ChangePassword("10.0.0.9", pw, "another long secret")
+		changed <- change{id, err}
+	}()
 	time.Sleep(50 * time.Millisecond)
 	type result struct {
 		id  string
@@ -713,15 +924,16 @@ func TestLoginRacingAPasswordChangeCreatesNoSession(t *testing.T) {
 	}()
 	time.Sleep(50 * time.Millisecond)
 	<-a.sem
-	if err := <-changed; err != nil {
-		t.Fatal(err)
+	ch := <-changed
+	if ch.err != nil {
+		t.Fatal(ch.err)
 	}
 	r := <-done
 	if r.err == nil || a.Valid(r.id) {
 		t.Fatalf("a login that read the old password outlived the change: id valid %v err %v", a.Valid(r.id), r.err)
 	}
-	if !a.Valid(keep) {
-		t.Fatal("the changing session was ended")
+	if !a.Valid(ch.id) {
+		t.Fatal("the change's new session was ended")
 	}
 	<-a.sem
 }
@@ -741,14 +953,17 @@ func TestUnreadableFile(t *testing.T) {
 	if _, err := a.Login("10.0.0.1", pw); !errors.Is(err, ErrUnreadable) {
 		t.Fatalf("login: %v", err)
 	}
-	if _, err := a.Setup(pw); !errors.Is(err, ErrUnreadable) {
+	if _, err := a.SetupCode(); !errors.Is(err, ErrUnreadable) {
+		t.Fatalf("setup code: %v", err)
+	}
+	if _, err := a.Setup("", pw); !errors.Is(err, ErrUnreadable) {
 		t.Fatalf("setup: %v", err)
 	}
 }
 
 func TestDerivationsAreBounded(t *testing.T) {
 	a, _ := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	fillSlots(a)
@@ -771,7 +986,7 @@ func TestDerivationsAreBounded(t *testing.T) {
 
 func TestLoginStopsWaitingWhenTheClientLeaves(t *testing.T) {
 	a, _ := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	fillSlots(a)
@@ -874,7 +1089,7 @@ func TestSetRepairsAnUnreadableFile(t *testing.T) {
 // gen is published, so a login queued behind it cannot keep a session.
 func TestLoginRacingASetCreatesNoSession(t *testing.T) {
 	a, _ := newTestAuth(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	fillSlots(a)

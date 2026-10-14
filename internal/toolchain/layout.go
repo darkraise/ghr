@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 func marker(dir string) string { return dir + ".complete" }
@@ -67,51 +70,80 @@ func (e *Env) removeLayout(toolDir, folder string) error {
 	if !validFolder(folder) || !e.has(toolDir, folder) {
 		return ErrNotInstalled
 	}
-	dir := e.versionDir(toolDir, folder)
-	if err := noSymlinks(e.Root, dir); err != nil {
+	r, err := os.OpenRoot(e.Root)
+	if err != nil {
 		return err
 	}
-	if err := os.Remove(marker(dir)); err != nil {
+	defer r.Close()
+	dir := filepath.Join(toolDir, folder, arch)
+	if err := r.Remove(marker(dir)); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(dir); err != nil {
+	if err := r.RemoveAll(dir); err != nil {
 		return err
 	}
 	// Fails, and keeps the folder, while it holds anything else.
-	os.Remove(filepath.Dir(dir))
+	r.Remove(filepath.Dir(dir))
 	return nil
+}
+
+// operation is one operation's directory under <Root>/.tmp. The runner user
+// owns <Root> and can swap .tmp for a link at any moment, so path is only for
+// the commands that need one; everything ghr does there itself goes through
+// the handles, which stay on the directories ghr made.
+type operation struct {
+	*os.Root // the operation directory
+	tmp      *os.Root
+	id       string
+	path     string
+	rel      string // path, relative to <Root>
+}
+
+// Close removes the operation directory.
+func (o *operation) Close() error {
+	o.Root.Close()
+	err := o.tmp.RemoveAll(o.id)
+	o.tmp.Close()
+	return err
 }
 
 // opDir makes a fresh directory for one operation under <Root>/.tmp. Both
 // are root-owned; .tmp allows only traversal, so jobs cannot reach into a
 // download.
-func (e *Env) opDir() (string, error) {
+func (e *Env) opDir() (*operation, error) {
 	tmp := filepath.Join(e.Root, ".tmp")
 	// A job can plant a symlink or its own directory here; a foreign directory
 	// would let the job swap an operation directory for a link.
 	if fi, err := os.Lstat(tmp); err == nil && (!fi.IsDir() || !ownedByMe(fi)) {
 		if err := os.RemoveAll(tmp); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 	if err := os.MkdirAll(tmp, 0o711); err != nil {
-		return "", err
+		return nil, err
 	}
 	// The job can swap .tmp again after that look, so the rest goes through
 	// one handle on the directory and never through its path.
 	r, err := openOwned(tmp)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	defer r.Close()
 	if err := r.Chmod(".", 0o711); err != nil {
-		return "", err
+		r.Close()
+		return nil, err
 	}
 	id := e.OpID()
 	if err := r.Mkdir(id, 0o700); err != nil {
-		return "", err
+		r.Close()
+		return nil, err
 	}
-	return filepath.Join(tmp, id), nil
+	op, err := r.OpenRoot(id)
+	if err != nil {
+		r.RemoveAll(id)
+		r.Close()
+		return nil, err
+	}
+	return &operation{Root: op, tmp: r, id: id, path: filepath.Join(tmp, id), rel: filepath.Join(".tmp", id)}, nil
 }
 
 // openOwned opens the directory at path, and only one that belongs to this
@@ -142,40 +174,36 @@ func openOwned(path string) (*os.Root, error) {
 // download in progress.
 func (e *Env) CleanTmp() error { return os.RemoveAll(filepath.Join(e.Root, ".tmp")) }
 
-func (e *Env) owner() string { return e.User + ":" + e.User }
-
-func (e *Env) chownTree(ctx context.Context, path string) error {
-	_, err := e.Run(ctx, "chown", "-R", "-h", e.owner(), path)
-	return err
+// chownTree gives rel, inside r, and everything below it to the runner user,
+// following no link.
+func (e *Env) chownTree(r *os.Root, rel string) error {
+	return fs.WalkDir(r.FS(), filepath.ToSlash(rel), func(p string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return e.Chown(r, filepath.FromSlash(p))
+	})
 }
 
-// mkdirOwned creates dir, when missing, owned by the runner user, so jobs'
-// setup-* steps can still add versions beside ghr's.
-func (e *Env) mkdirOwned(ctx context.Context, dir string) error {
-	if err := noSymlinks(e.Root, dir); err != nil {
-		return err
-	}
-	if _, err := os.Stat(dir); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.Mkdir(dir, 0o755); err != nil {
-		if os.IsExist(err) {
+// mkdirOwned creates rel inside r, when missing, owned by the runner user, so
+// jobs' setup-* steps can still add versions beside ghr's.
+func (e *Env) mkdirOwned(r *os.Root, rel string) error {
+	if err := r.Mkdir(rel, 0o755); err != nil {
+		if errors.Is(err, fs.ErrExist) {
 			return nil
 		}
 		return err
 	}
-	if _, err := e.Run(ctx, "chown", "-h", e.owner(), dir); err != nil {
+	if err := e.Chown(r, rel); err != nil {
 		// Left root-owned, a job's setup-* step could not add to it.
-		os.Remove(dir)
+		r.Remove(rel)
 		return err
 	}
 	return nil
 }
 
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
+func fileSHA256(r *os.Root, name string) (string, error) {
+	f, err := r.Open(name)
 	if err != nil {
 		return "", err
 	}
@@ -187,11 +215,11 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func verify(path, want string) error {
+func verify(r *os.Root, name, want string) error {
 	if want == "" {
 		return nil
 	}
-	got, err := fileSHA256(path)
+	got, err := fileSHA256(r, name)
 	if err != nil {
 		return fmt.Errorf("checksum: %w", err)
 	}
@@ -201,10 +229,15 @@ func verify(path, want string) error {
 	return nil
 }
 
-// singleRoot returns dir's lone subdirectory when dir holds nothing else,
-// as the actions cache an archive's single top folder.
-func singleRoot(dir string) (string, error) {
-	es, err := os.ReadDir(dir)
+// singleRoot returns dir's lone subdirectory when dir, inside r, holds
+// nothing else, as the actions cache an archive's single top folder.
+func singleRoot(r *os.Root, dir string) (string, error) {
+	f, err := r.Open(dir)
+	if err != nil {
+		return "", err
+	}
+	es, err := f.ReadDir(-1)
+	f.Close()
 	if err != nil {
 		return "", err
 	}
@@ -214,27 +247,75 @@ func singleRoot(dir string) (string, error) {
 	return dir, nil
 }
 
-// removeIncomplete deletes an x64 folder and its marker.
-func removeIncomplete(dir string) {
-	os.Remove(marker(dir))
-	os.RemoveAll(dir)
+// unfinishedFor is how long an x64 folder without a marker counts as a
+// running job's own setup-* install rather than a killed one.
+const unfinishedFor = time.Hour
+
+// checkUnfinished returns ErrInstallInProgress when rel's x64 folder dir,
+// inside r and known to have no marker, was written within unfinishedFor. A
+// time in the future, as a clock stepped back leaves it, counts as stale.
+func checkUnfinished(r *os.Root, dir string, rel Release) error {
+	fi, err := r.Lstat(dir)
+	if err != nil {
+		return nil
+	}
+	if age := time.Since(fi.ModTime()); age < 0 || age >= unfinishedFor {
+		return nil
+	}
+	return fmt.Errorf("%s %s: %w", rel.Tool, rel.Version, ErrInstallInProgress)
+}
+
+// removeIncomplete deletes an x64 folder inside r and its marker.
+func removeIncomplete(r *os.Root, dir string) {
+	r.Remove(marker(dir))
+	r.RemoveAll(dir)
 }
 
 // dropFailed undoes a failed install: the x64 folder, its marker, and the
 // version folder when nothing else is left in it.
-func dropFailed(dir string) {
-	removeIncomplete(dir)
-	os.Remove(filepath.Dir(dir))
+func dropFailed(r *os.Root, dir string) {
+	removeIncomplete(r, dir)
+	r.Remove(filepath.Dir(dir))
 }
 
 // fetch is the one way an installer downloads: Allow judges rawURL against
 // the installer's own origin, and Fetch then gets that same string.
-func (e *Env) fetch(ctx context.Context, from Origin, rawURL, dst string) error {
+// It writes to name in op, a file it creates there.
+func (e *Env) fetch(ctx context.Context, from Origin, rawURL string, op *operation, name string) error {
 	if err := e.Allow(rawURL, from); err != nil {
 		return err
 	}
-	if err := e.Fetch(ctx, rawURL, dst); err != nil {
+	f, err := op.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
 		return fmt.Errorf("download: %w", err)
+	}
+	err = e.Fetch(ctx, rawURL, f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+	return nil
+}
+
+// unpack extracts name, a .tar.gz in op, into op's x, which it creates.
+func (e *Env) unpack(ctx context.Context, op *operation, name string) error {
+	if err := op.Mkdir("x", 0o755); err != nil {
+		return err
+	}
+	archive, err := op.Open(name)
+	if err != nil {
+		return err
+	}
+	defer archive.Close()
+	x, err := op.OpenRoot("x")
+	if err != nil {
+		return err
+	}
+	defer x.Close()
+	if err := e.Extract(ctx, archive, x); err != nil {
+		return fmt.Errorf("extract: %w", err)
 	}
 	return nil
 }
@@ -253,63 +334,70 @@ func (e *Env) installArchive(ctx context.Context, toolDir string, from Origin, r
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(op)
+	defer op.Close()
 	progress("downloading")
-	archive := filepath.Join(op, "archive.tar.gz")
-	if err := e.fetch(ctx, from, rel.URL, archive); err != nil {
+	if err := e.fetch(ctx, from, rel.URL, op, "archive.tar.gz"); err != nil {
 		return err
 	}
-	if err := verify(archive, rel.SHA256); err != nil {
+	if err := verify(op.Root, "archive.tar.gz", rel.SHA256); err != nil {
 		return err
 	}
 	progress("extracting")
-	out := filepath.Join(op, "x")
-	if err := os.Mkdir(out, 0o755); err != nil {
+	if err := e.unpack(ctx, op, "archive.tar.gz"); err != nil {
 		return err
 	}
-	if err := e.Extract(ctx, archive, out); err != nil {
-		return fmt.Errorf("extract: %w", err)
-	}
-	src, err := singleRoot(out)
+	src, err := singleRoot(op.Root, "x")
 	if err != nil {
 		return fmt.Errorf("extract: %w", err)
 	}
-	if err := e.chownTree(ctx, src); err != nil {
+	if err := e.chownTree(op.Root, src); err != nil {
 		return fmt.Errorf("chown: %w", err)
 	}
-	toolPath := filepath.Join(e.Root, toolDir)
-	verPath := filepath.Join(toolPath, rel.Folder)
-	for _, d := range []string{toolPath, verPath} {
-		if err := e.mkdirOwned(ctx, d); err != nil {
+	// The runner user owns the tool cache and can swap any folder in it for a
+	// link at any moment, so every step from here goes through a root, which
+	// never follows a link out of the cache.
+	r, err := os.OpenRoot(e.Root)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	verRel := filepath.Join(toolDir, rel.Folder)
+	for _, d := range []string{toolDir, verRel} {
+		if err := e.mkdirOwned(r, d); err != nil {
 			return err
 		}
 	}
-	target := filepath.Join(verPath, arch)
+	target := filepath.Join(verRel, arch)
 	if err := ctx.Err(); err != nil {
 		// A marker-less target may be a job's own download, not ours to drop.
-		os.Remove(verPath)
+		r.Remove(verRel)
 		return err
 	}
 	// A job's setup-* step may have completed this version while ghr downloaded.
 	if e.has(toolDir, rel.Folder) {
 		return ErrAlreadyInstalled
 	}
-	// A target without a marker is a killed install; replace it, as
+	if err := checkUnfinished(r, target, rel); err != nil {
+		return err
+	}
+	// An older target without a marker is a killed install; replace it, as
 	// @actions/tool-cache's _createToolPath does.
-	removeIncomplete(target)
-	if err := os.Rename(src, target); err != nil {
-		dropFailed(target)
+	removeIncomplete(r, target)
+	// Through the tool cache's root, a .tmp swapped meanwhile can only lead
+	// to the runner user's own files.
+	if err := r.Rename(filepath.Join(op.rel, src), target); err != nil {
+		dropFailed(r, target)
 		return err
 	}
 	// O_EXCL, so a link planted at the marker's path is never followed.
-	f, err := os.OpenFile(marker(target), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	f, err := r.OpenFile(marker(target), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		dropFailed(target)
+		dropFailed(r, target)
 		return err
 	}
 	f.Close()
-	if _, err := e.Run(ctx, "chown", "-h", e.owner(), marker(target)); err != nil {
-		dropFailed(target)
+	if err := e.Chown(r, marker(target)); err != nil {
+		dropFailed(r, target)
 		return fmt.Errorf("chown: %w", err)
 	}
 	return nil

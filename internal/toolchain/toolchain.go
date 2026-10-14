@@ -6,6 +6,8 @@ package toolchain
 import (
 	"context"
 	"errors"
+	"io"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +23,8 @@ var (
 	ErrUnknownTool      = errors.New("unknown toolchain")
 	ErrNotInstalled     = errors.New("toolchain version not installed")
 	ErrAlreadyInstalled = errors.New("toolchain version already installed")
+	// ErrInstallInProgress comes with the tool and version it was found for.
+	ErrInstallInProgress = errors.New("an unfinished install was written in the last hour, maybe by a running job; try again later")
 )
 
 // Sources are the upstream URLs the installers read.
@@ -47,13 +51,16 @@ type Env struct {
 	User    string // the runner user, owner of everything installed
 	Sources Sources
 	Get     func(ctx context.Context, url string) ([]byte, error)
-	Fetch   func(ctx context.Context, url, dst string) error
+	Fetch   func(ctx context.Context, url string, w io.Writer) error
 	// Allow returns an error unless url may be downloaded for an installer
 	// whose files come from from. A version list names the URL, and what it
 	// downloads is unpacked or run on this machine.
-	Allow   func(url string, from Origin) error
-	Run     func(ctx context.Context, name string, args ...string) ([]byte, error)
-	Extract func(ctx context.Context, archive, dir string) error
+	Allow func(url string, from Origin) error
+	Run   func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// Chown gives rel, inside r, to the runner user without following a
+	// link at rel.
+	Chown   func(r *os.Root, rel string) error
+	Extract func(ctx context.Context, archive io.Reader, dir *os.Root) error
 	OpID    func() string
 	// PythonPlatform is the Ubuntu release whose python-versions builds this
 	// host runs; empty means 24.04.

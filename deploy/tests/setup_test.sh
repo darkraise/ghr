@@ -11,16 +11,25 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set +e
 # Case (c) stubs check_host out; case (o) tests the real one.
 REAL_CHECK_HOST=$(declare -f check_host)
+REAL_FETCH_RUNNER=$(declare -f fetch_runner)
 
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 
-# setup.sh installs Docker's key under /etc. The directory is redirected into $T
-# before any case runs; run refuses to start a function while it points elsewhere.
+# Every install path of setup.sh is redirected into $T before any case runs; run
+# refuses to start a function while one of them points elsewhere.
 DEFAULT_KEYRING_DIR=$KEYRING_DIR
 KEYRING_DIR="$T/keyrings"
 DEFAULT_SYSTEMD_DIR=$SYSTEMD_DIR
 SYSTEMD_DIR="$T/systemd"
+BIN_DIR="$T/bin"
+HOOKS_DIR="$T/hooks"
+ETC_DIR="$T/etc"
+APT_SOURCES_DIR="$T/apt-sources"
+STATE_DIR="$T/state"
+OPT_DIR="$T/opt"
+DIST_DIR="$T/dist"
+OS_RELEASE="$T/os-release"
 
 FAILS=0
 check() {
@@ -41,9 +50,9 @@ bump() { echo $(($(count "$1") + 1)) > "$MARK_DIR/$1"; }
 # Runs a setup.sh function the way main runs: errexit on, die exits a subshell.
 # It refuses to run while a redirected directory points outside the temporary tree.
 run() {
-  case "$KEYRING_DIR:$SYSTEMD_DIR" in
-    "$T"/*:"$T"/*) ;;
-    *) echo "refusing to run: KEYRING_DIR=$KEYRING_DIR or SYSTEMD_DIR=$SYSTEMD_DIR is outside $T" >&2; return 99 ;;
+  case "$KEYRING_DIR:$SYSTEMD_DIR:$BIN_DIR:$HOOKS_DIR:$ETC_DIR:$APT_SOURCES_DIR:$STATE_DIR:$OPT_DIR:$DIST_DIR:$OS_RELEASE" in
+    "$T"/*:"$T"/*:"$T"/*:"$T"/*:"$T"/*:"$T"/*:"$T"/*:"$T"/*:"$T"/*:"$T"/*) ;;
+    *) echo "refusing to run: KEYRING_DIR=$KEYRING_DIR, SYSTEMD_DIR=$SYSTEMD_DIR, BIN_DIR=$BIN_DIR, HOOKS_DIR=$HOOKS_DIR, ETC_DIR=$ETC_DIR, APT_SOURCES_DIR=$APT_SOURCES_DIR, STATE_DIR=$STATE_DIR, OPT_DIR=$OPT_DIR, DIST_DIR=$DIST_DIR or OS_RELEASE=$OS_RELEASE is outside $T" >&2; return 99 ;;
   esac
   (set -e; "$@")
 }
@@ -87,6 +96,7 @@ fetch_runner() {
   [ ! -f "$MARK_DIR/stopped" ] || touch "$MARK_DIR/fetched-after-stop"
   cp "$T/runner.tar.gz" "$2"
 }
+STUB_FETCH_RUNNER=$(declare -f fetch_runner)
 READY_AFTER=1
 FAKE_STATE=active
 ghr() {
@@ -104,12 +114,19 @@ ghr() {
   echo "daemon unreachable" >&2
   return 1
 }
+# STOP_RC makes `systemctl stop` fail; STOP_STAYS_ACTIVE keeps a stopped unit active.
 systemctl() {
-  [ "$1" != stop ] || { echo "$2" > "$MARK_DIR/stopped"; return 0; }
+  if [ "$1" = stop ]; then
+    [ "${STOP_RC:-0}" = 0 ] || return "$STOP_RC"
+    echo "$2" > "$MARK_DIR/stopped"
+    return 0
+  fi
   [ "$1" != start ] || { echo "$2" > "$MARK_DIR/started"; return 0; }
   [ "$1" = is-active ] || return 0
-  echo "$FAKE_STATE"
-  [ "$FAKE_STATE" = active ]
+  local state=$FAKE_STATE
+  [ ! -f "$MARK_DIR/stopped" ] || [ -n "${STOP_STAYS_ACTIVE:-}" ] || [ "$state" != active ] || state=inactive
+  echo "$state"
+  [ "$state" = active ]
 }
 timeout() { shift; "$@"; }
 sleep() { SECONDS=$((SECONDS + $1)); }
@@ -131,7 +148,9 @@ new_case() {
   OPT_DIR="$T/$1/opt"
   KEYRING_DIR="$T/$1/keyrings"
   SYSTEMD_DIR="$T/$1/systemd"
-  mkdir -p "$DIST_DIR" "$MARK_DIR" "$STATE_DIR" "$OPT_DIR"
+  BIN_DIR="$T/$1/bin"
+  HOOKS_DIR="$T/$1/hooks"
+  mkdir -p "$DIST_DIR" "$MARK_DIR" "$STATE_DIR" "$OPT_DIR" "$BIN_DIR" "$HOOKS_DIR"
   cp "$HERE/../config.example.yaml" "$OPT_DIR/"
   echo 0 > "$MARK_DIR/fetches"
   echo 0 > "$MARK_DIR/polls"
@@ -196,6 +215,79 @@ check "a: no dist dir carries the v" absent "$DIST_DIR/v$FIXTURE_VERSION"
 check "a: the runner is fetched by its bare number" [ "$(cat "$MARK_DIR/fetched-versions")" = "$FIXTURE_VERSION" ]
 check "a: current points at the bare number" [ "$(target_of_current)" = "$FIXTURE_VERSION" ]
 
+# A dist dir without an executable run.sh is incomplete: it is replaced, not a reason to fail.
+new_case a-partial-dir
+mkdir -p "$DIST_DIR/$FIXTURE_VERSION"
+touch "$DIST_DIR/$FIXTURE_VERSION/partial"
+out=$(run install_runner 2>&1)
+rc=$?
+check "a: an incomplete dist dir does not block the install" [ "$rc" -eq 0 ]
+check "a: the incomplete dist dir is replaced by a complete one" [ -x "$DIST_DIR/$FIXTURE_VERSION/run.sh" ]
+check "a: nothing of the incomplete dist dir is kept" absent "$DIST_DIR/$FIXTURE_VERSION/partial"
+check "a: current points at the replaced version" [ "$(target_of_current)" = "$FIXTURE_VERSION" ]
+
+# api_curl answers GitHub's API with API_BODY, or fails with API_RC, and saves a
+# download as the text "tarball".
+api_curl() {
+  curl() {
+    local out="" url=""
+    while [ $# -gt 0 ]; do
+      case "$1" in -o) out="$2"; shift ;; -*) ;; *) url="$1" ;; esac
+      shift
+    done
+    case "$url" in
+      https://api.github.com/*)
+        echo "$url" >> "$MARK_DIR/urls"
+        [ "${API_RC:-0}" = 0 ] || return "$API_RC"
+        printf '%s\n' "$API_BODY"
+        ;;
+      *) echo tarball > "$out" ;;
+    esac
+  }
+}
+# A rate-limited anonymous API call must end in a message, not a silent exit.
+new_case a-latest-lookup
+RUNNER_VERSION=latest
+out=$( (api_curl; API_RC=22; run install_runner) 2>&1)
+rc=$?
+check "a: a failed latest-release lookup fails install_runner" [ "$rc" -ne 0 ]
+check "a: and tells how to pin the version" contains "$out" "set RUNNER_VERSION=<x.y.z>"
+check "a: and names the likely cause" contains "$out" "GitHub API rate limit?"
+check "a: nothing is fetched after a failed lookup" [ "$(count fetches)" -eq 0 ]
+for body in '{"message":"API rate limit exceeded"}' '{"tag_name":""}' ''; do
+  out=$( (api_curl; API_BODY="$body"; run install_runner) 2>&1)
+  rc=$?
+  check "a: a latest-release answer without a tag ($body) fails install_runner" [ "$rc" -ne 0 ]
+  check "a: and tells how to pin the version ($body)" contains "$out" "set RUNNER_VERSION=<x.y.z>"
+done
+out=$( (api_curl; API_BODY='{"tag_name":"v'$FIXTURE_VERSION'"}'; run install_runner) 2>&1)
+rc=$?
+check "a: a latest-release answer with a tag succeeds" [ "$rc" -eq 0 ]
+check "a: and installs that version" [ -x "$DIST_DIR/$FIXTURE_VERSION/run.sh" ]
+
+# The checksum comes from the release notes; a failed lookup is not a missing checksum.
+new_case a-checksum-lookup
+eval "$REAL_FETCH_RUNNER"
+out=$( (api_curl; API_RC=22; run fetch_runner "$FIXTURE_VERSION" "$T/a-checksum-lookup/tgz") 2>&1)
+rc=$?
+check "a: a failed release-notes lookup fails fetch_runner" [ "$rc" -ne 0 ]
+check "a: and says the release could not be read" contains "$out" "could not read the actions/runner v$FIXTURE_VERSION release notes (GitHub API rate limit?)"
+check "a: and not that the checksum is missing" lacks "$out" "no linux-x64 checksum"
+out=$( (api_curl; API_BODY='{"body":"no checksums here"}'; run fetch_runner "$FIXTURE_VERSION" "$T/a-checksum-lookup/tgz") 2>&1)
+rc=$?
+check "a: release notes without a checksum still fail fetch_runner" [ "$rc" -ne 0 ]
+check "a: and say the checksum is missing" contains "$out" "no linux-x64 checksum in the v$FIXTURE_VERSION release notes"
+sum=$(echo tarball | sha256sum | cut -d' ' -f1)
+out=$( (api_curl; API_BODY='{"body":"<!-- BEGIN SHA linux-x64 -->'$sum'<!-- END SHA linux-x64 -->"}'; run fetch_runner "$FIXTURE_VERSION" "$T/a-checksum-lookup/tgz") 2>&1)
+rc=$?
+check "a: a download matching the release notes' checksum passes" [ "$rc" -eq 0 ]
+out=$( (api_curl; API_BODY='{"body":"<!-- BEGIN SHA linux-x64 -->'${sum//[0-9a-f]/0}'<!-- END SHA linux-x64 -->"}'; run fetch_runner "$FIXTURE_VERSION" "$T/a-checksum-lookup/tgz") 2>&1)
+rc=$?
+check "a: a download that does not match is refused" [ "$rc" -ne 0 ]
+check "a: and called a checksum mismatch" contains "$out" "actions-runner checksum mismatch"
+unset -f curl
+eval "$STUB_FETCH_RUNNER"
+
 # (b) Readiness loop.
 new_case b-ready-after-polls
 READY_AFTER=3
@@ -255,6 +347,49 @@ out=$(run install_config 2>&1)
 rc=$?
 check "d: an upgrade does not need the example" [ "$rc" -eq 0 ]
 
+# GHR_WEB_LISTEN sets web.listen in the config a first install writes, and nowhere else.
+new_case d-web-listen
+ETC_DIR="$T/d-web-listen/etc"
+mkdir -p "$ETC_DIR"
+listen_line() { grep '^  listen:' "$ETC_DIR/config.yaml"; }
+out=$( (GHR_WEB_LISTEN=127.0.0.1:9090; run install_config) 2>&1)
+rc=$?
+check "d: a first install with GHR_WEB_LISTEN succeeds" [ "$rc" -eq 0 ]
+check "d: GHR_WEB_LISTEN sets the listen address" [ "$(listen_line)" = '  listen: "127.0.0.1:9090"' ]
+check "d: nothing else in the example changes" [ "$(grep -vc '^  listen:' "$ETC_DIR/config.yaml")" -eq "$(grep -vc '^  listen:' "$OPT_DIR/config.example.yaml")" ]
+check "d: config.yaml stays private" [ "$(stat -c %a "$ETC_DIR/config.yaml")" = 600 ]
+printf 'web:\n  listen: 10.0.0.1:8080\n' > "$ETC_DIR/config.yaml"
+(GHR_WEB_LISTEN=127.0.0.1:9090; run install_config) >/dev/null 2>&1
+check "d: an existing config.yaml keeps its listen address" [ "$(listen_line)" = '  listen: 10.0.0.1:8080' ]
+rm "$ETC_DIR/config.yaml"
+(GHR_WEB_LISTEN='[::1]:8080'; run install_config) >/dev/null 2>&1
+check "d: an IPv6 address is quoted so YAML reads it as a string" [ "$(listen_line)" = '  listen: "[::1]:8080"' ]
+rm "$ETC_DIR/config.yaml"
+(GHR_WEB_LISTEN=; run install_config) >/dev/null 2>&1
+check "d: without GHR_WEB_LISTEN the example's address stays" [ "$(listen_line)" = "$(grep '^  listen:' "$OPT_DIR/config.example.yaml")" ]
+rm "$ETC_DIR/config.yaml"
+sed -i '/^  listen:/d' "$OPT_DIR/config.example.yaml"
+out=$( (GHR_WEB_LISTEN=127.0.0.1:9090; run install_config) 2>&1)
+rc=$?
+check "d: GHR_WEB_LISTEN fails when the example has no listen line" [ "$rc" -ne 0 ]
+check "d: and says so" contains "$out" "has no web.listen line to set"
+check "d: and writes no config.yaml" absent "$ETC_DIR/config.yaml"
+
+for good in 0.0.0.0:8080 127.0.0.1:9090 :8080 localhost:80 ghr.lan:65535 '[::]:8080' '[::1]:8080' '[fd00::5]:1'; do
+  out=$( (GHR_WEB_LISTEN=$good; run check_web_listen) 2>&1)
+  rc=$?
+  check "d: GHR_WEB_LISTEN=$good is accepted" [ "$rc" -eq 0 ]
+done
+for bad in 8080 host: host:0 host:65536 host:abc host:-1 host:+80 ::1:8080 'a b:80' 'x"y:80' '1.2.3.4:8080;x' '[::1:80' '::1]:80' '[]:80' 'a/b:80' 'a&b:80' 'a\b:80' 'a#b:80' host:80:90; do
+  out=$( (GHR_WEB_LISTEN=$bad; run check_web_listen) 2>&1)
+  rc=$?
+  check "d: GHR_WEB_LISTEN=$bad is refused" [ "$rc" -ne 0 ]
+  check "d: GHR_WEB_LISTEN=$bad names the expected form" contains "$out" "GHR_WEB_LISTEN must be host:port with a port from 1 to 65535, such as 127.0.0.1:8080"
+done
+out=$( (GHR_WEB_LISTEN=; run check_web_listen) 2>&1)
+rc=$?
+check "d: an empty GHR_WEB_LISTEN is accepted" [ "$rc" -eq 0 ]
+
 # (l) install_ghr installs the example config the release ships.
 new_case l-install-ghr
 for variant in with without; do
@@ -268,7 +403,7 @@ for variant in with without; do
   (cd "$T/l-$variant" && sha256sum ghr_linux_amd64.tar.gz > checksums.txt)
 done
 # fake_release serves the l-$1 release: curl copies the requested file and
-# records the URL; install into OPT_DIR is real, anything else is recorded.
+# records the URL.
 fake_release() {
   RELEASE="$1"
   curl() {
@@ -280,12 +415,6 @@ fake_release() {
     echo "$url" >> "$MARK_DIR/urls"
     cp "$T/l-$RELEASE/${url##*/}" "$out"
   }
-  install() {
-    case "${*: -1}" in
-      "$OPT_DIR"/*) command install "$@" ;;
-      *) echo "install $*" >> "$MARK_DIR/installs" ;;
-    esac
-  }
 }
 rm "$OPT_DIR/config.example.yaml"
 out=$( (fake_release with; GHR_VERSION=v0.1.17; run install_ghr) 2>&1)
@@ -293,12 +422,45 @@ rc=$?
 check "l: install_ghr succeeds" [ "$rc" -eq 0 ]
 check "l: the bundled example lands in OPT_DIR" [ -f "$OPT_DIR/config.example.yaml" ]
 check "l: a pinned version downloads that release" contains "$(cat "$MARK_DIR/urls")" "releases/download/v0.1.17/ghr_linux_amd64.tar.gz"
-check "l: the binary is installed" contains "$(cat "$MARK_DIR/installs")" "/usr/local/bin/ghr"
+check "l: the binary is installed" [ -x "$BIN_DIR/ghr" ]
+check "l: the start hook is installed" [ -x "$HOOKS_DIR/job-started.sh" ]
+check "l: the completion hook is installed" [ -x "$HOOKS_DIR/job-completed.sh" ]
 rm -f "$OPT_DIR/config.example.yaml"
 out=$( (fake_release without; GHR_VERSION=latest; run install_ghr) 2>&1)
 rc=$?
 check "l: a release without the example still installs" [ "$rc" -eq 0 ]
 check "l: and installs no example" absent "$OPT_DIR/config.example.yaml"
+
+# The binary and the hooks replace the old ones in one step, so an interrupted
+# install leaves a complete file, never half a binary.
+new_case l-atomic
+fake_release with
+echo old > "$BIN_DIR/ghr"
+echo old > "$HOOKS_DIR/job-started.sh"
+out=$( (GHR_VERSION=v0.1.17; run install_ghr) 2>&1)
+rc=$?
+check "l: an upgrade succeeds" [ "$rc" -eq 0 ]
+check "l: an upgrade replaces the binary" [ "$(cat "$BIN_DIR/ghr")" = '#!/bin/sh' ]
+check "l: an upgrade replaces a hook" [ ! -s "$HOOKS_DIR/job-started.sh" ]
+check "l: the binary is left executable" [ "$(stat -c %a "$BIN_DIR/ghr")" = 755 ]
+check "l: no staging file is left next to the binary" [ "$(ls -A "$BIN_DIR")" = ghr ]
+check "l: nor next to the hooks" [ "$(ls -A "$HOOKS_DIR" | tr '\n' ' ')" = "job-completed.sh job-started.sh " ]
+
+# A failed download leaves nothing in the temporary directory; the exit trap
+# stop_ghr sets removes it.
+new_case l-cleanup
+mkdir -p "$T/l-badsum/ghr" "$T/l-tmp"
+cp "$T/l-with/ghr/"* "$T/l-badsum/ghr/"
+cp "$T/l-with/ghr_linux_amd64.tar.gz" "$T/l-badsum/"
+echo "0000000000000000000000000000000000000000000000000000000000000000  ghr_linux_amd64.tar.gz" > "$T/l-badsum/checksums.txt"
+stop_then_install() { stop_ghr; install_ghr; }
+out=$( (fake_release badsum; export TMPDIR="$T/l-tmp"; GHR_VERSION=v0.1.17; run stop_then_install) 2>&1)
+rc=$?
+check "l: a checksum mismatch fails the install" [ "$rc" -ne 0 ]
+check "l: and says so" contains "$out" "ghr checksum mismatch"
+check "l: the downloaded files are removed" [ -z "$(ls -A "$T/l-tmp")" ]
+check "l: ghr is started again" [ "$(cat "$MARK_DIR/started" 2>/dev/null)" = ghr.service ]
+check "l: the old binary is not touched" absent "$BIN_DIR/ghr"
 
 # (m) Piped into bash (curl ... | bash), setup.sh runs main instead of nothing.
 if [ "$(id -u)" -ne 0 ]; then
@@ -495,39 +657,58 @@ rm -f "$pending"
 (run install_config) >/dev/null 2>&1
 check "h: an existing config.yaml does not" absent "$pending"
 
+# `ghr setup` answers only the web field, from the mark file web (absent: no answer).
+# `ghr code` fails like the real one when the mark file password-set exists (a
+# password is set) or daemon-down exists (the daemon does not answer).
 web_ghr() {
   ghr() {
+    if [ "$1" = setup ]; then
+      [ ! -f "$MARK_DIR/web" ] || echo "web: $(cat "$MARK_DIR/web")"
+      return 0
+    fi
+    if [ "$1" = code ]; then
+      [ ! -f "$MARK_DIR/daemon-down" ] || { echo "ghr: cannot reach the daemon" >&2; return 1; }
+      [ ! -f "$MARK_DIR/password-set" ] || { echo "ghr: a web password is already set" >&2; return 1; }
+      echo ABCDE-FGHJK-MNPQR-STVWX
+      return 0
+    fi
     echo "$*" >> "$MARK_DIR/ghr-calls"
     cat > "$MARK_DIR/ghr-stdin"
     [ ! -f "$MARK_DIR/fail-web" ] || { echo "ghr: password must be 12 to 1024 characters" >&2; return 1; }
     echo "web password set; every browser was logged out"
   }
 }
-out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run set_web_password) </dev/null 2>&1)
+# main reads WEB_UNCLAIMED in print_next; run's subshell would drop it.
+web_password() {
+  set_web_password
+  echo "unclaimed=${WEB_UNCLAIMED:-}"
+}
+out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
 check "h: without the marker the web password is left alone" absent "$MARK_DIR/ghr-calls"
-check "h: and nothing is printed" [ -z "$out" ]
+check "h: and nothing is printed" [ "$out" = "unclaimed=" ]
 
 touch "$pending"
-out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run set_web_password) </dev/null 2>&1)
+out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
 check "h: GHR_WEB_PASSWORD goes to ghr web set-password" [ "$(cat "$MARK_DIR/ghr-calls")" = "web set-password" ]
 check "h: the password is piped without a newline" [ "$(wc -c < "$MARK_DIR/ghr-stdin")" -eq 13 ]
 check "h: success is reported" contains "$out" "web password set"
+check "h: a password that is set leaves nothing for print_next" [ "$(tail -n 1 <<<"$out")" = "unclaimed=" ]
 check "h: no reminder after success" lacks "$out" "has no password"
 check "h: a password that is set clears the marker" absent "$pending"
 
 rm -f "$MARK_DIR/ghr-calls"
 touch "$pending" "$MARK_DIR/fail-web"
-out=$( (web_ghr; GHR_WEB_PASSWORD='short'; run set_web_password) </dev/null 2>&1)
+out=$( (web_ghr; GHR_WEB_PASSWORD='short'; run web_password) </dev/null 2>&1)
 rc=$?
 check "h: a refused password does not fail the install" [ "$rc" -eq 0 ]
 check "h: the refusal is shown" contains "$out" "password must be 12 to 1024 characters"
-check "h: the reminder follows a refusal" contains "$out" "set it now with: ghr web set-password"
+check "h: a refusal leaves the UI to print_next" contains "$out" "unclaimed=1"
 check "h: a refused password keeps the marker" [ -f "$pending" ]
 
 rm -f "$MARK_DIR/ghr-calls" "$MARK_DIR/fail-web"
-out=$( (web_ghr; GHR_WEB_PASSWORD=; run set_web_password) </dev/null 2>&1)
+out=$( (web_ghr; GHR_WEB_PASSWORD=; run web_password) </dev/null 2>&1)
 check "h: with no terminal and no GHR_WEB_PASSWORD nothing is sent" absent "$MARK_DIR/ghr-calls"
-check "h: and the reminder is printed" contains "$out" "web UI on :8080 has no password; set it now with: ghr web set-password"
+check "h: and the UI is left to print_next" [ "$out" = "unclaimed=1" ]
 check "h: and the marker stays for the next run" [ -f "$pending" ]
 
 (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) <<<'a long secret' >/dev/null 2>&1
@@ -536,30 +717,81 @@ check "h: and clears the marker" absent "$pending"
 
 touch "$pending"
 rm -f "$MARK_DIR/ghr-calls"
-out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) <<<'' 2>&1)
+out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run web_password) <<<'' 2>&1)
 check "h: Enter at the prompt sends nothing" absent "$MARK_DIR/ghr-calls"
 check "h: Enter at the prompt clears the marker" absent "$pending"
-check "h: Enter at the prompt still prints the reminder" contains "$out" "has no password"
+check "h: Enter at the prompt still leaves the UI to print_next" contains "$out" "unclaimed=1"
 
 # End of input and a failed read are not an Enter: the marker stays.
 for ending in "end of input:/dev/null" "closed input:-" "a partial line:partial"; do
   touch "$pending"
   rm -f "$MARK_DIR/ghr-calls"
   case "${ending##*:}" in
-    /dev/null) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) </dev/null 2>&1) ;;
-    -) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) <&- 2>&1) ;;
-    partial) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run set_web_password) < <(printf 'a long secret') 2>&1) ;;
+    /dev/null) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run web_password) </dev/null 2>&1) ;;
+    -) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run web_password) <&- 2>&1) ;;
+    partial) out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run web_password) < <(printf 'a long secret') 2>&1) ;;
   esac
   check "h: ${ending%%:*} at the prompt sends nothing" absent "$MARK_DIR/ghr-calls"
   check "h: ${ending%%:*} at the prompt keeps the marker" [ -f "$pending" ]
-  check "h: ${ending%%:*} at the prompt still prints the reminder" contains "$out" "has no password"
+  check "h: ${ending%%:*} at the prompt still leaves the UI to print_next" contains "$out" "unclaimed=1"
 done
 
+# A password set in the browser since the first install is not replaced, and the
+# marker that asked for one is cleared, at a terminal or through GHR_WEB_PASSWORD.
+touch "$pending" "$MARK_DIR/password-set"
+rm -f "$MARK_DIR/ghr-calls" "$MARK_DIR/ghr-stdin"
+out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
+check "h: a password already set is not replaced from GHR_WEB_PASSWORD" absent "$MARK_DIR/ghr-calls"
+check "h: and its marker is cleared" absent "$pending"
+check "h: and nothing is left for print_next" [ "$out" = "unclaimed=" ]
+touch "$pending"
+out=$( (web_ghr; stdin_is_tty() { return 0; }; GHR_WEB_PASSWORD=; run web_password) <<<'a long secret' 2>&1)
+check "h: a password already set is not asked for at a terminal" absent "$MARK_DIR/ghr-calls"
+check "h: nor read from it" lacks "$out" "Web UI password"
+check "h: and the marker is cleared at a terminal too" absent "$pending"
+check "h: and nothing is left for print_next at a terminal" [ "$out" = "unclaimed=" ]
+rm "$MARK_DIR/password-set"
+touch "$pending" "$MARK_DIR/daemon-down"
+rm -f "$MARK_DIR/ghr-calls"
+out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
+check "h: a daemon that does not answer ghr code does not stop the password being set" [ "$(cat "$MARK_DIR/ghr-calls")" = "web set-password" ]
+check "h: and that password clears the marker" absent "$pending"
+rm -f "$MARK_DIR/daemon-down" "$MARK_DIR/ghr-calls"
+
+# The web UI is plain HTTP; on a wildcard address every network the host is on
+# can read what a browser sends, so the installer says so while setup is open.
+exposed="the web UI is plain HTTP on every interface; put a TLS proxy in front"
+touch "$pending"
+rm -f "$MARK_DIR/ghr-calls"
+for web in 0.0.0.0:8080 '[::]:8080' :8080; do
+  echo "$web" > "$MARK_DIR/web"
+  out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
+  check "h: web $web warns about plain HTTP" contains "$out" "$exposed"
+  check "h: web $web points at the proxy docs" contains "$out" "docs/web-ui.md#behind-a-reverse-proxy"
+  check "h: web $web warns once" [ "$(grep -c 'plain HTTP' <<<"$out")" -eq 1 ]
+  touch "$pending"
+done
+for web in 127.0.0.1:9090 192.168.0.5:8080 localhost:8080 '[::1]:8080' '[fd00::5]:8080'; do
+  echo "$web" > "$MARK_DIR/web"
+  out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
+  check "h: web $web does not warn" lacks "$out" "plain HTTP"
+  touch "$pending"
+done
+rm -f "$MARK_DIR/web"
+out=$( (web_ghr; GHR_WEB_PASSWORD='a long secret'; run web_password) </dev/null 2>&1)
+check "h: an unanswered web field does not warn" lacks "$out" "plain HTTP"
+rm -f "$pending"
+
 # setup_ghr answers `ghr setup` from the mark files configured, wizard, owner
-# and web, and records `ghr setup github` and `ghr toolchain` calls.
+# and web, and `ghr code` from the mark file code (absent: a password is set),
+# and records `ghr setup github` and `ghr toolchain` calls.
 setup_ghr() {
   ghr() {
     case "$1 ${2:-}" in
+      "code ")
+        [ -f "$MARK_DIR/code" ] || { echo "ghr: a web password is already set" >&2; return 1; }
+        cat "$MARK_DIR/code"
+        ;;
       "setup ")
         printf 'configured: %s\nwizard: %s\nowner: %s\nweb: %s\n' "$(cat "$MARK_DIR/configured")" \
           "$(cat "$MARK_DIR/wizard")" "$(cat "$MARK_DIR/owner")" "$(cat "$MARK_DIR/web")"
@@ -583,7 +815,7 @@ setup_marks() {
   echo "$2" > "$MARK_DIR/wizard"
   echo "$3" > "$MARK_DIR/owner"
   echo "$4" > "$MARK_DIR/web"
-  rm -f "$MARK_DIR/ghr-calls" "$MARK_DIR/ghr-stdin"
+  rm -f "$MARK_DIR/ghr-calls" "$MARK_DIR/ghr-stdin" "$MARK_DIR/code"
 }
 
 # (i) configure_github asks for owner and token while ghr is not configured.
@@ -673,6 +905,18 @@ for listen_url in "192.168.0.5:8080 http://192.168.0.5:8080/setup" \
   out=$( (setup_ghr; run print_next) 2>&1)
   check "k: web ${listen_url%% *} gives ${listen_url##* }" contains "$out" "finish setup in the browser: ${listen_url##* }"
 done
+for web in 0.0.0.0:8080 '[::]:8080' :8080; do
+  setup_marks no pending - "$web"
+  out=$( (setup_ghr; run print_next) 2>&1)
+  check "k: web $web warns about plain HTTP" contains "$out" "the web UI is plain HTTP on every interface; put a TLS proxy in front"
+  check "k: web $web points at the proxy docs" contains "$out" "docs/web-ui.md#behind-a-reverse-proxy"
+  check "k: the warning follows the address" contains "$(sed -n 2p <<<"$out")" "plain HTTP"
+done
+for web in 127.0.0.1:9090 192.168.0.5:8080 localhost:8080 '[::1]:8080' '[fd00::5]:8080'; do
+  setup_marks no pending - "$web"
+  out=$( (setup_ghr; run print_next) 2>&1)
+  check "k: web $web does not warn" lacks "$out" "plain HTTP"
+done
 hostname() { echo "fd00::99 192.168.0.99"; }
 setup_marks no pending - 0.0.0.0:8080
 out=$( (setup_ghr; run print_next) 2>&1)
@@ -680,6 +924,35 @@ check "k: a wildcard with an IPv6 first address brackets it" contains "$out" "ht
 hostname() { :; }
 out=$( (setup_ghr; run print_next) 2>&1)
 check "k: a wildcard with no host address says this host" contains "$out" "http://<this host>:8080/setup"
+hostname() { echo "192.168.0.99"; }
+code_line="web UI setup code: ABCDE-FGHJK-MNPQR-STVWX (the browser asks for it once; or set a password now with: ghr web set-password)"
+setup_marks no pending - 0.0.0.0:8080
+echo ABCDE-FGHJK-MNPQR-STVWX > "$MARK_DIR/code"
+out=$( (setup_ghr; run print_next) 2>&1)
+check "k: an unclaimed web UI gets its setup code" contains "$out" "$code_line"
+check "k: as the last line, after the address" [ "$(tail -n 1 <<<"$out")" = "$(log "$code_line")" ]
+check "k: and the address comes first" contains "$(head -n 1 <<<"$out")" "http://192.168.0.99:8080/setup"
+setup_marks yes "done" DarkRaise 0.0.0.0:8080
+echo ABCDE-FGHJK-MNPQR-STVWX > "$MARK_DIR/code"
+out=$( (setup_ghr; run print_next) 2>&1)
+check "k: a finished setup with an unclaimed web UI prints only the code" [ "$out" = "$(log "$code_line")" ]
+setup_marks no pending - 0.0.0.0:8080
+out=$( (setup_ghr; run print_next) 2>&1)
+check "k: a claimed web UI gets no setup code" lacks "$out" "setup code"
+check "k: and no reminder" lacks "$out" "has no password"
+out=$( (setup_ghr; WEB_UNCLAIMED=1; run print_next) 2>&1)
+check "k: when ghr code fails after set_web_password left no password, the reminder is printed" \
+  [ "$(tail -n 1 <<<"$out")" = "$(log "the web UI has no password; set one with: ghr web set-password")" ]
+setup_marks no pending - -
+echo ABCDE-FGHJK-MNPQR-STVWX > "$MARK_DIR/code"
+out=$( (setup_ghr; WEB_UNCLAIMED=1; run print_next) 2>&1)
+check "k: without the web UI there is no code to print" lacks "$out" "setup code"
+check "k: nor a reminder" lacks "$out" "has no password"
+# A daemon that answers nothing leaves nothing to print, except that the web UI still has no password.
+out=$( (ghr() { return 1; }; WEB_UNCLAIMED=1; run print_next) 2>&1)
+check "k: a silent daemon with an unclaimed web UI still gets the reminder" [ "$out" = "$(log "the web UI has no password; set one with: ghr web set-password")" ]
+out=$( (ghr() { return 1; }; WEB_UNCLAIMED=; run print_next) 2>&1)
+check "k: a silent daemon and a claimed web UI print nothing" [ -z "$out" ]
 unset -f hostname
 
 # (n) The unit comes back with Docker. It is rewritten only when its content
@@ -709,6 +982,8 @@ install_unit
 check "n: install_service succeeds" [ "$rc" -eq 0 ]
 check "n: the unit starts again with Docker" contains "$(cat "$unit")" "WantedBy=multi-user.target docker.service"
 check "n: the unit still requires Docker" contains "$(cat "$unit")" "Requires=docker.service"
+check "n: the unit starts the daemon from BIN_DIR" contains "$(cat "$unit")" "ExecStart=$BIN_DIR/ghr daemon"
+check "n: the unit keeps MAINPID literal" contains "$(cat "$unit")" 'ExecReload=/bin/kill -HUP $MAINPID'
 check "n: a first install enables without a reload, reloads once, then starts" [ "$(cat "$MARK_DIR/systemctl")" = "$reloaded" ]
 check "n: and leaves the docker.service link" [ -e "$link" ]
 touch -d '2020-01-01 00:00:00' "$unit"
@@ -757,10 +1032,53 @@ check "c: current kept and points at the new version" [ "$(target_of_current)" =
 check "c: ghr stopped before the runner download" [ -f "$MARK_DIR/fetched-after-stop" ]
 check "c: the stopped unit is ghr.service" [ "$(cat "$MARK_DIR/stopped")" = ghr.service ]
 
+new_case c-main-order
+order_stubs() {
+  set_web_password() { echo set_web_password >> "$MARK_DIR/order"; }
+  configure_github() { echo configure_github >> "$MARK_DIR/order"; }
+  preinstall_toolchains() { echo preinstall_toolchains >> "$MARK_DIR/order"; }
+  print_next() { echo print_next >> "$MARK_DIR/order"; }
+}
+out=$( (order_stubs; run main) 2>&1)
+rc=$?
+check "c: main with the steps stubbed succeeds" [ "$rc" -eq 0 ]
+check "c: the web password is set before GitHub is configured, and print_next ends the install" \
+  [ "$(cat "$MARK_DIR/order")" = $'set_web_password\nconfigure_github\npreinstall_toolchains\nprint_next' ]
+
+new_case c-bad-web-listen
+out=$( (GHR_WEB_LISTEN=8080; run main) 2>&1)
+rc=$?
+check "c: main refuses a malformed GHR_WEB_LISTEN" [ "$rc" -ne 0 ]
+check "c: before it stops ghr" absent "$MARK_DIR/stopped"
+check "c: before it fetches anything" [ "$(count fetches)" -eq 0 ]
+
 new_case c-first-install
 out=$( (systemctl() { return 5; }; run stop_ghr) 2>&1)
 rc=$?
 check "c: stop_ghr succeeds when ghr is not installed yet" [ "$rc" -eq 0 ]
+
+new_case c-stop-fails
+old_version 2.336.0
+ln -sfn "$DIST_DIR/2.336.0" "$DIST_DIR/current"
+out=$( (STOP_RC=1; run main) 2>&1)
+rc=$?
+check "c: main fails when ghr.service cannot be stopped" [ "$rc" -ne 0 ]
+check "c: the failed stop is explained" contains "$out" "could not stop ghr.service; stop it and re-run"
+check "c: no runner is fetched after a failed stop" [ "$(count fetches)" -eq 0 ]
+check "c: the old version is untouched after a failed stop" [ -d "$DIST_DIR/2.336.0" ]
+check "c: ghr started again after a failed stop" [ "$(cat "$MARK_DIR/started" 2>/dev/null)" = ghr.service ]
+
+new_case c-stop-stays-active
+out=$( (STOP_STAYS_ACTIVE=1; run main) 2>&1)
+rc=$?
+check "c: main fails when ghr.service is still active after the stop" [ "$rc" -ne 0 ]
+check "c: a unit that stays active is explained" contains "$out" "could not stop ghr.service; stop it and re-run"
+check "c: no runner is fetched while the unit stays active" [ "$(count fetches)" -eq 0 ]
+
+new_case c-stop-deactivating
+out=$( (FAKE_STATE=deactivating; run stop_ghr) 2>&1)
+rc=$?
+check "c: a unit still deactivating counts as not stopped" [ "$rc" -ne 0 ]
 
 new_case c-main-fetch-fails
 old_version 2.336.0
@@ -777,7 +1095,19 @@ echo '{"queued_at":"2026-10-05T12:00:00Z","warned_version":"2.338.0"}' > "$STATE
 out=$( (run stop_ghr) 2>&1)
 rc=$?
 check "c: stop_ghr succeeds with a queued runner update" [ "$rc" -eq 0 ]
-check "c: stop_ghr drops the queued runner update" [ ! -e "$STATE_DIR/runner-update.json" ]
+check "c: stop_ghr drops the queued runner update" [ "$(jq -c . "$STATE_DIR/runner-update.json")" = '{"warned_version":"2.338.0"}' ]
+check "c: stop_ghr leaves no temp file behind" absent "$STATE_DIR/runner-update.json.tmp"
+echo '{"queued_at":"2026-10-05T12:00:00Z"' > "$STATE_DIR/runner-update.json"
+out=$( (run stop_ghr) 2>&1)
+rc=$?
+check "c: stop_ghr succeeds with an unreadable runner update file" [ "$rc" -eq 0 ]
+check "c: stop_ghr removes an unreadable runner update file" absent "$STATE_DIR/runner-update.json"
+check "c: and its temp file" absent "$STATE_DIR/runner-update.json.tmp"
+rm -f "$STATE_DIR/runner-update.json"
+out=$( (run stop_ghr) 2>&1)
+rc=$?
+check "c: stop_ghr succeeds with no runner update file" [ "$rc" -eq 0 ]
+check "c: and creates none" absent "$STATE_DIR/runner-update.json"
 
 new_case c-main-not-ready
 echo 0 > "$MARK_DIR/restarts"
@@ -857,6 +1187,14 @@ for h in "ubuntu 20.04 focal" "debian 12 bookworm" "fedora 42 x"; do
   check "o: $id $ver is refused" [ "$rc" -ne 0 ]
   check "o: $id $ver names the supported hosts" contains "$out" "Debian 13 or Ubuntu 22.04, 24.04 or 26.04 required (found $id $ver)"
 done
+
+# ghr and the actions-runner are installed for amd64 only.
+host debian 13 trixie
+check "o: amd64 is accepted" [ "$rc" -eq 0 ]
+out=$( (dpkg() { echo arm64; }; run probe_host) 2>&1)
+rc=$?
+check "o: arm64 is refused" [ "$rc" -ne 0 ]
+check "o: arm64 is named in the refusal" contains "$out" "ghr supports amd64 (x86_64) hosts only (found arm64)"
 
 DOCKER_DISTRO=ubuntu
 VERSION_CODENAME=jammy

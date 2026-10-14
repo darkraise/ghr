@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"net"
+	"net/netip"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -102,7 +103,7 @@ func closeTwiceAtOnce(c net.Conn) {
 func TestLimitListenerHoldsTheGlobalCap(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		inner := newScriptedListener()
-		ln := limitConns(inner, 2, 2)
+		ln := limitConns(inner, 2, 2, nil)
 		conns, failed := acceptLoop(ln)
 		defer endLoop(ln, conns)
 
@@ -139,7 +140,7 @@ func TestLimitListenerHoldsTheGlobalCap(t *testing.T) {
 func TestLimitListenerFreesTheSlotOfAFailedAccept(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		inner := newScriptedListener()
-		ln := limitConns(inner, 1, 1)
+		ln := limitConns(inner, 1, 1, nil)
 		boom := errors.New("accept: too many open files")
 		_, failed := acceptLoop(ln)
 		inner.fail <- boom
@@ -156,7 +157,7 @@ func TestLimitListenerFreesTheSlotOfAFailedAccept(t *testing.T) {
 func TestLimitListenerBoundsEachClient(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		inner := newScriptedListener()
-		ln := limitConns(inner, 3, 2)
+		ln := limitConns(inner, 3, 2, nil)
 		conns, _ := acceptLoop(ln)
 		defer endLoop(ln, conns)
 		clients := func() int {
@@ -213,7 +214,7 @@ func TestLimitListenerBoundsEachClient(t *testing.T) {
 func TestLimitListenerRefusalsCostOtherClientsNothing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		inner := newScriptedListener()
-		ln := limitConns(inner, 4, 2)
+		ln := limitConns(inner, 4, 2, nil)
 		conns, _ := acceptLoop(ln)
 		defer endLoop(ln, conns)
 
@@ -242,6 +243,54 @@ func TestLimitListenerRefusalsCostOtherClientsNothing(t *testing.T) {
 		synctest.Wait()
 		if n := inner.calls.Load(); n != 104 {
 			t.Fatalf("the inner Accept was called %d times, want 104", n)
+		}
+	})
+}
+
+// A trusted proxy carries the connections of many clients, so only the
+// global cap holds it.
+func TestLimitListenerExemptsATrustedProxy(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		inner := newScriptedListener()
+		ln := limitConns(inner, 6, 2, []netip.Prefix{netip.MustParsePrefix("192.0.2.2/32")})
+		conns, _ := acceptLoop(ln)
+		defer endLoop(ln, conns)
+
+		var proxied []net.Conn
+		for _, remote := range []string{"192.0.2.2:5000", "192.0.2.2:5001", "192.0.2.2:5002", "[::ffff:192.0.2.2]:5003"} {
+			inner.dial(remote)
+			proxied = append(proxied, <-conns)
+		}
+		ln.mu.Lock()
+		counted := len(ln.clients)
+		ln.mu.Unlock()
+		if counted != 0 {
+			t.Fatalf("%d clients counted for the trusted proxy's connections", counted)
+		}
+
+		// A neighbour of the proxy is still held to its bound, and the global
+		// cap holds the proxy too.
+		inner.dial("192.0.2.3:5000")
+		<-conns
+		inner.dial("192.0.2.3:5001")
+		<-conns
+		synctest.Wait()
+		if n := inner.calls.Load(); n != 6 {
+			t.Fatalf("with every slot taken the inner Accept was called %d times, want 6", n)
+		}
+		for _, c := range proxied {
+			c.Close()
+		}
+		refused := inner.dial("192.0.2.3:5002")
+		synctest.Wait()
+		if n := refused.closed.Load(); n != 1 {
+			t.Fatalf("the neighbour's connection over its bound was closed %d times", n)
+		}
+
+		// The proxy's closed connections gave their slots back.
+		for port := range 4 {
+			inner.dial(net.JoinHostPort("192.0.2.2", strconv.Itoa(6000+port)))
+			<-conns
 		}
 	})
 }

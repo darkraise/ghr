@@ -1,6 +1,6 @@
 # Web UI
 
-ghr serves a browser UI with every page and action the `ghr` command offers. The example config turns it on at `0.0.0.0:8080`.
+ghr serves a browser UI with every page and action the `ghr` command offers. The example config turns it on at `0.0.0.0:8080`; `GHR_WEB_LISTEN=host:port` makes `setup.sh` write another address on a first install.
 
 | Page | What it shows |
 |---|---|
@@ -16,12 +16,14 @@ The UI updates live over one long-lived request and falls back to polling when i
 
 ## Password
 
-Until a password is set, the first visitor to the port sets it. Set it during install (`GHR_WEB_PASSWORD` for scripts) or open the UI right after installing. The first-run wizard at `/setup` stays reachable until you finish it.
+Until a password is set, the UI asks for a one-time setup code along with the new password. `setup.sh` prints the code when it finishes, and `ghr code` prints it again on the host; a restart of ghr or `ghr web reset-password` replaces it. Setting the password during install (`GHR_WEB_PASSWORD` for scripts) makes the code unnecessary. The first-run wizard at `/setup` stays reachable until you finish it.
 
 - `ghr status` warns while the UI has no password.
 - `ghr web set-password` (12 to 1024 characters) sets it over SSH.
-- `ghr web reset-password` deletes the password and logs every browser out; the next visitor then sets a new one, so set one right after running it.
-- Five wrong passwords from one address within 15 minutes lock that address out for 15 minutes.
+- `ghr web reset-password` deletes the password, logs every browser out and prints a new setup code; set a new password with `ghr web set-password`, or in the browser with that code.
+- Five wrong passwords, at login or when changing it, from one address within 15 minutes lock that address out for 15 minutes.
+- Changing the password logs out every other browser and session.
+- A session ends after 24 hours without use, and after 30 days in any case. A tab kept in view keeps its session in use.
 - Sessions live in memory: every restart, including each `setup.sh` upgrade, logs you out.
 
 ## Listen address and hostnames
@@ -43,5 +45,6 @@ ghr answers only IP addresses, `localhost` and the names in `web.hosts`, which b
 On the network the UI is plain HTTP: the password and the session cookie cross it unencrypted. Put a TLS-terminating proxy such as nginx-proxy-manager in front, and bind `listen` to a LAN-only address rather than `0.0.0.0` if the host has more than one network.
 
 - Add the proxy's hostname to `web.hosts` and restart ghr. The proxy must forward the original `Host` header, as nginx-proxy-manager does by default.
-- Behind a proxy every browser shares the proxy's address, so the lockout after five wrong passwords applies to everyone at once. Put an access list in front of the host.
+- Every browser reaches ghr from the proxy's address. List the proxy's address, or a CIDR prefix that holds only proxies, such as a Docker bridge network dedicated to the proxy (`172.18.0.0/16`, if nothing but the proxy is attached to it), in `web.trusted_proxies` and restart ghr. The lockout after five wrong passwords then counts each browser by the address the proxy reports in `X-Forwarded-For`, and the proxy is held only to the total connection limit, not the per-address one. Without it a lockout shuts out everyone behind the proxy at once.
+- ghr reads `X-Forwarded-For` from the right and takes the first address that is not a trusted proxy, so a proxy may append to a header the browser sent, as nginx-proxy-manager does, or replace it. The proxy must set the header: one that passes the browser's own header on unchanged, as plain nginx does without `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, lets the browser choose the address it is counted under. List only proxies, since a browser at a trusted address can do the same: a prefix that also covers the LAN's browsers, such as the LAN's own subnet, lets each of them choose the address it is counted under and never be locked out.
 - Live updates use `/api/changes`. ghr marks it `X-Accel-Buffering: no`, which nginx honours, and sends a ping every 15 seconds, inside nginx's default 60-second read timeout, so nginx-proxy-manager needs no extra settings. Another proxy must pass the response through unbuffered and allow 15 seconds of silence.

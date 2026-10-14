@@ -14,6 +14,31 @@ import (
 
 var ErrTooLarge = errors.New("github: download is larger than the limit")
 
+// BlobHost reports whether u is an address GitHub sends artifact and log
+// downloads to: https on a host under githubusercontent.com or Azure blob
+// storage.
+func BlobHost(u string) bool {
+	p, err := url.Parse(u)
+	if err != nil || p.Scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(p.Hostname())
+	return strings.HasSuffix(host, ".githubusercontent.com") || strings.HasSuffix(host, ".blob.core.windows.net")
+}
+
+// blobRedirect keeps a log download on https and on the hosts GitHub serves
+// logs from, with http.Client's own limit of ten redirects, which setting a
+// rule replaces.
+func (c *Client) blobRedirect(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" || !c.blobHost(req.URL.String()) {
+		return fmt.Errorf("github: log download redirect to %s://%s refused", req.URL.Scheme, req.URL.Host)
+	}
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	return nil
+}
+
 func newBlobClient() *http.Client {
 	return &http.Client{Transport: &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
@@ -78,11 +103,16 @@ func (c *Client) OpenJobLog(ctx context.Context, repo string, jobID int64) (io.R
 	if err != nil {
 		return nil, 0, hideURL(err, "log")
 	}
+	if !c.blobHost(loc) {
+		return nil, 0, fmt.Errorf("github: GitHub returned an unexpected log address")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, loc, nil)
 	if err != nil {
 		return nil, 0, hideURL(err, "log")
 	}
-	resp, err := c.Blob.Do(req)
+	blob := *c.Blob
+	blob.CheckRedirect = c.blobRedirect
+	resp, err := blob.Do(req)
 	if err != nil {
 		return nil, 0, hideURL(err, "log")
 	}

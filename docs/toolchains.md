@@ -24,6 +24,17 @@ ghr also prunes Docker on its own when the disk use of Docker's data root passes
 
 `setup.sh` queues the popular preset on a first install once ghr is configured, and returns without waiting. While the owner and token are not set yet, the preset stays pending and is offered in the setup wizard, or can be queued with `ghr toolchain install --preset popular`. If the first run fails before the preset is queued, the next run queues it. `GHR_TOOLCHAINS=popular` or `GHR_TOOLCHAINS=none` overrides this either way.
 
+## Download integrity
+
+What ghr checks before it installs a toolchain depends on the tool:
+
+- **Go:** the SHA-256 that go.dev lists for the archive.
+- **Java:** the SHA-256 that Adoptium's API lists for the package.
+- **Node and Python:** none. The build comes from a release of `actions/node-versions` or `actions/python-versions` on GitHub over HTTPS. Python's own `setup.sh` runs as `ghrunner`.
+- **.NET:** none. ghr fetches Microsoft's `dotnet-install.sh` over HTTPS and runs it as `ghrunner`; the script downloads the SDK itself.
+
+A checksum from the same provider over the same connection catches a damaged download, not a compromised provider.
+
 ## Python on Debian and Ubuntu
 
 The Python builds `setup-python` uses are made for Ubuntu. ghr installs the builds made for the host's Ubuntu release; on Debian it installs Ubuntu 24.04's, and `setup.sh` installs the libraries they link.

@@ -21,10 +21,16 @@ describe("login page", () => {
     const assign = vi.fn()
     vi.stubGlobal("location", { assign })
     const { user } = renderApp("/login")
-    const password = await screen.findByLabelText("Password")
+    const code = await screen.findByLabelText("Setup code")
+    const password = screen.getByLabelText("Password")
     const confirm = screen.getByLabelText("Confirm password")
     const submit = screen.getByRole("button", { name: "Set password" })
-    expect(screen.getByText("No password is set. Choose one to claim this ghr.")).toBeInTheDocument()
+    expect(
+      screen.getByText("No password is set. Enter the setup code from this host and choose one to claim this ghr."),
+    ).toBeInTheDocument()
+    expect(code).toHaveAttribute("autocomplete", "one-time-code")
+    expect(code).toHaveAccessibleDescription("Printed by setup.sh. On the host, run ghr code.")
+    await user.type(code, "abcde-fghjk-mnpqr-stvwx")
 
     await user.type(password, "short")
     await user.type(confirm, "short")
@@ -43,7 +49,24 @@ describe("login page", () => {
     await user.type(confirm, "correct horse battery")
     await user.click(submit)
     await waitFor(() => expect(assign).toHaveBeenCalledWith("/"))
-    expect(calls.find((c) => c.path === "/auth/setup")?.body).toEqual({ password: "correct horse battery" })
+    expect(calls.find((c) => c.path === "/auth/setup")?.body).toEqual({
+      code: "abcde-fghjk-mnpqr-stvwx",
+      password: "correct horse battery",
+    })
+  })
+
+  it("shows a refused setup code inline", async () => {
+    mockApi({
+      "GET /auth/state": { setup_required: true, authenticated: false },
+      "POST /auth/setup": () => json({ error: "wrong setup code; run on the host: ghr code" }, 401),
+    })
+    const { user, router } = renderApp("/login")
+    await user.type(await screen.findByLabelText("Setup code"), "not-the-code")
+    await user.type(screen.getByLabelText("Password"), "correct horse battery")
+    await user.type(screen.getByLabelText("Confirm password"), "correct horse battery")
+    await user.click(screen.getByRole("button", { name: "Set password" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("wrong setup code; run on the host: ghr code")
+    expect(router.state.location.pathname).toBe("/login")
   })
 
   it("logs in", async () => {
@@ -61,6 +84,7 @@ describe("login page", () => {
     vi.stubGlobal("location", { assign })
     const { user } = renderApp("/login")
     await user.type(await screen.findByLabelText("Password"), "correct horse battery")
+    expect(screen.queryByLabelText("Setup code")).not.toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Log in" }))
     await waitFor(() => expect(assign).toHaveBeenCalledWith("/"))
     expect(screen.getByRole("button", { name: "Log in" })).toBeDisabled()

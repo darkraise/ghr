@@ -23,6 +23,7 @@ runner_limits:              # per runner
 web:
   listen: 0.0.0.0:8080
   hosts: [ghr.lan]          # names a proxy serves the UI under; IPs and localhost always work
+  trusted_proxies: [10.0.0.2]   # reverse proxies, as IPs or CIDR prefixes, whose X-Forwarded-For names the browser; see web-ui.md
 github_storage:             # see artifact-storage.md
   included_mb: 500
 repos:
@@ -62,8 +63,9 @@ ghr kill <id>                 # stop a runner
 ghr logs <id> [-f]            # a runner's diagnostic log
 ghr history [--repo r] [--conclusion c] [--limit n]
 ghr runner-update [--cancel]  # queue a runner update; it runs when no job is running or queued
+ghr code                      # the web UI setup code, until a password is set
 ghr web set-password          # prompts, or reads stdin
-ghr web reset-password
+ghr web reset-password        # prints a new setup code
 ghr setup                     # first-run state: configured, wizard, owner
 ghr setup github [--owner <owner>]          # set the owner and token (prompts, or reads stdin)
 ghr setup finish [--toolchains popular|none]

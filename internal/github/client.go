@@ -166,11 +166,16 @@ type Client struct {
 	Token   func() string
 	HTTP    *http.Client
 	// Blob fetches the signed download URLs GitHub redirects to. It sends no
-	// token, and the caller's context bounds the whole download.
+	// token, and the caller's context bounds the whole download. OpenJobLog
+	// sets the redirect rule on a copy, so the rule holds for any client.
 	Blob *http.Client
 	Now  func() time.Time
 	// Sleep waits d. When ctx ends first it returns at once with ctx's error.
 	Sleep func(ctx context.Context, d time.Duration) error
+
+	// blobHost reports whether a download address is one GitHub serves
+	// logs from; tests swap it to reach local servers.
+	blobHost func(string) bool
 
 	mu sync.Mutex
 	// cache holds the last body per GET URL for ETag revalidation, sized by
@@ -190,6 +195,7 @@ func New(owner string, token func() string) *Client {
 	return &Client{
 		BaseURL: "https://api.github.com", Owner: owner, Token: token,
 		HTTP: &http.Client{Timeout: 30 * time.Second}, Blob: newBlobClient(), Now: time.Now, Sleep: sleep,
+		blobHost:  BlobHost,
 		cache:     lru.New[string, cached](maxCacheEntries, maxCacheBytes),
 		remaining: -1,
 		mutSlot:   make(chan struct{}, 1),
@@ -393,6 +399,11 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 		c.suspend(gen, apiErr)
 		return nil, "", apiErr
 	}
+	if next != "" {
+		if err := c.checkNext(next); err != nil {
+			return nil, "", err
+		}
+	}
 	if method == http.MethodGet {
 		if etag := resp.Header.Get("ETag"); etag != "" {
 			c.mu.Lock()
@@ -403,6 +414,24 @@ func (c *Client) do(ctx context.Context, method, u string, body any) ([]byte, st
 		}
 	}
 	return data, next, nil
+}
+
+// checkNext refuses a pagination link that leaves the API origin, since the
+// next request would carry the token to wherever the link points.
+func (c *Client) checkNext(next string) error {
+	n, err := url.Parse(next)
+	base, berr := url.Parse(c.BaseURL)
+	if err != nil || berr != nil || n.Scheme != base.Scheme || n.Host != base.Host {
+		host := "an unparsable address"
+		if err == nil {
+			host = n.Host
+			if host == "" {
+				host = "a relative address"
+			}
+		}
+		return fmt.Errorf("github: pagination link to %s refused", host)
+	}
+	return nil
 }
 
 func (c *Client) classify(resp *http.Response, data []byte) *APIError {

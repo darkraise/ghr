@@ -24,8 +24,23 @@ func socketHandler(api http.Handler, auth *webui.Auth, ev *events.Ring) http.Han
 			writeSocketError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		ev.Add("warn", "", "web password removed; set a new one with: ghr web set-password")
+		ev.Add("warn", "", "web password removed; set a new one with: ghr web set-password, or open the web UI with the code from: ghr code")
 		w.WriteHeader(http.StatusNoContent)
+	})
+	// The code never goes into an event: /api/events shows the ring to every
+	// later session.
+	mux.HandleFunc("GET /web/setup-code", func(w http.ResponseWriter, r *http.Request) {
+		code, err := auth.SetupCode()
+		switch {
+		case errors.Is(err, webui.ErrPasswordSet):
+			writeSocketError(w, http.StatusConflict, err.Error())
+			return
+		case err != nil:
+			writeSocketError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"code": code})
 	})
 	mux.HandleFunc("POST /web/set-password", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {

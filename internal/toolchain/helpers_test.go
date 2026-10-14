@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/darkraise/ghr/internal/system"
 )
@@ -40,6 +41,15 @@ func mkInstall(t *testing.T, root, toolDir, folder string, complete bool) string
 		}
 	}
 	return dir
+}
+
+// backdate sets path's times d in the past.
+func backdate(t *testing.T, path string, d time.Duration) {
+	t.Helper()
+	at := time.Now().Add(-d)
+	if err := os.Chtimes(path, at, at); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // semver is the part of node-semver the ported finders need.
@@ -184,13 +194,23 @@ func dotnetFind(dotnetDir, spec string) string {
 	return ""
 }
 
-// host fakes the commands an Env runs: chown is recorded, runuser runs the
-// fake registered for the script it names.
+// host fakes the commands an Env runs and its Chown: each is recorded, and
+// runuser runs the fake registered for the script it names.
 type host struct {
 	mu          sync.Mutex
 	calls       []string
 	scripts     map[string]func(dir string, env map[string]string, args []string) error
 	failExtract error
+	// onChown runs before each Chown with the path it names.
+	onChown func(path string)
+	// chowned is what each chown reached, as it was at the time.
+	chowned []os.FileInfo
+}
+
+func (h *host) reached(fi os.FileInfo) {
+	h.mu.Lock()
+	h.chowned = append(h.chowned, fi)
+	h.mu.Unlock()
 }
 
 func (h *host) run(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -198,8 +218,6 @@ func (h *host) run(_ context.Context, name string, args ...string) ([]byte, erro
 	h.calls = append(h.calls, name+" "+strings.Join(args, " "))
 	h.mu.Unlock()
 	switch name {
-	case "chown":
-		return nil, nil
 	case "runuser":
 		return nil, h.runAs(args)
 	}
@@ -223,6 +241,23 @@ func (h *host) runAs(args []string) error {
 		return fmt.Errorf("no fake for %s", args[b+4])
 	}
 	return f(args[b+3], env, args[b+5:])
+}
+
+// lchown records the path Env.Chown names and fails unless it is something
+// inside r.
+func (h *host) lchown(r *os.Root, rel string) error {
+	path := filepath.Join(r.Name(), rel)
+	h.mu.Lock()
+	h.calls = append(h.calls, "lchown "+path)
+	h.mu.Unlock()
+	if h.onChown != nil {
+		h.onChown(path)
+	}
+	fi, err := r.Lstat(rel)
+	if err == nil {
+		h.reached(fi)
+	}
+	return err
 }
 
 func (h *host) commands() []string {
@@ -275,10 +310,11 @@ func newFixture(t *testing.T) *fixture {
 			DotnetScript:   srv.URL + "/dotnet-install.sh",
 		},
 		Get:   testGet,
-		Fetch: system.Download,
+		Fetch: system.DownloadFor(time.Minute),
 		Allow: func(string, Origin) error { return nil },
 		Run:   f.host.run,
-		Extract: func(_ context.Context, archive, dir string) error {
+		Chown: f.host.lchown,
+		Extract: func(_ context.Context, archive io.Reader, dir *os.Root) error {
 			if f.host.failExtract != nil {
 				return f.host.failExtract
 			}
@@ -336,13 +372,8 @@ func tarGz(files map[string]string) []byte {
 	return buf.Bytes()
 }
 
-func extractTarGz(archive, dir string) error {
-	f, err := os.Open(archive)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
+func extractTarGz(archive io.Reader, dir *os.Root) error {
+	gz, err := gzip.NewReader(archive)
 	if err != nil {
 		return err
 	}
@@ -355,15 +386,15 @@ func extractTarGz(archive, dir string) error {
 		if err != nil {
 			return err
 		}
-		p := filepath.Join(dir, filepath.FromSlash(h.Name))
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		p := filepath.FromSlash(h.Name)
+		if err := dir.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return err
 		}
 		b, err := io.ReadAll(tr)
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(p, b, 0o755); err != nil {
+		if err := dir.WriteFile(p, b, 0o755); err != nil {
 			return err
 		}
 	}

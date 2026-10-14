@@ -300,7 +300,7 @@ func TestRunServesTheWebUI(t *testing.T) {
 		}
 		for _, e := range evs {
 			if e.Level == "warn" && strings.HasPrefix(e.Msg, "web UI on ") &&
-				strings.HasSuffix(e.Msg, " has no password; run: ghr web set-password") {
+				strings.HasSuffix(e.Msg, " has no password; set one with: ghr web set-password, or open it and enter the code from: ghr code") {
 				return true
 			}
 		}
@@ -339,6 +339,17 @@ func TestRunServesTheWebUI(t *testing.T) {
 		t.Fatalf("api without a session: %d", resp.StatusCode)
 	}
 	resp, body = call(http.MethodPost, "/auth/setup", `{"password":"correct horse battery"}`, "")
+	if resp.StatusCode != http.StatusUnauthorized || !setupRequired() {
+		t.Fatalf("setup without a code: %d %s", resp.StatusCode, body)
+	}
+	code, err := c.SetupCode(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(eventMsgs(t, o.Socket), code) {
+		t.Fatal("the setup code reached the event ring")
+	}
+	resp, body = call(http.MethodPost, "/auth/setup", `{"code":"`+code+`","password":"correct horse battery"}`, "")
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("setup: %d %s", resp.StatusCode, body)
 	}
@@ -357,6 +368,9 @@ func TestRunServesTheWebUI(t *testing.T) {
 	}
 	if resp, _ := call(http.MethodPost, "/api/web/reset-password", "", session); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("reset over TCP: %d", resp.StatusCode)
+	}
+	if resp, _ := call(http.MethodGet, "/api/web/setup-code", "", session); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("setup code over TCP: %d", resp.StatusCode)
 	}
 	if err := c.ResetWebPassword(context.Background()); err != nil {
 		t.Fatal(err)
@@ -718,7 +732,7 @@ func TestRunRecordsTheWebAddressABrowserUsed(t *testing.T) {
 		t.Fatalf("state: %d", resp.StatusCode)
 	}
 	absent("after the bind alone")
-	resp, body := webCall(t, addr, http.MethodPost, "/auth/setup", `{"password":"correct horse battery"}`, "")
+	resp, body := webCall(t, addr, http.MethodPost, "/auth/setup", claimBody(t, o.Socket), "")
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("setup: %d %s", resp.StatusCode, body)
 	}
@@ -866,6 +880,16 @@ func setupStateOver(socket string) (model.SetupState, bool) {
 	return st, true
 }
 
+// claimBody is a browser's setup request, carrying the code the socket gives.
+func claimBody(t *testing.T, socket string) string {
+	t.Helper()
+	code, err := api.NewUnixClient(socket).SetupCode(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return `{"code":"` + code + `","password":"correct horse battery"}`
+}
+
 // webCall calls the web listener with the X-GHR header and an optional session.
 func webCall(t *testing.T, addr, method, path, body, session string) (*http.Response, string) {
 	t.Helper()
@@ -915,7 +939,7 @@ func TestRunConfiguresFromTheWebUI(t *testing.T) {
 	if resp, _ := webCall(t, addr, http.MethodPost, "/api/setup/github", `{"owner":"darkraise","token":"good"}`, ""); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("configure without a session: %d", resp.StatusCode)
 	}
-	resp, body := webCall(t, addr, http.MethodPost, "/auth/setup", `{"password":"correct horse battery"}`, "")
+	resp, body := webCall(t, addr, http.MethodPost, "/auth/setup", claimBody(t, o.Socket), "")
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("claim: %d %s", resp.StatusCode, body)
 	}

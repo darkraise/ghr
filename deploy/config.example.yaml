@@ -11,9 +11,10 @@ labels: [docker]            # added to every runner, besides self-hosted, linux 
 runner_limits:
   memory_max: 6G
   cpu_quota: 200%
-web:                          # browser UI; the first visitor sets its password (setup.sh can set it first); Settings → Web access edits it
+web:                          # browser UI; set its password with ghr web set-password, or in the browser with the code from ghr code; Settings → Web access edits it
   listen: 0.0.0.0:8080
   # hosts: [ghr.lan]          # names a proxy serves it under; IPs and localhost always work
+  # trusted_proxies: [10.0.0.2]  # proxies, as IPs or CIDR prefixes, whose X-Forwarded-For names the browser
 # github_storage:             # the Artifacts page's quota and cleanup; Settings → GitHub storage edits it
 #   included_mb: 500          # the plan's artifact + Packages allowance
 #   warn_pct: [70, 90]

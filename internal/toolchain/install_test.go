@@ -3,12 +3,14 @@ package toolchain
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func demoRelease(f *fixture, body []byte) Release {
@@ -37,10 +39,12 @@ func TestInstallArchiveWritesTheToolCacheLayout(t *testing.T) {
 		t.Fatalf(".tmp holds %v", got)
 	}
 	want := []string{
-		"chown -R -h ghrunner:ghrunner " + filepath.Join(f.Root, ".tmp", "op1", "x", "demo-1.2.3"),
-		"chown -h ghrunner:ghrunner " + filepath.Join(f.Root, "demo"),
-		"chown -h ghrunner:ghrunner " + filepath.Join(f.Root, "demo", "1.2.3"),
-		"chown -h ghrunner:ghrunner " + dir + ".complete",
+		"lchown " + filepath.Join(f.Root, ".tmp", "op1", "x", "demo-1.2.3"),
+		"lchown " + filepath.Join(f.Root, ".tmp", "op1", "x", "demo-1.2.3", "bin"),
+		"lchown " + filepath.Join(f.Root, ".tmp", "op1", "x", "demo-1.2.3", "bin", "demo"),
+		"lchown " + filepath.Join(f.Root, "demo"),
+		"lchown " + filepath.Join(f.Root, "demo", "1.2.3"),
+		"lchown " + dir + ".complete",
 	}
 	if got := f.host.commands(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands\n got %q\nwant %q", got, want)
@@ -70,18 +74,43 @@ func TestInstallArchiveSkipsACompleteVersion(t *testing.T) {
 	}
 }
 
+// A folder written in the future, as a clock stepped back leaves it, would
+// otherwise never count as killed.
 func TestInstallArchiveReplacesAFolderWithoutMarker(t *testing.T) {
+	for name, age := range map[string]time.Duration{"two hours old": 2 * time.Hour, "two hours ahead": -2 * time.Hour} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			stale := mkInstall(t, f.Root, "demo", "1.2.3", false)
+			backdate(t, stale, age)
+			rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
+			if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); err != nil {
+				t.Fatal(err)
+			}
+			if exists(filepath.Join(stale, "file")) {
+				t.Fatal("the marker-less folder's content survived")
+			}
+			if !exists(stale + ".complete") {
+				t.Fatal("no marker")
+			}
+		})
+	}
+}
+
+// A folder without a marker written this recently may be a running job's
+// own setup-* step at work.
+func TestInstallArchiveLeavesAFreshFolderWithoutMarker(t *testing.T) {
 	f := newFixture(t)
-	stale := mkInstall(t, f.Root, "demo", "1.2.3", false)
+	theirs := mkInstall(t, f.Root, "demo", "1.2.3", false)
 	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
-	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); err != nil {
-		t.Fatal(err)
+	err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {})
+	if !errors.Is(err, ErrInstallInProgress) || !strings.Contains(err.Error(), "demo 1.2.3") {
+		t.Fatalf("got %v", err)
 	}
-	if exists(filepath.Join(stale, "file")) {
-		t.Fatal("the marker-less folder's content survived")
+	if !exists(filepath.Join(theirs, "file")) || exists(filepath.Join(theirs, "bin")) || exists(theirs+".complete") {
+		t.Fatal("the unfinished folder was touched")
 	}
-	if !exists(stale + ".complete") {
-		t.Fatal("no marker")
+	if got := tmpEntries(t, f.Root); len(got) != 0 {
+		t.Fatalf(".tmp holds %v", got)
 	}
 }
 
@@ -116,7 +145,7 @@ func TestInstallArchiveCancelledLateLeavesNoVersionFolder(t *testing.T) {
 	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
 	ctx, cancel := context.WithCancel(context.Background())
 	extract := f.Extract
-	f.Extract = func(c context.Context, archive, dir string) error {
+	f.Extract = func(c context.Context, archive io.Reader, dir *os.Root) error {
 		defer cancel()
 		return extract(c, archive, dir)
 	}
@@ -135,8 +164,8 @@ func TestInstallArchiveTmpModes(t *testing.T) {
 	f := newFixture(t)
 	rel := demoRelease(f, tarGz(map[string]string{"bin/demo": "bin"}))
 	fetch := f.Fetch
-	f.Fetch = func(ctx context.Context, url, dst string) error {
-		for path, want := range map[string]os.FileMode{filepath.Join(f.Root, ".tmp"): 0o711, filepath.Dir(dst): 0o700} {
+	f.Fetch = func(ctx context.Context, url string, w io.Writer) error {
+		for path, want := range map[string]os.FileMode{filepath.Join(f.Root, ".tmp"): 0o711, filepath.Join(f.Root, ".tmp", "op1"): 0o700} {
 			st, err := os.Stat(path)
 			if err != nil {
 				t.Errorf("%s: %v", path, err)
@@ -146,7 +175,7 @@ func TestInstallArchiveTmpModes(t *testing.T) {
 				t.Errorf("%s: mode %v, want %v", path, st.Mode().Perm(), want)
 			}
 		}
-		return fetch(ctx, url, dst)
+		return fetch(ctx, url, w)
 	}
 	if err := f.installArchive(context.Background(), "demo", Origin{Dir: f.url + "/"}, rel, func(string) {}); err != nil {
 		t.Fatal(err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,24 +75,26 @@ func (p python) Install(ctx context.Context, rel Release, progress func(string))
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(op)
+	defer op.Close()
 	progress("downloading")
-	archive := filepath.Join(op, "python.tar.gz")
-	if err := e.fetch(ctx, Origin{Dir: pythonReleases}, rel.URL, archive); err != nil {
+	if err := e.fetch(ctx, Origin{Dir: pythonReleases}, rel.URL, op, "python.tar.gz"); err != nil {
 		return err
 	}
 	progress("extracting")
-	out := filepath.Join(op, "x")
-	if err := os.Mkdir(out, 0o755); err != nil {
+	if err := e.unpack(ctx, op, "python.tar.gz"); err != nil {
 		return err
 	}
-	if err := e.Extract(ctx, archive, out); err != nil {
-		return fmt.Errorf("extract: %w", err)
-	}
-	if err := e.chownTree(ctx, op); err != nil {
+	out := filepath.Join(op.path, "x")
+	if err := e.chownTree(op.Root, "."); err != nil {
 		return fmt.Errorf("chown: %w", err)
 	}
-	if err := e.mkdirOwned(ctx, filepath.Join(e.Root, p.dir)); err != nil {
+	// The runner user owns <Root>/Python, and setup.sh runs as them.
+	r, err := os.OpenRoot(e.Root)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	if err := e.mkdirOwned(r, p.dir); err != nil {
 		return err
 	}
 	// setup.sh replaces the version folder, so a job's setup-python that
@@ -99,15 +102,18 @@ func (p python) Install(ctx context.Context, rel Release, progress func(string))
 	if e.has(p.dir, rel.Folder) {
 		return ErrAlreadyInstalled
 	}
+	if err := checkUnfinished(r, filepath.Join(p.dir, rel.Folder, arch), rel); err != nil {
+		return err
+	}
 	progress("running setup.sh")
-	verDir := filepath.Join(e.Root, p.dir, rel.Folder)
+	verRel := filepath.Join(p.dir, rel.Folder)
 	// A version folder that is already there may be a job's own setup-python
-	// at work, and the runner user can swap any folder above it for a link.
-	_, statErr := os.Lstat(verDir)
-	existed := !os.IsNotExist(statErr)
+	// at work.
+	_, statErr := r.Lstat(verRel)
+	existed := !errors.Is(statErr, fs.ErrNotExist)
 	fail := func(err error) error {
-		if !existed && noSymlinks(e.Root, verDir) == nil {
-			os.RemoveAll(verDir)
+		if !existed {
+			r.RemoveAll(verRel)
 		}
 		return err
 	}

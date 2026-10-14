@@ -212,7 +212,7 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 	m.Reconcile(ctx, store.Config())
 
 	tools := toolchain.New(toolchain.NewEnv(o.Paths.ToolCache, o.Paths.Home, runner.RunnerUser,
-		system.ExecGroupFor(InstallTimeout), system.DownloadFor(InstallTimeout)))
+		system.ExecGroupFor(InstallTimeout), system.ExecGroupIOFor(InstallTimeout), system.DownloadFor(InstallTimeout)))
 	space := &storage.Service{Tools: tools, Docker: m.Disk, Home: o.Paths.Home, User: runner.RunnerUser,
 		Busy: m.BusyCount, Events: ev}
 	space.Start()
@@ -339,7 +339,7 @@ func Run(ctx context.Context, o Options) error {
 		var tcp net.Listener
 		tcp, webCfg.Listen, webErr = listenWeb(webCfg.Listen, o.WebListenPath)
 		if tcp != nil {
-			webLn = limitConns(tcp, maxWebConns, maxWebConnsPerClient)
+			webLn = limitConns(tcp, maxWebConns, maxWebConnsPerClient, webCfg.TrustedProxyPrefixes())
 		}
 	}
 	auth := webui.NewAuth(o.WebPasswordPath, time.Now, rand.Reader)
@@ -396,7 +396,7 @@ func Run(ctx context.Context, o Options) error {
 		if err != nil {
 			return err
 		}
-		webSrv.Handler = webui.Handler(auth, handler, static, webCfg.Hosts, recordWebListen(o.WebListenPath, webCfg.Listen))
+		webSrv.Handler = webui.Handler(auth, handler, static, webCfg.Hosts, webCfg.TrustedProxyPrefixes(), recordWebListen(o.WebListenPath, webCfg.Listen))
 	}
 	serve := func() {
 		served = true
@@ -415,7 +415,7 @@ func Run(ctx context.Context, o Options) error {
 		}()
 		ev.Add("info", "", "web UI listening on %s", webLn.Addr())
 		if webSetupRequired() {
-			ev.Add("warn", "", "web UI on %s has no password; run: ghr web set-password", webLn.Addr())
+			ev.Add("warn", "", "web UI on %s has no password; set one with: ghr web set-password, or open it and enter the code from: ghr code", webLn.Addr())
 		}
 	}
 	// Every return after serve goes through teardown, so no path leaves the

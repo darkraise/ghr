@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func newTestHandler(t *testing.T) (http.Handler, *Auth, *fakeAPI) {
 	t.Helper()
 	a, _ := newTestAuth(t)
 	api := &fakeAPI{}
-	return Handler(a, api, testFS(), []string{"ghr.lan"}, nil), a, api
+	return Handler(a, api, testFS(), []string{"ghr.lan"}, nil, nil), a, api
 }
 
 // do sends a request as the browser app would: Host ghr.lan:8080 and the
@@ -71,6 +72,16 @@ func sessionCookie(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
 
 func body(pw string) string { return `{"password":"` + pw + `"}` }
 
+// setupBody is a setup request carrying a's current setup code.
+func setupBody(t *testing.T, a *Auth, pw string) string {
+	t.Helper()
+	code, err := a.SetupCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return `{"code":"` + code + `","password":"` + pw + `"}`
+}
+
 // local sends the request from loopback, then applies mods.
 func local(mods ...func(*http.Request)) func(*http.Request) {
 	return func(r *http.Request) {
@@ -82,12 +93,22 @@ func local(mods ...func(*http.Request)) func(*http.Request) {
 }
 
 func TestSetupThenAPI(t *testing.T) {
-	h, _, api := newTestHandler(t)
+	h, a, api := newTestHandler(t)
 	rec := do(h, http.MethodGet, "/auth/state", "", nil)
 	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"authenticated":false,"setup_required":true}` {
 		t.Fatalf("state: %d %s", rec.Code, rec.Body.String())
 	}
 	rec = do(h, http.MethodPost, "/auth/setup", body(pw), local())
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "wrong setup code; run on the host: ghr code") ||
+		len(rec.Result().Cookies()) != 0 {
+		t.Fatalf("setup without a code: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(h, http.MethodGet, "/auth/state", "", nil)
+	if strings.TrimSpace(rec.Body.String()) != `{"authenticated":false,"setup_required":true}` {
+		t.Fatalf("state after a refused setup: %s", rec.Body.String())
+	}
+	claimBody := setupBody(t, a, pw)
+	rec = do(h, http.MethodPost, "/auth/setup", claimBody, local())
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("setup: %d %s", rec.Code, rec.Body.String())
 	}
@@ -106,7 +127,7 @@ func TestSetupThenAPI(t *testing.T) {
 	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Fatalf("api cache-control %q", cc)
 	}
-	if rec := do(h, http.MethodPost, "/auth/setup", body(pw), local()); rec.Code != http.StatusConflict {
+	if rec := do(h, http.MethodPost, "/auth/setup", claimBody, local()); rec.Code != http.StatusConflict {
 		t.Fatalf("second setup: %d", rec.Code)
 	}
 }
@@ -117,11 +138,11 @@ func TestLoginResponses(t *testing.T) {
 		!strings.Contains(rec.Body.String(), "no web password is set yet") {
 		t.Fatalf("login before setup: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(h, http.MethodPost, "/auth/setup", body("short"), local()); rec.Code != http.StatusBadRequest ||
+	if rec := do(h, http.MethodPost, "/auth/setup", setupBody(t, a, "short"), local()); rec.Code != http.StatusBadRequest ||
 		!strings.Contains(rec.Body.String(), "password must be 12 to 1024 characters") {
 		t.Fatalf("short setup: %d %s", rec.Code, rec.Body.String())
 	}
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	for range maxFailures {
@@ -146,9 +167,126 @@ func TestLoginResponses(t *testing.T) {
 	sessionCookie(t, other)
 }
 
+// fromProxy sends the request from peer with one X-Forwarded-For line per
+// entry of forwarded.
+func fromProxy(peer string, forwarded ...string) func(*http.Request) {
+	return func(r *http.Request) {
+		r.RemoteAddr = peer
+		for _, f := range forwarded {
+			r.Header.Add("X-Forwarded-For", f)
+		}
+	}
+}
+
+var testProxies = []netip.Prefix{netip.MustParsePrefix("10.0.0.2/32"), netip.MustParsePrefix("10.1.0.0/16")}
+
+func TestLoginBehindATrustedProxy(t *testing.T) {
+	a, _ := newTestAuth(t)
+	h := Handler(a, &fakeAPI{}, testFS(), []string{"ghr.lan"}, testProxies, nil)
+	if _, err := claim(a, pw); err != nil {
+		t.Fatal(err)
+	}
+	login := func(mod func(*http.Request), password string) int {
+		return do(h, http.MethodPost, "/auth/login", body(password), mod).Code
+	}
+	lockOut := func(mod func(*http.Request)) {
+		t.Helper()
+		for range maxFailures {
+			if code := login(mod, "wrong password!"); code != http.StatusUnauthorized {
+				t.Fatalf("wrong password: %d", code)
+			}
+		}
+		if code := login(mod, pw); code != http.StatusTooManyRequests {
+			t.Fatalf("after %d wrong passwords: %d", maxFailures, code)
+		}
+	}
+
+	lockOut(fromProxy("10.0.0.2:4000", "203.0.113.5"))
+	for _, tc := range []struct {
+		name string
+		mod  func(*http.Request)
+		want int
+	}{
+		{"another client through the proxy", fromProxy("10.0.0.2:4001", "203.0.113.6"), http.StatusNoContent},
+		{"the locked client with a leftmost entry of its own", fromProxy("10.0.0.2:4002", "198.51.100.9, 203.0.113.5"), http.StatusTooManyRequests},
+		{"the locked client through a second trusted hop", fromProxy("10.0.0.2:4003", "198.51.100.9", "203.0.113.5, 10.1.2.3"), http.StatusTooManyRequests},
+		{"the proxy itself, with no X-Forwarded-For", fromProxy("10.0.0.2:4004"), http.StatusNoContent},
+	} {
+		if code := login(tc.mod, pw); code != tc.want {
+			t.Errorf("%s: %d, want %d", tc.name, code, tc.want)
+		}
+	}
+
+	// An untrusted peer's X-Forwarded-For is ignored, so it cannot step
+	// round its own lockout or lock out the client it names.
+	lockOut(fromProxy("192.168.0.20:5000", "203.0.113.7"))
+	if code := login(fromProxy("192.168.0.20:5001", "203.0.113.8"), pw); code != http.StatusTooManyRequests {
+		t.Errorf("the locked untrusted peer naming another client: %d", code)
+	}
+	if code := login(fromProxy("10.0.0.2:4005", "203.0.113.7"), pw); code != http.StatusNoContent {
+		t.Errorf("the client the untrusted peer named: %d", code)
+	}
+}
+
+func TestPasswordChangeBehindATrustedProxyCountsTheClient(t *testing.T) {
+	a, _ := newTestAuth(t)
+	h := Handler(a, &fakeAPI{}, testFS(), []string{"ghr.lan"}, testProxies, nil)
+	id, err := claim(a, pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := func(peer, forwarded string) int {
+		return do(h, http.MethodPost, "/auth/password", `{"current":"wrong password!","new":"another password"}`, func(r *http.Request) {
+			fromProxy(peer, forwarded)(r)
+			withCookie(id)(r)
+		}).Code
+	}
+	for range maxFailures {
+		if code := change("10.0.0.2:4000", "203.0.113.5"); code != http.StatusForbidden {
+			t.Fatalf("wrong current password: %d", code)
+		}
+	}
+	if code := change("10.0.0.2:4001", "203.0.113.5"); code != http.StatusTooManyRequests {
+		t.Fatalf("the locked client: %d", code)
+	}
+	if code := change("10.0.0.2:4002", "203.0.113.6"); code != http.StatusForbidden {
+		t.Fatalf("another client through the proxy: %d", code)
+	}
+}
+
+func TestClientKeyBehindTrustedProxies(t *testing.T) {
+	h := &handler{trusted: testProxies}
+	for _, tc := range []struct {
+		name      string
+		peer      string
+		forwarded []string
+		want      string
+	}{
+		{"an untrusted peer", "192.168.0.20:5000", []string{"203.0.113.5"}, "192.168.0.20"},
+		{"a trusted peer without the header", "10.0.0.2:4000", nil, "10.0.0.2"},
+		{"the rightmost entry", "10.0.0.2:4000", []string{"198.51.100.9, 203.0.113.5"}, "203.0.113.5"},
+		{"trusted hops across header lines", "10.0.0.2:4000", []string{"198.51.100.9", "203.0.113.5,10.1.2.3"}, "203.0.113.5"},
+		{"a trusted peer written IPv4-mapped", "[::ffff:10.0.0.2]:4000", []string{"203.0.113.5"}, "203.0.113.5"},
+		{"a trusted hop written IPv4-mapped", "10.0.0.2:4000", []string{"203.0.113.5, ::ffff:10.1.2.3"}, "203.0.113.5"},
+		{"an entry with a port", "10.0.0.2:4000", []string{"[::ffff:203.0.113.5]:1234"}, "203.0.113.5"},
+		{"an entry with an IPv6 zone", "10.0.0.2:4000", []string{"fe80::1%eth0"}, "fe80::1"},
+		{"a bracketed IPv6 entry with a zone and a port", "10.0.0.2:4000", []string{"[fe80::1%eth0]:80"}, "fe80::1"},
+		{"a bracketed IPv6 entry", "10.0.0.2:4000", []string{"[2001:db8::1]"}, "2001:db8::1"},
+		{"every hop trusted", "10.0.0.2:4000", []string{"10.1.0.7, 10.1.2.3"}, "10.1.0.7"},
+		{"an entry that does not parse", "10.0.0.2:4000", []string{"203.0.113.5, unknown, 10.1.2.3"}, "10.1.2.3"},
+		{"an empty entry", "10.0.0.2:4000", []string{"203.0.113.5, "}, "10.0.0.2"},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
+		fromProxy(tc.peer, tc.forwarded...)(r)
+		if got := h.clientKey(r); got != tc.want {
+			t.Errorf("%s: key %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestSecureCookie(t *testing.T) {
-	h, _, _ := newTestHandler(t)
-	rec := do(h, http.MethodPost, "/auth/setup", body(pw), local(func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https") }))
+	h, a, _ := newTestHandler(t)
+	rec := do(h, http.MethodPost, "/auth/setup", setupBody(t, a, pw), local(func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https") }))
 	if c := sessionCookie(t, rec); !c.Secure {
 		t.Fatal("cookie not Secure behind an HTTPS proxy")
 	}
@@ -166,7 +304,7 @@ func TestSecureCookie(t *testing.T) {
 
 func TestLoginEndsWithTheRequest(t *testing.T) {
 	h, a, _ := newTestHandler(t)
-	if _, err := a.Setup(pw); err != nil {
+	if _, err := claim(a, pw); err != nil {
 		t.Fatal(err)
 	}
 	fillSlots(a)
@@ -201,8 +339,8 @@ func TestAPIRequestsCarryTheBrowserMark(t *testing.T) {
 		seen = append(seen, r.Method+" "+r.URL.Path+" "+host)
 		w.WriteHeader(http.StatusNoContent)
 	})
-	h := Handler(a, backend, testFS(), []string{"ghr.lan"}, nil)
-	id, err := a.Setup(pw)
+	h := Handler(a, backend, testFS(), []string{"ghr.lan"}, nil, nil)
+	id, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +365,7 @@ func TestAPIRequestsCarryTheBrowserMark(t *testing.T) {
 
 func TestRequestChecks(t *testing.T) {
 	h, a, _ := newTestHandler(t)
-	id, err := a.Setup(pw)
+	id, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +440,7 @@ func TestRequestChecks(t *testing.T) {
 
 func TestRoutes(t *testing.T) {
 	h, a, api := newTestHandler(t)
-	id, err := a.Setup(pw)
+	id, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +489,7 @@ func TestRoutes(t *testing.T) {
 func TestLongestPasswordsFitTheBodyLimit(t *testing.T) {
 	h, a, _ := newTestHandler(t)
 	current, next := strings.Repeat("\U0001F600", MaxPasswordLen), strings.Repeat("\U0001F601", MaxPasswordLen)
-	id, err := a.Setup(current)
+	id, err := claim(a, current)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +510,7 @@ func TestLongestPasswordsFitTheBodyLimit(t *testing.T) {
 
 func TestLogoutAndPasswordChange(t *testing.T) {
 	h, a, _ := newTestHandler(t)
-	keep, err := a.Setup(pw)
+	keep, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,24 +524,34 @@ func TestLogoutAndPasswordChange(t *testing.T) {
 	if rec := do(h, http.MethodPost, "/auth/password", `{"current":"x","new":"y"}`, nil); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("change without a session: %d", rec.Code)
 	}
-	if rec := change(keep, "wrong password!", "another long secret"); rec.Code != http.StatusUnauthorized ||
+	if rec := change(keep, "wrong password!", "another long secret"); rec.Code != http.StatusForbidden ||
 		!strings.Contains(rec.Body.String(), "wrong password") {
 		t.Fatalf("wrong current: %d %s", rec.Code, rec.Body.String())
 	}
 	if rec := do(h, http.MethodGet, "/api/status", "", withCookie(keep)); rec.Code != 200 {
 		t.Fatalf("a wrong current password ended the session: %d", rec.Code)
 	}
-	if rec := change(keep, pw, "another long secret"); rec.Code != http.StatusNoContent {
+	rec := change(keep, pw, "another long secret")
+	if rec.Code != http.StatusNoContent {
 		t.Fatalf("change: %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(h, http.MethodGet, "/api/status", "", withCookie(other)); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("other session survived the change: %d", rec.Code)
+	c := sessionCookie(t, rec)
+	if c.Value == keep || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || c.MaxAge != 2592000 || c.Path != "/" {
+		t.Fatalf("cookie after the change %+v", c)
 	}
-	rec := do(h, http.MethodPost, "/auth/logout", "", withCookie(keep))
+	for name, id := range map[string]string{"the changing": keep, "another": other} {
+		if rec := do(h, http.MethodGet, "/api/status", "", withCookie(id)); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s session survived the change: %d", name, rec.Code)
+		}
+	}
+	if rec := do(h, http.MethodGet, "/api/status", "", withCookie(c.Value)); rec.Code != 200 {
+		t.Fatalf("the new session: %d", rec.Code)
+	}
+	rec = do(h, http.MethodPost, "/auth/logout", "", withCookie(c.Value))
 	if rec.Code != http.StatusNoContent || sessionCookie(t, rec).MaxAge >= 0 {
 		t.Fatalf("logout: %d", rec.Code)
 	}
-	if rec := do(h, http.MethodGet, "/api/status", "", withCookie(keep)); rec.Code != http.StatusUnauthorized {
+	if rec := do(h, http.MethodGet, "/api/status", "", withCookie(c.Value)); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("session survived logout: %d", rec.Code)
 	}
 	if rec := do(h, http.MethodPost, "/auth/logout", "", nil); rec.Code != http.StatusUnauthorized {
@@ -433,7 +581,7 @@ func TestSetupFromAnyAddress(t *testing.T) {
 		"loopback":        local(),
 	} {
 		h, a, _ := newTestHandler(t)
-		rec := do(h, http.MethodPost, "/auth/setup", body(pw), mod)
+		rec := do(h, http.MethodPost, "/auth/setup", setupBody(t, a, pw), mod)
 		if rec.Code != http.StatusNoContent || len(rec.Result().Cookies()) == 0 {
 			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
 		}
@@ -473,12 +621,12 @@ func TestLongRequestEndsWithItsSession(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setSessionRecheck(t, 20*time.Millisecond)
 			a, c := newTestAuth(t)
-			id, err := a.Setup(pw)
+			id, err := claim(a, pw)
 			if err != nil {
 				t.Fatal(err)
 			}
 			api := &waitAPI{started: make(chan struct{}), ended: make(chan struct{})}
-			h := Handler(a, api, testFS(), []string{"ghr.lan"}, nil)
+			h := Handler(a, api, testFS(), []string{"ghr.lan"}, nil, nil)
 			returned := make(chan struct{})
 			go func() {
 				do(h, http.MethodGet, "/api/changes", "", withCookie(id))
@@ -514,7 +662,7 @@ func TestRequestStopsItsSessionTimer(t *testing.T) {
 	}
 	t.Cleanup(func() { afterFunc = time.AfterFunc })
 	h, a, _ := newTestHandler(t)
-	id, err := a.Setup(pw)
+	id, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,12 +679,12 @@ func TestRequestStopsItsSessionTimer(t *testing.T) {
 
 func TestOnSessionRunsForLoggedInAPIRequests(t *testing.T) {
 	a, _ := newTestAuth(t)
-	id, err := a.Setup(pw)
+	id, err := claim(a, pw)
 	if err != nil {
 		t.Fatal(err)
 	}
 	calls := 0
-	h := Handler(a, &fakeAPI{}, testFS(), []string{"ghr.lan"}, func() { calls++ })
+	h := Handler(a, &fakeAPI{}, testFS(), []string{"ghr.lan"}, nil, func() { calls++ })
 	for _, tc := range []struct {
 		target string
 		mod    func(*http.Request)

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -35,19 +36,21 @@ var sessionRecheck = 5 * time.Second
 var afterFunc = time.AfterFunc
 
 type handler struct {
-	auth  *Auth
-	hosts []string
+	auth    *Auth
+	hosts   []string
+	trusted []netip.Prefix
 	// onSession runs for every request a valid session lets through; nil
 	// runs nothing.
 	onSession func()
 }
 
 // Handler serves the web UI's TCP listener: /auth/* for login, the control
-// API under /api/ for logged-in sessions, and the app from static.
+// API under /api/ for logged-in sessions, and the app from static. A request
+// from a trusted proxy is throttled by the client its X-Forwarded-For names.
 // onSession, when set, runs for every /api/ request a valid session lets
 // through, before the API handles it.
-func Handler(a *Auth, apiHandler http.Handler, static fs.FS, hosts []string, onSession func()) http.Handler {
-	h := &handler{auth: a, hosts: hosts, onSession: onSession}
+func Handler(a *Auth, apiHandler http.Handler, static fs.FS, hosts []string, trusted []netip.Prefix, onSession func()) http.Handler {
+	h := &handler{auth: a, hosts: hosts, trusted: trusted, onSession: onSession}
 	mux := http.NewServeMux()
 	allow := map[string]string{}
 	route := func(method, path string, fn http.HandlerFunc) {
@@ -221,6 +224,7 @@ func (h *handler) state(w http.ResponseWriter, r *http.Request) {
 }
 
 type passwordBody struct {
+	Code     string `json:"code"`
 	Password string `json:"password"`
 	Current  string `json:"current"`
 	New      string `json:"new"`
@@ -245,7 +249,7 @@ func (h *handler) setup(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &b) {
 		return
 	}
-	id, err := h.auth.Setup(b.Password)
+	id, err := h.auth.Setup(b.Code, b.Password)
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -259,7 +263,7 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &b) {
 		return
 	}
-	id, err := h.auth.login(r.Context(), ClientKey(r.RemoteAddr), b.Password)
+	id, err := h.auth.login(r.Context(), h.clientKey(r), b.Password)
 	if err != nil {
 		h.fail(w, err)
 		return
@@ -280,8 +284,7 @@ func (h *handler) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) password(w http.ResponseWriter, r *http.Request) {
-	id, ok := h.session(r)
-	if !ok {
+	if _, ok := h.session(r); !ok {
 		writeError(w, http.StatusUnauthorized, "not logged in")
 		return
 	}
@@ -289,11 +292,61 @@ func (h *handler) password(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &b) {
 		return
 	}
-	if err := h.auth.ChangePassword(id, b.Current, b.New); err != nil {
+	id, err := h.auth.ChangePassword(h.clientKey(r), b.Current, b.New)
+	if err != nil {
+		// 401 on this route means only "not logged in", which the app answers
+		// by going to the login page.
+		if errors.Is(err, ErrWrongPassword) {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
 		h.fail(w, err)
 		return
 	}
+	setSession(w, r, id, int(sessionTTL/time.Second))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// clientKey is the throttle key of the client behind r. Each proxy appends
+// the address it took the request from to X-Forwarded-For, so walking it from
+// the right while the hop is trusted ends at the nearest address no trusted
+// proxy is: anything left of that the client could have written. An entry
+// that does not parse ends the walk at the trusted hop that wrote it, and a
+// chain trusted throughout ends at its leftmost address.
+func (h *handler) clientKey(r *http.Request) string {
+	hop, ok := remoteAddr(r.RemoteAddr)
+	if !ok || !h.isTrusted(hop) {
+		return ClientKey(r.RemoteAddr)
+	}
+	lines := r.Header.Values("X-Forwarded-For")
+	for i := len(lines) - 1; i >= 0; i-- {
+		entries := strings.Split(lines[i], ",")
+		for j := len(entries) - 1; j >= 0; j-- {
+			ip, ok := forwardedAddr(entries[j])
+			if !ok {
+				return hop.String()
+			}
+			hop = ip
+			if !h.isTrusted(hop) {
+				return hop.String()
+			}
+		}
+	}
+	return hop.String()
+}
+
+func (h *handler) isTrusted(ip netip.Addr) bool {
+	return slices.ContainsFunc(h.trusted, func(p netip.Prefix) bool { return p.Contains(ip) })
+}
+
+// forwardedAddr parses an X-Forwarded-For entry, which some proxies write
+// with a port or an IPv6 address in brackets.
+func forwardedAddr(entry string) (netip.Addr, bool) {
+	entry = strings.TrimSpace(entry)
+	if ip, ok := remoteAddr(entry); ok {
+		return ip, true
+	}
+	return remoteAddr(strings.TrimSuffix(strings.TrimPrefix(entry, "["), "]"))
 }
 
 // setSession sets the session cookie; maxAge -1 deletes it. X-Forwarded-Proto
@@ -320,7 +373,7 @@ func (h *handler) fail(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{
 			"error": err.Error(), "retry_at": te.RetryAt.UTC().Format(time.RFC3339),
 		})
-	case errors.Is(err, ErrWrongPassword):
+	case errors.Is(err, ErrWrongPassword), errors.Is(err, ErrSetupCode):
 		writeError(w, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, ErrPasswordLength):
 		writeError(w, http.StatusBadRequest, err.Error())

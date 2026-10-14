@@ -46,10 +46,27 @@ func ExecGroupFor(d time.Duration) Runner {
 	}
 }
 
+// IORunner is a Runner for a command that also reads in on stdin and gets
+// extra as its open files from fd 3 on.
+type IORunner func(ctx context.Context, in io.Reader, extra []*os.File, name string, args ...string) ([]byte, error)
+
+// ExecGroupIOFor is ExecGroupFor as an IORunner.
+func ExecGroupIOFor(d time.Duration) IORunner {
+	return func(ctx context.Context, in io.Reader, extra []*os.File, name string, args ...string) ([]byte, error) {
+		return executeIO(ctx, d, true, in, extra, name, args)
+	}
+}
+
 func execute(ctx context.Context, timeout time.Duration, group bool, name string, args []string) ([]byte, error) {
+	return executeIO(ctx, timeout, group, nil, nil, name, args)
+}
+
+func executeIO(ctx context.Context, timeout time.Duration, group bool, in io.Reader, extra []*os.File, name string, args []string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = in
+	cmd.ExtraFiles = extra
 	if group {
 		killGroup(cmd)
 	}
@@ -423,6 +440,10 @@ func HTTPSRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
+// maxDownload caps one download; the largest archives ghr fetches, a .NET
+// SDK or a JDK, are a few hundred megabytes.
+var maxDownload int64 = 2 << 30
+
 var downloadClient = &http.Client{CheckRedirect: HTTPSRedirect}
 
 // Download saves url to dst, following redirects to https URLs. It sends no
@@ -431,14 +452,32 @@ func Download(ctx context.Context, url, dst string) error {
 	return download(ctx, DownloadTimeout, url, dst)
 }
 
-// DownloadFor is Download with its own timeout d in place of DownloadTimeout.
-func DownloadFor(d time.Duration) func(ctx context.Context, url, dst string) error {
-	return func(ctx context.Context, url, dst string) error {
-		return download(ctx, d, url, dst)
+// DownloadFor is Download with its own timeout d in place of
+// DownloadTimeout, writing to w, which the caller has opened.
+func DownloadFor(d time.Duration) func(ctx context.Context, url string, w io.Writer) error {
+	return func(ctx context.Context, url string, w io.Writer) error {
+		return fetchTo(ctx, d, url, func() (io.Writer, error) { return w, nil })
 	}
 }
 
 func download(ctx context.Context, timeout time.Duration, url, dst string) error {
+	var f *os.File
+	err := fetchTo(ctx, timeout, url, func() (io.Writer, error) {
+		var err error
+		f, err = os.Create(dst)
+		return f, err
+	})
+	if f != nil {
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+	}
+	return err
+}
+
+// fetchTo copies url's body to what open returns, calling open only once
+// the response is known to be one to keep.
+func fetchTo(ctx context.Context, timeout time.Duration, url string, open func() (io.Writer, error)) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -453,13 +492,16 @@ func download(ctx context.Context, timeout time.Duration, url, dst string) error
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
-	f, err := os.Create(dst)
+	if resp.ContentLength > maxDownload {
+		return fmt.Errorf("GET %s: download is larger than %d bytes", url, maxDownload)
+	}
+	w, err := open()
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		f.Close()
-		return err
+	n, err := io.Copy(w, io.LimitReader(resp.Body, maxDownload+1))
+	if err == nil && n > maxDownload {
+		err = fmt.Errorf("GET %s: download is larger than %d bytes", url, maxDownload)
 	}
-	return f.Close()
+	return err
 }

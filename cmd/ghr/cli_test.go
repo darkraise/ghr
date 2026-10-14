@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -45,6 +46,27 @@ func fakeDaemon(t *testing.T) *[]recorded {
 		case r.URL.Path == "/history":
 			json.NewEncoder(w).Encode([]model.HistoryEntry{{Repo: "darkmem", RunNumber: "88", JobName: "build", Conclusion: "failure",
 				StartedAt: now.Add(-time.Minute), FinishedAt: now}})
+		case r.URL.Path == "/runners/evil/log":
+			chunk := model.LogChunk{}
+			if r.URL.Query().Get("cursor") == "" {
+				chunk = model.LogChunk{Data: hostileLog, Next: "evil=1"}
+			}
+			json.NewEncoder(w).Encode(chunk)
+		case r.URL.Path == "/runners/split/log":
+			// RunnerLog cuts chunks at arbitrary offsets, here inside a CRLF.
+			chunks := map[string]model.LogChunk{
+				"":    {Data: "one\r", Next: "s=1"},
+				"s=1": {Data: "\ntwo\r", Next: "s=2"},
+				"s=2": {Data: "three\r", Next: "s=3"},
+			}
+			json.NewEncoder(w).Encode(chunks[r.URL.Query().Get("cursor")])
+		case r.URL.Path == "/runners/broken/log":
+			if r.URL.Query().Get("cursor") == "" {
+				json.NewEncoder(w).Encode(model.LogChunk{Data: "one\r", Next: "b=1"})
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "log store failed"})
 		case strings.HasSuffix(r.URL.Path, "/log"):
 			// Two chunks, then nothing new: an unknown cursor gets an empty chunk.
 			chunks := map[string]model.LogChunk{
@@ -55,6 +77,8 @@ func fakeDaemon(t *testing.T) *[]recorded {
 		case r.URL.Path == "/repos" && strings.Contains(string(b), `"public"`) && !strings.Contains(string(b), `"allow_public":true`):
 			w.WriteHeader(409)
 			json.NewEncoder(w).Encode(map[string]string{"error": "public is public"})
+		case r.URL.Path == "/web/setup-code":
+			json.NewEncoder(w).Encode(map[string]string{"code": "ABCDE-FGHJK-MNPQR-STVWX"})
 		case r.URL.Path == "/storage":
 			json.NewEncoder(w).Encode(sampleStorage(now))
 		case r.URL.Path == "/toolchains/available":
@@ -288,6 +312,191 @@ func TestLogsAndHistory(t *testing.T) {
 	}
 }
 
+// hostileLog carries an ESC clear-screen, a BEL, an OSC 52 clipboard write
+// and a C1 CSI around ordinary lines.
+const hostileLog = "ok\tline\n\x1b[2Jcleared\a\x1b]52;c;aGk=\x07bell\u009b31mc1\x7fdel\n"
+
+func stubStdoutTerminal(t *testing.T, on bool) {
+	t.Helper()
+	old := fdIsTerminal
+	fdIsTerminal = func(fd uintptr) bool { return on && fd == os.Stdout.Fd() }
+	t.Cleanup(func() { fdIsTerminal = old })
+}
+
+func TestLogsEscapeControlsAtATerminal(t *testing.T) {
+	fakeDaemon(t)
+	stubStdoutTerminal(t, true)
+	code, out, _ := runCLI(t, "", "logs", "evil")
+	want := "ok\tline\n\ufffd[2Jcleared\ufffd\ufffd]52;c;aGk=\ufffdbell\ufffd31mc1\ufffddel\n"
+	if code != 0 || out != want {
+		t.Fatalf("logs %d %q, want %q", code, out, want)
+	}
+}
+
+func TestTermSafeLineEndingsAndBidi(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"crlf", "a\r\nb\r\n", "a\nb\n"},
+		{"lone cr", "pass\rFAIL\n", "pass\nFAIL\n"},
+		{"cr before crlf", "a\r\r\nb", "a\n\nb"},
+		{"embedding and override", "a\u202ab\u202bc\u202dd\u202ee\u202cf", "a\ufffdb\ufffdc\ufffdd\ufffde\ufffdf"},
+		{"isolates", "a\u2066b\u2067c\u2068d\u2069e", "a\ufffdb\ufffdc\ufffdd\ufffde"},
+		{"other text", "caf\u00e9 \u2713 \u200f\n\t", "caf\u00e9 \u2713 \u200f\n\t"},
+	} {
+		if got := termSafe(tc.in); got != tc.want {
+			t.Errorf("%s: termSafe(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestLogsHoldACarriageReturnAcrossChunks(t *testing.T) {
+	fakeDaemon(t)
+	stubStdoutTerminal(t, true)
+	code, out, _ := runCLI(t, "", "logs", "split")
+	if want := "one\ntwo\nthree\n"; code != 0 || out != want {
+		t.Fatalf("logs %d %q, want %q", code, out, want)
+	}
+	stubStdoutTerminal(t, false)
+	if code, out, _ := runCLI(t, "", "logs", "split"); code != 0 || out != "one\r\ntwo\rthree\r" {
+		t.Fatalf("logs in a pipe %d %q, want the raw bytes", code, out)
+	}
+}
+
+func TestLogsFlushAHeldCarriageReturnWhenTheDaemonFails(t *testing.T) {
+	fakeDaemon(t)
+	stubStdoutTerminal(t, true)
+	code, out, errOut := runCLI(t, "", "logs", "broken")
+	if code != 1 || out != "one\n" || !strings.Contains(errOut, "log store failed") {
+		t.Fatalf("logs %d out %q err %q, want exit 1, the held line break and the daemon's error", code, out, errOut)
+	}
+}
+
+// logPoller answers the polls of a followed log from a script and counts them.
+type logPoller struct {
+	chunks []model.LogChunk
+	polls  *int
+}
+
+func (p logPoller) RoundTrip(r *http.Request) (*http.Response, error) {
+	chunk := p.chunks[min(*p.polls, len(p.chunks)-1)]
+	*p.polls++
+	body, _ := json.Marshal(chunk)
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
+}
+
+func TestFollowKeepsACarriageReturnHeldThroughAnEmptyPoll(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stubStdoutTerminal(t, true)
+		polls := 0
+		client := &api.Client{Base: "http://ghr", HTTP: &http.Client{Transport: logPoller{
+			chunks: []model.LogChunk{{Data: "one\r", Next: "f=1"}, {Next: "f=1"}}, polls: &polls}}}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var out bytes.Buffer
+		var err error
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			err = logs(ctx, client, []string{"a3f9c1", "-f"}, &out)
+		}()
+		synctest.Wait()
+		time.Sleep(logPollInterval)
+		synctest.Wait()
+		if polls != 2 || out.String() != "one" {
+			t.Fatalf("after an empty poll: %d polls, output %q, want 2 polls and the CR still held", polls, out.String())
+		}
+		cancel()
+		synctest.Wait()
+		<-done
+		if err != nil || out.String() != "one\n" {
+			t.Errorf("after the cancellation: err %v, output %q, want the held CR flushed as a line break", err, out.String())
+		}
+	})
+}
+
+func TestLogsAreRawInAPipe(t *testing.T) {
+	fakeDaemon(t)
+	stubStdoutTerminal(t, false)
+	if code, out, _ := runCLI(t, "", "logs", "evil"); code != 0 || out != hostileLog {
+		t.Fatalf("logs %d %q, want the raw bytes", code, out)
+	}
+}
+
+func TestJobNamesEscapeControlsAtATerminal(t *testing.T) {
+	const name = "build\x1b]0;pwned\x07"
+	st := model.Status{Mode: "queue", GlobalMax: 1,
+		Repos:     []model.RepoStatus{{Name: "r\x1b[31m", LastJob: &model.HistoryEntry{Conclusion: "success", RunNumber: "1", JobName: name}}},
+		Instances: []model.InstanceStatus{{ID: "a3f9c1", Repo: "r", State: "busy", Job: &model.JobInfo{Name: "wf / " + name, RunNumber: "2"}}}}
+	hist := []model.HistoryEntry{{Repo: "r", RunNumber: "1\x1b[2J", JobName: name, Conclusion: "success"}}
+	for _, on := range []bool{true, false} {
+		stubStdoutTerminal(t, on)
+		var status, history bytes.Buffer
+		printStatus(&status, st)
+		printHistory(&history, hist)
+		for what, out := range map[string]string{"status": status.String(), "history": history.String()} {
+			if on && strings.ContainsAny(out, "\x1b\a") {
+				t.Errorf("%s at a terminal kept a control byte: %q", what, out)
+			}
+			if !on && !strings.Contains(out, "\x1b") {
+				t.Errorf("%s in a pipe lost the raw bytes: %q", what, out)
+			}
+		}
+	}
+}
+
+func TestSingleLineFieldsCannotAddARowAtATerminal(t *testing.T) {
+	build := func(sep string) (model.Status, []model.HistoryEntry) {
+		name := "build" + sep + "FAKE" + sep + "failure"
+		st := model.Status{Mode: "queue", GlobalMax: 1,
+			Repos: []model.RepoStatus{
+				{Name: "r" + sep + "fake", Error: "boom" + sep + "ERR"},
+				{Name: "s", LastJob: &model.HistoryEntry{Conclusion: "success", RunNumber: "1" + sep + "2", JobName: name}}},
+			Instances: []model.InstanceStatus{{ID: "a3f9c1", Repo: "r" + sep + "x", State: "busy",
+				Job: &model.JobInfo{Name: "wf" + sep + "/ " + name, RunNumber: "2" + sep + "3"}}}}
+		return st, []model.HistoryEntry{{Repo: "r" + sep + "x", RunNumber: "1" + sep + "2", JobName: name, Conclusion: "success"}}
+	}
+	render := func(sep string) (string, string) {
+		st, hist := build(sep)
+		var status, history bytes.Buffer
+		printStatus(&status, st)
+		printHistory(&history, hist)
+		return status.String(), history.String()
+	}
+	oneLineStatus, oneLineHistory := render(" ")
+	for _, sep := range []string{"\n", "\t"} {
+		stubStdoutTerminal(t, true)
+		if status, history := render(sep); status != oneLineStatus || history != oneLineHistory {
+			t.Errorf("at a terminal a %q in a field changed the layout:\n%s%s", sep, status, history)
+		}
+		stubStdoutTerminal(t, false)
+		if status, _ := render(sep); status == oneLineStatus {
+			t.Errorf("in a pipe a %q in a field was changed", sep)
+		}
+	}
+}
+
+func TestRemainingStatusFieldsEscapeControlsAtATerminal(t *testing.T) {
+	const evil = "x\x1b[2J\nFAKE\x1b]0;t\a"
+	st := model.Status{Mode: "queue", GlobalMax: 1, Degraded: true, DegradedReason: evil,
+		RunnerUpdate: model.RunnerUpdate{Installed: "2.330.0", CheckError: evil},
+		Repos:        []model.RepoStatus{{Name: "r", LastJob: &model.HistoryEntry{Conclusion: evil, RunNumber: "1", JobName: "j"}}},
+		Instances:    []model.InstanceStatus{{ID: "a3f9c1", Repo: "r", State: evil}}}
+	hist := []model.HistoryEntry{{Repo: "r", RunNumber: "1", JobName: "j", Conclusion: evil}}
+	for _, on := range []bool{true, false} {
+		stubStdoutTerminal(t, on)
+		var status, history bytes.Buffer
+		printStatus(&status, st)
+		printHistory(&history, hist)
+		for what, out := range map[string]string{"status": status.String(), "history": history.String()} {
+			if on && (strings.ContainsAny(out, "\x1b\a") || strings.Contains(out, "\nFAKE")) {
+				t.Errorf("%s at a terminal kept a control byte or a new line: %q", what, out)
+			}
+			if !on && !strings.Contains(out, "\x1b") {
+				t.Errorf("%s in a pipe lost the raw bytes: %q", what, out)
+			}
+		}
+	}
+}
+
 type failWriter struct{}
 
 func (failWriter) Write([]byte) (int, error) { return 0, errors.New("closed") }
@@ -299,15 +508,45 @@ func TestLogsReportsWriteError(t *testing.T) {
 	}
 }
 
+func TestCode(t *testing.T) {
+	reqs := fakeDaemon(t)
+	code, out, errOut := runCLI(t, "", "code")
+	if code != 0 || out != "ABCDE-FGHJK-MNPQR-STVWX\n" {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+	if last := (*reqs)[len(*reqs)-1]; last.method != "GET" || last.path != "/web/setup-code" {
+		t.Fatalf("request %+v", last)
+	}
+	if code, _, errOut := runCLI(t, "", "code", "now"); code != 2 || !strings.Contains(errOut, "usage: ghr code") {
+		t.Errorf("extra argument: exit %d err %q", code, errOut)
+	}
+	if _, out, _ := runCLI(t, "", "help"); !strings.Contains(out, "\n  code ") {
+		t.Fatalf("usage lacks code:\n%s", out)
+	}
+}
+
+func TestCodeWithAPasswordSet(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{"error": "a web password is already set"})
+	}))
+	t.Cleanup(srv.Close)
+	newClient = func() *api.Client { return &api.Client{Base: srv.URL, HTTP: srv.Client()} }
+	code, out, errOut := runCLI(t, "", "code")
+	if code != 1 || out != "" || !strings.Contains(errOut, "ghr: a web password is already set") {
+		t.Fatalf("exit %d out %q err %q", code, out, errOut)
+	}
+}
+
 func TestWebResetPassword(t *testing.T) {
 	reqs := fakeDaemon(t)
 	code, out, errOut := runCLI(t, "", "web", "reset-password")
-	if code != 0 || !strings.Contains(out, "web password removed; set a new one with: ghr web set-password") {
+	if code != 0 || out != "web password removed; set a new one with: ghr web set-password, or in the browser with setup code ABCDE-FGHJK-MNPQR-STVWX\n" {
 		t.Fatalf("exit %d out %q err %q", code, out, errOut)
 	}
-	last := (*reqs)[len(*reqs)-1]
-	if last.method != "POST" || last.path != "/web/reset-password" {
-		t.Fatalf("request %+v", last)
+	if n := len(*reqs); n < 2 || (*reqs)[n-2].method != "POST" || (*reqs)[n-2].path != "/web/reset-password" ||
+		(*reqs)[n-1].method != "GET" || (*reqs)[n-1].path != "/web/setup-code" {
+		t.Fatalf("requests %+v", *reqs)
 	}
 	for _, args := range [][]string{{"web"}, {"web", "reset"}, {"web", "reset-password", "now"}} {
 		code, _, errOut := runCLI(t, "", args...)
@@ -512,7 +751,7 @@ func TestCtrlCAtAPromptPrintsInterrupted(t *testing.T) {
 func TestStatusWarnsWhileTheWebUIHasNoPassword(t *testing.T) {
 	var out bytes.Buffer
 	printStatus(&out, model.Status{Mode: "queue", GlobalMax: 1, WebSetupRequired: true})
-	const warning = "warning: the web UI has no password. Run: ghr web set-password\n"
+	const warning = "warning: the web UI has no password. Run: ghr web set-password, or open the web UI with the code from: ghr code\n"
 	if !strings.HasPrefix(out.String(), warning) {
 		t.Fatalf("output:\n%s", out.String())
 	}
@@ -527,7 +766,7 @@ func TestStatusWhileUnconfigured(t *testing.T) {
 	var out bytes.Buffer
 	printStatus(&out, model.Status{Mode: "queue", GlobalMax: 2, Unconfigured: true, WebSetupRequired: true})
 	want := "warning: ghr is not configured. Run: ghr setup github --owner <owner>, or open the web UI\n" +
-		"warning: the web UI has no password. Run: ghr web set-password\n"
+		"warning: the web UI has no password. Run: ghr web set-password, or open the web UI with the code from: ghr code\n"
 	if out.String() != want {
 		t.Fatalf("output:\n%s", out.String())
 	}

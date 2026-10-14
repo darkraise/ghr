@@ -1,11 +1,14 @@
 package system
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +107,51 @@ func TestDownload(t *testing.T) {
 	}
 }
 
+func TestDownloadRefusesMoreThanTheCap(t *testing.T) {
+	old := maxDownload
+	maxDownload = 64
+	defer func() { maxDownload = old }()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := strconv.Atoi(r.URL.Query().Get("n"))
+		if r.URL.Query().Get("chunked") == "" {
+			w.Header().Set("Content-Length", strconv.Itoa(n))
+		}
+		for i := 0; i < n; i += 16 {
+			w.Write(bytes.Repeat([]byte("x"), min(16, n-i)))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	for _, tc := range []struct {
+		name    string
+		query   string
+		refused bool
+		created bool
+	}{
+		{name: "declared at the cap", query: "n=64"},
+		{name: "declared over the cap", query: "n=65", refused: true},
+		{name: "chunked at the cap", query: "n=64&chunked=1"},
+		{name: "chunked over the cap", query: "n=65&chunked=1", refused: true, created: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := filepath.Join(t.TempDir(), "f")
+			err := Download(context.Background(), srv.URL+"/?"+tc.query, dst)
+			if tc.refused != (err != nil) || (err != nil && !strings.Contains(err.Error(), "larger than")) {
+				t.Fatalf("err %v, refused want %v", err, tc.refused)
+			}
+			_, statErr := os.Stat(dst)
+			if !tc.refused && statErr != nil {
+				t.Fatalf("a download within the cap was not saved: %v", statErr)
+			}
+			if tc.refused && !tc.created && statErr == nil {
+				t.Fatal("a download declared over the cap created its file")
+			}
+		})
+	}
+}
+
 func TestDownloadFollowsARedirectOnlyToHTTPS(t *testing.T) {
 	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("sent over plain http"))
@@ -175,7 +223,7 @@ func TestDownloadForTimesOutAtItsOwnLimit(t *testing.T) {
 	DownloadTimeout = time.Hour
 	defer func() { DownloadTimeout = old }()
 	start := time.Now()
-	if err := DownloadFor(100*time.Millisecond)(context.Background(), srv.URL, filepath.Join(t.TempDir(), "f")); err == nil {
+	if err := DownloadFor(100*time.Millisecond)(context.Background(), srv.URL, io.Discard); err == nil {
 		t.Fatal("expected a timeout error")
 	}
 	if time.Since(start) > 5*time.Second {
@@ -188,11 +236,11 @@ func TestDownloadForSavesTheBody(t *testing.T) {
 		w.Write([]byte("archive"))
 	}))
 	t.Cleanup(srv.Close)
-	dst := filepath.Join(t.TempDir(), "a.tar.gz")
-	if err := DownloadFor(time.Minute)(context.Background(), srv.URL, dst); err != nil {
+	var got bytes.Buffer
+	if err := DownloadFor(time.Minute)(context.Background(), srv.URL, &got); err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(dst); string(b) != "archive" {
-		t.Fatalf("saved %q", b)
+	if got.String() != "archive" {
+		t.Fatalf("wrote %q", got.String())
 	}
 }
