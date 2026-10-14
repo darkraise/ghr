@@ -40,6 +40,32 @@ function seconds(floor: number): UnitSetting {
   }
 }
 
+function hours(floor: number): UnitSetting {
+  return {
+    unit: "h",
+    spoken: "hours",
+    read: (raw) => {
+      const ms = parseDuration(raw.trim())
+      return ms === null ? null : ms / 3_600_000
+    },
+    write: (n) => `${n}h`,
+    error: (n) => (Number.isNaN(n) ? "Enter a number of hours" : n < floor ? `Enter at least ${floor} hour${floor === 1 ? "" : "s"}` : ""),
+  }
+}
+
+function minutes(floor: number): UnitSetting {
+  return {
+    unit: "min",
+    spoken: "minutes",
+    read: (raw) => {
+      const ms = parseDuration(raw.trim())
+      return ms === null ? null : ms / 60_000
+    },
+    write: (n) => `${n}m`,
+    error: (n) => (Number.isNaN(n) ? "Enter a number of minutes" : n < floor ? `Enter at least ${floor} minutes` : ""),
+  }
+}
+
 // config.ParseDuration takes only whole days, so a fraction goes as seconds.
 const days: UnitSetting = {
   unit: "days",
@@ -92,6 +118,11 @@ export const UNIT_SETTINGS: Record<string, UnitSetting> = {
   build_cache_keep: gigabytes,
   memory_max: megabytes,
   cpu_quota: percent,
+  // The daemon's floors: config.Validate refuses less.
+  "jobs.ghr_update_check.every": hours(1),
+  "jobs.runner_update_check.every": hours(1),
+  "jobs.prune.every": hours(1),
+  "jobs.storage_measure.every": minutes(5),
 }
 
 // The form holds the number, or the daemon's text when read gave null; that

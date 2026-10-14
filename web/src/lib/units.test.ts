@@ -16,6 +16,11 @@ describe("readSetting", () => {
     ["memory_max", "512M", 512],
     ["memory_max", "1073741824", 1024],
     ["cpu_quota", "200%", 200],
+    ["jobs.prune.every", "1d", 24],
+    ["jobs.prune.every", "12h0m0s", 12],
+    ["jobs.ghr_update_check.every", "1h30m0s", 1.5],
+    ["jobs.storage_measure.every", "30m0s", 30],
+    ["jobs.storage_measure.every", "1h0m0s", 60],
   ])("reads %s %s as %d", (key, raw, n) => {
     expect(readSetting(key, raw)).toBe(n)
   })
@@ -38,6 +43,8 @@ describe("writeSetting", () => {
     ["poll_interval", 15, "15s"],
     ["history_retention", 30, "30d"],
     ["history_retention", 1.5, "129600s"],
+    ["jobs.prune.every", 12, "12h"],
+    ["jobs.storage_measure.every", 30, "30m"],
     ["build_cache_keep", 20, "20GB"],
     ["memory_max", 8192, "8192M"],
     ["memory_max", Number.NaN, "infinity"],
@@ -69,5 +76,18 @@ describe("unit errors", () => {
   it("lets memory_max be empty but not fractional", () => {
     expect(error("memory_max", Number.NaN)).toBe("")
     expect(error("memory_max", 1.5)).toBe("Enter a whole number of MB, or leave it empty for no limit")
+  })
+})
+
+describe("job intervals", () => {
+  it.each([
+    ["jobs.ghr_update_check.every", 0.5, "Enter at least 1 hour"],
+    ["jobs.runner_update_check.every", 1, ""],
+    ["jobs.prune.every", Number.NaN, "Enter a number of hours"],
+    ["jobs.storage_measure.every", 4, "Enter at least 5 minutes"],
+    ["jobs.storage_measure.every", 5, ""],
+    ["jobs.storage_measure.every", Number.NaN, "Enter a number of minutes"],
+  ])("checks %s %d", (key, n, want) => {
+    expect(UNIT_SETTINGS[key]?.error(n)).toBe(want)
   })
 })

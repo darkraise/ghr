@@ -3,7 +3,7 @@ import { toast } from "darkraise-ui/components/sonner"
 import { useState } from "react"
 import { ApiError, api } from "@/api/client"
 import { keys, readConfig, useConfig, useStatus } from "@/api/hooks"
-import type { Config, ConfigPatch, RunnerLimitsPatch, WebPatch } from "@/api/types"
+import type { Config, ConfigPatch, JobName, JobsConfig, RunnerLimitsPatch, WebPatch } from "@/api/types"
 import { changedKeys, sameValue, settle, type Equal, type Values } from "@/lib/draft"
 import { isHostname, splitListen } from "@/lib/listen"
 import { UNIT_SETTINGS, readSetting, writeSetting } from "@/lib/units"
@@ -12,8 +12,32 @@ import { errorText } from "@/query"
 // The daemon's cap on global_max (config.MaxRunners); it refuses a larger value.
 const MAX_RUNNERS = 99
 
+export const JOB_NAMES: readonly JobName[] = ["ghr_update_check", "runner_update_check", "prune", "storage_measure"]
+
+// The keys Settings › General and the setup wizard edit; the Jobs page edits
+// JOB_KEYS. Each form counts and saves only its own.
+export const GENERAL_KEYS: readonly string[] = [
+  "mode",
+  "global_max",
+  "poll_interval",
+  "start_timeout",
+  "idle_timeout",
+  "disk_high_water",
+  "build_cache_keep",
+  "history_retention",
+  "labels",
+  "memory_max",
+  "cpu_quota",
+  "web_listen",
+  "web_hosts",
+]
+
+export const JOB_KEYS: readonly string[] = JOB_NAMES.flatMap((n) => [`jobs.${n}.enabled`, `jobs.${n}.every`])
+
+const JOB_KEY = /^jobs\.([a-z_]+)\.(enabled|every)$/
+
 function loadedValues(c: Config): Values {
-  return {
+  const values: Values = {
     mode: c.mode,
     global_max: c.global_max,
     poll_interval: readSetting("poll_interval", c.poll_interval),
@@ -28,6 +52,14 @@ function loadedValues(c: Config): Values {
     web_listen: c.web?.listen ?? "",
     web_hosts: c.web?.hosts ?? [],
   }
+  // An older daemon sends no jobs block; the Jobs page then has no form.
+  for (const name of JOB_NAMES) {
+    const job = c.jobs?.[name]
+    if (!job) continue
+    values[`jobs.${name}.enabled`] = job.enabled
+    values[`jobs.${name}.every`] = readSetting(`jobs.${name}.every`, job.every)
+  }
+  return values
 }
 
 // The daemon compares hostnames as a set, ignoring case, order and repeats.
@@ -76,24 +108,43 @@ function toPatch(sent: Values): ConfigPatch {
   const patch: Record<string, unknown> = {}
   const limits: RunnerLimitsPatch = {}
   const web: WebPatch = {}
+  const jobs: Record<string, Record<string, unknown>> = {}
   for (const [key, v] of Object.entries(sent)) {
     const written = writeSetting(key, v)
     const value = typeof written === "string" ? written.trim() : written
-    if (isLimit(key)) limits[key] = value as string
+    const job = JOB_KEY.exec(key)
+    if (job) {
+      const [, name = "", field = ""] = job
+      jobs[name] = { ...jobs[name], [field]: value }
+    } else if (isLimit(key)) limits[key] = value as string
     else if (key === "web_listen") web.listen = value as string
     else if (key === "web_hosts") web.hosts = value as string[]
     else patch[key] = value
   }
   if (Object.keys(limits).length > 0) patch.runner_limits = limits
   if (Object.keys(web).length > 0) patch.web = web
+  if (Object.keys(jobs).length > 0) patch.jobs = jobs
   return patch as ConfigPatch
+}
+
+function mergeJobs(jobs: JobsConfig | undefined, patch: ConfigPatch["jobs"]): JobsConfig | undefined {
+  if (!jobs || !patch) return jobs
+  const out = { ...jobs }
+  for (const name of JOB_NAMES) out[name] = { ...out[name], ...patch[name] }
+  return out
 }
 
 // The daemon took the save, so until a read succeeds the cached config shows
 // what was sent; the next poll replaces it with what the daemon holds.
 function withPatch(c: Config, patch: ConfigPatch): Config {
-  const { runner_limits: limits, web, ...rest } = patch
-  return { ...c, ...rest, runner_limits: { ...c.runner_limits, ...limits }, web: { ...c.web, ...web } } as Config
+  const { runner_limits: limits, web, jobs, ...rest } = patch
+  return {
+    ...c,
+    ...rest,
+    runner_limits: { ...c.runner_limits, ...limits },
+    web: { ...c.web, ...web },
+    jobs: mergeJobs(c.jobs, jobs),
+  } as Config
 }
 
 const PATCH_KEYS: Record<string, string> = {
@@ -111,6 +162,7 @@ const patchKey = (key: string) => PATCH_KEYS[key] ?? key
 const REJECTION_FIELDS: [prefix: string, key: string][] = [
   ["web.listen: ", "web_listen"],
   ["web.hosts: ", "web_hosts"],
+  ...JOB_NAMES.map((n): [string, string] => [`jobs.${n}.every: `, `jobs.${n}.every`]),
 ]
 
 function placeRejection(message: string): { fields: Record<string, string>; rest: string } {
@@ -135,7 +187,7 @@ export interface SettingsForm {
   discard: () => void
 }
 
-export function useSettingsForm(): SettingsForm {
+export function useSettingsForm(fields: readonly string[] = GENERAL_KEYS): SettingsForm {
   const config = useConfig()
   const status = useStatus()
   const queryClient = useQueryClient()
@@ -145,8 +197,8 @@ export function useSettingsForm(): SettingsForm {
 
   const loaded = config.data ? loadedValues(config.data) : {}
   const values: Values = { ...loaded, ...draft }
-  const changed = config.data ? changedKeys(draft, loaded, equal) : []
-  const errors = config.data ? fieldErrors(values, loaded) : {}
+  const changed = config.data ? changedKeys(draft, loaded, equal).filter((k) => fields.includes(k)) : []
+  const errors = config.data ? Object.fromEntries(Object.entries(fieldErrors(values, loaded)).filter(([k]) => fields.includes(k))) : {}
   const offline = status.isError
   const placed = placeRejection(rejection)
 
