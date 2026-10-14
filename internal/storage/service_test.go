@@ -56,6 +56,16 @@ func TestStartCleansUpAndMeasuresAtOnce(t *testing.T) {
 	}
 }
 
+func TestSnapshotReportsWhetherTheCachesShareTheDataRootFilesystem(t *testing.T) {
+	s := newService(t, &fakeTools{}, &fakeDisk{})
+	s.Docker = rootedDisk{fakeDisk: &fakeDisk{}, root: otherFilesystem(t)}
+	startService(t, s)
+	waitFor(t, "the first measurement", func() bool { return s.Snapshot().MeasuredAt != nil })
+	if s.Snapshot().CachesOnDataRoot {
+		t.Fatal("CachesOnDataRoot is true with the data root on another filesystem")
+	}
+}
+
 func TestStartDoesNotWaitForTheCleanUpButTheQueueDoes(t *testing.T) {
 	tools, node := nodeTools()
 	tools.cleanGate = make(chan struct{})

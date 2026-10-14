@@ -101,5 +101,6 @@
         "freed": 6800000
       }
     ]
-  }
+  },
+  "caches_on_data_root": true
 }

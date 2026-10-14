@@ -333,6 +333,7 @@ export interface Storage {
   measure_error?: string
   operations: Operations
   last_prune: LastPrune | null
+  caches_on_data_root: boolean
 }
 
 export interface ToolchainChoice {

@@ -152,9 +152,10 @@ func (s *Service) Snapshot() model.Storage {
 			Rows:            slices.Clone(s.snap.docker),
 			BuildCacheTypes: slices.Clone(s.snap.cacheTypes),
 		},
-		Measuring:    s.measuring,
-		MeasureError: s.snap.err,
-		Operations:   model.Operations{Queued: len(s.queue), Recent: slices.Clone(s.recent)},
+		CachesOnDataRoot: s.snap.cachesOnDataRoot,
+		Measuring:        s.measuring,
+		MeasureError:     s.snap.err,
+		Operations:       model.Operations{Queued: len(s.queue), Recent: slices.Clone(s.recent)},
 	}
 	if !s.snap.at.IsZero() {
 		at := s.snap.at

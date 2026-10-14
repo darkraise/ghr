@@ -21,6 +21,11 @@ type Storage struct {
 	MeasureError   string         `json:"measure_error,omitempty"`
 	Operations     Operations     `json:"operations"`
 	LastPrune      *LastPrune     `json:"last_prune"`
+
+	// CachesOnDataRoot is false when the tool cache or the runner home is on
+	// another filesystem than Docker's data root, so their sizes do not count
+	// toward the disk Docker's use is measured on.
+	CachesOnDataRoot bool `json:"caches_on_data_root"`
 }
 
 // Toolchain is one installed version in the tool cache.

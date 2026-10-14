@@ -128,7 +128,10 @@ type measured struct {
 	caches     []model.PackageCache
 	docker     []model.DockerRow
 	cacheTypes []model.BuildCacheType
-	err        string
+	// cachesOnDataRoot is false when the tool cache or the runner home is on
+	// another filesystem than Docker's data root.
+	cachesOnDataRoot bool
+	err              string
 }
 
 // inHome refuses a cache path that resolves out of the home through a
@@ -147,11 +150,12 @@ func inHome(r *os.Root, rel string) error {
 
 func emptyMeasured() measured {
 	return measured{
-		toolchains: []model.Toolchain{},
-		other:      []model.Folder{},
-		caches:     []model.PackageCache{},
-		docker:     []model.DockerRow{},
-		cacheTypes: []model.BuildCacheType{},
+		cachesOnDataRoot: true,
+		toolchains:       []model.Toolchain{},
+		other:            []model.Folder{},
+		caches:           []model.PackageCache{},
+		docker:           []model.DockerRow{},
+		cacheTypes:       []model.BuildCacheType{},
 	}
 }
 
@@ -233,6 +237,45 @@ func measure(ctx context.Context, tools Toolchains, docker Docker, home string, 
 	for _, t := range types {
 		m.cacheTypes = append(m.cacheTypes, model.BuildCacheType{Type: t.Type, Count: t.Count, Bytes: t.Bytes, Reclaimable: t.Reclaimable})
 	}
+	m.cachesOnDataRoot = cachesOnDataRoot(ctx, docker, tools.Root(), home)
 	m.err = strings.Join(errs, "; ")
 	return m
+}
+
+// cachesOnDataRoot reports whether the tool cache and the runner home are on
+// the filesystem holding Docker's data root. It answers yes when it cannot
+// tell, as ghr's installer keeps them on one filesystem.
+func cachesOnDataRoot(ctx context.Context, docker Docker, toolRoot, home string) bool {
+	d, ok := docker.(interface {
+		DataRootBytes(ctx context.Context) (system.DiskUsage, error)
+	})
+	if !ok {
+		return true
+	}
+	u, err := d.DataRootBytes(ctx)
+	if err != nil {
+		return true
+	}
+	want, ok := deviceOf(u.Root)
+	if !ok {
+		return true
+	}
+	for _, p := range []string{toolRoot, home} {
+		if dev, ok := deviceOf(p); ok && dev != want {
+			return false
+		}
+	}
+	return true
+}
+
+// deviceOf is the filesystem path is on.
+func deviceOf(path string) (uint64, bool) {
+	if path == "" {
+		return 0, false
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, false
+	}
+	return device(fi)
 }

@@ -268,8 +268,60 @@ func TestMeasureFollowsALinkInsideTheHome(t *testing.T) {
 	}
 }
 
+// rootedDisk is a Docker that can also name its data root, as system.Docker does.
+type rootedDisk struct {
+	*fakeDisk
+	root string
+	err  error
+}
+
+func (d rootedDisk) DataRootBytes(context.Context) (system.DiskUsage, error) {
+	return system.DiskUsage{Root: d.root}, d.err
+}
+
+// otherFilesystem is a directory that is not on the temp dir's filesystem.
+func otherFilesystem(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("needs /proc, a filesystem of its own")
+	}
+	return "/proc"
+}
+
+func TestMeasureSaysWhetherTheCachesShareTheDataRootFilesystem(t *testing.T) {
+	home, tools := t.TempDir(), t.TempDir()
+	for name, c := range map[string]struct {
+		docker Docker
+		want   bool
+	}{
+		"the data root is beside the caches":     {rootedDisk{fakeDisk: &fakeDisk{}, root: home}, true},
+		"the data root is on another filesystem": {rootedDisk{fakeDisk: &fakeDisk{}, root: otherFilesystem(t)}, false},
+		"the data root cannot be read":           {rootedDisk{fakeDisk: &fakeDisk{}, err: errors.New("docker is down")}, true},
+		"the data root is gone":                  {rootedDisk{fakeDisk: &fakeDisk{}, root: filepath.Join(home, "absent")}, true},
+		"docker does not name its data root":     {&fakeDisk{}, true},
+	} {
+		m := measure(context.Background(), &fakeTools{root: tools}, c.docker, home, time.Now())
+		if m.cachesOnDataRoot != c.want {
+			t.Errorf("%s: cachesOnDataRoot = %v, want %v", name, m.cachesOnDataRoot, c.want)
+		}
+	}
+}
+
+func TestMeasureSeesACacheRootOnAnotherFilesystem(t *testing.T) {
+	// The tool cache is the one root on another filesystem: the data root is
+	// beside the home.
+	home := t.TempDir()
+	m := measure(context.Background(), &fakeTools{root: otherFilesystem(t)}, rootedDisk{fakeDisk: &fakeDisk{}, root: home}, home, time.Now())
+	if m.cachesOnDataRoot {
+		t.Fatal("a tool cache on another filesystem was counted on the data root")
+	}
+}
+
 func TestEmptyMeasuredHasNoNilSlices(t *testing.T) {
 	m := emptyMeasured()
+	if !m.cachesOnDataRoot {
+		t.Error("before a measurement the caches are assumed to be on the data root")
+	}
 	if m.toolchains == nil || m.other == nil || m.caches == nil || m.docker == nil || m.cacheTypes == nil {
 		t.Fatalf("%+v", m)
 	}
