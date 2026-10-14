@@ -499,7 +499,9 @@ func (s *Service) merge(ls []*listing, now time.Time) {
 	for _, l := range ls {
 		key := strings.ToLower(l.name)
 		if l.retention != nil {
-			s.retention[key] = *l.retention
+			if cur, ok := s.retention[key]; !ok || !cur.at.After(l.retention.at) {
+				s.retention[key] = *l.retention
+			}
 		}
 		row := model.RepoStorage{Name: l.name, Visibility: "public", Artifacts: []model.ArtifactItem{}, Caches: []model.CacheItem{}}
 		if l.private {

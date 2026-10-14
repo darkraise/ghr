@@ -291,6 +291,57 @@ func TestSetRetention(t *testing.T) {
 	}
 }
 
+// A retention read that was under way when a write finished holds the old
+// value; it must not replace the newer one.
+func TestSetRetentionBeatsAListingThatReadItEarlier(t *testing.T) {
+	gh := newFakeGH()
+	gh.addRepo("darkmem", true)
+	s, clock := newTestService(t, gh, testConfig())
+	s.pass(true, false)
+	clock.Add(retentionTTL)
+	entered, release := make(chan struct{}), make(chan struct{})
+	gh.onRetention = func(ctx context.Context, repo string) {
+		close(entered)
+		<-release
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.pass(true, false)
+	}()
+	<-entered
+	clock.Add(time.Second)
+	if err := s.SetRetention(context.Background(), "darkmem", 7); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	<-done
+	if d := row(t, s.Snapshot(), "darkmem").RetentionDays; d != 7 {
+		t.Fatalf("retention %d after the listing finished, want the 7 that was set while it ran", d)
+	}
+}
+
+func TestSetRetentionClearsTheRetentionError(t *testing.T) {
+	gh := newFakeGH()
+	gh.addRepo("darkmem", true)
+	gh.retErr["darkmem"] = forbidden
+	s, _ := newTestService(t, gh, testConfig())
+	s.pass(true, false)
+	if r := row(t, s.Snapshot(), "darkmem"); r.Error != forbidden.Error() {
+		t.Fatalf("row error %q, want the retention read's", r.Error)
+	}
+	if err := s.SetRetention(context.Background(), "darkmem", 7); err != nil {
+		t.Fatal(err)
+	}
+	if r := row(t, s.Snapshot(), "darkmem"); r.Error != "" || r.RetentionDays != 7 {
+		t.Fatalf("row %+v: a successful write leaves no retention error", r)
+	}
+	s.pass(true, false)
+	if r := row(t, s.Snapshot(), "darkmem"); r.Error != "" {
+		t.Fatalf("row error %q after the next pass", r.Error)
+	}
+}
+
 func TestSetRetentionAll(t *testing.T) {
 	gh := newFakeGH()
 	for _, r := range []string{"a", "b", "c", "d"} {

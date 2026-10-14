@@ -43,6 +43,9 @@ type fakeGH struct {
 	// onList runs at the start of ListRepoArtifacts; an error it returns is
 	// the call's answer.
 	onList func(ctx context.Context, repo string) error
+	// onRetention runs in Retention after the answer is read, before it is
+	// returned.
+	onRetention func(ctx context.Context, repo string)
 	// onDelete runs at the start of DeleteArtifact and DeleteCache.
 	onDelete func(ctx context.Context, repo string, id int64) error
 	// onUsage runs at the start of StorageUsage; an error it returns is the
@@ -134,11 +137,15 @@ func (f *fakeGH) ListCaches(_ context.Context, repo string) ([]github.Cache, err
 	return slices.Clone(f.caches[repo]), nil
 }
 
-func (f *fakeGH) Retention(_ context.Context, repo string) (github.Retention, error) {
+func (f *fakeGH) Retention(ctx context.Context, repo string) (github.Retention, error) {
 	f.call("Retention %s", repo)
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.retention[repo], f.retErr[repo]
+	r, err := f.retention[repo], f.retErr[repo]
+	f.mu.Unlock()
+	if f.onRetention != nil {
+		f.onRetention(ctx, repo)
+	}
+	return r, err
 }
 
 func (f *fakeGH) SetRetention(_ context.Context, repo string, days int) error {
