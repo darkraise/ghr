@@ -23,6 +23,7 @@ import { TagField } from "@/components/tag-field"
 import { FIELD_WIDTH } from "@/lib/field-width"
 import { numberFromText, textFromNumber } from "@/lib/number-text"
 import { PUBLIC_HELP, servePublicConfirm } from "@/lib/repos"
+import { useMounted } from "@/lib/use-mounted"
 import { errorText } from "@/query"
 
 function clampMax(text: string): number {
@@ -47,6 +48,7 @@ export function AddRepoDialog({ open, onClose }: { open: boolean; onClose: () =>
 function AddRepoForm({ onClose }: { onClose: () => void }) {
   const status = useStatus()
   const queryClient = useQueryClient()
+  const mounted = useMounted()
   const [picked, setPicked] = useState("")
   const [max, setMax] = useState("")
   const [labels, setLabels] = useState<string[]>([])
@@ -85,7 +87,7 @@ function AddRepoForm({ onClose }: { onClose: () => void }) {
     toast.success(`Added ${picked}`)
     void queryClient.invalidateQueries({ queryKey: keys.status })
     void queryClient.invalidateQueries({ queryKey: keys.config })
-    onClose()
+    if (mounted.current) onClose()
   }
 
   return (

@@ -10,6 +10,7 @@ import { api } from "@/api/client"
 import { keys, useToolchainChoices } from "@/api/hooks"
 import { ErrorLine } from "@/components/page/error-line"
 import { TOOLS } from "@/lib/toolchains"
+import { useMounted } from "@/lib/use-mounted"
 import { errorText } from "@/query"
 
 export function InstallDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -27,6 +28,7 @@ export function InstallDialog({ open, onClose }: { open: boolean; onClose: () =>
 
 function InstallForm({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient()
+  const mounted = useMounted()
   const [tool, setTool] = useState("node")
   const [filter, setFilter] = useState("")
   const [picked, setPicked] = useState<string | null>(null)
@@ -44,7 +46,7 @@ function InstallForm({ onClose }: { onClose: () => void }) {
       await api.installToolchain(tool, target)
       toast.success(`Queued: install ${tool} ${target}`)
       void queryClient.invalidateQueries({ queryKey: keys.storage })
-      onClose()
+      if (mounted.current) onClose()
     } catch (err) {
       setError(errorText(err))
     } finally {

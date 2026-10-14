@@ -81,6 +81,22 @@ describe("Add repository dialog", () => {
     expect(again.getByText("Pick one below")).toBeInTheDocument()
   })
 
+  it("keeps a reopened dialog open when the earlier request succeeds", async () => {
+    let answer: (r: Response) => void = () => undefined
+    mockApi(routes({ "POST /api/repos": () => new Promise<Response>((resolve) => (answer = resolve)) }))
+    const { dialog, user } = await open()
+    await user.click(dialog.getByRole("option", { name: /new-repo/ }))
+    await user.click(dialog.getByRole("button", { name: "Add" }))
+    await user.click(dialog.getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    await user.click(screen.getAllByRole("button", { name: "Add repository" })[0] as HTMLElement)
+    const again = within(await screen.findByRole("dialog"))
+    await again.findByRole("option", { name: /new-repo/ })
+    answer(noContent())
+    expect((await screen.findAllByText("Added new-repo")).length).toBeGreaterThan(0)
+    await expect(waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 500 })).rejects.toThrow()
+  })
+
   it("moves between the pickable repos with the arrow keys, Home and End", async () => {
     const repos = [
       { name: "alpha", private: true, configured: false },
