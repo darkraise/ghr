@@ -177,8 +177,11 @@ func planQueue(cfg *config.Config, insts []Instance, demand Demand, now time.Tim
 }
 
 func planAll(cfg *config.Config, insts []Instance, demand Demand, now time.Time) []Spawn {
-	var out []Spawn
-	total := totalActive(insts)
+	type need struct {
+		repo string
+		n    int
+	}
+	var needs []need
 	for _, r := range cfg.Repos {
 		if r.Paused {
 			continue
@@ -192,9 +195,24 @@ func planAll(cfg *config.Config, insts []Instance, demand Demand, now time.Time)
 		if max := cfg.EffectiveMax(r); max > 0 && n > max-repoActive(insts, r.Name) {
 			n = max - repoActive(insts, r.Name)
 		}
-		for ; n > 0 && total < config.MaxRunners; n-- {
-			out = append(out, Spawn{Repo: r.Name})
+		if n > 0 {
+			needs = append(needs, need{r.Name, n})
+		}
+	}
+	// One runner per repository per round, so a repository with a long queue
+	// cannot take every slot below the cap before the next one gets any.
+	var out []Spawn
+	total := totalActive(insts)
+	for progress := true; progress && total < config.MaxRunners; {
+		progress = false
+		for i := range needs {
+			if needs[i].n == 0 || total >= config.MaxRunners {
+				continue
+			}
+			out = append(out, Spawn{Repo: needs[i].repo})
+			needs[i].n--
 			total++
+			progress = true
 		}
 	}
 	return out

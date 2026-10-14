@@ -133,6 +133,31 @@ func TestPlanAllCapsTotalRunners(t *testing.T) {
 	}
 }
 
+func TestPlanAllSharesTheCapAcrossRepos(t *testing.T) {
+	queue := func(repo string, n int) []QueuedJob {
+		var out []QueuedJob
+		for i := 0; i < n; i++ {
+			out = append(out, QueuedJob{Repo: repo, ID: int64(i + 1), CreatedAt: t0.Add(-time.Duration(i+1) * time.Minute)})
+		}
+		return out
+	}
+	c := cfg("all", 2, config.Repo{Name: "a"}, config.Repo{Name: "b", Max: ptr(10)})
+	got := map[string]int{}
+	for _, s := range Plan(c, nil, Demand{"a": queue("a", 150), "b": queue("b", 30)}, t0) {
+		got[s.Repo]++
+	}
+	if got["a"] != config.MaxRunners-10 || got["b"] != 10 {
+		t.Fatalf("spawns by repo %v", got)
+	}
+	got = map[string]int{}
+	for _, s := range Plan(cfg("all", 2, config.Repo{Name: "a"}, config.Repo{Name: "b"}), nil, Demand{"a": queue("a", 150), "b": queue("b", 150)}, t0) {
+		got[s.Repo]++
+	}
+	if got["a"]+got["b"] != config.MaxRunners || got["a"]-got["b"] < 0 || got["a"]-got["b"] > 1 {
+		t.Fatalf("spawns by repo %v", got)
+	}
+}
+
 func TestMatchLabels(t *testing.T) {
 	eff := []string{"self-hosted", "linux", "x64", "homelab"}
 	if !MatchLabels([]string{"Self-Hosted", "Linux", "X64"}, eff) {
