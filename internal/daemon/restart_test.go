@@ -394,7 +394,7 @@ func TestSelfUnitCheck(t *testing.T) {
 func TestRestartUnit(t *testing.T) {
 	var calls []string
 	if err := restartUnit(recordRunner(&calls, "", nil))(context.Background()); err != nil ||
-		!slices.Equal(calls, []string{"systemctl restart --no-block ghr.service"}) {
+		!slices.Equal(calls, []string{"systemd-run --quiet --collect --no-block systemctl restart --no-block ghr.service"}) {
 		t.Fatalf("ran %q: %v", calls, err)
 	}
 	failure := errors.New("systemctl restart: exit status 5: Unit ghr.service not loaded.")

@@ -157,10 +157,13 @@ func selfUnitCheck(run system.Runner) func(ctx context.Context) bool {
 }
 
 // restartUnit is the default Options.Restart: it queues a restart of
-// selfUnit through run and returns without waiting for it.
+// selfUnit through run and returns without waiting for it. systemctl runs in
+// a transient unit of its own: as a child of this daemon it sits in the
+// daemon's cgroup, and systemd kills it with the daemon while it is still
+// answering, so a restart that works is reported as failed.
 func restartUnit(run system.Runner) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
-		_, err := run(ctx, "systemctl", "restart", "--no-block", selfUnit)
+		_, err := run(ctx, "systemd-run", "--quiet", "--collect", "--no-block", "systemctl", "restart", "--no-block", selfUnit)
 		return err
 	}
 }
