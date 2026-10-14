@@ -137,7 +137,8 @@ var actionsDeadline = 20 * time.Second
 
 // good keeps each repository's runs from its last successful call, keyed by
 // lower-case name, so a paused, rate-limited or rejected repository keeps
-// showing them; a config change or a new token starts it over.
+// showing them; a config change or a new token starts it over. Only the
+// build in call touches it while the lock is released.
 type actionsCache struct {
 	mu     sync.Mutex
 	cfg    *config.Config
@@ -147,30 +148,78 @@ type actionsCache struct {
 	val    model.Actions
 	good   map[string][]model.ActionsRun
 	goodAt time.Time
+	call   *actionsCall
 	// histFailing holds whether the last build failed to read history, so a
 	// read that keeps failing warns once rather than at every build.
 	histFailing bool
 }
 
+// actionsCall is the build that callers under the same config and token
+// generation share.
+type actionsCall struct {
+	done chan struct{}
+	cfg  *config.Config
+	gen  uint64
+	val  model.Actions
+	err  error
+}
+
 // Actions shares one build between callers, so the fetch runs detached from
-// any one request and the cache age counts from when the build finished.
+// any one request and the cache age counts from when the build finished. The
+// lock is not held during the fetch: a caller that joins a build leaves when
+// its own request ends.
 func (b *Backend) Actions(ctx context.Context) (model.Actions, error) {
 	c := &b.actions
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	cfg := b.Store.Config()
-	gen := b.tokenGen()
-	if c.ok && c.cfg == cfg && c.gen == gen && b.now().Sub(c.at) < actionsTTL {
-		return c.val, nil
+	for {
+		c.mu.Lock()
+		cfg := b.Store.Config()
+		gen := b.tokenGen()
+		if c.ok && c.cfg == cfg && c.gen == gen && b.now().Sub(c.at) < actionsTTL {
+			val := c.val
+			c.mu.Unlock()
+			return val, nil
+		}
+		call := c.call
+		if call == nil {
+			if c.cfg != cfg || c.gen != gen {
+				c.good, c.goodAt = map[string][]model.ActionsRun{}, time.Time{}
+			}
+			call = &actionsCall{done: make(chan struct{}), cfg: cfg, gen: gen}
+			c.call = call
+			c.mu.Unlock()
+			b.buildActions(ctx, call)
+			return call.val, call.err
+		}
+		c.mu.Unlock()
+		select {
+		case <-call.done:
+		case <-ctx.Done():
+			return model.Actions{}, ctx.Err()
+		}
+		// A build that began under an older config or token is not an answer
+		// for this caller, which goes round again to start its own.
+		if call.cfg == cfg && call.gen == gen {
+			return call.val, call.err
+		}
 	}
-	if c.cfg != cfg || c.gen != gen {
-		c.good, c.goodAt = map[string][]model.ActionsRun{}, time.Time{}
-	}
-	// The build is kept under the generation it began under, so one the
-	// token changed during is never served: the next call starts over.
-	c.gen = gen
+}
 
-	covered := coveredRepos(cfg)
+// buildActions fills call. It must leave c.call and close done even if it
+// panics, or every later request would wait on the build for good.
+func (b *Backend) buildActions(ctx context.Context, call *actionsCall) {
+	c := &b.actions
+	built := false
+	defer func() {
+		if !built {
+			call.err = errors.New("could not read the runs")
+		}
+		c.mu.Lock()
+		c.call = nil
+		c.mu.Unlock()
+		close(call.done)
+	}()
+
+	covered := coveredRepos(call.cfg)
 	runs := make([][]github.Run, len(covered))
 	errs := make([]error, len(covered))
 	if skip := b.githubErr(); skip != nil {
@@ -208,10 +257,13 @@ func (b *Backend) Actions(ctx context.Context) (model.Actions, error) {
 	}
 
 	ours, herr := b.ghrRuns()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if herr != nil && !c.histFailing {
 		log.Printf("actions: cannot read history, so no run is marked as ghr's: %v", herr)
 	}
 	c.histFailing = herr != nil
+	cfg := call.cfg
 	now := b.now()
 	out := model.Actions{FetchedAt: now, Runs: []model.ActionsRun{}, Repos: make([]model.ActionsRepo, 0, len(covered))}
 	// fetched_at keeps the last good build's time only while every
@@ -248,8 +300,11 @@ func (b *Backend) Actions(ctx context.Context) (model.Actions, error) {
 		out.FetchedAt = c.goodAt
 	}
 	sortActions(out.Runs)
-	c.cfg, c.at, c.ok, c.val = cfg, now, true, out
-	return out, nil
+	// The build is kept under the generation it began under, so one the
+	// token changed during is never served: the next call starts over.
+	c.cfg, c.gen, c.at, c.ok, c.val = cfg, call.gen, now, true, out
+	call.val = out
+	built = true
 }
 
 // ghrRuns reads live instances, then pending records, then history: a job

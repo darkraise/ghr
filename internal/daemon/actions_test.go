@@ -338,6 +338,69 @@ func TestActionsCallersShareOneBuild(t *testing.T) {
 	}
 }
 
+func TestActionsWaiterLeavesWhenItsRequestEnds(t *testing.T) {
+	b, _, gh := newBackend(t)
+	gh.recentBy = map[string][]github.Run{}
+	gh.recentWait = make(chan struct{})
+	built := make(chan struct{})
+	go func() {
+		b.Actions(context.Background())
+		close(built)
+	}()
+	t.Cleanup(func() {
+		close(gh.recentWait)
+		<-built
+	})
+	waitInFlight(t, gh, 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	errc := make(chan error, 1)
+	go func() {
+		_, err := b.Actions(ctx)
+		errc <- err
+	}()
+	select {
+	case err := <-errc:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a caller with a finished request waited for the build")
+	}
+}
+
+// A build that began before the config changed must not answer a caller
+// that arrived after it.
+func TestActionsNewConfigDoesNotJoinAnOldBuild(t *testing.T) {
+	b, _, gh := newBackend(t)
+	gh.recentBy = map[string][]github.Run{}
+	gh.recentWait = make(chan struct{})
+	first := make(chan struct{})
+	go func() {
+		b.Actions(context.Background())
+		close(first)
+	}()
+	waitInFlight(t, gh, 2)
+	if err := b.WatchRepo(context.Background(), "public"); err != nil {
+		t.Fatal(err)
+	}
+	second := make(chan model.Actions, 1)
+	go func() {
+		a, _ := b.Actions(context.Background())
+		second <- a
+	}()
+	close(gh.recentWait)
+	<-first
+	select {
+	case a := <-second:
+		if len(a.Repos) != 3 {
+			t.Fatalf("repos %+v, want the watched repository too", a.Repos)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the second caller never got a build")
+	}
+}
+
 func TestActionsDegradedTokenMakesNoCalls(t *testing.T) {
 	b, m, gh := newBackend(t)
 	gh.recentBy = map[string][]github.Run{}
