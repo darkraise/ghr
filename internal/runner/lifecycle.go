@@ -397,8 +397,11 @@ type pending struct {
 	Deadline   time.Time          `json:"deadline"`
 }
 
-// pendingFor builds the record from job.json, falling back to the job the
-// manager confirmed through the jobs API. ok is false when no job ran.
+// pendingFor builds the record from the job the manager knows of, which the
+// jobs API confirms, and from job.json only for a job too short for a tick to
+// see. The job can rewrite job.json, so once the job is known the record
+// moves only the finish time, within the job's run time. ok is false when no
+// job ran.
 func (m *Manager) pendingFor(i instance, rec JobRecord, recOK bool) (pending, bool) {
 	if !recOK && i.Job == nil {
 		return pending{}, false
@@ -406,25 +409,28 @@ func (m *Manager) pendingFor(i instance, rec JobRecord, recOK bool) (pending, bo
 	now := m.Now()
 	e := model.HistoryEntry{ID: i.ID, Repo: i.Repo, Conclusion: "unknown", StartedAt: i.SpawnedAt, FinishedAt: now}
 	if i.Job != nil {
-		e.RunID, e.RunNumber, e.Workflow, e.JobName, e.HTMLURL = i.Job.RunID, i.Job.RunNumber, i.Job.Workflow, i.Job.Name, i.Job.HTMLURL
-		e.RunAttempt, e.StartedAt = i.Job.RunAttempt, i.Job.StartedAt
-	}
-	if recOK {
+		e.RunID, e.RunAttempt, e.RunNumber, e.Workflow = i.Job.RunID, i.Job.RunAttempt, i.Job.RunNumber, i.Job.Workflow
+		e.JobName, e.HTMLURL, e.StartedAt = i.Job.Name, i.Job.HTMLURL, i.Job.StartedAt
+		// The jobs API has no run number, so it is the record's, as
+		// readJobFiles would have copied it at the next tick.
+		if e.RunNumber == "" && recOK {
+			e.RunNumber = rec.RunNumber
+			if e.Workflow == "" {
+				e.Workflow = rec.Workflow
+			}
+		}
+		if t, ok := parseTime(rec.FinishedAt); recOK && ok && !t.After(now) {
+			e.FinishedAt = t
+			if t.Before(e.StartedAt) {
+				e.FinishedAt = e.StartedAt
+			}
+		}
+	} else {
 		if id, err := strconv.ParseInt(rec.RunID, 10, 64); err == nil && id != 0 {
 			e.RunID = id
 		}
-		if a, err := strconv.Atoi(rec.RunAttempt); err == nil && a > 0 {
-			e.RunAttempt = a
-		}
-		if rec.RunNumber != "" {
-			e.RunNumber = rec.RunNumber
-		}
-		if rec.Workflow != "" {
-			e.Workflow = rec.Workflow
-		}
-		if e.JobName == "" {
-			e.JobName = rec.Job
-		}
+		e.RunAttempt, _ = strconv.Atoi(rec.RunAttempt)
+		e.RunNumber, e.Workflow, e.JobName = rec.RunNumber, rec.Workflow, rec.Job
 		if t, ok := parseTime(rec.StartedAt); ok {
 			e.StartedAt = t
 		}

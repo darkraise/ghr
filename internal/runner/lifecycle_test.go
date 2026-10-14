@@ -467,6 +467,54 @@ func TestFinalizeWithoutAnAttemptReadsTheLatest(t *testing.T) {
 	}
 }
 
+// job.json belongs to the job. Once the jobs API has confirmed the job, the
+// record can move only the finish time, and only within the job's run time.
+func TestPendingKeepsTheConfirmedJob(t *testing.T) {
+	h := newHarness(t)
+	started := h.now.Add(-10 * time.Minute)
+	confirmed := &model.JobInfo{RunID: 55, RunAttempt: 1, RunNumber: "412", Workflow: "CI", Name: "CI / e2e", StartedAt: started}
+	forged := JobRecord{RunID: "99", RunAttempt: "3", RunNumber: "7", Workflow: "Other", Job: "x",
+		StartedAt: h.now.Add(-time.Hour).Format(time.RFC3339)}
+	for _, c := range []struct {
+		finished string
+		want     time.Time
+	}{
+		{h.now.Add(-5 * time.Minute).Format(time.RFC3339), h.now.Add(-5 * time.Minute)},
+		{h.now.Add(-time.Hour).Format(time.RFC3339), started},
+		{h.now.Add(time.Hour).Format(time.RFC3339), h.now},
+	} {
+		rec := forged
+		rec.FinishedAt = c.finished
+		i := instance{Meta: Meta{ID: "aaaaaa", Repo: "darkmem", RunnerName: "ghr-darkmem-aaaaaa", SpawnedAt: started}, Job: confirmed}
+		p, ok := h.m.pendingFor(i, rec, true)
+		e := p.Entry
+		if !ok || e.RunID != 55 || e.RunAttempt != 1 || e.RunNumber != "412" || e.Workflow != "CI" || e.JobName != "CI / e2e" ||
+			!e.StartedAt.Equal(started) || !e.FinishedAt.Equal(c.want) {
+			t.Fatalf("finished_at %s: entry %+v, want finish %s", c.finished, e, c.want)
+		}
+	}
+	unnumbered := *confirmed
+	unnumbered.RunNumber, unnumbered.Workflow = "", ""
+	i := instance{Meta: Meta{ID: "aaaaaa", Repo: "darkmem", SpawnedAt: started}, Job: &unnumbered}
+	if p, _ := h.m.pendingFor(i, forged, true); p.Entry.RunID != 55 || p.Entry.RunNumber != "7" || p.Entry.Workflow != "Other" {
+		t.Fatalf("a job that exited before a tick read its run number: entry %+v", p.Entry)
+	}
+}
+
+// A job too short for any tick to see is known only from its record.
+func TestPendingFallsBackToTheRecord(t *testing.T) {
+	h := newHarness(t)
+	rec := JobRecord{RunID: "99", RunAttempt: "3", RunNumber: "7", Workflow: "Other", Job: "x",
+		StartedAt: "2026-10-03T11:00:00Z", FinishedAt: "2026-10-03T11:01:00Z"}
+	i := instance{Meta: Meta{ID: "aaaaaa", Repo: "darkmem", RunnerName: "ghr-darkmem-aaaaaa", SpawnedAt: h.now}}
+	p, ok := h.m.pendingFor(i, rec, true)
+	e := p.Entry
+	if !ok || e.RunID != 99 || e.RunAttempt != 3 || e.RunNumber != "7" || e.Workflow != "Other" || e.JobName != "x" ||
+		!e.StartedAt.Equal(time.Date(2026, 10, 3, 11, 0, 0, 0, time.UTC)) || !e.FinishedAt.Equal(time.Date(2026, 10, 3, 11, 1, 0, 0, time.UTC)) {
+		t.Fatalf("entry %+v", e)
+	}
+}
+
 // Without a CompletedAt from the API, the hook's finished_at is the finish time.
 func TestFinishTimeFromCompletionHook(t *testing.T) {
 	h := newHarness(t)
