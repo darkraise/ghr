@@ -24,6 +24,7 @@ type Status struct {
 	Instances    []InstanceStatus  `json:"instances"`
 	Maintenance  MaintenanceStatus `json:"maintenance"`
 	RunnerUpdate RunnerUpdate      `json:"runner_update"`
+	Jobs         []JobStatus       `json:"jobs,omitempty"`
 	// WebSetupRequired is true while the web UI listens with no password set.
 	WebSetupRequired bool `json:"web_setup_required"`
 	// Unconfigured is true while ghr has no owner or token; an older daemon
@@ -99,6 +100,21 @@ type RunnerUpdate struct {
 	LastOutcome  string     `json:"last_outcome,omitempty"` // "ok", "failed", "current"
 	LastError    string     `json:"last_error,omitempty"`
 	LastFinished *time.Time `json:"last_finished,omitempty"`
+}
+
+// JobStatus is one background task in the status: its schedule and its last run.
+type JobStatus struct {
+	Name        string     `json:"name"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	Enabled     bool       `json:"enabled"`
+	Every       string     `json:"every"`
+	Running     bool       `json:"running,omitempty"`
+	Pending     bool       `json:"pending,omitempty"`
+	LastStart   *time.Time `json:"last_start,omitempty"`
+	LastFinish  *time.Time `json:"last_finish,omitempty"`
+	LastError   string     `json:"last_error,omitempty"`
+	Next        *time.Time `json:"next,omitempty"`
 }
 
 type RepoStatus struct {
