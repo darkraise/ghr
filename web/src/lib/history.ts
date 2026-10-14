@@ -1,5 +1,5 @@
 import type { HistoryEntry } from "@/api/types"
-import { dur, hhmm, monthDay, plural } from "@/lib/format"
+import { dur, hhmm, isZeroTime, monthDay, plural } from "@/lib/format"
 
 export const HISTORY_WINDOWS = ["24h", "7d", "30d"] as const
 export type HistoryWindow = (typeof HISTORY_WINDOWS)[number]
@@ -64,8 +64,10 @@ export function groupByDay(rows: HistoryEntry[], now: number): DayGroup[] {
   return groupByDayOf(rows, (r) => r.finished_at, now)
 }
 
-export function took(entry: HistoryEntry): number {
-  return Date.parse(entry.finished_at) - Date.parse(entry.started_at)
+export function took(entry: HistoryEntry): number | undefined {
+  if (isZeroTime(entry.started_at)) return undefined
+  const ms = Date.parse(entry.finished_at) - Date.parse(entry.started_at)
+  return Number.isNaN(ms) ? undefined : ms
 }
 
 export function median(values: number[]): number | undefined {
@@ -89,7 +91,7 @@ export function resultWord(conclusion: string): string {
 export function historySummary(rows: HistoryEntry[]): string {
   if (rows.length === 0) return "No jobs"
   const failed = rows.filter((r) => resultWord(r.conclusion) === "Failed").length
-  const mid = median(rows.map(took)) ?? 0
+  const mid = median(rows.flatMap((r) => took(r) ?? [])) ?? 0
   return `${plural(rows.length, "job")}${failed > 0 ? `, ${failed} failed` : ""}, median ${dur(mid)}`
 }
 

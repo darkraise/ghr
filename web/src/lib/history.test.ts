@@ -10,6 +10,7 @@ import {
   parseHistorySearch,
   pickText,
   resultWord,
+  took,
 } from "./history"
 
 const now = Date.parse("2026-10-03T14:05:00Z")
@@ -68,6 +69,18 @@ describe("groupByDayOf", () => {
   })
 })
 
+describe("took", () => {
+  it("is the time between start and finish", () => {
+    expect(took(entry("a", "2026-10-03T13:35:00Z", "2026-10-03T13:40:00Z"))).toBe(300_000)
+  })
+
+  it("is unknown when the start was never recorded or does not parse", () => {
+    expect(took(entry("a", "0001-01-01T00:00:00Z", "2026-10-03T13:40:00Z"))).toBeUndefined()
+    expect(took(entry("b", "", "2026-10-03T13:40:00Z"))).toBeUndefined()
+    expect(took(entry("c", "not a time", "2026-10-03T13:40:00Z"))).toBeUndefined()
+  })
+})
+
 describe("median and historySummary", () => {
   it("takes the middle value, or the mean of the two middle ones", () => {
     expect(median([1, 3, 2])).toBe(2)
@@ -83,6 +96,14 @@ describe("median and historySummary", () => {
     expect(historySummary(rows)).toBe("2 jobs, 1 failed, median 3m15s")
     expect(historySummary([rows[0] as HistoryEntry])).toBe("1 job, median 5m00s")
     expect(historySummary([])).toBe("No jobs")
+  })
+
+  it("leaves jobs without a start out of the median", () => {
+    const rows = [
+      entry("a", "2026-10-03T13:35:00Z", "2026-10-03T13:40:00Z"),
+      entry("b", "0001-01-01T00:00:00Z", "2026-10-03T11:06:30Z"),
+    ]
+    expect(historySummary(rows)).toBe("2 jobs, median 5m00s")
   })
 })
 

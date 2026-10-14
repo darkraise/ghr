@@ -85,10 +85,14 @@ function HistoryRow({ entry, longest, wide }: { entry: HistoryEntry; longest: nu
         <>
           <RunValue kind="time">{hhmm(new Date(entry.finished_at))}</RunValue>
           <span className="flex flex-col items-end gap-1">
-            <RunValue kind="duration">{dur(ms)}</RunValue>
-            <span data-duration-bar aria-hidden="true" className="block h-1.5 w-20 rounded-[2px] bg-muted">
-              <span className="block h-1.5 rounded-[2px] bg-foreground/40" style={{ width: `${Math.round((ms / longest) * 100)}%` }} />
-            </span>
+            {ms !== undefined && (
+              <>
+                <RunValue kind="duration">{dur(ms)}</RunValue>
+                <span data-duration-bar aria-hidden="true" className="block h-1.5 w-20 rounded-[2px] bg-muted">
+                  <span className="block h-1.5 rounded-[2px] bg-foreground/40" style={{ width: `${Math.round((ms / longest) * 100)}%` }} />
+                </span>
+              </>
+            )}
           </span>
         </>
       }
@@ -159,7 +163,7 @@ export function HistoryPage() {
   const picked = pick && activity.data?.buckets.some((b) => b.start === pick.start) ? pick : null
   const rows = picked ? inBucket(all, picked) : all
   const groups = groupByDay(rows, now)
-  const longest = Math.max(1, ...rows.map(took))
+  const longest = Math.max(1, ...rows.flatMap((r) => took(r) ?? []))
   const filtered = repo !== "" || result !== ""
 
   let body
