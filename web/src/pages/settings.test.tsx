@@ -355,6 +355,18 @@ describe("Account section", () => {
     expect(router.state.location.pathname).toBe("/settings/account")
   })
 
+  it("says when password changes are throttled", async () => {
+    mockApi(
+      routes({
+        "POST /auth/password": () =>
+          json({ error: "too many failed logins; retry after 2026-10-06T14:20:00Z", retry_at: "2026-10-06T14:20:00Z" }, 429),
+      }),
+    )
+    const { user } = renderApp("/settings/account")
+    await fill(user, "bad password 1", "new password 12", "new password 12")
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Too many failed attempts; try again after 14:20\.$/)
+  })
+
   it("a 401 on password change goes to the login page", async () => {
     let authenticated = true
     mockApi(
