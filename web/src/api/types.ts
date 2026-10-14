@@ -74,6 +74,52 @@ export interface RunnerUpdate {
   last_finished?: string
 }
 
+// ghr's own release state; an older daemon sends none.
+export interface GhrUpdate {
+  installed: string
+  development?: boolean
+  newer?: boolean
+  latest?: string
+  checked_at?: string
+  check_error?: string
+  installing?: boolean
+  // download, verify, smoke, waiting, swap or restart
+  step?: string
+  restart_pending?: string
+  last_outcome?: string
+  last_error?: string
+}
+
+export type JobName = "ghr_update_check" | "runner_update_check" | "prune" | "storage_measure"
+
+// A background task. name is typed string: a JSON fixture's strings do not
+// narrow to JobName.
+export interface JobStatus {
+  name: string
+  title: string
+  description: string
+  enabled: boolean
+  every: string
+  running?: boolean
+  pending?: boolean
+  last_start?: string
+  last_finish?: string
+  last_error?: string
+  next?: string
+}
+
+export interface JobConfig {
+  enabled: boolean
+  every: string
+}
+
+export type JobsConfig = Record<JobName, JobConfig>
+
+export interface JobPatch {
+  enabled?: boolean
+  every?: string
+}
+
 export interface RestartStatus {
   pending?: string[]
   blocked_by?: string[]
@@ -111,6 +157,8 @@ export interface Status {
   restart: RestartStatus
   web_listen_error?: WebListenError
   github_storage?: StorageAlert
+  ghr_update?: GhrUpdate
+  jobs?: JobStatus[]
 }
 
 export interface SetupState {
@@ -205,6 +253,7 @@ export interface Config {
   watch_repos?: string[]
   web?: WebConfig
   github_storage?: GitHubStorageConfig
+  jobs?: JobsConfig
 }
 
 export interface TokenStatus {
@@ -379,6 +428,7 @@ export interface ConfigPatch {
   repos?: Record<string, RepoPatch>
   web?: WebPatch
   github_storage?: GitHubStoragePatch
+  jobs?: Partial<Record<JobName, JobPatch>>
 }
 
 export interface AddRepoRequest {

@@ -89,6 +89,53 @@
     "last_outcome": "current",
     "last_finished": "2026-10-02T14:05:00Z"
   },
+  "jobs": [
+    {
+      "name": "ghr_update_check",
+      "title": "ghr update check",
+      "description": "Asks GitHub for the newest ghr release.",
+      "enabled": true,
+      "every": "1d",
+      "last_start": "2026-10-03T13:05:00Z",
+      "last_finish": "2026-10-03T13:05:30Z",
+      "next": "2026-10-04T13:05:30Z"
+    },
+    {
+      "name": "runner_update_check",
+      "title": "Runner update check",
+      "description": "Asks GitHub for the newest runner release and its forced-update deadline.",
+      "enabled": true,
+      "every": "1d",
+      "last_start": "2026-10-03T13:05:00Z",
+      "last_finish": "2026-10-03T13:05:30Z",
+      "next": "2026-10-04T13:05:30Z"
+    },
+    {
+      "name": "prune",
+      "title": "Prune",
+      "description": "Removes history and logs older than history_retention. While on, a disk above disk_high_water also prunes Docker.",
+      "enabled": true,
+      "every": "1d",
+      "last_start": "2026-10-02T16:05:00Z",
+      "last_finish": "2026-10-02T16:05:30Z",
+      "next": "2026-10-03T16:05:30Z"
+    },
+    {
+      "name": "storage_measure",
+      "title": "Storage measurement",
+      "description": "Measures the disk use of Docker, toolchains and package caches for the Storage page.",
+      "enabled": true,
+      "every": "30m0s",
+      "last_start": "2026-10-03T13:50:00Z",
+      "last_finish": "2026-10-03T13:50:30Z",
+      "next": "2026-10-03T14:20:30Z"
+    }
+  ],
+  "ghr_update": {
+    "installed": "v0.1.26",
+    "latest": "v0.1.26",
+    "checked_at": "2026-10-03T13:05:00Z"
+  },
   "web_setup_required": false,
   "restart": {
     "available": false

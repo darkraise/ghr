@@ -139,6 +139,15 @@ describe("type fixtures", () => {
     expect(config.repos?.[0]?.max).toBe(2)
   })
 
+  it("status and config carry the update and job fields", () => {
+    expect(status.ghr_update).toEqual({ installed: "v0.1.26", latest: "v0.1.26", checked_at: "2026-10-03T13:05:00Z" })
+    expect(status.jobs?.map((j) => j.name)).toEqual(["ghr_update_check", "runner_update_check", "prune", "storage_measure"])
+    expect(status.jobs?.[2]).toMatchObject({ title: "Prune", enabled: true, every: "1d", last_finish: "2026-10-02T16:05:30Z" })
+    expect(status.jobs?.[3]?.next).toBe("2026-10-03T14:20:30Z")
+    expect(config.jobs?.prune).toEqual({ enabled: true, every: "1d" })
+    expect(config.jobs?.storage_measure).toEqual({ enabled: true, every: "30m0s" })
+  })
+
   it("the later pages' types parse too", () => {
     expect(storage.operations.current?.progress).toBe("extracting")
     expect(storage.last_prune?.steps?.[0]?.freed).toBe(6800000)
