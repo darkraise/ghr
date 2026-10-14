@@ -21,7 +21,8 @@ import (
 type fakeGH struct {
 	mu        sync.Mutex
 	runs      map[string][]github.Run // key repo/status
-	jobs      map[int64][]github.Job
+	jobs      map[int64][]github.Job  // the latest attempt's, by run
+	attempts  map[attemptKey][]github.Job
 	runners   map[int64]*github.Runner
 	listed    map[string][]github.Runner
 	deleted   []int64
@@ -36,8 +37,9 @@ type fakeGH struct {
 }
 
 func newFakeGH() *fakeGH {
-	return &fakeGH{runs: map[string][]github.Run{}, jobs: map[int64][]github.Job{}, runners: map[int64]*github.Runner{},
-		listed: map[string][]github.Runner{}, errs: map[string]error{}, public: map[string]bool{}, nextID: 100, remaining: 4999}
+	return &fakeGH{runs: map[string][]github.Run{}, jobs: map[int64][]github.Job{}, attempts: map[attemptKey][]github.Job{},
+		runners: map[int64]*github.Runner{},
+		listed:  map[string][]github.Runner{}, errs: map[string]error{}, public: map[string]bool{}, nextID: 100, remaining: 4999}
 }
 
 // call records the call and returns its injected error, if any.
@@ -83,6 +85,25 @@ func (f *fakeGH) ListJobs(_ context.Context, repo string, runID int64) ([]github
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	return f.jobs[runID], nil
+}
+
+type attemptKey struct {
+	run     int64
+	attempt int
+}
+
+// ListAttemptJobs answers an attempt set with setAttemptJobs, and any other
+// with the latest attempt's jobs, as a run that was never re-run does.
+func (f *fakeGH) ListAttemptJobs(_ context.Context, repo string, runID int64, attempt int) ([]github.Job, error) {
+	if err := f.call("ListAttemptJobs", repo); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if jobs, ok := f.attempts[attemptKey{runID, attempt}]; ok {
+		return jobs, nil
+	}
 	return f.jobs[runID], nil
 }
 
@@ -178,6 +199,12 @@ func (f *fakeGH) setJobs(runID int64, jobs ...github.Job) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.jobs[runID] = jobs
+}
+
+func (f *fakeGH) setAttemptJobs(runID int64, attempt int, jobs ...github.Job) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.attempts[attemptKey{runID, attempt}] = jobs
 }
 
 type fakeSD struct {

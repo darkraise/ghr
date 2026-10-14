@@ -252,7 +252,7 @@ func (m *Manager) confirm(id string, j github.Job, now time.Time) {
 	if i.Job != nil {
 		runNumber = i.Job.RunNumber
 	}
-	i.Job = &model.JobInfo{RunID: j.RunID, RunNumber: runNumber, Workflow: j.WorkflowName, Name: j.Name, HTMLURL: j.HTMLURL, StartedAt: started}
+	i.Job = &model.JobInfo{RunID: j.RunID, RunAttempt: j.RunAttempt, RunNumber: runNumber, Workflow: j.WorkflowName, Name: j.Name, HTMLURL: j.HTMLURL, StartedAt: started}
 }
 
 // maxSpawnsPerTick bounds one tick's spawns, so a burst of queued jobs does not

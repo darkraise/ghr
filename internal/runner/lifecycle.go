@@ -172,11 +172,12 @@ func parseTime(s string) (time.Time, bool) {
 // unparsable start time falls back to now.
 func jobInfo(rec JobRecord, now time.Time) *model.JobInfo {
 	runID, _ := strconv.ParseInt(rec.RunID, 10, 64)
+	attempt, _ := strconv.Atoi(rec.RunAttempt)
 	started, ok := parseTime(rec.StartedAt)
 	if !ok {
 		started = now
 	}
-	return &model.JobInfo{RunID: runID, RunNumber: rec.RunNumber, Workflow: rec.Workflow, Name: rec.Job, StartedAt: started}
+	return &model.JobInfo{RunID: runID, RunAttempt: attempt, RunNumber: rec.RunNumber, Workflow: rec.Workflow, Name: rec.Job, StartedAt: started}
 }
 
 // readJobFiles marks instances busy once their job-started hook has written job.json.
@@ -406,11 +407,14 @@ func (m *Manager) pendingFor(i instance, rec JobRecord, recOK bool) (pending, bo
 	e := model.HistoryEntry{ID: i.ID, Repo: i.Repo, Conclusion: "unknown", StartedAt: i.SpawnedAt, FinishedAt: now}
 	if i.Job != nil {
 		e.RunID, e.RunNumber, e.Workflow, e.JobName, e.HTMLURL = i.Job.RunID, i.Job.RunNumber, i.Job.Workflow, i.Job.Name, i.Job.HTMLURL
-		e.StartedAt = i.Job.StartedAt
+		e.RunAttempt, e.StartedAt = i.Job.RunAttempt, i.Job.StartedAt
 	}
 	if recOK {
 		if id, err := strconv.ParseInt(rec.RunID, 10, 64); err == nil && id != 0 {
 			e.RunID = id
+		}
+		if a, err := strconv.Atoi(rec.RunAttempt); err == nil && a > 0 {
+			e.RunAttempt = a
 		}
 		if rec.RunNumber != "" {
 			e.RunNumber = rec.RunNumber
@@ -585,7 +589,15 @@ func (m *Manager) finalize(ctx context.Context, path string) {
 	e := p.Entry
 	final := false
 	if e.RunID != 0 {
-		jobs, err := m.GH.ListJobs(ctx, e.Repo, e.RunID)
+		var jobs []github.Job
+		var err error
+		// A re-run moves the latest attempt on, and its jobs can carry the
+		// same names on other runners.
+		if e.RunAttempt > 0 {
+			jobs, err = m.GH.ListAttemptJobs(ctx, e.Repo, e.RunID, e.RunAttempt)
+		} else {
+			jobs, err = m.GH.ListJobs(ctx, e.Repo, e.RunID)
+		}
 		if err != nil && !github.IsKind(err, github.ErrNotFound) {
 			if github.IsKind(err, github.ErrAuth) || github.IsKind(err, github.ErrRateLimit) {
 				m.apiErr(e.Repo, err, m.Now())

@@ -91,6 +91,7 @@ type Step struct {
 type Job struct {
 	ID           int64      `json:"id"`
 	RunID        int64      `json:"run_id"`
+	RunAttempt   int        `json:"run_attempt"`
 	Name         string     `json:"name"`
 	WorkflowName string     `json:"workflow_name"`
 	Status       string     `json:"status"`

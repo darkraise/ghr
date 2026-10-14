@@ -373,7 +373,7 @@ func TestConclusionFallsBackToUnknownAfterDeadline(t *testing.T) {
 	h := newHarness(t)
 	h.m.spawn(context.Background(), h.cfg, "darkmem")
 	h.writeJob(t, "aaaaaa", 55)
-	h.gh.setErr("ListJobs darkmem", &github.APIError{Status: 502, Kind: github.ErrServer})
+	h.gh.setErr("ListAttemptJobs darkmem", &github.APIError{Status: 502, Kind: github.ErrServer})
 	h.sd.active["ghr-runner-aaaaaa"] = false
 	h.m.refreshUnits(context.Background())
 	h.m.Wait()
@@ -405,6 +405,65 @@ func TestFinishFallsBackToConfirmedJob(t *testing.T) {
 	got, _ := h.m.History.Query("", "", time.Time{}, 0)
 	if len(got) != 1 || got[0].RunID != 77 || got[0].Conclusion != "failure" {
 		t.Fatalf("history %+v", got)
+	}
+}
+
+// A re-run started before the runner's cleanup finalizes its job: the run's
+// latest attempt lists another runner's job of the same name, so the
+// conclusion comes from the attempt the runner ran.
+func TestFinalizeReadsTheAttemptTheRunnerRan(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		prepare func(h *harness)
+	}{
+		{"attempt from the hook record", func(h *harness) { h.writeJob(t, "aaaaaa", 55) }},
+		{"attempt from the jobs API", func(h *harness) {
+			job := completedJob(h, 55, "ghr-darkmem-aaaaaa", "")
+			job.Status, job.CompletedAt, job.RunAttempt = "in_progress", nil, 1
+			h.m.confirm("aaaaaa", job, h.now)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.m.spawn(context.Background(), h.cfg, "darkmem")
+			c.prepare(h)
+			rerun := completedJob(h, 55, "ghr-darkmem-bbbbbb", "")
+			rerun.Status, rerun.CompletedAt, rerun.RunAttempt = "in_progress", nil, 2
+			h.gh.setJobs(55, rerun)
+			ran := completedJob(h, 55, "ghr-darkmem-aaaaaa", "failure")
+			ran.RunAttempt = 1
+			h.gh.setAttemptJobs(55, 1, ran)
+			h.sd.active["ghr-runner-aaaaaa"] = false
+			h.m.refreshUnits(context.Background())
+			h.m.Wait()
+			got, _ := h.m.History.Query("", "", time.Time{}, 0)
+			if len(got) != 1 || got[0].Conclusion != "failure" || got[0].RunAttempt != 1 {
+				t.Fatalf("history %+v\ncalls %s", got, h.gh.callsText())
+			}
+		})
+	}
+}
+
+// A pending record written before attempts were recorded reads the latest
+// attempt, as it did when it was written.
+func TestFinalizeWithoutAnAttemptReadsTheLatest(t *testing.T) {
+	h := newHarness(t)
+	e := model.HistoryEntry{ID: "aaaaaa", Repo: "darkmem", RunID: 55, JobName: "e2e", Conclusion: "unknown",
+		StartedAt: h.now.Add(-2 * time.Minute), FinishedAt: h.now}
+	if err := os.MkdirAll(h.m.Paths.Pending, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSONAtomic(h.m.pendingPath("aaaaaa"), pending{Entry: e, RunnerName: "ghr-darkmem-aaaaaa", Deadline: h.now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	h.gh.setJobs(55, completedJob(h, 55, "ghr-darkmem-aaaaaa", "success"))
+	h.gh.setAttemptJobs(55, 1)
+	h.m.finalizePending(context.Background())
+	if got := h.history(t); !reflect.DeepEqual(got, []string{"aaaaaa success"}) {
+		t.Fatalf("history %v calls %s", got, h.gh.callsText())
+	}
+	if strings.Contains(h.gh.callsText(), "ListAttemptJobs") {
+		t.Fatalf("calls %s", h.gh.callsText())
 	}
 }
 

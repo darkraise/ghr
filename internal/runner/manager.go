@@ -46,6 +46,7 @@ var idRe = regexp.MustCompile(`^[0-9a-f]{6}$`)
 type GitHub interface {
 	ListRuns(ctx context.Context, repo, status string) ([]github.Run, error)
 	ListJobs(ctx context.Context, repo string, runID int64) ([]github.Job, error)
+	ListAttemptJobs(ctx context.Context, repo string, runID int64, attempt int) ([]github.Job, error)
 	ListRunners(ctx context.Context, repo string) ([]github.Runner, error)
 	GetRunner(ctx context.Context, repo string, id int64) (*github.Runner, error)
 	DeleteRunner(ctx context.Context, repo string, id int64) error
