@@ -312,3 +312,45 @@ func TestFinishLeavesASymlinkAtTheArchivePathAlone(t *testing.T) {
 		})
 	}
 }
+
+// A name in _diag can be a second name for a file elsewhere on the host. The
+// archive is trimmed as root, so cutting such a log to size would cut the
+// original too: a log with more than one name is dropped from the archive and
+// the original is left as it was.
+func TestArchiveDropsAHardLinkedLog(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	diag := filepath.Join(h.m.instanceDir("aaaaaa"), "_diag")
+	outside := filepath.Join(h.root, "outside.log")
+	if err := os.WriteFile(outside, []byte("not a job log\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(outside, maxArchivedLog+100); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(outside, filepath.Join(diag, "Runner_1.log")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(diag, "Worker_1.log"), []byte("head\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	mustReturn(t, "finish", func() {
+		h.m.refreshUnits(context.Background())
+		h.m.Wait()
+	})
+	entries, err := os.ReadDir(filepath.Join(h.m.Paths.Logs, "aaaaaa"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	if !reflect.DeepEqual(names, []string{"Worker_1.log"}) {
+		t.Fatalf("archive holds %v\n%s", names, h.eventText())
+	}
+	if fi, err := os.Stat(outside); err != nil || fi.Size() != maxArchivedLog+100 {
+		t.Fatalf("the original: %v, %v", fi, err)
+	}
+}

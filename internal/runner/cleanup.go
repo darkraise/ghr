@@ -563,11 +563,12 @@ func (m *Manager) openLogs(id string) (*os.Root, error) {
 }
 
 // trimArchive removes from the archive id under logs everything but its
-// regular files named by logPatterns, cuts each of those to its first
-// maxArchivedLog bytes, and sets its mtime to now. The job filled the
-// archive, so only a real directory is opened, through an os.Root of logs,
-// and it is worked on through its own os.Root, which follows no symlink out
-// of it and keeps the directory it opened even if the name is swapped.
+// regular files named by logPatterns that have no other name on the host,
+// cuts each of those to its first maxArchivedLog bytes, and sets its mtime
+// to now. The job filled the archive, so only a real directory is opened,
+// through an os.Root of logs, and it is worked on through its own os.Root,
+// which follows no symlink out of it and keeps the directory it opened even
+// if the name is swapped.
 func trimArchive(logs, id string, now time.Time) error {
 	parent, err := os.OpenRoot(logs)
 	if err != nil {
@@ -591,7 +592,7 @@ func trimArchive(logs, id string, now time.Time) error {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if !e.Type().IsRegular() || !isLogName(name) {
+		if !e.Type().IsRegular() || !isLogName(name) || otherNames(e) {
 			if err := root.RemoveAll(name); err != nil {
 				return err
 			}
@@ -605,6 +606,13 @@ func trimArchive(logs, id string, now time.Time) error {
 	// created, often the job's start. prune ages archives as it ages
 	// history: from the job's end.
 	return root.Chtimes(".", now, now)
+}
+
+// otherNames reports whether the entry is a file that has another name
+// outside the archive; cutting or keeping it would act on that file too.
+func otherNames(e fs.DirEntry) bool {
+	fi, err := e.Info()
+	return err != nil || hasOtherNames(fi)
 }
 
 func isLogName(name string) bool {
@@ -626,8 +634,8 @@ func truncateLog(root *os.Root, name string) error {
 		return err
 	}
 	defer f.Close()
-	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
-		return fmt.Errorf("%s: not a regular file", name)
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() || hasOtherNames(fi) {
+		return fmt.Errorf("%s: not a regular file with one name", name)
 	}
 	return f.Truncate(maxArchivedLog)
 }
