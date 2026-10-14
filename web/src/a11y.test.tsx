@@ -319,3 +319,18 @@ describe("Jobs accessibility", () => {
     30_000,
   )
 })
+
+describe("Updates settings accessibility", () => {
+  it(
+    "has no axe violations at 1280px",
+    async () => {
+      setViewport(1280)
+      mockApi(authedRoutes({ "GET /api/token": fixtures.token }))
+      renderApp("/settings/updates")
+      await screen.findByRole("region", { name: "Runner" })
+      await screen.findByText("Up to date")
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+})

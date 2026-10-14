@@ -2,7 +2,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Button } from "darkraise-ui/components/button"
 import { toast } from "darkraise-ui/components/sonner"
 import { Spinner } from "darkraise-ui/components/spinner"
-import { useState } from "react"
 import { api } from "@/api/client"
 import { keys, useStatus } from "@/api/hooks"
 import type { RunnerUpdate } from "@/api/types"
@@ -11,12 +10,6 @@ import { StatusPill } from "@/components/page/status-pill"
 import { DAY_MS } from "@/lib/duration"
 import { ago, monthDay, plural } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
-import { errorText } from "@/query"
-
-function reloadText(warnings: number): string {
-  if (warnings === 0) return "Config reloaded"
-  return `Config reloaded with ${plural(warnings, "warning")}. See Events on the Dashboard.`
-}
 
 function deadlineText(deadline: string, now: number): string {
   const left = Date.parse(deadline) - now
@@ -80,7 +73,6 @@ export function RunnerSection() {
   const status = useStatus()
   const queryClient = useQueryClient()
   const now = useNow()
-  const [reloading, setReloading] = useState(false)
   const offline = status.isError
   const u = status.data?.runner_update
 
@@ -95,21 +87,9 @@ export function RunnerSection() {
     onSettled: () => refresh(),
   })
 
-  async function reload() {
-    setReloading(true)
-    try {
-      toast.success(reloadText((await api.reload()).length))
-    } catch (err) {
-      toast.error(`Reload rejected: ${errorText(err)}`)
-    } finally {
-      setReloading(false)
-      await refresh()
-    }
-  }
-
   const canQueue = u?.deadline !== undefined && !u.running && !u.queued
   return (
-    <FieldGroup id="runner" title="Version and config" note="These act at once, outside the save bar.">
+    <FieldGroup id="runner" title="Runner" note="These act at once, outside the save bar.">
       <Field label="Runner version" help={u?.queued ? "Runs when no job is running or queued" : undefined}>
         {u ? <VersionLine u={u} now={now} /> : <Spinner label="Loading" />}
       </Field>
@@ -128,11 +108,6 @@ export function RunnerSection() {
           )}
         </div>
       )}
-      <Field label="Config" help="Reads config.yaml again. Warnings appear under Events on the Dashboard.">
-        <Button variant="outline" disabled={offline} loading={reloading} onClick={() => void reload()}>
-          Reload config.yaml
-        </Button>
-      </Field>
     </FieldGroup>
   )
 }

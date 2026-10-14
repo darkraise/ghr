@@ -6,6 +6,7 @@ import { AccountSection } from "@/components/account-section"
 import { ErrorLine } from "@/components/page/error-line"
 import { GitHubStorageSection } from "@/components/github-storage-section"
 import { SideGroup, SideLayout } from "@/components/page/side-layout"
+import { ReloadConfig } from "@/components/reload-config"
 import { SaveBar } from "@/components/save-bar"
 import { SettingsSections } from "@/components/settings-form"
 import { TokenSection } from "@/components/token-section"
@@ -62,6 +63,7 @@ function GeneralSettings() {
         <>
           <div className="flex min-w-0 flex-col gap-6">
             <SettingsSections form={form} webAccess />
+            <ReloadConfig />
           </div>
           <SaveBar count={form.changed.length} saving={form.saving} disabled={form.offline} onSave={() => void form.save()} onDiscard={form.discard} />
           <UnsavedGuard count={form.changed.length} page="Settings" saving={form.saving} onSave={form.save} onDiscard={form.discard} />

@@ -626,3 +626,40 @@ describe("Web access", () => {
     expect(screen.queryByText(/unsaved change/)).toBeNull()
   })
 })
+
+describe("Config file", () => {
+  async function group() {
+    return within(await screen.findByRole("region", { name: "Config file" }))
+  }
+
+  it.each([
+    [[], "Config reloaded"],
+    [["web settings changed; restart ghr to apply"], "Config reloaded with 1 warning. See Events on the Dashboard."],
+    [["a", "b", "c"], "Config reloaded with 3 warnings. See Events on the Dashboard."],
+  ])("reloads the config with %j and says so", async (warnings, text) => {
+    mockApi(routes({ "POST /api/reload": warnings }))
+    const { user } = renderApp("/settings")
+    await user.click(await (await group()).findByRole("button", { name: "Reload config.yaml" }))
+    expect((await screen.findAllByText(text)).length).toBeGreaterThan(0)
+  })
+
+  it("shows a rejected reload", async () => {
+    mockApi(routes({ "POST /api/reload": () => json({ error: 'mode must be "queue" or "all"' }, 400) }))
+    const { user } = renderApp("/settings")
+    await user.click(await (await group()).findByRole("button", { name: "Reload config.yaml" }))
+    expect((await screen.findAllByText('Reload rejected: mode must be "queue" or "all"')).length).toBeGreaterThan(0)
+  })
+
+  it("explains what reloading does", async () => {
+    mockApi(routes())
+    renderApp("/settings")
+    expect(await (await group()).findByText("Reads config.yaml again. Warnings appear under Events on the Dashboard.")).toBeInTheDocument()
+  })
+
+  it("is no longer part of Updates", async () => {
+    mockApi(routes())
+    renderApp("/settings/updates")
+    expect(await screen.findByRole("region", { name: "Runner" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Reload config.yaml" })).toBeNull()
+  })
+})
