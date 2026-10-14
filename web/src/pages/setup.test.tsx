@@ -169,6 +169,59 @@ describe("setup wizard", () => {
     expect(calls.some((c) => c.path === "/api/setup/finish")).toBe(false)
   })
 
+  it("stays on the step when an edit is made while the dialog's save is pending", async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const { calls } = mockApi(
+      authedRoutes({
+        "GET /api/setup": { ...base, configured: true, owner: "DarkRaise" },
+        "GET /api/storage": fixtures.storage,
+        "PATCH /api/config": async () => {
+          await gate
+          return noContent()
+        },
+      }),
+    )
+    const { user } = renderApp("/setup")
+    await user.click(await screen.findByRole("button", { name: "Next" }))
+    const max = await screen.findByLabelText("Max concurrent runners")
+    await user.clear(max)
+    await user.type(max, "3")
+    await user.click(screen.getByRole("button", { name: "Next" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    const disk = screen.getByLabelText("Disk high-water")
+    await user.clear(disk)
+    await user.type(disk, "70")
+    const reads = calls.filter((c) => c.path === "/api/config" && c.method === "GET").length
+    release()
+    await waitFor(() => expect(calls.filter((c) => c.path === "/api/config" && c.method === "GET").length).toBeGreaterThan(reads))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.getByLabelText("Disk high-water")).toHaveValue("70")
+    expect(screen.queryByRole("heading", { name: "Toolchains", level: 2 })).toBeNull()
+    expect(screen.getByRole("heading", { name: "Settings", level: 2 })).toBeInTheDocument()
+  })
+
+  it("stays on the step and shows the error when the dialog's save fails", async () => {
+    mockApi(
+      authedRoutes({
+        "GET /api/setup": { ...base, configured: true, owner: "DarkRaise" },
+        "GET /api/storage": fixtures.storage,
+        "PATCH /api/config": () => json({ error: "global_max is too high" }, 400),
+      }),
+    )
+    const { user } = renderApp("/setup")
+    await user.click(await screen.findByRole("button", { name: "Next" }))
+    const max = await screen.findByLabelText("Max concurrent runners")
+    await user.clear(max)
+    await user.type(max, "3")
+    await user.click(screen.getByRole("button", { name: "Next" }))
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Save" }))
+    expect(await screen.findByText(/global_max is too high/)).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Toolchains", level: 2 })).toBeNull()
+    expect(screen.getByLabelText("Max concurrent runners")).toHaveValue("3")
+  })
+
   it("shows the settings error with a retry, and still lets the steps move on", async () => {
     mockApi(
       authedRoutes({
