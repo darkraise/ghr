@@ -16,14 +16,20 @@ REAL_FETCH_RUNNER=$(declare -f fetch_runner)
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 
-# setup.sh installs Docker's key under /etc. The directory is redirected into $T
-# before any case runs; run refuses to start a function while it points elsewhere.
+# Every install path of setup.sh is redirected into $T before any case runs; run
+# refuses to start a function while one of them points elsewhere.
 DEFAULT_KEYRING_DIR=$KEYRING_DIR
 KEYRING_DIR="$T/keyrings"
 DEFAULT_SYSTEMD_DIR=$SYSTEMD_DIR
 SYSTEMD_DIR="$T/systemd"
 BIN_DIR="$T/bin"
 HOOKS_DIR="$T/hooks"
+ETC_DIR="$T/etc"
+APT_SOURCES_DIR="$T/apt-sources"
+STATE_DIR="$T/state"
+OPT_DIR="$T/opt"
+DIST_DIR="$T/dist"
+OS_RELEASE="$T/os-release"
 
 FAILS=0
 check() {
@@ -44,9 +50,9 @@ bump() { echo $(($(count "$1") + 1)) > "$MARK_DIR/$1"; }
 # Runs a setup.sh function the way main runs: errexit on, die exits a subshell.
 # It refuses to run while a redirected directory points outside the temporary tree.
 run() {
-  case "$KEYRING_DIR:$SYSTEMD_DIR:$BIN_DIR:$HOOKS_DIR" in
-    "$T"/*:"$T"/*:"$T"/*:"$T"/*) ;;
-    *) echo "refusing to run: KEYRING_DIR=$KEYRING_DIR, SYSTEMD_DIR=$SYSTEMD_DIR, BIN_DIR=$BIN_DIR or HOOKS_DIR=$HOOKS_DIR is outside $T" >&2; return 99 ;;
+  case "$KEYRING_DIR:$SYSTEMD_DIR:$BIN_DIR:$HOOKS_DIR:$ETC_DIR:$APT_SOURCES_DIR:$STATE_DIR:$OPT_DIR:$DIST_DIR:$OS_RELEASE" in
+    "$T"/*:"$T"/*:"$T"/*:"$T"/*:"$T"/*:"$T"/*:"$T"/*:"$T"/*:"$T"/*:"$T"/*) ;;
+    *) echo "refusing to run: KEYRING_DIR=$KEYRING_DIR, SYSTEMD_DIR=$SYSTEMD_DIR, BIN_DIR=$BIN_DIR, HOOKS_DIR=$HOOKS_DIR, ETC_DIR=$ETC_DIR, APT_SOURCES_DIR=$APT_SOURCES_DIR, STATE_DIR=$STATE_DIR, OPT_DIR=$OPT_DIR, DIST_DIR=$DIST_DIR or OS_RELEASE=$OS_RELEASE is outside $T" >&2; return 99 ;;
   esac
   (set -e; "$@")
 }
