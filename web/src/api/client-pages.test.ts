@@ -1,10 +1,10 @@
-import { renderHook } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { act, renderHook } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
 import { mockApi, noContent } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
 import { api } from "./client"
-import { annotationsPoll, keys, POLL_ACTIONS, POLL_SAFETY, POLL_SLOW, runDetailPoll, useJobLog, useRunAnnotations, useRunDetail } from "./hooks"
+import { annotationsPoll, keys, logSettling, POLL_ACTIONS, POLL_SAFETY, POLL_SLOW, runDetailPoll, useJobLog, useRunAnnotations, useRunDetail } from "./hooks"
 
 const ok = () => noContent()
 
@@ -144,8 +144,45 @@ describe("api for the run pages", () => {
     const { wrapper } = withQuery()
     renderHook(() => useRunDetail("darkmem", 102, undefined, false), { wrapper })
     renderHook(() => useRunAnnotations("darkmem", 102, undefined, true, false), { wrapper })
-    renderHook(() => useJobLog("darkmem", 1002, false), { wrapper })
+    renderHook(() => useJobLog("darkmem", 1002, false, undefined, 0), { wrapper })
     await new Promise((r) => setTimeout(r, 100))
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe("logSettling", () => {
+  const completed = "2026-10-03T14:00:00Z"
+  const at = Date.parse(completed)
+  it.each([
+    ["no completion time", undefined, at, false],
+    ["just completed", completed, at, true],
+    ["completed 30 seconds ago", completed, at + 30_000, true],
+    ["completed exactly 3 minutes ago", completed, at + 180_000, false],
+    ["completed 10 minutes ago", completed, at + 600_000, false],
+    ["a clock behind the completion time", completed, at - 5_000, false],
+  ])("is %s", (_why, completedAt, now, want) => {
+    expect(logSettling(completedAt, now)).toBe(want)
+  })
+})
+
+describe("useJobLog", () => {
+  it("asks again by the clock it is given", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
+    try {
+      const { calls } = mockApi({ "GET /api/actions/darkmem/jobs/1002/log": { ...fixtures.jobLog, no_log: true, steps: [] } })
+      const { wrapper } = withQuery()
+      const completedAt = "2026-10-03T14:00:00Z"
+      const { rerender } = renderHook(({ now }: { now: number }) => useJobLog("darkmem", 1002, true, completedAt, now), {
+        wrapper,
+        initialProps: { now: Date.parse(completedAt) + 30_000 },
+      })
+      await act(() => vi.advanceTimersByTimeAsync(15_000))
+      expect(calls).toHaveLength(2)
+      rerender({ now: Date.parse(completedAt) - 60_000 })
+      await act(() => vi.advanceTimersByTimeAsync(30_000))
+      expect(calls).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

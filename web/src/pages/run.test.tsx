@@ -245,7 +245,7 @@ describe("Job page", () => {
     try {
       const recent = {
         ...fixtures.runDetail,
-        jobs: fixtures.runDetail.jobs.map((j) => (j.id === 1002 ? { ...j, completed_at: new Date(Date.now() - 30_000).toISOString() } : j)),
+        jobs: fixtures.runDetail.jobs.map((j) => (j.id === 1002 ? { ...j, completed_at: new Date(Date.parse(fixtures.status.now) - 30_000).toISOString() } : j)),
       }
       let stored = false
       const { calls } = mockApi(
@@ -264,6 +264,21 @@ describe("Job page", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it("does not wait for a log of a job that completed after the page's clock", async () => {
+    const skewed = {
+      ...fixtures.runDetail,
+      jobs: fixtures.runDetail.jobs.map((j) => (j.id === 1002 ? { ...j, completed_at: new Date(Date.parse(fixtures.status.now) + 10 * 60_000).toISOString() } : j)),
+    }
+    mockApi(
+      runRoutes({
+        "GET /api/actions/darkmem/runs/102": skewed,
+        "GET /api/actions/darkmem/jobs/1002/log": { ...fixtures.jobLog, no_log: true, steps: [] },
+      }),
+    )
+    renderApp("/actions/darkmem/runs/102/jobs/1002")
+    expect(await screen.findByText("This job produced no log.")).toBeInTheDocument()
   })
 
   it("saves the raw log through a Blob", async () => {

@@ -252,7 +252,7 @@ function saveBlob(blob: Blob, fileName: string) {
 }
 
 function JobLogs({ repo, job, search, ms, now }: { repo: string; job: RunJob; search: JobSearch; ms: number | undefined; now: number }) {
-  const log = useJobLog(repo, job.id, true, job.completed_at)
+  const log = useJobLog(repo, job.id, true, job.completed_at, now)
   const raw = useMutation({
     mutationFn: () => api.rawJobLog(repo, job.id),
     onSuccess: (blob) => saveBlob(blob, rawLogFileName(repo, job.id)),
