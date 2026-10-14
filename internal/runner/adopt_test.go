@@ -3,16 +3,19 @@ package runner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/sched"
@@ -24,8 +27,11 @@ func makeInstance(t *testing.T, h *harness, id, repo string, runnerID int64, wit
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeJSON(filepath.Join(dir, MetaFile), Meta{ID: id, Repo: repo, RunnerID: runnerID, RunnerName: "ghr-" + repo + "-" + id,
-		Labels: []string{"homelab"}, SpawnedAt: h.now}); err != nil {
+	meta := Meta{ID: id, Repo: repo, RunnerID: runnerID, RunnerName: "ghr-" + repo + "-" + id, Labels: []string{"homelab"}, SpawnedAt: h.now}
+	if err := h.m.writePrivateMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSON(filepath.Join(dir, MetaFile), meta); err != nil {
 		t.Fatal(err)
 	}
 	if withJob {
@@ -37,7 +43,7 @@ func TestAdopt(t *testing.T) {
 	h := newHarness(t)
 	makeInstance(t, h, "aaaaaa", "darkcloud", 1, true) // running, mid-job
 	makeInstance(t, h, "bbbbbb", "darkmem", 2, false)  // exited while daemon was down
-	os.MkdirAll(h.m.instanceDir("cccccc"), 0o755)      // no ghr.json, unit active
+	os.MkdirAll(h.m.instanceDir("cccccc"), 0o755)      // no metadata record, unit active
 	h.sd.active["ghr-runner-aaaaaa"] = true
 	h.sd.active["ghr-runner-cccccc"] = true
 	h.sd.active["ghr-runner-dddddd"] = true // unit without a dir
@@ -147,6 +153,119 @@ func TestReconcileStopsUntrackedUnitBeforeDeletingRegistration(t *testing.T) {
 	}
 }
 
+// A registration that is gone by the time it is deleted is removed all the same.
+func TestReconcileTakesA404FromTheDeleteAsRemoved(t *testing.T) {
+	h := newHarness(t)
+	h.gh.listed["darkmem"] = []github.Runner{{ID: 3, Name: "ghr-darkmem-ffffff", Status: "offline"}}
+	h.gh.setErr("DeleteRunner darkmem", &github.APIError{Status: 404, Kind: github.ErrNotFound})
+	h.m.Reconcile(context.Background(), h.cfg)
+	h.m.Reconcile(context.Background(), h.cfg)
+	if ev := h.eventText(); !strings.Contains(ev, "info darkmem removed stale registration ghr-darkmem-ffffff") || strings.Contains(ev, "warn") {
+		t.Fatalf("events:\n%s", ev)
+	}
+}
+
+// A registration finish could not delete is retried by reconciliation even
+// once its repository is no longer served, which no runner list then covers.
+func TestReconcileRetriesARegistrationFinishCouldNotDelete(t *testing.T) {
+	h := newHarness(t)
+	if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	h.gh.setErr("DeleteRunner darkmem", &github.APIError{Status: 502, Kind: github.ErrServer})
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if h.state("aaaaaa") != "gone" || len(h.gh.deleted) != 0 {
+		t.Fatalf("state %s deleted %v", h.state("aaaaaa"), h.gh.deleted)
+	}
+	h.gh.setErr("DeleteRunner darkmem", nil)
+	cfg := h.cfg.Clone()
+	cfg.Repos = slices.DeleteFunc(cfg.Repos, func(r config.Repo) bool { return r.Name == "darkmem" })
+	h.cfg = cfg
+	h.m.Reconcile(context.Background(), h.cfg)
+	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("deleted %v\n%s", h.gh.deleted, h.eventText())
+	}
+	h.m.Reconcile(context.Background(), h.cfg)
+	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("deleted again: %v", h.gh.deleted)
+	}
+}
+
+func addUndeleted(h *harness, id int64, repo string) {
+	h.m.mu.Lock()
+	defer h.m.mu.Unlock()
+	h.m.undeleted[id] = registration{repo: repo, name: fmt.Sprintf("ghr-%s-%06x", repo, id)}
+}
+
+func undeletedCount(h *harness) int {
+	h.m.mu.Lock()
+	defer h.m.mu.Unlock()
+	return len(h.m.undeleted)
+}
+
+// Retrying a registration is a GitHub call like any other, so it waits out a
+// rate limit pause.
+func TestReconcileRetriesRegistrationsOnlyWhileTheAPIIsAllowed(t *testing.T) {
+	h := newHarness(t)
+	addUndeleted(h, 101, "darkmem")
+	h.m.mu.Lock()
+	h.m.pauseUntil = h.now.Add(time.Minute)
+	h.m.mu.Unlock()
+	h.m.Reconcile(context.Background(), h.cfg)
+	if strings.Contains(h.gh.callsText(), "DeleteRunner") || undeletedCount(h) != 1 {
+		t.Fatalf("calls %s, %d kept", h.gh.callsText(), undeletedCount(h))
+	}
+	h.now = h.now.Add(time.Minute)
+	h.m.Reconcile(context.Background(), h.cfg)
+	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) || undeletedCount(h) != 0 {
+		t.Fatalf("deleted %v, %d kept", h.gh.deleted, undeletedCount(h))
+	}
+}
+
+// A rate limit met by one retry pauses the rest, like it does anywhere else.
+func TestReconcileRateLimitedRetryPausesTheAPI(t *testing.T) {
+	h := newHarness(t)
+	addUndeleted(h, 101, "darkmem")
+	addUndeleted(h, 102, "darkmem")
+	until := h.now.Add(time.Minute)
+	h.gh.setErr("DeleteRunner darkmem", &github.APIError{Status: 429, Kind: github.ErrRateLimit, RetryAt: until})
+	h.m.Reconcile(context.Background(), h.cfg)
+	if got := strings.Count(h.gh.callsText(), "DeleteRunner"); got != 1 {
+		t.Fatalf("%d delete calls after a rate limit\n%s", got, h.eventText())
+	}
+	if !h.m.PausedUntil().Equal(until) || undeletedCount(h) != 2 {
+		t.Fatalf("paused until %v, %d kept", h.m.PausedUntil(), undeletedCount(h))
+	}
+}
+
+// A 403 for a repository ghr no longer serves is reported once and given up:
+// nothing in ghr will ever make that token allowed to delete it.
+func TestReconcileGivesUpOnARemovedRepositoryTheTokenCannotReach(t *testing.T) {
+	h := newHarness(t)
+	addUndeleted(h, 101, "gone-repo")
+	addUndeleted(h, 102, "darkmem")
+	forbidden := &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible by personal access token"}
+	h.gh.setErr("DeleteRunner gone-repo", forbidden)
+	h.gh.setErr("DeleteRunner darkmem", forbidden)
+	h.m.Reconcile(context.Background(), h.cfg)
+	h.m.Reconcile(context.Background(), h.cfg)
+	if got := strings.Count(h.gh.callsText(), "DeleteRunner gone-repo"); got != 1 {
+		t.Fatalf("%d delete calls for the removed repository\n%s", got, h.eventText())
+	}
+	if got := strings.Count(h.eventText(), "ghr-gone-repo-"); got != 1 {
+		t.Fatalf("%d events for the removed repository\n%s", got, h.eventText())
+	}
+	// A served repository keeps its registration and shows the permission error.
+	if got := strings.Count(h.gh.callsText(), "DeleteRunner darkmem"); got != 2 || undeletedCount(h) != 1 {
+		t.Fatalf("%d delete calls for darkmem, %d kept", got, undeletedCount(h))
+	}
+	if !strings.Contains(h.m.Status().Repos[1].Error, "token lacks permission for this repository") {
+		t.Fatalf("status %q", h.m.Status().Repos[1].Error)
+	}
+}
+
 func TestReconcileReportsListRunnersFailure(t *testing.T) {
 	h := newHarness(t)
 	h.gh.setErr("ListRunners darkmem", errors.New("boom"))
@@ -220,6 +339,19 @@ func TestReconcileLeavesAnotherHostsRunners(t *testing.T) {
 	}
 }
 
+// GitHub repository names are case-insensitive, so a registration named in
+// another case than the config's is still one of ours.
+func TestReconcileSweepsARegistrationNamedInAnotherCase(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.Repos[1].Name = "MyRepo"
+	h.gh.listed["MyRepo"] = []github.Runner{{ID: 31, Name: "ghr-myrepo-abc123", Status: "offline"}}
+	h.m.Reconcile(context.Background(), h.cfg)
+	h.m.Reconcile(context.Background(), h.cfg)
+	if !reflect.DeepEqual(h.gh.deleted, []int64{31}) {
+		t.Fatalf("deleted %v\n%s", h.gh.deleted, h.eventText())
+	}
+}
+
 func adoptedMeta(h *harness, id string) Meta {
 	h.m.mu.Lock()
 	defer h.m.mu.Unlock()
@@ -247,55 +379,29 @@ func TestAdoptTrustsTheRootOwnedRecordOverTheInstanceCopy(t *testing.T) {
 	}
 }
 
-// An instance an older ghr spawned has only the copy in its own directory.
-// It is adopted from that copy once, and recorded.
-func TestAdoptRecordsAnOlderInstancesMetadataOnce(t *testing.T) {
+// An instance an older ghr spawned has only the copy in its own directory,
+// which its job can rewrite. Nothing trusts that copy: the instance is
+// stopped and removed, and no registration is deleted on its word.
+func TestAdoptStopsAnInstanceWithoutARecord(t *testing.T) {
 	h := newHarness(t)
-	makeInstance(t, h, "aaaaaa", "darkmem", 1, false)
+	makeInstance(t, h, "aaaaaa", "darkmem", 1, true)
+	os.Remove(filepath.Join(h.m.Paths.Private, "aaaaaa.json"))
 	h.sd.active["ghr-runner-aaaaaa"] = true
 	if err := h.m.Adopt(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	var rec Meta
-	if err := readJSON(filepath.Join(h.m.Paths.Private, "aaaaaa.json"), &rec); err != nil || rec.Repo != "darkmem" || rec.RunnerID != 1 {
-		t.Fatalf("recorded %+v: %v", rec, err)
+	h.m.Wait()
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || h.state("aaaaaa") != "gone" {
+		t.Fatalf("stopped %v, state %s\n%s", h.sd.stopped, h.state("aaaaaa"), h.eventText())
 	}
-	forged := Meta{ID: "aaaaaa", Repo: "darkcloud", RunnerID: 999, RunnerName: "ghr-darkcloud-aaaaaa"}
-	if err := writeJSON(filepath.Join(h.m.instanceDir("aaaaaa"), MetaFile), forged); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(h.m.instanceDir("aaaaaa")); !os.IsNotExist(err) {
+		t.Fatalf("instance dir kept: %v", err)
 	}
-	h.restart(t)
-	if err := h.m.Adopt(context.Background()); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(h.m.Paths.Private, "aaaaaa.json")); !os.IsNotExist(err) {
+		t.Fatalf("the directory's copy was recorded: %v", err)
 	}
-	if got := adoptedMeta(h, "aaaaaa"); got.Repo != "darkmem" || got.RunnerID != 1 {
-		t.Fatalf("adopted %+v", got)
-	}
-}
-
-// When the record cannot be written, adopting from the instance's own copy
-// would mean trusting that copy again at every later start. Adoption fails
-// instead, and nothing is stopped or removed.
-func TestAdoptFailsRatherThanTrustAnUnrecordedCopy(t *testing.T) {
-	h := newHarness(t)
-	makeInstance(t, h, "aaaaaa", "darkmem", 1, false)
-	h.sd.active["ghr-runner-aaaaaa"] = true
-	orig := writeFile
-	t.Cleanup(func() { writeFile = orig })
-	writeFile = func(name string, data []byte, perm os.FileMode) error {
-		if strings.HasPrefix(name, h.m.Paths.Private) {
-			return &fs.PathError{Op: "write", Path: name, Err: syscall.EIO}
-		}
-		return orig(name, data, perm)
-	}
-	if err := h.m.Adopt(context.Background()); err == nil {
-		t.Fatal("adopted an instance whose metadata could not be recorded")
-	}
-	if len(h.sd.stopped) != 0 {
-		t.Fatalf("stopped %v", h.sd.stopped)
-	}
-	if _, err := os.Stat(h.m.instanceDir("aaaaaa")); err != nil {
-		t.Fatalf("instance dir removed: %v", err)
+	if len(h.gh.deleted) != 0 || len(h.history(t)) != 0 {
+		t.Fatalf("deleted %v, history %v", h.gh.deleted, h.history(t))
 	}
 }
 
@@ -320,8 +426,8 @@ func TestPrivateRecordsGoWithTheirInstance(t *testing.T) {
 }
 
 // If the instance directory cannot be removed after a failed spawn, it stays
-// runner-writable. Its private record must stay too, or the next start would
-// take the directory's own copy of the metadata on trust.
+// runner-writable. Its private record stays too, and is what the next start
+// reads, not the directory's copy.
 func TestFailedSpawnKeepsTheRecordWhileTheDirStays(t *testing.T) {
 	h := newHarness(t)
 	origWrite, origRemove := writeFile, removeAll

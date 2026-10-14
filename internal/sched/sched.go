@@ -178,6 +178,7 @@ func planQueue(cfg *config.Config, insts []Instance, demand Demand, now time.Tim
 
 func planAll(cfg *config.Config, insts []Instance, demand Demand, now time.Time) []Spawn {
 	var out []Spawn
+	total := totalActive(insts)
 	for _, r := range cfg.Repos {
 		if r.Paused {
 			continue
@@ -191,8 +192,9 @@ func planAll(cfg *config.Config, insts []Instance, demand Demand, now time.Time)
 		if max := cfg.EffectiveMax(r); max > 0 && n > max-repoActive(insts, r.Name) {
 			n = max - repoActive(insts, r.Name)
 		}
-		for ; n > 0; n-- {
+		for ; n > 0 && total < config.MaxRunners; n-- {
 			out = append(out, Spawn{Repo: r.Name})
+			total++
 		}
 	}
 	return out

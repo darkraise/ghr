@@ -34,7 +34,7 @@ ghr targets the space in between: one LXC or VM, native runners, nothing else to
 - **Toolchain cache.** Pre-installs Node, Python, Go, Java and .NET where `setup-*` actions find them, so jobs skip the download.
 - **Disk care.** Prunes Docker when the disk fills and manages the package caches jobs share.
 - **Artifact quota.** Tracks the month's GitHub artifact storage against your plan's allowance, warns before it runs out, and cleans up old artifacts.
-- **Runner updates.** ghr tracks new runner releases and GitHub's deadline for them, and installs a queued update once no job is running.
+- **Runner updates.** ghr tracks new runner releases and GitHub's deadline for them. A queued update is downloaded in the background and installed once no job is running; runners are paused only for the switch.
 - **One-line install.** An idempotent installer that also upgrades.
 
 ## Quick start
@@ -63,7 +63,7 @@ jobs:
 
 ghr runs as a systemd service. Every few seconds it asks the GitHub API for queued jobs in the configured repositories. When a job is waiting and the caps allow it, ghr requests a just-in-time runner configuration from GitHub, copies the runner software into a fresh instance directory and starts it with `systemd-run` as the `ghrunner` user, under the configured memory and CPU limits. The runner takes exactly one job; GitHub removes its registration afterwards.
 
-Job hooks record which job each runner ran. When a runner exits, ghr removes the Docker compose projects and containers the job started, then the instance directory. The `ghr` command talks to the daemon over a Unix socket, and the web UI over HTTP.
+Job hooks record which job each runner ran. When a runner exits, ghr removes the Docker compose projects the job started and the service and `container:` job containers and networks the runner created, then the instance directory. Containers the job starts with plain `docker run` are removed only if their names match the repository's `cleanup_name_prefixes`, so give them a prefix or use `--rm`. The `ghr` command talks to the daemon over a Unix socket, and the web UI over HTTP.
 
 ## Security
 
@@ -71,7 +71,9 @@ ghr executes your CI jobs natively on the host, so treat the host as trusted by 
 
 - Any job can become root on the host through Docker. Do not run anything else on it.
 - All repositories ghr serves form one trust domain. A job in any of them can read the GitHub token, take over other repositories' runners and read their job secrets, and leave files in the shared home, package caches and tool cache that later jobs of every repository run. "Single-use" means a fresh runner registration and working directory, not a clean host. Serve only repositories whose workflow authors you would trust with root on the host and with every other served repository.
-- ghr serves public repositories only when `allow_public` is set for them. Never enable "Run workflows from fork pull requests" on a repository ghr serves: a fork's pull request could then run its code on your host.
+- ghr serves public repositories only when `allow_public` is set for them, and refuses jobs whose event comes from a fork, such as a fork's pull request. To refuse a job, ghr's job-started hook ends the runner's worker process. A hook that only exits non-zero fails the job, but the job's `if: always()` and `if: failure()` steps still run. This behaviour was read from the actions/runner source and has not yet been checked with a real fork pull request; that check is still due before release. A runner that is already idle when a private repository turns public may still take one job before the next poll pauses it, so never enable "Run workflows from fork pull requests" on a repository ghr serves.
+- An `issue_comment` workflow on a fork's pull request runs the base branch's code and is not refused. Do not let such a workflow check out the pull request's code.
+- A `merge_group` workflow is not refused either. A merge queue builds a branch of the base repository that holds the pull request's code, a fork's included, and runs it as base-repository code once a maintainer adds the pull request to the queue. Queue only pull requests whose code you trust to run on the host.
 - The web UI is plain HTTP. Put a TLS proxy in front of it and keep it on a trusted network; see [Web UI](docs/web-ui.md#behind-a-reverse-proxy).
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).

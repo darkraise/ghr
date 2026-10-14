@@ -71,6 +71,24 @@ func TestStoreUpdateReloadToken(t *testing.T) {
 	if s.Token() != "tok2" || strings.TrimSpace(string(data)) != "tok2" {
 		t.Fatalf("token %q file %q", s.Token(), data)
 	}
+	if fi, err := os.Stat(s.TokenPath); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("token file mode %v %v", fi.Mode(), err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(s.TokenPath), ".token-*")); len(left) != 0 {
+		t.Fatalf("temp files left: %v", left)
+	}
+}
+
+// GitHub owner names are case-insensitive, so a reload that only changes the
+// owner's case is not a change of owner and applies the rest of the file.
+func TestStoreReloadAcceptsTheOwnerInAnotherCase(t *testing.T) {
+	s := newStore(t)
+	edited := strings.Replace(cfgYAML, "owner: darkraise", "owner: DarkRaise", 1)
+	edited = strings.Replace(edited, "global_max: 2", "global_max: 3", 1)
+	os.WriteFile(s.ConfigPath, []byte(edited), 0o600)
+	if _, _, _, err := s.Reload(); err != nil || s.Config().GlobalMax != 3 {
+		t.Fatalf("reload: err %v cfg %+v", err, s.Config())
+	}
 }
 
 // Reload says which warnings of its load are new: neither in the load before

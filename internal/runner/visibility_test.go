@@ -203,7 +203,7 @@ func TestRemovedRepositoryIsForgotten(t *testing.T) {
 	if _, known := h.visibility("darkmem"); !known {
 		t.Fatal("setup: darkmem was not read")
 	}
-	h.m.apiErr("darkcloud", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(time.Hour)}, h.now)
+	h.rateLimited("darkcloud", h.now.Add(time.Hour))
 	without := h.cfg.Clone()
 	without.Repos = without.Repos[:1]
 	h.cfg = without

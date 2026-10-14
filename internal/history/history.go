@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -27,6 +28,21 @@ type Store struct {
 	writes   int64
 	onChange func()
 	skipped  int // lines the last read skipped; readAll logs a change
+	cache    *snapshot
+}
+
+// snapshot is the parsed content of the file as it was when fi described it.
+type snapshot struct {
+	fi      os.FileInfo
+	entries []model.HistoryEntry
+	skipped int
+}
+
+// current reports whether fi still describes the file the snapshot was read
+// from. A rewrite that leaves the same size, modification time and file
+// unchanged is not noticed.
+func (c *snapshot) current(fi os.FileInfo) bool {
+	return c != nil && os.SameFile(c.fi, fi) && c.fi.Size() == fi.Size() && c.fi.ModTime().Equal(fi.ModTime())
 }
 
 // SetOnChange installs fn, which Append and Prune call after a counted write,
@@ -91,6 +107,7 @@ func (s *Store) append(e model.HistoryEntry) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	warm := s.cache.current(st)
 	if st.Mode().Perm()&^0o600 != 0 {
 		if err := f.Chmod(0o600); err != nil {
 			return false, err
@@ -113,13 +130,37 @@ func (s *Store) append(e model.HistoryEntry) (bool, error) {
 	if err := f.Sync(); err != nil {
 		return true, err
 	}
-	return true, f.Close()
+	after, err := f.Stat()
+	if err != nil {
+		return true, err
+	}
+	if err := f.Close(); err != nil {
+		return true, err
+	}
+	if warm {
+		s.cache = &snapshot{fi: after, entries: append(s.cache.entries, e), skipped: s.cache.skipped}
+	}
+	return true, nil
 }
 
-// readAll returns the stored entries and how many lines it skipped: a line
-// longer than maxLine, or one that is not valid JSON. It logs that number
-// when it differs from the previous read's and is not zero. s.mu is held.
+// readAll returns a copy of the stored entries and how many lines it
+// skipped: a line longer than maxLine, or one that is not valid JSON. It
+// parses the file only when it differs from the one the last call parsed. It
+// logs that number when it differs from the previous read's and is not zero.
+// s.mu is held.
 func (s *Store) readAll() ([]model.HistoryEntry, int, error) {
+	fi, err := os.Stat(s.Path)
+	if os.IsNotExist(err) {
+		s.skipped, s.cache = 0, nil
+		return nil, 0, nil
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	if s.cache.current(fi) {
+		return slices.Clone(s.cache.entries), s.cache.skipped, nil
+	}
+	s.cache = nil
 	f, err := os.Open(s.Path)
 	if os.IsNotExist(err) {
 		s.skipped = 0
@@ -129,6 +170,12 @@ func (s *Store) readAll() ([]model.HistoryEntry, int, error) {
 		return nil, 0, err
 	}
 	defer f.Close()
+	// Taken before the read: a file that grows during it then no longer
+	// matches and is read again.
+	fi, err = f.Stat()
+	if err != nil {
+		return nil, 0, err
+	}
 	var out []model.HistoryEntry
 	skipped := 0
 	r := bufio.NewReaderSize(f, 64*1024)
@@ -172,7 +219,8 @@ func (s *Store) readAll() ([]model.HistoryEntry, int, error) {
 			log.Printf("history: %s: skipped %d line(s) longer than 1 MiB or not valid JSON", s.Path, skipped)
 		}
 	}
-	return out, skipped, nil
+	s.cache = &snapshot{fi: fi, entries: out, skipped: skipped}
+	return slices.Clone(out), skipped, nil
 }
 
 // Query returns entries by FinishedAt, newest first, filtered by repo (in any
@@ -253,11 +301,16 @@ func (s *Store) prune(cutoff time.Time) (bool, error) {
 		tmp.Close()
 		return false, err
 	}
+	fi, statErr := tmp.Stat()
 	if err := tmp.Close(); err != nil {
 		return false, err
 	}
 	if err := os.Rename(tmp.Name(), s.Path); err != nil {
 		return false, err
+	}
+	s.skipped, s.cache = 0, nil
+	if statErr == nil {
+		s.cache = &snapshot{fi: fi, entries: keep}
 	}
 	return true, nil
 }

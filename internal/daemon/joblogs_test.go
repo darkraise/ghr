@@ -253,6 +253,64 @@ func TestJobLogParsedCacheIsBoundedByLogSize(t *testing.T) {
 	}
 }
 
+// Misses are kept for minutes, so a daemon that is asked about many jobs
+// would otherwise keep one for every job it ever failed to read.
+func TestJobLogMissesAreBounded(t *testing.T) {
+	b, _, gh := newBackend(t)
+	ctx := context.Background()
+	for id := int64(1); id <= logMissEntries+1; id++ {
+		logJobOf(gh, id, "job", "x")
+		gh.logErr[id] = ghNotFound()
+		if l, err := b.JobLog(ctx, "darkmem", id); err != nil || !l.NoLog {
+			t.Fatalf("job %d: log %+v err %v", id, l, err)
+		}
+	}
+	b.logs.mu.Lock()
+	defer b.logs.mu.Unlock()
+	if _, ok := b.logs.misses.Get(1); ok {
+		t.Fatal("the oldest miss was kept")
+	}
+	if _, ok := b.logs.misses.Get(2); !ok {
+		t.Fatal("the second oldest miss was dropped")
+	}
+	if _, ok := b.logs.misses.Get(logMissEntries + 1); !ok {
+		t.Fatal("the newest miss was dropped")
+	}
+}
+
+// A parsed line costs memory beyond its bytes in the raw log, so a log of
+// many short lines is charged more than a log of one long line of the same
+// size.
+func TestJobLogParsedCacheChargesForLines(t *testing.T) {
+	short := make([]string, 40)
+	for i := range short {
+		short[i] = "x"
+	}
+	raw := int64(len(logLines(short...)))
+	long := strings.Repeat("y", int(raw)-len(logLines("")))
+	setParsedLogBytes(t, raw+10*logLineOverhead)
+	b, _, gh := newBackend(t)
+	logJobOf(gh, 1, "short lines", short...)
+	logJobOf(gh, 2, "one long line", long)
+	if int64(len(logLines(long))) != raw {
+		t.Fatalf("raw sizes differ: %d and %d", len(logLines(long)), raw)
+	}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		id        int64
+		downloads int
+	}{{1, 2}, {2, 1}} {
+		for range 2 {
+			if _, err := b.JobLog(ctx, "darkmem", tc.id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n := gh.count(fmt.Sprintf("JobLog darkmem %d", tc.id)); n != tc.downloads {
+			t.Errorf("job %d downloaded %d times, want %d", tc.id, n, tc.downloads)
+		}
+	}
+}
+
 func TestJobLogCallersShareOneDownload(t *testing.T) {
 	b, _, gh := newBackend(t)
 	logJobOf(gh, 1002, "Backend tests", "x")
@@ -543,7 +601,7 @@ func TestLogRouteTellsAQueuedDownloadFromAStartedOne(t *testing.T) {
 	for {
 		b.logs.mu.Lock()
 		_, inFlight := b.logs.calls[5]
-		_, missed := b.logs.misses[5]
+		_, missed := b.logs.misses.Get(5)
 		b.logs.mu.Unlock()
 		if missed {
 			t.Fatal("a busy download was cached as a miss")

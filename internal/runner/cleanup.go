@@ -2,12 +2,14 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -73,9 +75,27 @@ func (m *Manager) projects(ctx context.Context, id string) ([]string, error) {
 	return names, nil
 }
 
-// cleanupDocker removes the compose projects started from an instance's work dir
-// and the repo's prefix-matched containers. It returns how many containers it
-// removed and every failure joined; the caller retries the whole cleanup on error.
+// dockerInstanceLabel returns the label the actions runner puts on the job and
+// service containers it creates and on the job network: a bare key of the
+// first six hex digits of the SHA-256 of its lower-cased .runner file. It
+// returns "" when the runner never wrote the file, and then created nothing.
+// Containers a job starts itself with docker run do not carry it.
+func (m *Manager) dockerInstanceLabel(id string) (string, error) {
+	data, err := readJobFile(filepath.Join(m.instanceDir(id), ".runner"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read .runner: %w", err)
+	}
+	sum := sha256.Sum256([]byte(strings.ToLower(string(data))))
+	return fmt.Sprintf("%x", sum[:3]), nil
+}
+
+// cleanupDocker removes the compose projects started from an instance's work dir,
+// the containers and network the runner itself created, and the repo's
+// prefix-matched containers. It returns how many containers it removed and
+// every failure joined; the caller retries the whole cleanup on error.
 func (m *Manager) cleanupDocker(ctx context.Context, cfg *config.Config, id, repo string) (int, error) {
 	names, err := m.projects(ctx, id)
 	if err != nil {
@@ -84,7 +104,7 @@ func (m *Manager) cleanupDocker(ctx context.Context, cfg *config.Config, id, rep
 	record := func() error {
 		err := os.MkdirAll(m.Paths.Private, 0o700)
 		if err == nil {
-			err = writeFile(m.privateProjects(id), []byte(strings.Join(names, "\n")+"\n"), 0o600)
+			err = writeFileAtomic(m.privateProjects(id), []byte(strings.Join(names, "\n")+"\n"), 0o600)
 		}
 		if err != nil {
 			return fmt.Errorf("record compose projects: %w", err)
@@ -122,6 +142,21 @@ func (m *Manager) cleanupDocker(ctx context.Context, cfg *config.Config, id, rep
 	if recordAgain {
 		if err := record(); err != nil {
 			errs = append(errs, err)
+		}
+	}
+	if label, err := m.dockerInstanceLabel(id); err != nil {
+		errs = append(errs, err)
+	} else if label != "" {
+		ids, err := m.Docker.ContainerIDsByLabel(ctx, label)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("list containers of the runner: %w", err))
+		} else if err := m.Docker.RemoveContainers(ctx, ids); err != nil {
+			errs = append(errs, fmt.Errorf("remove containers of the runner: %w", err))
+		} else {
+			removed += len(ids)
+		}
+		if err := m.Docker.RemoveNetworksByLabel(ctx, label); err != nil {
+			errs = append(errs, fmt.Errorf("remove networks of the runner: %w", err))
 		}
 	}
 	r := cfg.Repo(repo)
@@ -436,6 +471,10 @@ func parseCursor(cursor string) map[string]int64 {
 	return out
 }
 
+// logPatterns match the runner's diagnostic logs, the only files of _diag
+// that RunnerLog reads and an archive keeps.
+var logPatterns = []string{"Runner_*.log", "Worker_*.log"}
+
 // lastLogKey is the cursor key naming the file the previous chunk ended in; log
 // file names always match Runner_*.log or Worker_*.log, so it never collides.
 const lastLogKey = "last"
@@ -456,7 +495,7 @@ func (m *Manager) RunnerLog(id, cursor string) (model.LogChunk, error) {
 	}
 	defer root.Close()
 	var files []string
-	for _, pat := range []string{"Runner_*.log", "Worker_*.log"} {
+	for _, pat := range logPatterns {
 		matches, _ := fs.Glob(root.FS(), pat)
 		sort.Strings(matches)
 		files = append(files, matches...)
@@ -523,13 +562,116 @@ func (m *Manager) openLogs(id string) (*os.Root, error) {
 	return os.OpenRoot(dir)
 }
 
-// readFrom reads up to limit bytes of a log from off. Only a regular file is
-// read: a symlink is skipped, and a FIFO or a device would block the reader
-// or feed it for ever. The check is repeated on the open file, because the
-// job can swap the name between the two; whatever it swaps in, the root
-// lets the open reach only a file inside the log directory.
+// pruneArchive removes from the archive id under logs everything but its
+// regular files named by logPatterns that have no other name on the host.
+// It runs before the archive is chowned, because a chown reaches a file's
+// other names too. The job filled the archive, so only a real directory is
+// opened, through an os.Root of logs, and it is worked on through its own
+// os.Root, which follows no symlink out of it and keeps the directory it
+// opened even if the name is swapped.
+func pruneArchive(logs, id string) error {
+	return withArchive(logs, id, pruneEntries)
+}
+
+// trimArchive prunes the archive again, cuts each log left to its first
+// maxArchivedLog bytes, and sets the archive's mtime to now.
+func trimArchive(logs, id string, now time.Time) error {
+	return withArchive(logs, id, func(root *os.Root) error {
+		if err := pruneEntries(root); err != nil {
+			return err
+		}
+		entries, err := fs.ReadDir(root.FS(), ".")
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if err := truncateLog(root, e.Name()); err != nil {
+				return err
+			}
+		}
+		// The rename keeps _diag's mtime, the time its last log file was
+		// created, often the job's start. prune ages archives as it ages
+		// history: from the job's end.
+		return root.Chtimes(".", now, now)
+	})
+}
+
+func withArchive(logs, id string, fn func(root *os.Root) error) error {
+	parent, err := os.OpenRoot(logs)
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	if fi, err := parent.Lstat(id); err != nil || !fi.IsDir() {
+		if err == nil {
+			err = fmt.Errorf("%s: not a directory", id)
+		}
+		return err
+	}
+	root, err := parent.OpenRoot(id)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return fn(root)
+}
+
+func pruneEntries(root *os.Root) error {
+	entries, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !e.Type().IsRegular() || !isLogName(name) || otherNames(e) {
+			if err := root.RemoveAll(name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// otherNames reports whether the entry is a file that has another name
+// outside the archive; cutting or keeping it would act on that file too.
+func otherNames(e fs.DirEntry) bool {
+	fi, err := e.Info()
+	return err != nil || hasOtherNames(fi)
+}
+
+func isLogName(name string) bool {
+	for _, pat := range logPatterns {
+		if ok, _ := path.Match(pat, name); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func truncateLog(root *os.Root, name string) error {
+	fi, err := root.Lstat(name)
+	if err != nil || fi.Size() <= maxArchivedLog {
+		return err
+	}
+	f, err := root.OpenFile(name, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() || hasOtherNames(fi) {
+		return fmt.Errorf("%s: not a regular file with one name", name)
+	}
+	return f.Truncate(maxArchivedLog)
+}
+
+// readFrom reads up to limit bytes of a log from off. Only a regular file
+// with no other name is read: a symlink is skipped, and so is a hard link to
+// a file elsewhere, and a FIFO or a device would block the reader or feed it
+// for ever. The check is repeated on the open file, because the job can swap
+// the name between the two; whatever it swaps in, the root lets the open
+// reach only a file inside the log directory.
 func readFrom(root *os.Root, name string, off int64, limit int) ([]byte, error) {
-	if fi, err := root.Lstat(name); err != nil || !fi.Mode().IsRegular() {
+	if fi, err := root.Lstat(name); err != nil || !fi.Mode().IsRegular() || hasOtherNames(fi) {
 		return nil, fs.ErrInvalid
 	}
 	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
@@ -537,7 +679,7 @@ func readFrom(root *os.Root, name string, off int64, limit int) ([]byte, error) 
 		return nil, err
 	}
 	defer f.Close()
-	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() || hasOtherNames(fi) {
 		return nil, fs.ErrInvalid
 	}
 	if _, err := f.Seek(off, io.SeekStart); err != nil {

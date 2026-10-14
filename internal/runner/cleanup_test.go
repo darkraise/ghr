@@ -3,15 +3,18 @@ package runner
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/sched"
 	"github.com/darkraise/ghr/internal/system"
@@ -39,6 +42,62 @@ func TestCleanupDockerProjectsAndPrefixes(t *testing.T) {
 	want := []string{"com.docker.compose.project=custom-p", "com.docker.compose.project=ghr-aaaaaa"}
 	if !reflect.DeepEqual(h.docker.netLabels, want) || !reflect.DeepEqual(h.docker.volLabels, want) {
 		t.Fatalf("networks %v volumes %v", h.docker.netLabels, h.docker.volLabels)
+	}
+}
+
+// A .runner file in the shape the runner writes, and the label the runner puts
+// on its service containers and job network: the first six hex digits of the
+// sha256 of the lower-cased file (DockerInstanceLabel in actions/runner's
+// DockerCommandManager.cs).
+const (
+	runnerFile  = `{"AgentId":"1","AgentName":"example-runner-abc123","DisableUpdate":"True","Ephemeral":"True","PoolId":"1","PoolName":null,"ServerUrl":"https://pipelines.actions.example/token/","WorkFolder":"_work","GitHubUrl":"https://github.example/example/repo","ServerUrlV2":"https://broker.actions.example/","UseV2Flow":"true"}`
+	runnerLabel = "c6b47a"
+)
+
+func TestCleanupRemovesTheRunnersOwnContainersAndNetworks(t *testing.T) {
+	h := newHarness(t)
+	dir := h.m.instanceDir("abc123")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".runner"), []byte(runnerFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.docker.byLabel[runnerLabel] = []string{"svc1", "job1"}
+
+	removed, err := h.m.cleanupDocker(context.Background(), h.cfg, "abc123", "darkcloud")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 2 || !reflect.DeepEqual(h.docker.removed, []string{"svc1", "job1"}) {
+		t.Fatalf("removed %d %v", removed, h.docker.removed)
+	}
+	want := []string{"com.docker.compose.project=ghr-abc123", runnerLabel}
+	if !reflect.DeepEqual(h.docker.netLabels, want) {
+		t.Fatalf("networks %v, want %v", h.docker.netLabels, want)
+	}
+}
+
+func TestCleanupWithoutRunnerFileSkipsTheRunnerLabel(t *testing.T) {
+	h := newHarness(t)
+	if err := os.MkdirAll(h.m.instanceDir("abc123"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.m.cleanupDocker(context.Background(), h.cfg, "abc123", "darkcloud"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"com.docker.compose.project=ghr-abc123"}; !reflect.DeepEqual(h.docker.netLabels, want) {
+		t.Fatalf("networks %v, want %v", h.docker.netLabels, want)
+	}
+}
+
+func TestCleanupReportsAnUnreadableRunnerFile(t *testing.T) {
+	h := newHarness(t)
+	if err := os.MkdirAll(filepath.Join(h.m.instanceDir("abc123"), ".runner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.m.cleanupDocker(context.Background(), h.cfg, "abc123", "darkcloud"); err == nil || !strings.Contains(err.Error(), ".runner") {
+		t.Fatalf("err %v", err)
 	}
 }
 
@@ -93,6 +152,37 @@ func TestCleanupRetryRemembersCustomProjects(t *testing.T) {
 	want := []string{"com.docker.compose.project=custom-p", "com.docker.compose.project=ghr-aaaaaa"}
 	if !reflect.DeepEqual(h.docker.netLabels, want) {
 		t.Fatalf("retry networks %v", h.docker.netLabels)
+	}
+}
+
+// A rewrite of the remembered projects that dies partway leaves the previous
+// list readable, so a later retry still reaches the projects it names.
+func TestFailedProjectRecordKeepsThePreviousOne(t *testing.T) {
+	h := newHarness(t)
+	dir := h.m.instanceDir("aaaaaa")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.docker.compose = []system.ComposeContainer{{ID: "c1", Project: "custom-p", WorkingDir: filepath.Join(dir, "_work", "r", "r")}}
+	h.docker.setErr("RemoveNetworksByLabel", errors.New("network busy"))
+	if _, err := h.m.cleanupDocker(context.Background(), h.cfg, "aaaaaa", "darkmem"); err == nil {
+		t.Fatal("network failure not reported")
+	}
+	h.docker.compose = nil
+	orig := writeFile
+	t.Cleanup(func() { writeFile = orig })
+	writeFile = func(name string, data []byte, perm os.FileMode) error {
+		if strings.HasPrefix(name, h.m.privateProjects("aaaaaa")) {
+			orig(name, data[:len(data)/2], perm)
+			return &fs.PathError{Op: "write", Path: name, Err: syscall.EIO}
+		}
+		return orig(name, data, perm)
+	}
+	if _, err := h.m.cleanupDocker(context.Background(), h.cfg, "aaaaaa", "darkmem"); err == nil || !strings.Contains(err.Error(), "record compose projects") {
+		t.Fatalf("failed record not reported: %v", err)
+	}
+	if b, err := os.ReadFile(h.m.privateProjects("aaaaaa")); err != nil || !reflect.DeepEqual(strings.Fields(string(b)), []string{"custom-p", "ghr-aaaaaa"}) {
+		t.Fatalf("remembered list %q, %v", b, err)
 	}
 }
 
@@ -194,6 +284,31 @@ func TestPruneHistoryAndLogs(t *testing.T) {
 	}
 	if _, err := os.Stat(newLog); err != nil {
 		t.Fatal("new log dir removed")
+	}
+}
+
+// The runner creates _diag when it starts, and a long job can outlast the
+// retention; its archive ages from the job's end, as its history entry does.
+func TestArchivedLogsAgeFromTheJobsEnd(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.HistoryRetention = config.Duration(24 * time.Hour)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	diag := filepath.Join(h.m.instanceDir("aaaaaa"), "_diag")
+	os.WriteFile(filepath.Join(diag, "Worker_1.log"), []byte("log"), 0o644)
+	started := h.now.Add(-72 * time.Hour)
+	os.Chtimes(diag, started, started)
+	h.sd.active["ghr-runner-aaaaaa"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	archive := filepath.Join(h.m.Paths.Logs, "aaaaaa")
+	h.m.prune(h.cfg, h.now)
+	if _, err := os.Stat(archive); err != nil {
+		t.Fatalf("archive of a job that just ended was pruned: %v", err)
+	}
+	h.now = h.now.Add(25 * time.Hour)
+	h.m.prune(h.cfg, h.now)
+	if _, err := os.Stat(archive); !os.IsNotExist(err) {
+		t.Fatalf("archive kept past the retention: %v", err)
 	}
 }
 

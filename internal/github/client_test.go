@@ -174,11 +174,13 @@ func TestGenerateJITConfigBodyAndSpacing(t *testing.T) {
 	}
 }
 
-func TestDeleteRunner404IsSuccess(t *testing.T) {
+// GitHub also answers 404 when the token cannot see the repository, so the
+// caller is told and decides what the 404 means.
+func TestDeleteRunner404IsNotFound(t *testing.T) {
 	c, f := newClient(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(404) })
 	c.Sleep = func(context.Context, time.Duration) error { return nil }
-	if err := c.DeleteRunner(context.Background(), "r", 9); err != nil {
-		t.Fatal(err)
+	if err := c.DeleteRunner(context.Background(), "r", 9); !IsKind(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 	if f.requests[0] != "DELETE /repos/darkraise/r/actions/runners/9" {
 		t.Fatalf("request = %s", f.requests[0])

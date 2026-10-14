@@ -47,6 +47,7 @@ type updateState struct {
 	file         updateFile
 	installed    string // "" when dist/current does not resolve
 	latest       string
+	latestSum    string // the latest release's linux-x64 SHA-256; "" when its notes carry none
 	latestPub    time.Time
 	deadline     time.Time // zero unless a release newer than installed exists
 	checkedAt    time.Time
@@ -59,6 +60,18 @@ type updateState struct {
 	gen          int       // bumped when an install switches dist/current
 	stopRetryAt  time.Time // no start before this, after an idle runner did not stop
 	waitReason   string    // why a queued update last waited; "" when nothing held it
+	preparing    bool      // the queued version is downloading in the background
+	prepareStop  context.CancelFunc
+	prepareAt    time.Time // no prepare before this, after one failed
+	prepareFails int       // failed prepares in a row
+	prepareErr   string    // the last failed prepare's error; "" once one succeeds
+	prepareErrAt time.Time
+}
+
+// forgetPrepareLocked drops what failed prepares left behind; m.mu must be
+// held.
+func (m *Manager) forgetPrepareLocked() {
+	m.upd.prepareAt, m.upd.prepareFails, m.upd.prepareErr, m.upd.prepareErrAt = time.Time{}, 0, "", time.Time{}
 }
 
 // releaseFacts is what a release listing says about an installed version.
@@ -146,6 +159,14 @@ func sameTime(a, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
+// releaseChecked reports whether a release check has succeeded since the
+// start, or since dist/current changed.
+func (m *Manager) releaseChecked() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return !m.upd.checkedAt.IsZero()
+}
+
 func (m *Manager) releaseCheckDue(now time.Time) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -167,6 +188,7 @@ func (m *Manager) checkRelease(ctx context.Context) ([]github.Release, error) {
 		err = errNoRelease
 	}
 	latest := f.version.String()
+	sum, _ := f.latest.LinuxX64SHA256()
 	m.mu.Lock()
 	// An install that switched dist/current during the request has already
 	// published newer facts than this check read.
@@ -175,11 +197,11 @@ func (m *Manager) checkRelease(ctx context.Context) ([]github.Release, error) {
 	case stale:
 	case err != nil:
 		if installed != m.upd.installed {
-			m.upd.latest, m.upd.latestPub, m.upd.deadline, m.upd.checkedAt = "", time.Time{}, time.Time{}, time.Time{}
+			m.upd.latest, m.upd.latestSum, m.upd.latestPub, m.upd.deadline, m.upd.checkedAt = "", "", time.Time{}, time.Time{}, time.Time{}
 		}
 		m.upd.installed, m.upd.checkErr, m.upd.nextCheck = installed, err.Error(), now.Add(releaseCheckRetry)
 	default:
-		m.upd.installed, m.upd.latest, m.upd.latestPub, m.upd.deadline = installed, latest, f.latest.PublishedAt, f.deadline
+		m.upd.installed, m.upd.latest, m.upd.latestSum, m.upd.latestPub, m.upd.deadline = installed, latest, sum, f.latest.PublishedAt, f.deadline
 		m.upd.checkedAt, m.upd.checkErr, m.upd.nextCheck = now, "", now.Add(releaseCheckEvery)
 	}
 	m.mu.Unlock()
@@ -250,11 +272,16 @@ func (m *Manager) QueueUpdate(ctx context.Context) error {
 	if err := m.storeUpdateFile(f); err != nil {
 		return err
 	}
+	// Queueing again is the owner's retry: a failed prepare does not wait.
+	m.mu.Lock()
+	m.forgetPrepareLocked()
+	m.mu.Unlock()
 	m.Events.Add("info", "", "runner update queued")
 	return nil
 }
 
-// CancelUpdate drops a queued update; with none queued it does nothing.
+// CancelUpdate drops a queued update and stops its prepare; with none queued
+// it does nothing.
 func (m *Manager) CancelUpdate() error {
 	m.fileMu.Lock()
 	defer m.fileMu.Unlock()
@@ -271,6 +298,13 @@ func (m *Manager) CancelUpdate() error {
 	if err := m.storeUpdateFile(f); err != nil {
 		return err
 	}
+	m.mu.Lock()
+	stop := m.upd.prepareStop
+	m.forgetPrepareLocked()
+	m.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
 	m.Events.Add("info", "", "runner update cancelled")
 	return nil
 }
@@ -282,35 +316,47 @@ func timePtr(t time.Time) *time.Time {
 	return &t
 }
 
-// runnerUpdate renders the update state for /status; m.mu must be held.
+// runnerUpdate renders the update state for /status; m.mu must be held. A
+// failing prepare is shown as the last outcome: before the prepare ran in
+// the background, the same failure ended the update.
 func (m *Manager) runnerUpdate() model.RunnerUpdate {
 	u := m.upd
-	return model.RunnerUpdate{
+	r := model.RunnerUpdate{
 		Installed: u.installed, Latest: u.latest, LatestPublished: timePtr(u.latestPub), Deadline: timePtr(u.deadline),
 		CheckedAt: timePtr(u.checkedAt), CheckError: u.checkErr,
 		Queued: u.file.QueuedAt != nil, QueuedAt: u.file.QueuedAt, Running: u.running,
 		LastOutcome: u.lastOutcome, LastError: u.lastErr, LastFinished: timePtr(u.lastFinished),
 	}
+	if u.prepareErr != "" {
+		r.LastOutcome, r.LastError, r.LastFinished = "failed", u.prepareErr, timePtr(u.prepareErrAt)
+	}
+	return r
 }
 
 const (
-	// updateTimeout bounds one runner update.
+	// updateTimeout bounds one runner update. Its version is normally
+	// prepared already, so the update only switches to it; it downloads only
+	// when a release newer than the prepared one appeared in between.
 	updateTimeout = 10 * time.Minute
+	// prepareTimeout bounds downloading and preparing a queued version, which
+	// runs beside the runners.
+	prepareTimeout = 30 * time.Minute
 	// updateStopRetry spaces start attempts after an idle runner could not be
 	// stopped, so a persistent failure does not stop the other idle runners
 	// (and respawn them) on every tick.
 	updateStopRetry = 15 * time.Minute
 )
 
-// startUpdateIfFree starts a queued runner update when ghr is free: no
-// instance starting or busy, this tick's demand poll (made with cfg, still the
-// live config) answered for every repo that is neither paused nor blocked
-// with no queued job, the API allowed and not degraded, and the maintenance
-// reservation free. gatherDemand decides which repos count. Every idle
-// runner is stopped first and comes back on the new version; one that took a
-// job, or could not be checked or stopped, means ghr is not free after all.
-// Spawning waits until the update ends. A shutdown during the stops leaves the
-// update queued and not started.
+// startUpdateIfFree starts a queued runner update when its version is
+// prepared and ghr is free: no instance starting or busy, this tick's demand
+// poll (made with cfg, still the live config) answered for every repo that is
+// neither paused nor blocked with no queued job, the API allowed and not
+// degraded, the maintenance reservation free and no maintenance hold.
+// gatherDemand decides which repos count. Every idle runner is stopped first
+// and comes back on the new version; one that took a job, or could not be
+// checked or stopped, means ghr is not free after all. Spawning waits until
+// the update ends. A shutdown during the stops leaves the update queued and
+// not started.
 func (m *Manager) startUpdateIfFree(tickCtx context.Context, cfg *config.Config, now time.Time, demandOK bool, unanswered string) {
 	reason := ""
 	switch {
@@ -320,6 +366,8 @@ func (m *Manager) startUpdateIfFree(tickCtx context.Context, cfg *config.Config,
 		reason = "GitHub API calls are paused"
 	case !demandOK:
 		reason = unanswered + " did not answer its poll"
+	case !m.releaseChecked():
+		reason = "no runner release check has succeeded"
 	}
 	m.noteUpdateWait(reason)
 	if reason != "" || m.Config() != cfg {
@@ -327,7 +375,8 @@ func (m *Manager) startUpdateIfFree(tickCtx context.Context, cfg *config.Config,
 	}
 	m.fileMu.Lock()
 	m.mu.Lock()
-	free := m.upd.file.QueuedAt != nil && !m.upd.running && !m.closed && !m.pruning && !now.Before(m.upd.stopRetryAt)
+	free := m.upd.file.QueuedAt != nil && !m.upd.running && !m.upd.preparing && m.preparedLocked() &&
+		!m.closed && !m.pruning && m.held == 0 && !now.Before(m.upd.stopRetryAt)
 	for _, i := range m.insts {
 		if i.State == sched.Starting || i.State == sched.Busy {
 			free = false
@@ -384,6 +433,72 @@ func (m *Manager) startUpdateIfFree(tickCtx context.Context, cfg *config.Config,
 	go func() {
 		defer finish()
 		m.runUpdate(ctx)
+	}()
+}
+
+// preparedLocked reports whether a queued update has nothing left to
+// download: its version is complete in dist, or the update would not stage
+// one, because the last good check found no newer release or no checksum to
+// verify it by. Before a check has succeeded nothing is known, and nothing
+// is prepared. m.mu must be held.
+func (m *Manager) preparedLocked() bool {
+	u := m.upd
+	if u.checkedAt.IsZero() {
+		return false
+	}
+	return u.deadline.IsZero() || u.latestSum == "" || complete(filepath.Join(filepath.Dir(m.Paths.Dist), u.latest))
+}
+
+// prepareUpdate downloads, verifies and prepares a queued update's version in
+// the background, so the update itself only switches to it and runners keep
+// working meanwhile. A failure keeps the queue and is retried after
+// releaseCheckRetry, doubling with each failure in a row up to
+// releaseCheckEvery, since a bad checksum or a failing dependency script
+// fails the same way each time; a shutdown or a cancel just ends it.
+func (m *Manager) prepareUpdate(now time.Time) {
+	m.mu.Lock()
+	ver, sum := m.upd.latest, m.upd.latestSum
+	if m.upd.file.QueuedAt == nil || m.upd.running || m.upd.preparing || m.closed || now.Before(m.upd.prepareAt) ||
+		m.upd.checkedAt.IsZero() || m.preparedLocked() {
+		m.mu.Unlock()
+		return
+	}
+	// A cancel ends ctx only; the dependency script runs under base, which
+	// still ends with the timeout and a shutdown.
+	base, cancelBase := context.WithTimeout(m.maintCtx, prepareTimeout)
+	ctx, cancel := context.WithCancel(base)
+	m.upd.preparing, m.upd.prepareStop = true, cancel
+	m.wg.Add(1)
+	m.mu.Unlock()
+	m.Events.Add("info", "", "runner update: downloading %s", ver)
+	go func() {
+		defer m.wg.Done()
+		err := m.stage(ctx, base, filepath.Dir(m.Paths.Dist), ver, sum)
+		stopped := errors.Is(ctx.Err(), context.Canceled)
+		cancel()
+		cancelBase()
+		now := m.Now()
+		retry := releaseCheckRetry
+		m.mu.Lock()
+		m.upd.preparing, m.upd.prepareStop = false, nil
+		switch {
+		case err == nil:
+			m.forgetPrepareLocked()
+		case !stopped:
+			m.upd.prepareFails++
+			for n := 1; n < m.upd.prepareFails && retry < releaseCheckEvery; n++ {
+				retry *= 2
+			}
+			retry = min(retry, releaseCheckEvery)
+			m.upd.prepareAt, m.upd.prepareErr, m.upd.prepareErrAt = now.Add(retry), err.Error(), now
+		}
+		m.mu.Unlock()
+		switch {
+		case err == nil:
+			m.Events.Add("info", "", "runner update: %s is ready", ver)
+		case !stopped:
+			m.Events.Add("warn", "", "runner update: preparing %s failed: %v; retrying in %s", ver, err, retry)
+		}
 	}()
 }
 

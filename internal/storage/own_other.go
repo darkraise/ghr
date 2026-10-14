@@ -13,3 +13,5 @@ func chownTo(*os.Root, string, *owner) error { return nil }
 func allocated(fi os.FileInfo) int64 { return fi.Size() }
 
 func hardLink(os.FileInfo) (inode, bool) { return inode{}, false }
+
+func device(os.FileInfo) (uint64, bool) { return 0, false }

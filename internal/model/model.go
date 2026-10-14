@@ -129,12 +129,13 @@ type InstanceStatus struct {
 }
 
 type JobInfo struct {
-	RunID     int64     `json:"run_id"`
-	RunNumber string    `json:"run_number"`
-	Workflow  string    `json:"workflow"`
-	Name      string    `json:"name"`
-	HTMLURL   string    `json:"html_url,omitempty"`
-	StartedAt time.Time `json:"started_at"`
+	RunID      int64     `json:"run_id"`
+	RunAttempt int       `json:"run_attempt,omitempty"`
+	RunNumber  string    `json:"run_number"`
+	Workflow   string    `json:"workflow"`
+	Name       string    `json:"name"`
+	HTMLURL    string    `json:"html_url,omitempty"`
+	StartedAt  time.Time `json:"started_at"`
 }
 
 type Event struct {
@@ -149,6 +150,7 @@ type HistoryEntry struct {
 	ID         string    `json:"id"`
 	Repo       string    `json:"repo"`
 	RunID      int64     `json:"run_id"`
+	RunAttempt int       `json:"run_attempt,omitempty"`
 	RunNumber  string    `json:"run_number"`
 	Workflow   string    `json:"workflow"`
 	JobName    string    `json:"job_name"`

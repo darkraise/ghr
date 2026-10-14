@@ -2,7 +2,7 @@ package runner
 
 import (
 	"context"
-	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,8 +27,8 @@ func (m *Manager) activeUnits(ctx context.Context) (map[string]bool, error) {
 
 // Adopt rebuilds state after a daemon start from running units and instance dirs.
 // Instances whose unit is gone are cleaned up. A unit without a readable
-// ghr.json is stopped, and its dir is removed only once the stop succeeded;
-// Reconcile retries a failed stop and deletes the registration.
+// metadata record is stopped, and its dir is removed only once the stop
+// succeeded; Reconcile retries a failed stop and deletes the registration.
 func (m *Manager) Adopt(ctx context.Context) error {
 	active, err := m.activeUnits(ctx)
 	if err != nil {
@@ -44,16 +44,6 @@ func (m *Manager) Adopt(ctx context.Context) error {
 	now := m.Now()
 	adopted, exited := 0, 0
 	var toFinish []string
-	// Recording comes first, for every instance: when it fails, the runners
-	// keep running and the daemon does not start until the directory can be
-	// written.
-	for _, e := range entries {
-		if e.IsDir() && idRe.MatchString(e.Name()) {
-			if _, err := m.readMeta(e.Name()); errors.Is(err, errRecordMeta) {
-				return err
-			}
-		}
-	}
 	for _, e := range entries {
 		id := e.Name()
 		if !e.IsDir() || !idRe.MatchString(id) {
@@ -61,22 +51,19 @@ func (m *Manager) Adopt(ctx context.Context) error {
 		}
 		dir := m.instanceDir(id)
 		meta, err := m.readMeta(id)
-		if errors.Is(err, errRecordMeta) {
-			return err
-		}
 		if err != nil {
 			if active[id] {
 				if err := m.SD.Stop(ctx, UnitPrefix+id); err != nil {
-					m.Events.Add("warn", "", "instance %s has no readable %s and its unit did not stop (%v); reconciliation retries", id, MetaFile, err)
+					m.Events.Add("warn", "", "instance %s has no metadata record and its unit did not stop (%v); reconciliation retries", id, err)
 					delete(active, id)
 					continue
 				}
 			}
 			if err := os.RemoveAll(dir); err != nil {
-				m.Events.Add("warn", "", "instance %s had no readable %s; its dir could not be removed (%v); reconciliation retries", id, MetaFile, err)
+				m.Events.Add("warn", "", "instance %s had no metadata record; its dir could not be removed (%v); reconciliation retries", id, err)
 			} else {
 				m.removePrivate(id)
-				m.Events.Add("warn", "", "instance %s had no readable %s; stopped and removed", id, MetaFile)
+				m.Events.Add("warn", "", "instance %s had no metadata record; stopped and removed", id)
 			}
 			delete(active, id)
 			continue
@@ -118,8 +105,9 @@ func (m *Manager) Adopt(ctx context.Context) error {
 	return nil
 }
 
-// Reconcile works from the real unit inventory: it stops running units no
-// instance tracks, deletes ghr-<repo>-<id> registrations that match neither a
+// Reconcile works from the real unit inventory: it retries the registration
+// deletes finish could not make, stops running units no instance tracks,
+// deletes ghr-<repo>-<id> registrations that match neither a
 // tracked instance (same repo and runner ID) nor a running unit once they
 // have been offline at two reconciles in a row, and removes instance dirs
 // whose unit has confirmed exited.
@@ -129,6 +117,7 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 		m.Events.Add("warn", "", "reconcile: list units: %v", err)
 		return
 	}
+	m.retryUndeleted(ctx, cfg)
 	known := map[string]instance{}
 	for _, i := range m.snapshot() {
 		known[i.ID] = i
@@ -156,8 +145,11 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 		}
 		prefix := "ghr-" + r.Name + "-"
 		for _, rn := range runners {
-			id := strings.TrimPrefix(rn.Name, prefix)
-			if !strings.HasPrefix(rn.Name, prefix) || !idRe.MatchString(id) {
+			if len(rn.Name) <= len(prefix) || !strings.EqualFold(rn.Name[:len(prefix)], prefix) {
+				continue
+			}
+			id := rn.Name[len(prefix):]
+			if !idRe.MatchString(id) {
 				continue
 			}
 			i, tracked := known[id]
@@ -180,7 +172,7 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 			}
 			err := m.GH.DeleteRunner(ctx, r.Name, rn.ID)
 			switch {
-			case err == nil:
+			case err == nil, github.IsKind(err, github.ErrNotFound):
 				m.Events.Add("info", r.Name, "removed stale registration %s", rn.Name)
 			case github.IsKind(err, github.ErrUnprocessable):
 				// busy; retried at the next reconciliation
@@ -208,4 +200,43 @@ func (m *Manager) Reconcile(ctx context.Context, cfg *config.Config) {
 		}
 	}
 	m.sweepPrivate()
+}
+
+// retryUndeleted deletes the registrations finish could not delete. The
+// repository need not be served any more, so no runner list covers them. It
+// stops as soon as GitHub API calls are not allowed. A registration the token
+// is forbidden to delete in a repository that is no longer configured is
+// reported once and dropped; in a configured one the permission error is
+// filed against the repository and the registration stays.
+func (m *Manager) retryUndeleted(ctx context.Context, cfg *config.Config) {
+	m.mu.Lock()
+	regs := maps.Clone(m.undeleted)
+	m.mu.Unlock()
+	for id, r := range regs {
+		now := m.Now()
+		if !m.apiAllowed(now) {
+			return
+		}
+		err := m.GH.DeleteRunner(ctx, r.repo, id)
+		switch {
+		case err == nil, github.IsKind(err, github.ErrNotFound):
+			m.mu.Lock()
+			delete(m.undeleted, id)
+			m.mu.Unlock()
+			if err == nil {
+				m.Events.Add("info", r.repo, "removed registration %s", r.name)
+			}
+		case github.IsKind(err, github.ErrUnprocessable):
+			// busy; retried at the next reconciliation
+		case github.IsKind(err, github.ErrAuth) && !tokenRejected(err) && cfg.Repo(r.repo) == nil:
+			m.mu.Lock()
+			delete(m.undeleted, id)
+			m.mu.Unlock()
+			m.Events.Add("warn", r.repo, "reconcile: delete registration %s: %v; the repository is no longer configured, so it is left on GitHub", r.name, err)
+		case github.IsKind(err, github.ErrAuth), github.IsKind(err, github.ErrRateLimit):
+			m.apiErr(r.repo, err, now)
+		default:
+			m.Events.Add("warn", r.repo, "reconcile: delete registration %s: %v", r.name, err)
+		}
+	}
 }

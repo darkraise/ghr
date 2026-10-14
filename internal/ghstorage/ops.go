@@ -346,25 +346,41 @@ func (s *Service) SetRetention(ctx context.Context, repo string, days int) error
 }
 
 func (s *Service) setRetention(ctx context.Context, repo string, days int) error {
-	err := s.write(func() error { return s.GH.SetRetention(ctx, repo, days) })
+	err := s.write(func() error {
+		if err := s.GH.SetRetention(ctx, repo, days); err != nil {
+			return err
+		}
+		s.publishRetention(repo, days)
+		return nil
+	})
 	var ge *github.APIError
 	if errors.As(err, &ge) && ge.Kind == github.ErrUnprocessable {
 		return BadInput(ge.Message)
 	}
-	if err != nil {
-		return err
-	}
+	return err
+}
+
+// publishRetention records a retention GitHub accepted. It runs inside the
+// write slot so two writes publish in the order they reached GitHub, and it
+// is stamped with a time later than the start of any listing that read the
+// old value.
+func (s *Service) publishRetention(repo string, days int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if i, ok := s.find(repo); ok {
-		s.repos[i].RetentionDays = days
-	}
 	key := strings.ToLower(repo)
 	rr := s.retention[key]
 	rr.r.Days = days
+	rr.written = s.now()
+	old := rr.err
+	rr.err = ""
 	s.retention[key] = rr
+	if i, ok := s.find(repo); ok {
+		s.repos[i].RetentionDays = days
+		if old != "" && s.repos[i].Error == old {
+			s.repos[i].Error = ""
+		}
+	}
 	s.bump()
-	return nil
 }
 
 // SetRetentionAll starts setting one retention on every repository of the

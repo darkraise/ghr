@@ -253,17 +253,21 @@ func repo(ctx context.Context, c *api.Client, args []string) error {
 }
 
 func logs(ctx context.Context, c *api.Client, args []string, out io.Writer) error {
+	const logsUsage = "usage: ghr logs <id> [-f]"
 	follow := false
 	var id string
 	for _, a := range args {
-		if a == "-f" {
+		switch {
+		case a == "-f":
 			follow = true
-		} else {
+		case strings.HasPrefix(a, "-") || id != "":
+			return usageError(logsUsage)
+		default:
 			id = a
 		}
 	}
 	if id == "" {
-		return usageError("usage: ghr logs <id> [-f]")
+		return usageError(logsUsage)
 	}
 	safe := stdoutText()
 	// A chunk can end between the CR and the LF of a CRLF. At a terminal the

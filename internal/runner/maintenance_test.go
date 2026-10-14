@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/sched"
 )
 
 // holdOn blocks the named fake Docker method until release is called or the
@@ -287,5 +289,123 @@ func TestCloseInterruptsRunningPrune(t *testing.T) {
 	}
 	if strings.Contains(txt, "history and logs past retention removed") || strings.Contains(txt, "prune: disk") {
 		t.Fatalf("steps ran after the interruption:\n%s", txt)
+	}
+}
+
+func heldCount(h *harness) int {
+	h.m.mu.Lock()
+	defer h.m.mu.Unlock()
+	return h.m.held
+}
+
+func TestHoldRefusedWhileRunnersCannotBeHeld(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, h *harness)
+		want  string
+	}{
+		{"busy runner", func(t *testing.T, h *harness) {
+			addInstance(t, h, "aaaaaa", sched.Idle)
+			h.writeJob(t, "aaaaaa", 55)
+		}, "refused: 1 jobs running"},
+		{"starting runner", func(t *testing.T, h *harness) {
+			addInstance(t, h, "aaaaaa", sched.Starting)
+		}, "refused: a runner is starting"},
+		{"runner update", func(t *testing.T, h *harness) {
+			h.m.mu.Lock()
+			h.m.pruning, h.m.upd.running = true, true
+			h.m.mu.Unlock()
+		}, ErrUpdateRunning.Error()},
+		{"closed", func(t *testing.T, h *harness) { h.m.Close() }, ErrClosed.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			addInstance(t, h, "bbbbbb", sched.Idle)
+			tc.setup(t, h)
+			release, err := h.m.HoldForMaintenance(context.Background())
+			if err == nil || err.Error() != tc.want || release != nil {
+				t.Fatalf("err %v, want %q", err, tc.want)
+			}
+			if heldCount(h) != 0 || len(h.sd.stopped) != 0 {
+				t.Fatalf("held %d, stopped %v", heldCount(h), h.sd.stopped)
+			}
+		})
+	}
+}
+
+// The hold stops every idle runner and no runner spawns until it is
+// released, even for a queued job.
+func TestHoldStopsIdleRunnersAndSpawnsNothingUntilReleased(t *testing.T) {
+	h := newHarness(t)
+	id := idleRunner(t, h)
+	release, err := h.m.HoldForMaintenance(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.sd.stopped) != 1 || h.sd.stopped[0] != UnitPrefix+id {
+		t.Fatalf("stopped %v", h.sd.stopped)
+	}
+	queuedRun(h, "darkcloud", 7, github.Job{ID: 70, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
+	jits := jitCalls(h)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if n := jitCalls(h); n != jits {
+		t.Fatalf("%d spawns during the hold", n-jits)
+	}
+	release()
+	release()
+	if heldCount(h) != 0 {
+		t.Fatalf("held %d after release", heldCount(h))
+	}
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if n := jitCalls(h); n != jits+1 {
+		t.Fatalf("%d spawns after the release, want 1\n%s", n-jits, h.eventText())
+	}
+}
+
+// GitHub refuses to delete a runner that took a job after the check: the
+// hold is refused and the runner counts as busy. A runner that cannot be
+// stopped at all refuses it too.
+func TestHoldRefusedWhenAnIdleRunnerCannotBeStopped(t *testing.T) {
+	for _, tc := range []struct {
+		err   error
+		want  string
+		state string
+	}{
+		{&github.APIError{Status: 422, Kind: github.ErrUnprocessable}, "refused: 1 jobs running", "busy"},
+		{&github.APIError{Status: 502, Kind: github.ErrServer}, "refused: idle runner aaaaaa could not be stopped", "idle"},
+	} {
+		h := newHarness(t)
+		idleRunner(t, h)
+		h.gh.setErr("DeleteRunner darkmem", tc.err)
+		release, err := h.m.HoldForMaintenance(context.Background())
+		if err == nil || err.Error() != tc.want || release != nil {
+			t.Fatalf("%v: err %v, want %q", tc.err, err, tc.want)
+		}
+		if h.state("aaaaaa") != tc.state || heldCount(h) != 0 || len(h.sd.stopped) != 0 {
+			t.Fatalf("%v: state %s, held %d, stopped %v", tc.err, h.state("aaaaaa"), heldCount(h), h.sd.stopped)
+		}
+	}
+}
+
+// A tick that is spawning has a runner on its way that the hold cannot see
+// yet, so the hold is refused until the spawns end.
+func TestHoldRefusedWhileATickSpawns(t *testing.T) {
+	h := newHarness(t)
+	queuedRun(h, "darkcloud", 7, github.Job{ID: 70, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
+	var holdErr error
+	h.gh.hook = func(method string) {
+		if method == "GenerateJITConfig" {
+			_, holdErr = h.m.HoldForMaintenance(context.Background())
+		}
+	}
+	h.m.Tick(context.Background())
+	h.gh.hook = nil
+	if holdErr == nil || holdErr.Error() != "refused: a runner is starting" {
+		t.Fatalf("hold during a spawn: %v", holdErr)
+	}
+	if jitCalls(h) != 1 || heldCount(h) != 0 {
+		t.Fatalf("spawns %d, held %d", jitCalls(h), heldCount(h))
 	}
 }

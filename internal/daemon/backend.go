@@ -608,6 +608,9 @@ func (b *Backend) AddRepo(ctx context.Context, req model.AddRepoRequest) error {
 	if typed == "" {
 		return api.BadRequest("repo name is required")
 	}
+	if !config.ValidRepoName(typed) {
+		return api.BadRequest("repo name must be a repository name under owner, " + config.RepoNameRule)
+	}
 	cfg := b.Store.Config()
 	// A fast path that saves the GitHub call. It knows only the typed name;
 	// the check inside the update decides.
@@ -658,8 +661,8 @@ func (b *Backend) WatchRepo(ctx context.Context, name string) error {
 	if name == "" {
 		return api.BadRequest("repo name is required")
 	}
-	if strings.Contains(name, "/") {
-		return api.BadRequest("repo name must be a repository name under owner, without a slash")
+	if !config.ValidRepoName(name) {
+		return api.BadRequest("repo name must be a repository name under owner, " + config.RepoNameRule)
 	}
 	cfg := b.Store.Config()
 	if cfg.Repo(name) != nil {
@@ -956,7 +959,7 @@ func (b *Backend) PruneScope(scope string) error {
 	switch {
 	case errors.Is(err, runner.ErrUnknownScope):
 		return api.BadRequest(err.Error())
-	case errors.As(err, &busy), errors.Is(err, runner.ErrPruneRunning), errors.Is(err, runner.ErrUpdateRunning):
+	case errors.As(err, &busy), errors.Is(err, runner.ErrHoldRefused), errors.Is(err, runner.ErrPruneRunning), errors.Is(err, runner.ErrUpdateRunning):
 		return api.Conflict(err.Error())
 	case errors.Is(err, runner.ErrClosed):
 		return &api.Error{Status: http.StatusServiceUnavailable, Msg: err.Error()}
@@ -1019,7 +1022,7 @@ func storageErr(err error) error {
 		return api.BadRequest(err.Error())
 	case errors.Is(err, toolchain.ErrNotInstalled), errors.Is(err, storage.ErrUnknownCache):
 		return api.NotFound(err.Error())
-	case errors.Is(err, storage.ErrNotPresent), errors.Is(err, storage.ErrMeasuring):
+	case errors.Is(err, storage.ErrNotPresent), errors.Is(err, storage.ErrMeasuring), errors.Is(err, storage.ErrQueueFull):
 		return api.Conflict(err.Error())
 	case errors.Is(err, storage.ErrClosed):
 		return &api.Error{Status: http.StatusServiceUnavailable, Msg: err.Error()}
@@ -1140,7 +1143,9 @@ func (b *Backend) DeleteRegistration(ctx context.Context, repo string, id int64)
 	case r.Status != "offline":
 		return api.Conflict(r.Name + " is " + r.Status + "; only offline runners can be deleted")
 	}
-	if err := b.GH.DeleteRunner(ctx, name, id); err != nil {
+	if err := b.GH.DeleteRunner(ctx, name, id); github.IsKind(err, github.ErrNotFound) {
+		return nil
+	} else if err != nil {
 		return err
 	}
 	b.Events.Add("info", name, "deleted runner registration %s", r.Name)

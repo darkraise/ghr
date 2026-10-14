@@ -84,6 +84,7 @@ func TestStorageErrorsMapToStatuses(t *testing.T) {
 		{fmt.Errorf("%w: node 20.0.0", toolchain.ErrNotInstalled), 404},
 		{fmt.Errorf("%w %q", storage.ErrUnknownCache, "bogus"), 404},
 		{fmt.Errorf("%w: cargo", storage.ErrNotPresent), 409},
+		{storage.ErrQueueFull, 409},
 		{storage.ErrClosed, 503},
 	} {
 		fs.err = tc.err
@@ -175,6 +176,7 @@ func TestPruneScopeStatuses(t *testing.T) {
 	}{
 		{fmt.Errorf("%w %q", runner.ErrUnknownScope, "everything"), 400},
 		{model.BusyError{N: 2}, 409},
+		{fmt.Errorf("%w: a runner is starting", runner.ErrHoldRefused), 409},
 		{runner.ErrPruneRunning, 409},
 		{runner.ErrUpdateRunning, 409},
 		{runner.ErrClosed, 503},

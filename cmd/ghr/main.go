@@ -118,8 +118,9 @@ const usage = `usage: ghr [command]
   storage [refresh]               disk use: Docker, toolchains, package caches
   toolchain list | available <tool>
   toolchain install <tool> <version> | --preset popular
-  toolchain rm <tool> <version>   refused while jobs run
-  cache list | clear <name>       clear is refused while jobs run
+  toolchain rm <tool> <version>   refused while a runner has a job or starts;
+                                  idle runners stop meanwhile (needs GitHub)
+  cache list | clear <name>       clear is held the same way as toolchain rm
   prune [--scope <scope>]         standard (default), build-cache-keep,
                                   build-cache-all, dangling-images, unused-volumes
   code                            web UI setup code, until a password is set

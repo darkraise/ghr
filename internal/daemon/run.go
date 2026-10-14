@@ -115,28 +115,46 @@ func DefaultOptions() Options {
 	}
 }
 
-// listen binds the control socket before any runner is touched. The bound
-// socket is the single-daemon lock: when another daemon answers on it, Run
-// refuses to start instead of removing the live socket; a socket nobody
-// answers is a crashed daemon's leftover and is replaced.
-func listen(socket string) (net.Listener, error) {
+// listen binds the control socket before any runner is touched. A lock file
+// beside the socket makes the check for another daemon atomic, and the
+// returned file holds that lock until it is closed. As a second guard, when
+// another daemon answers on the socket, Run refuses to start instead of
+// removing the live socket; a socket nobody answers is a crashed daemon's
+// leftover and is replaced.
+func listen(socket string) (net.Listener, *os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(socket), 0o755); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	lock, err := os.OpenFile(socket+".lock", os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, nil, err
+	}
+	held, err := tryLock(lock)
+	if err != nil {
+		lock.Close()
+		return nil, nil, err
+	}
+	if held {
+		lock.Close()
+		return nil, nil, fmt.Errorf("another ghr daemon is already running (%s.lock is held)", socket)
 	}
 	if conn, err := net.DialTimeout("unix", socket, time.Second); err == nil {
 		conn.Close()
-		return nil, fmt.Errorf("another ghr daemon is already serving %s", socket)
+		lock.Close()
+		return nil, nil, fmt.Errorf("another ghr daemon is already serving %s", socket)
 	}
 	os.Remove(socket)
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
-		return nil, err
+		lock.Close()
+		return nil, nil, err
 	}
 	if err := os.Chmod(socket, 0o600); err != nil {
 		ln.Close()
-		return nil, err
+		lock.Close()
+		return nil, nil, err
 	}
-	return ln, nil
+	return ln, lock, nil
 }
 
 // checkToken validates a candidate token with the reads the manager depends on,
@@ -174,8 +192,9 @@ type running struct {
 	wake    chan struct{}
 }
 
-// start reads the owner once, then adopts and reconciles the runners already
-// on the host before anything serves the full API.
+// start reads the owner once, then adopts the runners already on the host
+// before anything serves the full API. Reconcile, which asks GitHub, is left
+// to Run so a slow answer does not keep the socket from serving.
 func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *changes.Hub, epoch string, webCfg config.Web, webErr *model.WebListenError, webSetupRequired func() bool) (*running, error) {
 	owner := store.Config().Owner
 	gh := github.New(owner, store.Token)
@@ -209,12 +228,11 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 	if err := m.Adopt(ctx); err != nil {
 		return nil, err
 	}
-	m.Reconcile(ctx, store.Config())
 
 	tools := toolchain.New(toolchain.NewEnv(o.Paths.ToolCache, o.Paths.Home, runner.RunnerUser,
 		system.ExecGroupFor(InstallTimeout), system.ExecGroupIOFor(InstallTimeout), system.DownloadFor(InstallTimeout)))
 	space := &storage.Service{Tools: tools, Docker: m.Disk, Home: o.Paths.Home, User: runner.RunnerUser,
-		Busy: m.BusyCount, Events: ev}
+		Hold: m.HoldForMaintenance, Events: ev}
 	space.Start()
 	m.PruneDone = space.Trigger
 
@@ -311,10 +329,11 @@ func Run(ctx context.Context, o Options) error {
 	if err != nil {
 		return err
 	}
-	ln, err := listen(o.Socket)
+	ln, lock, err := listen(o.Socket)
 	if err != nil {
 		return err
 	}
+	defer lock.Close()
 	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second}
 	webSrv := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
@@ -489,6 +508,8 @@ func Run(ctx context.Context, o Options) error {
 	ev.Add("info", "", "ghr daemon started (owner %s, mode %s)", owner, store.Config().Mode)
 
 	m := rt.m
+	// It clears what the last run left behind, so it goes before the first tick.
+	m.Reconcile(ctx, store.Config())
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	tick := func() {

@@ -338,6 +338,131 @@ func TestActionsCallersShareOneBuild(t *testing.T) {
 	}
 }
 
+func TestActionsWaiterLeavesWhenItsRequestEnds(t *testing.T) {
+	b, _, gh := newBackend(t)
+	gh.recentBy = map[string][]github.Run{}
+	gh.recentWait = make(chan struct{})
+	built := make(chan struct{})
+	go func() {
+		b.Actions(context.Background())
+		close(built)
+	}()
+	t.Cleanup(func() {
+		close(gh.recentWait)
+		<-built
+	})
+	waitInFlight(t, gh, 2)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	errc := make(chan error, 1)
+	go func() {
+		_, err := b.Actions(ctx)
+		errc <- err
+	}()
+	select {
+	case err := <-errc:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a caller with a finished request waited for the build")
+	}
+}
+
+// A build that began before the config changed must not answer a caller
+// that arrived after it.
+func TestActionsNewConfigDoesNotJoinAnOldBuild(t *testing.T) {
+	b, _, gh := newBackend(t)
+	gh.recentBy = map[string][]github.Run{}
+	gh.recentWait = make(chan struct{})
+	parked := make(chan struct{}, 1)
+	b.actions.joined = func() { parked <- struct{}{} }
+	first := make(chan struct{})
+	go func() {
+		b.Actions(context.Background())
+		close(first)
+	}()
+	waitInFlight(t, gh, 2)
+	if err := b.WatchRepo(context.Background(), "public"); err != nil {
+		t.Fatal(err)
+	}
+	second := make(chan model.Actions, 1)
+	go func() {
+		a, _ := b.Actions(context.Background())
+		second <- a
+	}()
+	select {
+	case <-parked:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the second caller never waited for the build")
+	}
+	close(gh.recentWait)
+	<-first
+	select {
+	case a := <-second:
+		if len(a.Repos) != 3 {
+			t.Fatalf("repos %+v, want the watched repository too", a.Repos)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the second caller never got a build")
+	}
+}
+
+// panickyPending is a manager whose pending records cannot be read, which
+// the build does after the fetch, outside the per-repository goroutines.
+type panickyPending struct{ Manager }
+
+func (panickyPending) Pending() []model.HistoryEntry { panic("boom") }
+
+// A panic in the build must still clear the call and release the callers
+// waiting on it with an error, or every later request would wait for good.
+func TestActionsPanicInTheBuildReleasesWaiters(t *testing.T) {
+	b, m, gh := newBackend(t)
+	gh.recentBy = map[string][]github.Run{}
+	gh.recentWait = make(chan struct{})
+	b.M = panickyPending{m}
+	parked := make(chan struct{}, 1)
+	b.actions.joined = func() { parked <- struct{}{} }
+	panicked := make(chan any, 1)
+	go func() {
+		defer func() { panicked <- recover() }()
+		b.Actions(context.Background())
+	}()
+	waitInFlight(t, gh, 2)
+	waiter := make(chan error, 1)
+	go func() {
+		_, err := b.Actions(context.Background())
+		waiter <- err
+	}()
+	select {
+	case <-parked:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the second caller never waited for the build")
+	}
+	close(gh.recentWait)
+	if r := <-panicked; r == nil {
+		t.Fatal("the panic did not reach the request that ran the build")
+	}
+	select {
+	case err := <-waiter:
+		if err == nil {
+			t.Fatal("a waiter got no error from a build that panicked")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("a waiter was never released")
+	}
+	b.actions.mu.Lock()
+	left := b.actions.call
+	b.actions.mu.Unlock()
+	if left != nil {
+		t.Fatal("the failed build was left in place")
+	}
+	b.M = m
+	if a, err := b.Actions(context.Background()); err != nil || len(a.Repos) != 2 {
+		t.Fatalf("the next call: %+v, %v", a, err)
+	}
+}
+
 func TestActionsDegradedTokenMakesNoCalls(t *testing.T) {
 	b, m, gh := newBackend(t)
 	gh.recentBy = map[string][]github.Run{}

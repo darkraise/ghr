@@ -10,6 +10,7 @@ import (
 
 	"github.com/darkraise/ghr/internal/changes"
 	"github.com/darkraise/ghr/internal/github"
+	"github.com/darkraise/ghr/internal/metrics"
 	"github.com/darkraise/ghr/internal/model"
 )
 
@@ -118,6 +119,19 @@ func TestStateChangesReachTheirTopics(t *testing.T) {
 	}
 	if got := changed(cur, b.fingerprints()); !slices.Contains(got, "config") {
 		t.Fatalf("a config change changed %v", got)
+	}
+}
+
+func TestASampleMovesTheMetricsTopicAndAnIdleCheckDoesNot(t *testing.T) {
+	b, _, _ := newBackend(t)
+	b.Sampler = metrics.NewSampler(func() metrics.Snapshot { return metrics.Snapshot{} }, func() int { return 0 })
+	prev := b.fingerprints()
+	if got := changed(prev, b.fingerprints()); len(got) != 0 {
+		t.Fatalf("an idle check changed %v", got)
+	}
+	b.Sampler.Sample()
+	if got := changed(prev, b.fingerprints()); !slices.Equal(got, []string{"metrics"}) {
+		t.Fatalf("a sample changed %v", got)
 	}
 }
 

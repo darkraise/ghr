@@ -68,6 +68,117 @@ func TestSpawnFailureCleansUp(t *testing.T) {
 	}
 }
 
+// A failed systemd-run may have started the unit, which would then run from
+// the instance dir with the registration. The rollback stops it first, and
+// runs to its end even when the tick is cancelled; a unit that does not stop
+// keeps everything it may be using for reconciliation.
+func TestSpawnStopsTheUnitBeforeRollingBackAFailedStart(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		stopErr error
+		cancel  bool
+	}{
+		{"the unit stops", nil, false},
+		{"the tick is cancelled", nil, true},
+		{"the unit does not stop", errors.New("Failed to connect to bus"), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			h.sd.onStart = func() error {
+				if c.cancel {
+					cancel()
+				}
+				return errors.New("systemd-run: signal: killed")
+			}
+			if c.stopErr != nil {
+				h.sd.stopErr["ghr-runner-aaaaaa"] = c.stopErr
+			}
+			if err := h.m.spawn(ctx, h.cfg, "darkmem"); err == nil {
+				t.Fatal("spawn succeeded")
+			}
+			_, dirErr := os.Stat(h.m.instanceDir("aaaaaa"))
+			_, privErr := os.Stat(filepath.Join(h.m.Paths.Private, "aaaaaa.json"))
+			if c.stopErr == nil {
+				if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || !reflect.DeepEqual(h.gh.deleted, []int64{101}) ||
+					!os.IsNotExist(dirErr) || !os.IsNotExist(privErr) {
+					t.Fatalf("stopped %v deleted %v dir %v record %v", h.sd.stopped, h.gh.deleted, dirErr, privErr)
+				}
+				return
+			}
+			if len(h.gh.deleted) != 0 || dirErr != nil || privErr != nil ||
+				!strings.Contains(h.eventText(), "left for reconciliation") {
+				t.Fatalf("deleted %v dir %v record %v\n%s", h.gh.deleted, dirErr, privErr, h.eventText())
+			}
+			// Reconciliation stops the unit, removes the dir and its record,
+			// and deletes the registration once it is offline twice.
+			delete(h.sd.stopErr, "ghr-runner-aaaaaa")
+			h.gh.listed["darkmem"] = []github.Runner{{ID: 101, Name: "ghr-darkmem-aaaaaa", Status: "offline"}}
+			h.m.Reconcile(context.Background(), h.cfg)
+			h.m.Reconcile(context.Background(), h.cfg)
+			_, dirErr = os.Stat(h.m.instanceDir("aaaaaa"))
+			_, privErr = os.Stat(filepath.Join(h.m.Paths.Private, "aaaaaa.json"))
+			if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || !reflect.DeepEqual(h.gh.deleted, []int64{101}) ||
+				!os.IsNotExist(dirErr) || !os.IsNotExist(privErr) {
+				t.Fatalf("after reconciling: stopped %v deleted %v dir %v record %v", h.sd.stopped, h.gh.deleted, dirErr, privErr)
+			}
+		})
+	}
+}
+
+// A rollback after an earlier step deletes the registration even when the
+// tick is cancelled.
+func TestSpawnRollbackOutlivesACancelledTick(t *testing.T) {
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	h.gh.hook = func(method string) {
+		if method == "GenerateJITConfig" {
+			cancel()
+		}
+	}
+	h.m.Paths.Dist = filepath.Join(h.root, "missing")
+	if err := h.m.spawn(ctx, h.cfg, "darkmem"); err == nil {
+		t.Fatal("spawn succeeded")
+	}
+	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("deleted %v\n%s", h.gh.deleted, h.eventText())
+	}
+}
+
+// A registration the rollback could not delete is retried by reconciliation,
+// as one finish could not delete is; a 404 means it is gone already.
+func TestSpawnRollbackKeepsARegistrationItCouldNotDelete(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		err    error
+		retain bool
+	}{
+		{"server error", &github.APIError{Status: 502, Kind: github.ErrServer}, true},
+		{"registration already gone", &github.APIError{Status: 404, Kind: github.ErrNotFound}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.m.Paths.Dist = filepath.Join(h.root, "missing")
+			h.gh.setErr("DeleteRunner darkmem", c.err)
+			if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err == nil {
+				t.Fatal("spawn succeeded")
+			}
+			if got := undeletedCount(h) == 1; got != c.retain {
+				t.Fatalf("%d registrations kept, want kept=%v\n%s", undeletedCount(h), c.retain, h.eventText())
+			}
+			if !c.retain {
+				return
+			}
+			h.gh.setErr("DeleteRunner darkmem", nil)
+			h.m.Reconcile(context.Background(), h.cfg)
+			if !reflect.DeepEqual(h.gh.deleted, []int64{101}) || undeletedCount(h) != 0 {
+				t.Fatalf("deleted %v, %d kept", h.gh.deleted, undeletedCount(h))
+			}
+		})
+	}
+}
+
 func TestUniqueIDSkipsArchivedLogsAndPendingHistory(t *testing.T) {
 	h := newHarness(t)
 	os.MkdirAll(filepath.Join(h.m.Paths.Logs, "aaaaaa"), 0o755)
@@ -78,6 +189,41 @@ func TestUniqueIDSkipsArchivedLogsAndPendingHistory(t *testing.T) {
 	}
 	if h.state("cccccc") != "starting" {
 		t.Fatalf("expected cccccc, events:\n%s", h.eventText())
+	}
+}
+
+// History outlives the log archive and the pending record, so an ID it holds
+// is not reused: two entries would share one ID. Both history read at start
+// and history appended since count.
+func TestUniqueIDSkipsIDsInHistory(t *testing.T) {
+	h := newHarness(t)
+	if err := h.m.History.Append(model.HistoryEntry{ID: "aaaaaa", Repo: "darkmem", Conclusion: "success"}); err != nil {
+		t.Fatal(err)
+	}
+	h.restart(t)
+	if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	if h.state("bbbbbb") != "starting" || h.state("aaaaaa") != "gone" {
+		t.Fatalf("aaaaaa %s, bbbbbb %s", h.state("aaaaaa"), h.state("bbbbbb"))
+	}
+	h.writeJob(t, "bbbbbb", 55)
+	h.gh.setJobs(55, completedJob(h, 55, "ghr-darkmem-bbbbbb", "success"))
+	h.sd.active["ghr-runner-bbbbbb"] = false
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if got := h.history(t); !reflect.DeepEqual(got, []string{"bbbbbb success", "aaaaaa success"}) {
+		t.Fatalf("history %v", got)
+	}
+	if err := os.RemoveAll(filepath.Join(h.m.Paths.Logs, "bbbbbb")); err != nil {
+		t.Fatal(err)
+	}
+	h.ids = []string{"bbbbbb", "dddddd"}
+	if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	if h.state("dddddd") != "starting" || h.state("bbbbbb") != "gone" {
+		t.Fatalf("bbbbbb %s, dddddd %s", h.state("bbbbbb"), h.state("dddddd"))
 	}
 }
 
@@ -227,7 +373,7 @@ func TestConclusionFallsBackToUnknownAfterDeadline(t *testing.T) {
 	h := newHarness(t)
 	h.m.spawn(context.Background(), h.cfg, "darkmem")
 	h.writeJob(t, "aaaaaa", 55)
-	h.gh.setErr("ListJobs darkmem", &github.APIError{Status: 502, Kind: github.ErrServer})
+	h.gh.setErr("ListAttemptJobs darkmem", &github.APIError{Status: 502, Kind: github.ErrServer})
 	h.sd.active["ghr-runner-aaaaaa"] = false
 	h.m.refreshUnits(context.Background())
 	h.m.Wait()
@@ -259,6 +405,113 @@ func TestFinishFallsBackToConfirmedJob(t *testing.T) {
 	got, _ := h.m.History.Query("", "", time.Time{}, 0)
 	if len(got) != 1 || got[0].RunID != 77 || got[0].Conclusion != "failure" {
 		t.Fatalf("history %+v", got)
+	}
+}
+
+// A re-run started before the runner's cleanup finalizes its job: the run's
+// latest attempt lists another runner's job of the same name, so the
+// conclusion comes from the attempt the runner ran.
+func TestFinalizeReadsTheAttemptTheRunnerRan(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		prepare func(h *harness)
+	}{
+		{"attempt from the hook record", func(h *harness) { h.writeJob(t, "aaaaaa", 55) }},
+		{"attempt from the jobs API", func(h *harness) {
+			job := completedJob(h, 55, "ghr-darkmem-aaaaaa", "")
+			job.Status, job.CompletedAt, job.RunAttempt = "in_progress", nil, 1
+			h.m.confirm("aaaaaa", job, h.now)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.m.spawn(context.Background(), h.cfg, "darkmem")
+			c.prepare(h)
+			rerun := completedJob(h, 55, "ghr-darkmem-bbbbbb", "")
+			rerun.Status, rerun.CompletedAt, rerun.RunAttempt = "in_progress", nil, 2
+			h.gh.setJobs(55, rerun)
+			ran := completedJob(h, 55, "ghr-darkmem-aaaaaa", "failure")
+			ran.RunAttempt = 1
+			h.gh.setAttemptJobs(55, 1, ran)
+			h.sd.active["ghr-runner-aaaaaa"] = false
+			h.m.refreshUnits(context.Background())
+			h.m.Wait()
+			got, _ := h.m.History.Query("", "", time.Time{}, 0)
+			if len(got) != 1 || got[0].Conclusion != "failure" || got[0].RunAttempt != 1 {
+				t.Fatalf("history %+v\ncalls %s", got, h.gh.callsText())
+			}
+		})
+	}
+}
+
+// A pending record written before attempts were recorded reads the latest
+// attempt, as it did when it was written.
+func TestFinalizeWithoutAnAttemptReadsTheLatest(t *testing.T) {
+	h := newHarness(t)
+	e := model.HistoryEntry{ID: "aaaaaa", Repo: "darkmem", RunID: 55, JobName: "e2e", Conclusion: "unknown",
+		StartedAt: h.now.Add(-2 * time.Minute), FinishedAt: h.now}
+	if err := os.MkdirAll(h.m.Paths.Pending, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeJSONAtomic(h.m.pendingPath("aaaaaa"), pending{Entry: e, RunnerName: "ghr-darkmem-aaaaaa", Deadline: h.now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	h.gh.setJobs(55, completedJob(h, 55, "ghr-darkmem-aaaaaa", "success"))
+	h.gh.setAttemptJobs(55, 1)
+	h.m.finalizePending(context.Background())
+	if got := h.history(t); !reflect.DeepEqual(got, []string{"aaaaaa success"}) {
+		t.Fatalf("history %v calls %s", got, h.gh.callsText())
+	}
+	if strings.Contains(h.gh.callsText(), "ListAttemptJobs") {
+		t.Fatalf("calls %s", h.gh.callsText())
+	}
+}
+
+// job.json belongs to the job. Once the jobs API has confirmed the job, the
+// record can move only the finish time, and only within the job's run time.
+func TestPendingKeepsTheConfirmedJob(t *testing.T) {
+	h := newHarness(t)
+	started := h.now.Add(-10 * time.Minute)
+	confirmed := &model.JobInfo{RunID: 55, RunAttempt: 1, RunNumber: "412", Workflow: "CI", Name: "CI / e2e", StartedAt: started}
+	forged := JobRecord{RunID: "99", RunAttempt: "3", RunNumber: "7", Workflow: "Other", Job: "x",
+		StartedAt: h.now.Add(-time.Hour).Format(time.RFC3339)}
+	for _, c := range []struct {
+		finished string
+		want     time.Time
+	}{
+		{h.now.Add(-5 * time.Minute).Format(time.RFC3339), h.now.Add(-5 * time.Minute)},
+		{h.now.Add(-time.Hour).Format(time.RFC3339), started},
+		{h.now.Add(time.Hour).Format(time.RFC3339), h.now},
+	} {
+		rec := forged
+		rec.FinishedAt = c.finished
+		i := instance{Meta: Meta{ID: "aaaaaa", Repo: "darkmem", RunnerName: "ghr-darkmem-aaaaaa", SpawnedAt: started}, Job: confirmed}
+		p, ok := h.m.pendingFor(i, rec, true)
+		e := p.Entry
+		if !ok || e.RunID != 55 || e.RunAttempt != 1 || e.RunNumber != "412" || e.Workflow != "CI" || e.JobName != "CI / e2e" ||
+			!e.StartedAt.Equal(started) || !e.FinishedAt.Equal(c.want) {
+			t.Fatalf("finished_at %s: entry %+v, want finish %s", c.finished, e, c.want)
+		}
+	}
+	unnumbered := *confirmed
+	unnumbered.RunNumber, unnumbered.Workflow = "", ""
+	i := instance{Meta: Meta{ID: "aaaaaa", Repo: "darkmem", SpawnedAt: started}, Job: &unnumbered}
+	if p, _ := h.m.pendingFor(i, forged, true); p.Entry.RunID != 55 || p.Entry.RunNumber != "7" || p.Entry.Workflow != "Other" {
+		t.Fatalf("a job that exited before a tick read its run number: entry %+v", p.Entry)
+	}
+}
+
+// A job too short for any tick to see is known only from its record.
+func TestPendingFallsBackToTheRecord(t *testing.T) {
+	h := newHarness(t)
+	rec := JobRecord{RunID: "99", RunAttempt: "3", RunNumber: "7", Workflow: "Other", Job: "x",
+		StartedAt: "2026-10-03T11:00:00Z", FinishedAt: "2026-10-03T11:01:00Z"}
+	i := instance{Meta: Meta{ID: "aaaaaa", Repo: "darkmem", RunnerName: "ghr-darkmem-aaaaaa", SpawnedAt: h.now}}
+	p, ok := h.m.pendingFor(i, rec, true)
+	e := p.Entry
+	if !ok || e.RunID != 99 || e.RunAttempt != 3 || e.RunNumber != "7" || e.Workflow != "Other" || e.JobName != "x" ||
+		!e.StartedAt.Equal(time.Date(2026, 10, 3, 11, 0, 0, 0, time.UTC)) || !e.FinishedAt.Equal(time.Date(2026, 10, 3, 11, 1, 0, 0, time.UTC)) {
+		t.Fatalf("entry %+v", e)
 	}
 }
 
@@ -392,7 +645,7 @@ func diskFullUntilCleanup(t *testing.T, h *harness, fail error) {
 		h.docker.mu.Lock()
 		full := len(h.docker.volLabels) == 0
 		h.docker.mu.Unlock()
-		if full && (strings.HasPrefix(name, h.m.Paths.Pending) || strings.HasSuffix(name, ".projects")) {
+		if full && (strings.HasPrefix(name, h.m.Paths.Pending) || strings.HasSuffix(name, ".projects.tmp")) {
 			return &fs.PathError{Op: "write", Path: name, Err: fail}
 		}
 		return orig(name, data, perm)
@@ -568,6 +821,33 @@ func TestStopIdleKeepsRunnerGitHubWillNotDeregister(t *testing.T) {
 	}
 }
 
+// The check answered, so a 404 from the delete means the registration is gone
+// only when the runner list confirms it: GitHub also answers 404 when the
+// token lost access to the repository.
+func TestStopIdleChecksTheListAfterADeleteAnswers404(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		listed  []github.Runner
+		stopped int
+	}{
+		{"still listed", []github.Runner{{ID: 101, Name: "ghr-darkmem-aaaaaa", Status: "online"}}, 0},
+		{"not listed", nil, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			idleOnline(t, h, "darkmem")
+			h.now = h.now.Add(6 * time.Minute)
+			h.gh.setErr("DeleteRunner darkmem", &github.APIError{Status: 404, Kind: github.ErrNotFound})
+			h.gh.listed["darkmem"] = c.listed
+			h.m.beginTick()
+			h.m.stopIdle(context.Background(), h.cfg, h.now)
+			if len(h.sd.stopped) != c.stopped {
+				t.Fatalf("stopped %v\n%s", h.sd.stopped, h.eventText())
+			}
+		})
+	}
+}
+
 // A tick stops its idle runners from a snapshot, and a stop a person asked for
 // can start a runner's cleanup after that snapshot was taken.
 func TestStopIdleRunnerLeavesARunnerInCleanupAlone(t *testing.T) {
@@ -638,6 +918,15 @@ func TestStartTimeoutStopsUnit(t *testing.T) {
 	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
 	if len(h.sd.stopped) != 1 || !strings.Contains(h.eventText(), "did not come online within 2m0s") {
 		t.Fatalf("stopped %v events %s", h.sd.stopped, h.eventText())
+	}
+	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("deleted %v", h.gh.deleted)
+	}
+	// finish does not delete the registration a second time.
+	h.m.refreshUnits(context.Background())
+	h.m.Wait()
+	if h.state("aaaaaa") != "gone" || !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("state %s deleted %v", h.state("aaaaaa"), h.gh.deleted)
 	}
 }
 
@@ -1130,6 +1419,90 @@ func TestStartTimeoutSkipsARunnerThatIsGone(t *testing.T) {
 	}
 }
 
+// A stop can block for a while, and a job recorded meanwhile (a maintenance
+// hold reads job.json from another goroutine) makes the next runner busy.
+func TestStartTimeoutSkipsARunnerThatTookAJobMeanwhile(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.refreshRunners(context.Background()) // the runners API answers: still offline
+	h.now = h.now.Add(3 * time.Minute)
+	h.writeJob(t, "bbbbbb", 55)
+	h.sd.stopGate, h.sd.stopEntered = make(chan struct{}), make(chan struct{}, 2)
+	go func() {
+		<-h.sd.stopEntered
+		h.m.readJobFiles()
+		close(h.sd.stopGate)
+	}()
+	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || h.state("bbbbbb") != "busy" {
+		t.Fatalf("stopped %v, bbbbbb %s", h.sd.stopped, h.state("bbbbbb"))
+	}
+	if !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("deleted %v, want only 101", h.gh.deleted)
+	}
+}
+
+// The registration goes before the unit stops. GitHub refuses to delete a
+// runner that took a job (422): it is busy and keeps running. Any other
+// failure leaves it for the next tick.
+func TestStartTimeoutDeregistersBeforeStopping(t *testing.T) {
+	for _, c := range []struct {
+		err   error
+		state string
+	}{
+		{&github.APIError{Status: 422, Kind: github.ErrUnprocessable}, "busy"},
+		{&github.APIError{Status: 502, Kind: github.ErrServer}, "starting"},
+	} {
+		h := newHarness(t)
+		h.m.spawn(context.Background(), h.cfg, "darkmem")
+		h.m.refreshRunners(context.Background())
+		h.now = h.now.Add(3 * time.Minute)
+		h.gh.setErr("DeleteRunner darkmem", c.err)
+		h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+		if len(h.sd.stopped) != 0 || h.state("aaaaaa") != c.state {
+			t.Fatalf("%v: stopped %v state %s", c.err, h.sd.stopped, h.state("aaaaaa"))
+		}
+	}
+}
+
+// A runner deregistered by a stop that then failed can take no job, so its
+// stop is retried without another delete, even during an API pause.
+func TestStartTimeoutRetriesOnlyTheUnitAfterDeregistering(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.refreshRunners(context.Background())
+	h.now = h.now.Add(3 * time.Minute)
+	h.sd.stopErr["ghr-runner-aaaaaa"] = errors.New("unit busy")
+	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+	if len(h.sd.stopped) != 0 || !reflect.DeepEqual(h.gh.deleted, []int64{101}) {
+		t.Fatalf("stopped %v deleted %v", h.sd.stopped, h.gh.deleted)
+	}
+	delete(h.sd.stopErr, "ghr-runner-aaaaaa")
+	h.rateLimited("darkmem", h.now.Add(time.Hour))
+	h.m.beginTick()
+	calls := h.gh.callCount()
+	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+	if !reflect.DeepEqual(h.sd.stopped, []string{"ghr-runner-aaaaaa"}) || h.gh.callCount() != calls {
+		t.Fatalf("stopped %v, GitHub calls %d→%d", h.sd.stopped, calls, h.gh.callCount())
+	}
+}
+
+// A runner stopped for its start timeout stays starting until a tick sees its
+// unit exit, which can take more than one tick when the unit state cannot be
+// read. A repeat stop must not count the same failed start again.
+func TestStartTimeoutCountsAFailedStartOnce(t *testing.T) {
+	h := newHarness(t)
+	h.m.spawn(context.Background(), h.cfg, "darkmem")
+	h.m.refreshRunners(context.Background())
+	h.now = h.now.Add(3 * time.Minute)
+	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+	h.m.stopStartTimedOut(context.Background(), h.cfg, h.now)
+	if n := spawnFails(h, "darkmem"); n != 1 {
+		t.Fatalf("%d failed starts, want 1\n%s", n, h.eventText())
+	}
+}
+
 // The runners API is slow. A runner that took a job while its answer was on
 // the way must not be put back to idle by that answer.
 func TestRunnerMadeBusyDuringTheCheckStaysBusy(t *testing.T) {
@@ -1154,7 +1527,7 @@ func TestRunnerMadeBusyDuringTheCheckStaysBusy(t *testing.T) {
 func TestStartTimeoutWaitsForAnAnswerFromTheRunnersAPI(t *testing.T) {
 	for name, block := range map[string]func(h *harness) (unblock func()){
 		"API pause": func(h *harness) func() {
-			h.m.apiErr("darkmem", &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: h.now.Add(10 * time.Minute)}, h.now)
+			h.rateLimited("darkmem", h.now.Add(10*time.Minute))
 			return func() { h.now = h.now.Add(10 * time.Minute) }
 		},
 		"failed call": func(h *harness) func() {

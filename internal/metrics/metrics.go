@@ -54,6 +54,7 @@ type Sampler struct {
 	hours    []model.MetricRollup
 	open     *openHour
 	closed   bool // an hour closed since the last save
+	writes   int64
 	lastSave time.Time
 	cur      model.Metrics
 	lastCPU  int64
@@ -167,6 +168,7 @@ func (s *Sampler) Load() error {
 	now := s.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.writes++
 	s.samples = nil
 	for _, m := range st.Minutes {
 		if !m.At.After(now) && now.Sub(m.At) <= keepMinutes*time.Minute {
@@ -214,6 +216,7 @@ func (s *Sampler) Sample() {
 	smp := model.MetricSample{At: now.Round(0), Live: counts.Live, Queued: counts.Queued}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.writes++
 	if usageOK && cpusOK && s.haveCPU && usage >= s.lastCPU && now.Sub(s.lastAt) >= time.Microsecond {
 		pct := float64(usage-s.lastCPU) / (float64(now.Sub(s.lastAt).Microseconds()) * cpus) * 100
 		pct = min(max(pct, 0), 100)
@@ -232,6 +235,15 @@ func (s *Sampler) Sample() {
 		s.samples = s.samples[len(s.samples)-keepMinutes:]
 	}
 	s.addToHour(smp)
+}
+
+// Writes counts the changes to the series: samples, loads and closed hours.
+// Callers that only need to know whether the series moved compare it
+// instead of copying the series.
+func (s *Sampler) Writes() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writes
 }
 
 // Metrics returns a copy of the last hour of samples and the current figures.
@@ -329,6 +341,7 @@ func (s *Sampler) closeHour() {
 	}
 	s.open = nil
 	s.closed = true
+	s.writes++
 }
 
 // cpus is the cgroup's CPU quota, or the CPU count when cpu.max says "max".

@@ -45,6 +45,14 @@ var SystemLabels = []string{"self-hosted", "linux", "x64"}
 // MaxLabelLength is the longest a custom label may be, in characters.
 const MaxLabelLength = 100
 
+// maxJITLabels is the most labels GitHub accepts when generating a runner's
+// JIT configuration; the system labels count towards it.
+const maxJITLabels = 100
+
+// maxCPUQuotaPercent is 10,000 CPUs; systemd parses the percentage into a
+// signed 32-bit count of parts per ten thousand of a CPU.
+const maxCPUQuotaPercent = 1000000
+
 type Config struct {
 	Owner            string       `yaml:"owner" json:"owner"`
 	Mode             string       `yaml:"mode" json:"mode"`
@@ -193,6 +201,7 @@ var (
 	sizeRe     = regexp.MustCompile(`^[0-9]+(B|KB|MB|GB|TB)$`)
 	memoryRe   = regexp.MustCompile(`^([1-9][0-9]*[KMGT]?|[1-9][0-9]?%|100%|infinity)$`)
 	cpuQuotaRe = regexp.MustCompile(`^[1-9][0-9]*%$`)
+	repoNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 	// hostnameRe is RFC 1123: dot-separated labels of letters, digits and
 	// inner hyphens, each 1 to 63 characters.
 	hostnameRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
@@ -310,6 +319,29 @@ func labelFault(l string) string {
 	return ""
 }
 
+// RepoNameRule describes what ValidRepoName accepts, for error messages.
+const RepoNameRule = "1 to 100 letters, digits, '.', '_' or '-', and not . or .."
+
+// ValidRepoName reports whether name can be a repository name under an owner.
+func ValidRepoName(name string) bool {
+	return repoNameRe.MatchString(name) && name != "." && name != ".."
+}
+
+// memoryFitsUint64 reports whether a memory_max that memoryRe accepted, bytes
+// with an optional K/M/G/T suffix, is below 2^64 bytes.
+func memoryFitsUint64(s string) bool {
+	if strings.HasSuffix(s, "%") || s == "infinity" {
+		return true
+	}
+	mult := uint64(1)
+	if i := strings.IndexAny(s, "KMGT"); i >= 0 {
+		mult = uint64(1) << (10 * uint(strings.IndexByte("KMGT", s[i])+1))
+		s = s[:i]
+	}
+	v, err := strconv.ParseUint(s, 10, 64)
+	return err == nil && v <= math.MaxUint64/mult
+}
+
 // labelProblem describes the first label in the list that is not valid or
 // that repeats an earlier one ignoring case, and returns "" for a valid list.
 func labelProblem(labels []string) string {
@@ -421,7 +453,17 @@ func Save(path string, c *Config) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// Syncing the directory makes the rename survive a power loss. Some
+	// platforms, Windows among them, cannot sync a directory, so it is best
+	// effort.
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		d.Sync()
+		d.Close()
+	}
+	return nil
 }
 
 // Clone returns a deep copy.
@@ -534,15 +576,22 @@ func (c *Config) Validate() ([]string, error) {
 	}
 	if !memoryRe.MatchString(c.RunnerLimits.MemoryMax) {
 		errs = append(errs, "runner_limits.memory_max must be bytes with an optional K/M/G/T suffix (6G), a percentage (50%) or infinity")
+	} else if !memoryFitsUint64(c.RunnerLimits.MemoryMax) {
+		errs = append(errs, "runner_limits.memory_max must fit in 64 bits (under 16 EiB)")
 	}
 	if !cpuQuotaRe.MatchString(c.RunnerLimits.CPUQuota) {
 		errs = append(errs, "runner_limits.cpu_quota must be a positive percentage such as 200%")
+	} else if n, err := strconv.ParseUint(strings.TrimSuffix(c.RunnerLimits.CPUQuota, "%"), 10, 64); err != nil || n > maxCPUQuotaPercent {
+		errs = append(errs, fmt.Sprintf("runner_limits.cpu_quota must be at most %d%%", maxCPUQuotaPercent))
 	}
 	seen := map[string]bool{}
 	for _, r := range c.Repos {
 		if strings.TrimSpace(r.Name) == "" {
 			errs = append(errs, "repo name is required")
 			continue
+		}
+		if !ValidRepoName(r.Name) {
+			errs = append(errs, "repos: "+r.Name+" must be a repository name under owner, "+RepoNameRule)
 		}
 		key := strings.ToLower(r.Name)
 		if seen[key] {
@@ -580,8 +629,18 @@ func (c *Config) Validate() ([]string, error) {
 		if len(c.CustomLabels(r)) == 0 {
 			errs = append(errs, r.Name+": needs at least one label in labels or repo labels")
 		}
+		if n := len(c.EffectiveLabels(r)); n > maxJITLabels {
+			errs = append(errs, fmt.Sprintf("%s: %d labels; GitHub allows at most %d including self-hosted, linux and x64", r.Name, n, maxJITLabels))
+		}
 		if len(r.CleanupNamePrefixes) > 0 && c.EffectiveMax(r) != 1 {
 			warnings = append(warnings, r.Name+": cleanup_name_prefixes can remove a concurrent job's containers when max is not 1")
+		}
+	}
+	for i, a := range c.Repos {
+		for _, b := range c.Repos[i+1:] {
+			if p, q, ok := overlappingPrefixes(a.CleanupNamePrefixes, b.CleanupNamePrefixes); ok {
+				warnings = append(warnings, fmt.Sprintf("%s: cleanup_name_prefixes %q and %s's %q overlap, so ending a runner can remove the other repository's containers", a.Name, p, b.Name, q))
+			}
 		}
 	}
 	watched := map[string]bool{}
@@ -594,8 +653,8 @@ func (c *Config) Validate() ([]string, error) {
 		if name != w {
 			errs = append(errs, "watch_repos: "+w+" must not have surrounding spaces")
 		}
-		if strings.Contains(name, "/") {
-			errs = append(errs, "watch_repos: "+w+" must be a repository name under owner, without a slash")
+		if !ValidRepoName(name) {
+			errs = append(errs, "watch_repos: "+w+" must be a repository name under owner, "+RepoNameRule)
 		}
 		key := strings.ToLower(name)
 		if watched[key] {
@@ -628,6 +687,23 @@ func (c *Config) Validate() ([]string, error) {
 		return nil, errors.New(strings.Join(sortedUnique(errs), "; "))
 	}
 	return warnings, nil
+}
+
+// overlappingPrefixes returns the first pair, one from each list, where one
+// prefix starts with the other. Blank prefixes are skipped; Validate rejects
+// them separately.
+func overlappingPrefixes(a, b []string) (string, string, bool) {
+	for _, p := range a {
+		for _, q := range b {
+			if strings.TrimSpace(p) == "" || strings.TrimSpace(q) == "" {
+				continue
+			}
+			if strings.HasPrefix(p, q) || strings.HasPrefix(q, p) {
+				return p, q, true
+			}
+		}
+	}
+	return "", "", false
 }
 
 func sortedUnique(in []string) []string {

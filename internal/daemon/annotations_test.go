@@ -137,7 +137,7 @@ func TestRunAnnotationsCountsABusyDownloadAsUnread(t *testing.T) {
 		t.Fatalf("waited %v for a download that could not start", took)
 	}
 	b.logs.mu.Lock()
-	_, missed := b.logs.misses[2001]
+	_, missed := b.logs.misses.Get(2001)
 	b.logs.mu.Unlock()
 	if missed {
 		t.Fatal("a busy download was cached as a miss")

@@ -21,7 +21,8 @@ import (
 type fakeGH struct {
 	mu        sync.Mutex
 	runs      map[string][]github.Run // key repo/status
-	jobs      map[int64][]github.Job
+	jobs      map[int64][]github.Job  // the latest attempt's, by run
+	attempts  map[attemptKey][]github.Job
 	runners   map[int64]*github.Runner
 	listed    map[string][]github.Runner
 	deleted   []int64
@@ -33,11 +34,13 @@ type fakeGH struct {
 	releases  []github.Release
 	public    map[string]bool     // repos GetRepo reports public; any other is private
 	hook      func(method string) // runs during every call, after it is recorded
+	suspended time.Time           // RetryAt of the last rate limit a call returned
 }
 
 func newFakeGH() *fakeGH {
-	return &fakeGH{runs: map[string][]github.Run{}, jobs: map[int64][]github.Job{}, runners: map[int64]*github.Runner{},
-		listed: map[string][]github.Runner{}, errs: map[string]error{}, public: map[string]bool{}, nextID: 100, remaining: 4999}
+	return &fakeGH{runs: map[string][]github.Run{}, jobs: map[int64][]github.Job{}, attempts: map[attemptKey][]github.Job{},
+		runners: map[int64]*github.Runner{},
+		listed:  map[string][]github.Runner{}, errs: map[string]error{}, public: map[string]bool{}, nextID: 100, remaining: 4999}
 }
 
 // call records the call and returns its injected error, if any.
@@ -45,6 +48,9 @@ func (f *fakeGH) call(method, repo string) error {
 	f.mu.Lock()
 	f.calls = append(f.calls, method+" "+repo)
 	err, hook := f.errs[method+" "+repo], f.hook
+	if ae, ok := err.(*github.APIError); ok && ae.Kind == github.ErrRateLimit {
+		f.suspended = ae.RetryAt
+	}
 	f.mu.Unlock()
 	if hook != nil {
 		hook(method)
@@ -86,6 +92,25 @@ func (f *fakeGH) ListJobs(_ context.Context, repo string, runID int64) ([]github
 	return f.jobs[runID], nil
 }
 
+type attemptKey struct {
+	run     int64
+	attempt int
+}
+
+// ListAttemptJobs answers an attempt set with setAttemptJobs, and any other
+// with the latest attempt's jobs, as a run that was never re-run does.
+func (f *fakeGH) ListAttemptJobs(_ context.Context, repo string, runID int64, attempt int) ([]github.Job, error) {
+	if err := f.call("ListAttemptJobs", repo); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if jobs, ok := f.attempts[attemptKey{runID, attempt}]; ok {
+		return jobs, nil
+	}
+	return f.jobs[runID], nil
+}
+
 func (f *fakeGH) ListRunners(_ context.Context, repo string) ([]github.Runner, error) {
 	if err := f.call("ListRunners", repo); err != nil {
 		return nil, err
@@ -109,8 +134,12 @@ func (f *fakeGH) GetRunner(_ context.Context, repo string, id int64) (*github.Ru
 	return &c, nil
 }
 
-func (f *fakeGH) DeleteRunner(_ context.Context, repo string, id int64) error {
+func (f *fakeGH) DeleteRunner(ctx context.Context, repo string, id int64) error {
 	if err := f.call("DeleteRunner", repo); err != nil {
+		return err
+	}
+	// The real client answers a context that has ended with its error.
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	f.mu.Lock()
@@ -149,6 +178,21 @@ func (f *fakeGH) setReleases(rels ...github.Release) {
 
 func (f *fakeGH) RateRemaining() int { return f.remaining }
 
+func (f *fakeGH) SuspendedUntil() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.suspended
+}
+
+// rateLimited files a rate limit met under repo until until, as the client
+// suspended by it reports.
+func (h *harness) rateLimited(repo string, until time.Time) {
+	h.gh.mu.Lock()
+	h.gh.suspended = until
+	h.gh.mu.Unlock()
+	h.m.apiErr(repo, &github.APIError{Status: 403, Kind: github.ErrRateLimit, RetryAt: until}, h.now)
+}
+
 func (f *fakeGH) GetRepo(_ context.Context, repo string) (*github.Repository, error) {
 	if err := f.call("GetRepo", repo); err != nil {
 		return nil, err
@@ -176,6 +220,12 @@ func (f *fakeGH) setJobs(runID int64, jobs ...github.Job) {
 	f.jobs[runID] = jobs
 }
 
+func (f *fakeGH) setAttemptJobs(runID int64, attempt int, jobs ...github.Job) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.attempts[attemptKey{runID, attempt}] = jobs
+}
+
 type fakeSD struct {
 	mu        sync.Mutex
 	started   []system.UnitSpec
@@ -192,6 +242,9 @@ type fakeSD struct {
 	// onActive, when set, runs at the start of every Active call, before the
 	// unit's state is read.
 	onActive func(unit string)
+	// onStart, when set, runs inside Start once the unit is recorded active,
+	// and its result is Start's: systemd-run can fail after the unit started.
+	onStart func() error
 }
 
 func newFakeSD() *fakeSD {
@@ -200,9 +253,13 @@ func newFakeSD() *fakeSD {
 
 func (f *fakeSD) Start(_ context.Context, u system.UnitSpec) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.started = append(f.started, u)
 	f.active[u.Unit] = true
+	hook := f.onStart
+	f.mu.Unlock()
+	if hook != nil {
+		return hook()
+	}
 	return nil
 }
 
@@ -217,6 +274,9 @@ func (f *fakeSD) Stop(ctx context.Context, unit string) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -457,9 +517,10 @@ func (f *fakeDocker) pruneList() string {
 type fakeHost struct {
 	mu       sync.Mutex
 	chowned  []string
-	calls    []string         // Extract and RunScript calls, as "<method> <dir>"
-	errs     map[string]error // by method name
-	onScript func()           // runs inside RunScript
+	calls    []string                  // Extract and RunScript calls, as "<method> <dir>"
+	errs     map[string]error          // by method name
+	onScript func(ctx context.Context) // runs inside RunScript, with its context
+	onChown  func(path string)         // runs inside ChownR
 }
 
 func (f *fakeHost) err(method string) error {
@@ -498,13 +559,13 @@ func (f *fakeHost) Extract(_ context.Context, _, dir string) error {
 	return os.WriteFile(filepath.Join(dir, "run.sh"), []byte("#!/bin/sh\n"), 0o755)
 }
 
-func (f *fakeHost) RunScript(_ context.Context, dir, _ string) error {
+func (f *fakeHost) RunScript(ctx context.Context, dir, _ string) error {
 	f.record("RunScript", dir)
 	f.mu.Lock()
 	hook := f.onScript
 	f.mu.Unlock()
 	if hook != nil {
-		hook()
+		hook(ctx)
 	}
 	return f.err("RunScript")
 }
@@ -553,8 +614,12 @@ func (f *fakeHost) CopyTree(_ context.Context, src, dst string) error {
 }
 func (f *fakeHost) ChownR(_ context.Context, path, user string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.chowned = append(f.chowned, path+":"+user)
+	hook := f.onChown
+	f.mu.Unlock()
+	if hook != nil {
+		hook(path)
+	}
 	return nil
 }
 

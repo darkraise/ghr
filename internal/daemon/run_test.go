@@ -14,6 +14,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -208,7 +210,7 @@ func TestRunServesTicksReloadsAndKeepsRunners(t *testing.T) {
 		t.Fatalf("status %+v", st)
 	}
 
-	if err := Run(context.Background(), o); err == nil || !strings.Contains(err.Error(), "already serving") {
+	if err := Run(context.Background(), o); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("second daemon: %v", err)
 	}
 	if _, err := c.Status(context.Background()); err != nil {
@@ -263,6 +265,104 @@ func testOptions(t *testing.T, cfg string) Options {
 			Pending: filepath.Join(dir, "pending"), Private: filepath.Join(dir, "private"), ToolCache: filepath.Join(dir, "toolcache"), Hooks: "/opt/ghr/hooks", Home: filepath.Join(dir, "home")},
 		GitHubURL: fakeGitHub(t).URL, Systemd: &recSD{}, Docker: nopDocker{}, Disk: nopDisk{}, Host: dirHost{}, Reload: make(chan os.Signal, 1),
 		SetupPendingPath: filepath.Join(dir, "setup-pending"), ToolchainsPendingPath: filepath.Join(dir, "toolchains-pending"),
+	}
+}
+
+// The startup reconcile lists runners at GitHub, which can be slow; the
+// socket must answer before it finishes, because the installer waits for it.
+func TestRunServesWhileReconcileLists(t *testing.T) {
+	o := testOptions(t, cfgYAML)
+	upstream, err := url.Parse(fakeGitHub(t).URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/actions/runners") {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(gh.Close)
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	o.GitHubURL = gh.URL
+	startRun(t, o)
+
+	c := api.NewUnixClient(o.Socket)
+	waitFor(t, "the socket to serve status while runners are being listed", func() bool {
+		_, err := c.Status(context.Background())
+		return err == nil
+	})
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the startup reconcile never listed runners")
+	}
+	releaseOnce.Do(func() { close(release) })
+}
+
+func TestListenAllowsOneDaemonPerSocket(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "ghr.sock")
+	ln, lock, err := listen(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(socket + ".lock"); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("lock file %v, %v", fi, err)
+	}
+	// With nothing answering on the socket, as when two daemons start
+	// together, only the lock separates them.
+	ln.Close()
+	if ln2, lock2, err := listen(socket); err == nil {
+		ln2.Close()
+		lock2.Close()
+		t.Fatal("a second daemon took the socket")
+	} else if !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("second listen: %v", err)
+	}
+	lock.Close()
+	ln, lock, err = listen(socket)
+	if err != nil {
+		t.Fatalf("listen after the first daemon ended: %v", err)
+	}
+	ln.Close()
+	lock.Close()
+}
+
+// A daemon that holds the socket but not the lock, as one from before the
+// lock existed, is still refused.
+func TestListenRefusesASocketSomeoneAnswers(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "ghr.sock")
+	old, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer old.Close()
+	go func() {
+		for {
+			c, err := old.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	if ln, lock, err := listen(socket); err == nil {
+		ln.Close()
+		lock.Close()
+		t.Fatal("took a socket another daemon answers on")
+	} else if !strings.Contains(err.Error(), "already serving") {
+		t.Fatalf("listen: %v", err)
 	}
 }
 

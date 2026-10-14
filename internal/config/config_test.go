@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -106,6 +107,14 @@ func TestValidateErrors(t *testing.T) {
 		"darkmem: a repo being removed must stay paused":       func(c *Config) { c.Repos[1].Removing = true },
 		"runner_limits.memory_max":                             func(c *Config) { c.RunnerLimits.MemoryMax = "6 gigs" },
 		"runner_limits.cpu_quota":                              func(c *Config) { c.RunnerLimits.CPUQuota = "2" },
+		"runner_limits.memory_max must fit in 64 bits":         func(c *Config) { c.RunnerLimits.MemoryMax = "999999999999999999999999G" },
+		"runner_limits.cpu_quota must be at most 1000000%":     func(c *Config) { c.RunnerLimits.CPUQuota = "99999999999%" },
+		"darkmem: 101 labels; GitHub allows at most 100":       func(c *Config) { c.Labels = numberedLabels(98) },
+		"repos: owner/repo must be a repository name":          func(c *Config) { c.Repos[1].Name = "owner/repo" },
+		"repos: a b must be a repository name":                 func(c *Config) { c.Repos[1].Name = "a b" },
+		"repos: .. must be a repository name":                  func(c *Config) { c.Repos[1].Name = ".." },
+		"watch_repos: a b must be a repository name":           func(c *Config) { c.WatchRepos = []string{"a b"} },
+		"watch_repos: .. must be a repository name":            func(c *Config) { c.WatchRepos = []string{".."} },
 		"poll_interval must be >= 5s":                          func(c *Config) { c.PollInterval = Duration(time.Millisecond) },
 		"history_retention must be >= 1d":                      func(c *Config) { c.HistoryRetention = Duration(time.Second) },
 		"watch_repos must not contain an empty name":           func(c *Config) { c.WatchRepos = []string{" "} },
@@ -255,6 +264,62 @@ func TestDurationFloorsAreInclusive(t *testing.T) {
 	}
 }
 
+func numberedLabels(n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = "label-" + strconv.Itoa(i)
+	}
+	return out
+}
+
+func TestLabelCountBound(t *testing.T) {
+	c, _, _ := Parse([]byte(sample))
+	c.Labels = numberedLabels(97)
+	c.Repos[0].Labels = []string{"darkcloud-linux"}
+	if _, err := c.Validate(); err == nil || !strings.Contains(err.Error(), "darkcloud: 101 labels") {
+		t.Fatalf("98 custom labels accepted: %v", err)
+	}
+
+	c, _, _ = Parse([]byte(sample))
+	c.Labels = numberedLabels(97)
+	c.Repos[0].Labels = nil
+	c.Repos[1].Labels = nil
+	if _, err := c.Validate(); err != nil {
+		t.Fatalf("97 custom labels rejected: %v", err)
+	}
+
+	c, _, _ = Parse([]byte(sample))
+	c.Labels = numberedLabels(97)
+	c.Repos[0].Labels = []string{"label-1", "label-96"}
+	c.Repos[1].Labels = nil
+	if _, err := c.Validate(); err != nil {
+		t.Fatalf("labels repeated across the global and repo lists counted twice: %v", err)
+	}
+}
+
+func TestRepoNameRules(t *testing.T) {
+	for _, name := range []string{"my.repo_1-x", "A", strings.Repeat("a", 100), "...", ".hidden"} {
+		c, _, _ := Parse([]byte(sample))
+		c.Repos[1].Name = name
+		c.WatchRepos = []string{name[:len(name)-1] + "w"}
+		if _, err := c.Validate(); err != nil {
+			t.Errorf("%q rejected: %v", name, err)
+		}
+	}
+	for _, name := range []string{"owner/repo", "a b", "..", ".", strings.Repeat("a", 101), "répo", "a\nb"} {
+		c, _, _ := Parse([]byte(sample))
+		c.Repos[1].Name = name
+		if _, err := c.Validate(); err == nil {
+			t.Errorf("repo %q accepted", name)
+		}
+		c, _, _ = Parse([]byte(sample))
+		c.WatchRepos = []string{name}
+		if _, err := c.Validate(); err == nil {
+			t.Errorf("watch repo %q accepted", name)
+		}
+	}
+}
+
 func TestValidRunnerLimits(t *testing.T) {
 	for _, l := range []RunnerLimits{
 		{MemoryMax: "6G", CPUQuota: "200%"},
@@ -262,6 +327,8 @@ func TestValidRunnerLimits(t *testing.T) {
 		{MemoryMax: "1073741824", CPUQuota: "100%"},
 		{MemoryMax: "50%", CPUQuota: "400%"},
 		{MemoryMax: "infinity", CPUQuota: "1%"},
+		{MemoryMax: "16777215T", CPUQuota: "1000000%"},
+		{MemoryMax: "18446744073709551615", CPUQuota: "200%"},
 	} {
 		c, _, _ := Parse([]byte(sample))
 		c.RunnerLimits = l
@@ -277,6 +344,12 @@ func TestValidRunnerLimits(t *testing.T) {
 		{MemoryMax: "6G", CPUQuota: ""},
 		{MemoryMax: "6G", CPUQuota: "0%"},
 		{MemoryMax: "6G", CPUQuota: "2.5"},
+		{MemoryMax: "999999999999999999999999G", CPUQuota: "200%"},
+		{MemoryMax: "18446744073709551616", CPUQuota: "200%"},
+		{MemoryMax: "16777216T", CPUQuota: "200%"},
+		{MemoryMax: "6G", CPUQuota: "99999999999%"},
+		{MemoryMax: "6G", CPUQuota: "1000001%"},
+		{MemoryMax: "6G", CPUQuota: "99999999999999999999999%"},
 	} {
 		c, _, _ := Parse([]byte(sample))
 		c.RunnerLimits = l
@@ -337,6 +410,26 @@ func TestPrefixWarningWhenMaxNotOne(t *testing.T) {
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "darkcloud") {
 		t.Fatalf("warnings = %v", warnings)
+	}
+}
+
+func TestPrefixOverlapAcrossReposWarns(t *testing.T) {
+	c, _, _ := Parse([]byte(sample))
+	one := 1
+	c.Repos[0].Max, c.Repos[1].Max = &one, &one
+	c.Repos[0].CleanupNamePrefixes = []string{"ci-"}
+	c.Repos[1].CleanupNamePrefixes = []string{"ci-db-"}
+	warnings, err := c.Validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "darkcloud") || !strings.Contains(warnings[0], "darkmem") {
+		t.Fatalf("warnings = %v", warnings)
+	}
+
+	c.Repos[1].CleanupNamePrefixes = []string{"other-"}
+	if warnings, err = c.Validate(); err != nil || len(warnings) != 0 {
+		t.Fatalf("disjoint prefixes: warnings %v err %v", warnings, err)
 	}
 }
 

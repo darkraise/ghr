@@ -966,7 +966,7 @@ func TestRegistrationsListed(t *testing.T) {
 }
 
 // A successful delete posts an event; a failed one returns GitHub's error and
-// posts nothing.
+// posts nothing, and one that finds the runner already gone posts nothing.
 func TestDeleteRegistrationEventAndFailure(t *testing.T) {
 	b, _, gh := newBackend(t)
 	registrationGH(gh)
@@ -977,6 +977,13 @@ func TestDeleteRegistrationEventAndFailure(t *testing.T) {
 	}
 	if evs := b.Events.After(0); len(evs) != 0 {
 		t.Fatalf("a failed delete posted %+v", evs)
+	}
+	gh.delErr = &github.APIError{Status: 404, Kind: github.ErrNotFound}
+	if err := b.DeleteRegistration(ctx, "darkcloud", 1); err != nil {
+		t.Fatalf("a runner removed between the check and the delete: %v", err)
+	}
+	if evs := b.Events.After(0); len(evs) != 0 {
+		t.Fatalf("a delete that found nothing posted %+v", evs)
 	}
 	gh.delErr = nil
 	if err := b.DeleteRegistration(ctx, "DarkCloud", 1); err != nil {
@@ -1488,6 +1495,22 @@ func TestRunnerStepsCarryTimes(t *testing.T) {
 	}
 }
 
+func TestRepoNamesAreCheckedBeforeGitHub(t *testing.T) {
+	b, _, gh := newBackend(t)
+	ctx := context.Background()
+	for _, name := range []string{"owner/repo", "a b", "..", "."} {
+		if err := b.AddRepo(ctx, model.AddRepoRequest{Name: name}); apiStatus(err) != 400 || !strings.Contains(err.Error(), "letters, digits") {
+			t.Errorf("AddRepo(%q) = %v", name, err)
+		}
+		if err := b.WatchRepo(ctx, name); apiStatus(err) != 400 || !strings.Contains(err.Error(), "letters, digits") {
+			t.Errorf("WatchRepo(%q) = %v", name, err)
+		}
+	}
+	if gh.getCalls != 0 {
+		t.Fatalf("GetRepo called %d times for names that cannot exist", gh.getCalls)
+	}
+}
+
 func TestWatchRepo(t *testing.T) {
 	b, _, _ := newBackend(t)
 	ctx := context.Background()
@@ -1497,7 +1520,9 @@ func TestWatchRepo(t *testing.T) {
 		text   string
 	}{
 		{" ", 400, "required"},
-		{"other/docs", 400, "without a slash"},
+		{"other/docs", 400, "letters, digits"},
+		{"a b", 400, "letters, digits"},
+		{"..", 400, "letters, digits"},
 		{"missing", 400, "repository access"},
 		{"DarkCloud", 409, "already configured"},
 	} {
@@ -1752,7 +1777,7 @@ func TestUpdateWritesOnlyNewConfigWarnings(t *testing.T) {
 		t.Fatalf("an unchanged warning was written again: %q", got)
 	}
 	var p model.ConfigPatch
-	if err := json.Unmarshal([]byte(`{"repos":{"darkcloud":{"max":4,"cleanup_name_prefixes":["proj-"]}}}`), &p); err != nil {
+	if err := json.Unmarshal([]byte(`{"repos":{"darkcloud":{"max":4,"cleanup_name_prefixes":["svc-"]}}}`), &p); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.PatchConfig(context.Background(), p); err != nil {

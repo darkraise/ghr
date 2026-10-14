@@ -497,6 +497,15 @@ func TestRemainingStatusFieldsEscapeControlsAtATerminal(t *testing.T) {
 	}
 }
 
+func TestLogsRejectsExtraArguments(t *testing.T) {
+	fakeDaemon(t)
+	for _, args := range [][]string{{"logs", "a", "b"}, {"logs", "a", "-x"}, {"logs", "-x"}} {
+		if code, _, errOut := runCLI(t, "", args...); code != 2 || !strings.Contains(errOut, "usage: ghr logs <id> [-f]") {
+			t.Errorf("%v: exit %d err %q", args, code, errOut)
+		}
+	}
+}
+
 type failWriter struct{}
 
 func (failWriter) Write([]byte) (int, error) { return 0, errors.New("closed") }

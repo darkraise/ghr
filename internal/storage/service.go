@@ -24,9 +24,11 @@ const MeasureInterval = 30 * time.Minute
 type Service struct {
 	Tools  Toolchains
 	Docker Docker
-	Home   string     // the runner user's home, where the package caches live
-	User   string     // owns the directories a clear recreates; "" leaves them to the daemon
-	Busy   func() int // runners with a job; nil counts none
+	Home   string // the runner user's home, where the package caches live
+	User   string // owns the directories a clear recreates; "" leaves them to the daemon
+	// Hold keeps the runners off while a removal or clear runs and is
+	// refused while a job runs; nil holds nothing.
+	Hold   func(ctx context.Context) (release func(), err error)
 	Events *events.Ring
 	Now    func() time.Time // nil means time.Now
 	NewID  func() string    // operation ids; nil makes random ones
@@ -150,9 +152,10 @@ func (s *Service) Snapshot() model.Storage {
 			Rows:            slices.Clone(s.snap.docker),
 			BuildCacheTypes: slices.Clone(s.snap.cacheTypes),
 		},
-		Measuring:    s.measuring,
-		MeasureError: s.snap.err,
-		Operations:   model.Operations{Queued: len(s.queue), Recent: slices.Clone(s.recent)},
+		CachesOnDataRoot: s.snap.cachesOnDataRoot,
+		Measuring:        s.measuring,
+		MeasureError:     s.snap.err,
+		Operations:       model.Operations{Queued: len(s.queue), Recent: slices.Clone(s.recent)},
 	}
 	if !s.snap.at.IsZero() {
 		at := s.snap.at

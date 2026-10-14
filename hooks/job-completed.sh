@@ -4,9 +4,14 @@
 # The runner runs it as `bash -e`, so the rename chain ends in `|| true`.
 dir="${GHR_INSTANCE_DIR:-}"
 [ -n "$dir" ] && [ -d "$dir" ] || exit 0
-now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || exit 0
 # jq -e exits 4 when it produces no output (an empty job.json), falling through.
-out="$(jq -ce --arg f "$now" '. + {finished_at: $f}' "$dir/job.json" 2>/dev/null)" \
+# The job owns the instance dir: job.json may be a FIFO, a link or huge, so only
+# a regular file of at most 64 KiB is read, and the timeout covers a swap after
+# the tests. stat, unlike wc, never opens the file, so a FIFO cannot block it.
+[ -f "$dir/job.json" ] && [ ! -L "$dir/job.json" ] \
+  && [ "$(stat -c %s -- "$dir/job.json" 2>/dev/null)" -le 65536 ] 2>/dev/null \
+  && out="$(timeout 10 jq -ce --arg f "$now" '. + {finished_at: $f}' "$dir/job.json" 2>/dev/null)" \
   || out="$(jq -nc --arg f "$now" '{finished_at: $f}' 2>/dev/null)" \
   || exit 0
 printf '%s\n' "$out" > "$dir/job.json.tmp" 2>/dev/null \

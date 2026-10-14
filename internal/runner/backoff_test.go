@@ -6,11 +6,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/github"
 )
 
 func jitAttempts(h *harness, repo string) int {
 	return strings.Count(h.gh.callsText(), "GenerateJITConfig "+repo)
+}
+
+func spawnFails(h *harness, repo string) int {
+	h.m.mu.Lock()
+	defer h.m.mu.Unlock()
+	return h.m.spawnFails[repo]
 }
 
 func spawnFailures(h *harness) int {
@@ -105,6 +112,37 @@ func TestRunnerThatNeverCameOnlineDelaysTheNextSpawn(t *testing.T) {
 	}
 }
 
+// A runner stopped for not coming online is a failed start like one that
+// exits: its replacement waits out the delay, which doubles with each repeat.
+func TestStartTimedOutRunnerDelaysItsReplacement(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.cfg.Mode = config.ModeAll
+	h.cfg.Repo("darkcloud").Paused = true
+	step := func(d time.Duration, want int) {
+		t.Helper()
+		h.now = h.now.Add(d)
+		h.m.Tick(ctx)
+		h.m.Wait()
+		if got := jitAttempts(h, "darkmem"); got != want {
+			t.Fatalf("at +%s: %d attempts, want %d\n%s", d, got, want, h.eventText())
+		}
+	}
+	step(0, 1)
+	step(3*time.Minute, 1) // aaaaaa times out and is stopped; its replacement waits
+	if !strings.Contains(h.eventText(), "next spawn in 10s") {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+	step(0, 1) // the exit the next tick sees is the same failed start
+	if n := spawnFails(h, "darkmem"); n != 1 {
+		t.Fatalf("%d failed starts, want 1", n)
+	}
+	step(10*time.Second, 2) // bbbbbb
+	step(3*time.Minute, 2)  // bbbbbb times out: the second failure in a row
+	step(10*time.Second, 2)
+	step(10*time.Second, 3)
+}
+
 func TestAStoppedOrAdoptedRunnerIsNotASpawnFailure(t *testing.T) {
 	t.Run("stopped by a person", func(t *testing.T) {
 		h := newHarness(t)
@@ -154,5 +192,21 @@ func TestRunnerThatRanAJobBetweenTicksClearsTheSpawnBackoff(t *testing.T) {
 	h.m.Wait()
 	if spawnFailures(h) != 0 || h.m.Status().Repos[1].Error != "" {
 		t.Fatalf("failures %d error %q", spawnFailures(h), h.m.Status().Repos[1].Error)
+	}
+}
+
+// An instance carries its repository in the spelling it was spawned under. A
+// refusal filed under that spelling holds back the config's repository all
+// the same, and its status shows it.
+func TestRepoBackoffIgnoresTheSpelling(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.Repos[1].Name = "myrepo"
+	h.m.apiErr("MyRepo", &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible by personal access token"}, h.now)
+	h.m.Tick(context.Background())
+	if strings.Contains(h.gh.callsText(), "ListRuns myrepo") {
+		t.Fatalf("polled during its backoff: %s", h.gh.callsText())
+	}
+	if got := h.m.Status().Repos[1].Error; !strings.Contains(got, "token lacks permission") {
+		t.Fatalf("status error %q", got)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -34,6 +35,24 @@ func holdFetch(t *testing.T, h *harness) (entered chan struct{}, release func())
 	return entered, release
 }
 
+// holdReleaseCheck makes the first release listing block until release is
+// called, signalling entered when it starts. With a queued update that is
+// the update's own check.
+func holdReleaseCheck(t *testing.T, h *harness) (entered chan struct{}, release func()) {
+	entered = make(chan struct{})
+	released := make(chan struct{})
+	var enter, once sync.Once
+	release = func() { once.Do(func() { close(released) }) }
+	t.Cleanup(release)
+	h.gh.hook = func(method string) {
+		if method == "ListRunnerReleases" {
+			enter.Do(func() { close(entered) })
+			<-released
+		}
+	}
+	return entered, release
+}
+
 // idleRunner spawns a darkmem runner and makes it idle and online.
 func idleRunner(t *testing.T, h *harness) string {
 	t.Helper()
@@ -52,7 +71,7 @@ func jitCalls(h *harness) int {
 
 func TestQueuedUpdateRunsWhenFree(t *testing.T) {
 	h := newHarness(t)
-	queuedUpdate(t, h, tarballSum())
+	preparedUpdate(t, h)
 	id := idleRunner(t, h)
 	h.m.Tick(context.Background())
 	h.m.Wait()
@@ -122,10 +141,15 @@ func TestQueuedUpdateWaitsUntilFree(t *testing.T) {
 			h.m.pruning = true
 			h.m.mu.Unlock()
 		}},
+		{"maintenance hold", func(t *testing.T, h *harness) {
+			h.m.mu.Lock()
+			h.m.held = 1
+			h.m.mu.Unlock()
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t)
-			_, fetched := queuedUpdate(t, h, tarballSum())
+			fetched := preparedUpdate(t, h)
 			c.block(t, h)
 			h.m.Tick(context.Background())
 			h.m.Wait()
@@ -141,10 +165,10 @@ func TestQueuedUpdateWaitsUntilFree(t *testing.T) {
 
 func TestNoSpawnWhileUpdating(t *testing.T) {
 	h := newHarness(t)
-	queuedUpdate(t, h, tarballSum())
-	entered, release := holdFetch(t, h)
+	preparedUpdate(t, h)
+	entered, release := holdReleaseCheck(t, h)
 	h.m.Tick(context.Background())
-	waitOrFail(t, entered, "the update to download")
+	waitOrFail(t, entered, "the update's release check")
 	if u := h.m.Status().RunnerUpdate; !u.Running {
 		t.Fatalf("status %+v", u)
 	}
@@ -172,11 +196,12 @@ func TestNoSpawnWhileUpdating(t *testing.T) {
 
 func TestShutdownInterruptsTheUpdate(t *testing.T) {
 	h := newHarness(t)
-	queuedUpdate(t, h, tarballSum())
-	entered, _ := holdFetch(t, h)
+	preparedUpdate(t, h)
+	entered, release := holdReleaseCheck(t, h)
 	h.m.Tick(context.Background())
-	waitOrFail(t, entered, "the update to download")
+	waitOrFail(t, entered, "the update's release check")
 	h.m.Close()
+	release()
 	h.m.Wait()
 	if !strings.Contains(h.eventText(), "runner update interrupted by shutdown") {
 		t.Fatalf("events:\n%s", h.eventText())
@@ -213,7 +238,7 @@ func TestUpdateWaitsWhenAnIdleRunnerDoesNotStop(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t)
-			_, fetched := queuedUpdate(t, h, tarballSum())
+			fetched := preparedUpdate(t, h)
 			id := idleRunner(t, h)
 			c.setup(h, id)
 			h.m.Tick(context.Background())
@@ -239,7 +264,7 @@ func TestUpdateWaitsWhenAnIdleRunnerDoesNotStop(t *testing.T) {
 // instead of every tick stopping the other idle runners again.
 func TestUpdateBacksOffWhenAnIdleRunnerCannotStop(t *testing.T) {
 	h := newHarness(t)
-	queuedUpdate(t, h, tarballSum())
+	preparedUpdate(t, h)
 	idleRunner(t, h)
 	if err := h.m.spawn(context.Background(), h.cfg, "darkcloud"); err != nil {
 		t.Fatal(err)
@@ -272,7 +297,7 @@ func TestUpdateBacksOffWhenAnIdleRunnerCannotStop(t *testing.T) {
 // whose poll covers the new config.
 func TestConfigChangeDuringPollDefersTheUpdate(t *testing.T) {
 	h := newHarness(t)
-	_, fetched := queuedUpdate(t, h, tarballSum())
+	fetched := preparedUpdate(t, h)
 	h.gh.hook = func(m string) {
 		if m != "ListRuns" {
 			return
@@ -299,7 +324,7 @@ func TestConfigChangeDuringPollDefersTheUpdate(t *testing.T) {
 // queued and not started: the stops run under the tick's context too.
 func TestShutdownDuringIdleStopsKeepsTheQueue(t *testing.T) {
 	h := newHarness(t)
-	_, fetched := queuedUpdate(t, h, tarballSum())
+	fetched := preparedUpdate(t, h)
 	idleRunner(t, h)
 	tickCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -329,7 +354,7 @@ func TestShutdownDuringIdleStopsKeepsTheQueue(t *testing.T) {
 // the update.
 func TestUpdateStartsInTheTickThatStoppedItsIdleRunner(t *testing.T) {
 	h := newHarness(t)
-	queuedUpdate(t, h, tarballSum())
+	preparedUpdate(t, h)
 	id := idleRunner(t, h)
 	h.now = h.now.Add(6 * time.Minute) // past idle_timeout
 	h.m.Tick(context.Background())
@@ -346,7 +371,7 @@ func TestUpdateStartsInTheTickThatStoppedItsIdleRunner(t *testing.T) {
 // says why, once per reason.
 func TestQueuedUpdateSaysWhyItWaits(t *testing.T) {
 	h := newHarness(t)
-	queuedUpdate(t, h, tarballSum())
+	preparedUpdate(t, h)
 	waiting := func() []string {
 		var out []string
 		for _, line := range strings.Split(h.eventText(), "\n") {
@@ -389,5 +414,235 @@ func TestQueuedUpdateSaysWhyItWaits(t *testing.T) {
 	h.m.Wait()
 	if got := waiting(); !reflect.DeepEqual(got, want) || current(t, h) != "2.338.0" {
 		t.Fatalf("current %s events %q", current(t, h), got)
+	}
+}
+
+// A queued update downloads and prepares its version in the background. It
+// starts only once that version is ready, and then only switches to it.
+func TestQueuedUpdateStartsOnlyOncePrepared(t *testing.T) {
+	h := newHarness(t)
+	dist, fetched := queuedUpdate(t, h, tarballSum())
+	id := idleRunner(t, h)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if strings.Contains(h.eventText(), "runner update started") || len(h.sd.stopped) != 0 || current(t, h) != "2.337.0" {
+		t.Fatalf("started before the version was ready: stopped %v\n%s", h.sd.stopped, h.eventText())
+	}
+	if len(*fetched) != 1 || !complete(filepath.Join(dist, "2.338.0")) || h.host.hostCalls() != "Extract 2.338.0.tmp,RunScript 2.338.0.tmp" {
+		t.Fatalf("not prepared: fetched %v host %q\n%s", *fetched, h.host.hostCalls(), h.eventText())
+	}
+	if u := h.m.Status().RunnerUpdate; !u.Queued || u.Running {
+		t.Fatalf("status %+v", u)
+	}
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if current(t, h) != "2.338.0" || len(h.sd.stopped) != 1 || h.sd.stopped[0] != UnitPrefix+id {
+		t.Fatalf("current %s stopped %v\n%s", current(t, h), h.sd.stopped, h.eventText())
+	}
+	if len(*fetched) != 1 || h.host.hostCalls() != "Extract 2.338.0.tmp,RunScript 2.338.0.tmp" {
+		t.Fatalf("the update downloaded again: fetched %v host %q", *fetched, h.host.hostCalls())
+	}
+}
+
+// Runners keep spawning while the new version downloads.
+func TestSpawnsWhileTheUpdatePrepares(t *testing.T) {
+	h := newHarness(t)
+	queuedUpdate(t, h, tarballSum())
+	entered, release := holdFetch(t, h)
+	h.m.Tick(context.Background())
+	waitOrFail(t, entered, "the version to download")
+	queuedRun(h, "darkmem", 7, github.Job{ID: 70, Status: "queued", Labels: []string{"homelab"}, CreatedAt: h.now})
+	h.m.Tick(context.Background())
+	if n := jitCalls(h); n != 1 {
+		t.Fatalf("%d spawns while the update prepared", n)
+	}
+	if err := h.m.StartPrune(); err != nil {
+		t.Fatalf("the prepare held the maintenance reservation: %v", err)
+	}
+	release()
+	h.m.Wait()
+}
+
+// A failed prepare keeps the queue and shows in the status as a failed
+// update. It is retried an hour later, then at doubling intervals; a
+// prepare that succeeds clears the failure.
+func TestFailedPrepareKeepsTheQueue(t *testing.T) {
+	h := newHarness(t)
+	dist, _ := queuedUpdate(t, h, tarballSum())
+	attempts := 0
+	fail := true
+	h.m.Fetch = func(_ context.Context, _, dst string) error {
+		attempts++
+		if fail {
+			return errors.New("connection reset")
+		}
+		return os.WriteFile(dst, tarball, 0o644)
+	}
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if u := h.m.Status().RunnerUpdate; !u.Queued || u.Running || u.LastOutcome != "failed" || u.LastError != "download: connection reset" ||
+		u.LastFinished == nil || !u.LastFinished.Equal(h.now) {
+		t.Fatalf("status %+v", u)
+	}
+	if !strings.Contains(h.eventText(), "warn  runner update: preparing 2.338.0 failed: download: connection reset; retrying in 1h0m0s") {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+	if _, err := os.Stat(filepath.Join(dist, "2.338.0.tmp")); !os.IsNotExist(err) {
+		t.Fatalf("staging kept: %v", err)
+	}
+	h.now = h.now.Add(time.Minute)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if attempts != 1 || strings.Contains(h.eventText(), "runner update started") {
+		t.Fatalf("%d attempts within the hour\n%s", attempts, h.eventText())
+	}
+	h.now = h.now.Add(releaseCheckRetry)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if attempts != 2 || !strings.Contains(h.eventText(), "retrying in 2h0m0s") {
+		t.Fatalf("%d attempts after the hour\n%s", attempts, h.eventText())
+	}
+	h.now = h.now.Add(releaseCheckRetry)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if attempts != 2 {
+		t.Fatalf("%d attempts one hour into a two-hour wait", attempts)
+	}
+	fail = false
+	h.now = h.now.Add(releaseCheckRetry)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if u := h.m.Status().RunnerUpdate; attempts != 3 || !u.Queued || u.LastOutcome != "" || u.LastError != "" || u.LastFinished != nil {
+		t.Fatalf("%d attempts, status %+v", attempts, u)
+	}
+}
+
+// Cancelling the update forgets its failed prepare, and queueing it again
+// prepares at once.
+func TestCancelForgetsAFailedPrepare(t *testing.T) {
+	h := newHarness(t)
+	queuedUpdate(t, h, tarballSum())
+	attempts := 0
+	h.m.Fetch = func(context.Context, string, string) error {
+		attempts++
+		return errors.New("connection reset")
+	}
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if err := h.m.CancelUpdate(); err != nil {
+		t.Fatal(err)
+	}
+	if u := h.m.Status().RunnerUpdate; u.Queued || u.LastOutcome != "" || u.LastError != "" {
+		t.Fatalf("status after the cancel %+v", u)
+	}
+	if err := h.m.QueueUpdate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if attempts != 2 {
+		t.Fatalf("%d attempts; queueing again must not wait out the retry", attempts)
+	}
+}
+
+// A shutdown or a cancel during the prepare stops it; only a cancel drops
+// the queue, and neither is a failure.
+func TestPrepareEndsWithShutdownOrCancel(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		end    func(t *testing.T, h *harness)
+		queued bool
+	}{
+		{"shutdown", func(_ *testing.T, h *harness) { h.m.Close() }, true},
+		{"cancel", func(t *testing.T, h *harness) {
+			if err := h.m.CancelUpdate(); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			dist, _ := queuedUpdate(t, h, tarballSum())
+			entered, _ := holdFetch(t, h)
+			h.m.Tick(context.Background())
+			waitOrFail(t, entered, "the version to download")
+			c.end(t, h)
+			h.m.Wait()
+			if u := h.m.Status().RunnerUpdate; u.Queued != c.queued || u.Running || current(t, h) != "2.337.0" {
+				t.Fatalf("status %+v current %s", u, current(t, h))
+			}
+			if strings.Contains(h.eventText(), "failed") {
+				t.Fatalf("events:\n%s", h.eventText())
+			}
+			if got := distEntries(t, dist); got != "2.330.0,2.337.0,current" {
+				t.Fatalf("dist holds %s", got)
+			}
+		})
+	}
+}
+
+// A cancel during the dependency script lets the script finish, since
+// killing apt midway can leave dpkg half-configured; the prepare ends right
+// after it.
+func TestCancelLetsTheDependencyScriptFinish(t *testing.T) {
+	h := newHarness(t)
+	dist, _ := queuedUpdate(t, h, tarballSum())
+	var scriptErr error
+	h.host.onScript = func(ctx context.Context) {
+		if err := h.m.CancelUpdate(); err != nil {
+			t.Error(err)
+		}
+		scriptErr = ctx.Err()
+	}
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if scriptErr != nil {
+		t.Fatalf("the cancel ended the dependency script: %v", scriptErr)
+	}
+	if u := h.m.Status().RunnerUpdate; u.Queued || u.LastOutcome != "" {
+		t.Fatalf("status %+v", u)
+	}
+	if got := distEntries(t, dist); got != "2.330.0,2.337.0,current" || strings.Contains(h.eventText(), "is ready") || strings.Contains(h.eventText(), "failed") {
+		t.Fatalf("dist holds %s\n%s", got, h.eventText())
+	}
+}
+
+// After a restart nothing is known about the releases until a check
+// succeeds. A failing first check keeps the update queued rather than
+// starting it with its version not prepared.
+func TestUpdateWaitsForAReleaseCheckAfterARestart(t *testing.T) {
+	h := newHarness(t)
+	_, fetched := queuedUpdate(t, h, tarballSum())
+	h.restart(t)
+	h.gh.setErr("ListRunnerReleases ", &github.APIError{Status: 502, Kind: github.ErrServer})
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if u := h.m.Status().RunnerUpdate; !u.Queued || u.LastOutcome != "" || len(*fetched) != 0 || strings.Contains(h.eventText(), "runner update started") {
+		t.Fatalf("status %+v fetched %v\n%s", u, *fetched, h.eventText())
+	}
+	if !strings.Contains(h.eventText(), "warn  runner update waiting: no runner release check has succeeded") {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+	h.gh.setErr("ListRunnerReleases ", nil)
+	h.now = h.now.Add(releaseCheckRetry)
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	if current(t, h) != "2.338.0" || len(*fetched) != 1 {
+		t.Fatalf("current %s fetched %v\n%s", current(t, h), *fetched, h.eventText())
+	}
+}
+
+// A release whose notes carry no checksum has nothing to prepare: the update
+// starts and fails at once, ending the queue, without downloading.
+func TestUpdateWithoutAChecksumFailsAtOnce(t *testing.T) {
+	h := newHarness(t)
+	_, fetched := queuedUpdate(t, h, "")
+	h.m.Tick(context.Background())
+	h.m.Wait()
+	u := h.m.Status().RunnerUpdate
+	if u.Queued || u.LastOutcome != "failed" || !strings.HasPrefix(u.LastError, "checksum: no linux-x64 checksum") || len(*fetched) != 0 {
+		t.Fatalf("status %+v fetched %v\n%s", u, *fetched, h.eventText())
 	}
 }

@@ -89,6 +89,57 @@ func TestRetentionIsReadOnceADay(t *testing.T) {
 	}
 }
 
+// A pass that pushes the token below the runner manager's reserve stops
+// listing: at most the repositories already under way finish their first
+// call, and every row keeps its last items.
+func TestInventoryStopsAtTheRateReserve(t *testing.T) {
+	gh := newFakeGH()
+	s, clock := newTestService(t, gh, testConfig())
+	now := clock.Now()
+	names := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
+	for _, n := range names {
+		gh.addRepo(n, true, ghArt(1, 10, now, time.Hour, 5))
+	}
+	s.pass(true, false)
+	listed := len(gh.callsLike("ListRepoArtifacts"))
+	cached := len(gh.callsLike("ListCaches"))
+	if listed != len(names) || cached != len(names) {
+		t.Fatalf("first pass: %d artifact and %d cache listings, want %d each", listed, cached, len(names))
+	}
+
+	gh.mu.Lock()
+	for _, n := range names {
+		gh.artifacts[n] = nil
+	}
+	gh.mu.Unlock()
+	dropped := make(chan struct{})
+	gh.onList = func(_ context.Context, repo string) error {
+		if repo != "a" {
+			<-dropped
+			return nil
+		}
+		gh.mu.Lock()
+		gh.remaining = MinRateLeft - 1
+		gh.mu.Unlock()
+		close(dropped)
+		return nil
+	}
+	clock.Add(InventoryInterval)
+	s.pass(true, false)
+	if n := len(gh.callsLike("ListRepoArtifacts")) - listed; n < 1 || n > Workers {
+		t.Errorf("%d repositories listed in the pass that fell below the reserve, want from 1 to the %d under way", n, Workers)
+	}
+	if n := len(gh.callsLike("ListCaches")) - cached; n != 0 {
+		t.Errorf("%d cache listings after the rate fell, want 0", n)
+	}
+	st := s.Snapshot()
+	for _, n := range names {
+		if r := row(t, st, n); r.ArtifactCount != 1 || r.Error != "" {
+			t.Errorf("%s row %+v, want its last artifact kept and no error", n, r)
+		}
+	}
+}
+
 // tooManyPages is the error a real client returns for a listing longer than
 // 50 pages.
 func tooManyPages(t *testing.T) error {

@@ -1,15 +1,19 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/toolchain"
 )
 
@@ -17,9 +21,23 @@ func queueService(t *testing.T, tools *fakeTools) (*Service, *atomic.Int32) {
 	t.Helper()
 	var busy atomic.Int32
 	s := newService(t, tools, &fakeDisk{})
-	s.Busy = func() int { return int(busy.Load()) }
+	s.Hold = busyHold(&busy, nil)
 	startService(t, s)
 	return s, &busy
+}
+
+// busyHold refuses while busy is above zero, as the runner manager's hold
+// does while jobs run; released, when set, is called on each release.
+func busyHold(busy *atomic.Int32, released func()) func(context.Context) (func(), error) {
+	return func(context.Context) (func(), error) {
+		if n := int(busy.Load()); n > 0 {
+			return nil, model.BusyError{N: n}
+		}
+		if released == nil {
+			return func() {}, nil
+		}
+		return released, nil
+	}
 }
 
 func nodeTools() (*fakeTools, *fakeInstaller) {
@@ -169,7 +187,70 @@ func TestPopularPresetQueuesNineInstallsInOrder(t *testing.T) {
 	}
 }
 
-func TestRemoveAndClearCheckBusyWhenTheyRun(t *testing.T) {
+func TestQueueSkipsAnOperationAlreadyQueued(t *testing.T) {
+	tools, node := nodeTools()
+	node.gate = make(chan struct{})
+	node.started = make(chan string, 4)
+	s, _ := queueService(t, tools)
+	if err := s.Install("node", "22"); err != nil {
+		t.Fatal(err)
+	}
+	recvVersion(t, node.started)
+	for range 2 {
+		if err := s.Install("node", "24"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if q := s.Snapshot().Operations.Queued; q != 1 {
+		t.Fatalf("%d queued after the same install twice, want 1", q)
+	}
+	if err := s.Install("node", "22"); err != nil {
+		t.Fatal(err)
+	}
+	if q := s.Snapshot().Operations.Queued; q != 2 {
+		t.Fatalf("%d queued, want 2: only a queued operation counts as a duplicate, not the running one", q)
+	}
+}
+
+func TestQueueRefusesPastFiftyOperations(t *testing.T) {
+	tools, node := nodeTools()
+	node.gate = make(chan struct{})
+	node.started = make(chan string, 4)
+	for _, e := range toolchain.Popular {
+		if tools.tools[e.Tool] == nil {
+			tools.tools[e.Tool] = newInstaller(map[string]string{})
+		}
+	}
+	s, _ := queueService(t, tools)
+	if err := s.Install("node", "22"); err != nil {
+		t.Fatal(err)
+	}
+	recvVersion(t, node.started)
+	for i := range 45 {
+		if err := s.Install("node", "v"+strconv.Itoa(i)); err != nil {
+			t.Fatalf("install %d: %v", i, err)
+		}
+	}
+	if err := s.InstallPreset("popular"); !errors.Is(err, ErrQueueFull) {
+		t.Fatalf("a preset that would pass 50: %v, want ErrQueueFull", err)
+	}
+	if q := s.Snapshot().Operations.Queued; q != 45 {
+		t.Fatalf("%d queued, want 45: a refused preset queues none of its installs", q)
+	}
+	for i := 45; i < 50; i++ {
+		if err := s.Install("node", "v"+strconv.Itoa(i)); err != nil {
+			t.Fatalf("install %d: %v", i, err)
+		}
+	}
+	if err := s.Install("node", "v50"); !errors.Is(err, ErrQueueFull) {
+		t.Fatalf("the 51st operation: %v, want ErrQueueFull", err)
+	}
+	if q := s.Snapshot().Operations.Queued; q != 50 {
+		t.Fatalf("%d queued, want 50", q)
+	}
+}
+
+func TestRemoveAndClearHoldTheRunnersWhenTheyRun(t *testing.T) {
 	tools, node := nodeTools()
 	nodeDir := filepath.Join(t.TempDir(), "node", "20.18.0", "x64")
 	writeFile(t, filepath.Join(nodeDir, "bin", "node"), "x")
@@ -180,12 +261,20 @@ func TestRemoveAndClearCheckBusyWhenTheyRun(t *testing.T) {
 	// the measurer, which walks the caches, in Docker's df throughout.
 	disk := &fakeDisk{entered: make(chan struct{}, 10), gate: make(chan struct{})}
 	var busy atomic.Int32
+	// Each release notes what the operation had removed by then, so the hold
+	// is seen to last until the operation ends.
+	var releases []string
+	var relMu sync.Mutex
 	s := newService(t, tools, disk)
-	s.Busy = func() int { return int(busy.Load()) }
+	s.Hold = busyHold(&busy, func() {
+		relMu.Lock()
+		defer relMu.Unlock()
+		_, err := os.Stat(pkg(s))
+		releases = append(releases, strings.Join(node.removedList(), ",")+" "+strconv.FormatBool(err != nil))
+	})
 	startService(t, s)
 	recvOrFail(t, disk.entered, "the first measurement")
-	pkg := filepath.Join(s.Home, ".nuget", "packages", "pkg", "a.nupkg")
-	writeFile(t, pkg, "x")
+	writeFile(t, pkg(s), "x")
 	if err := s.Install("node", "22"); err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +296,7 @@ func TestRemoveAndClearCheckBusyWhenTheyRun(t *testing.T) {
 	if got := node.removedList(); len(got) != 0 {
 		t.Fatalf("a refused removal ran: %q", got)
 	}
-	if _, err := os.Stat(pkg); err != nil {
+	if _, err := os.Stat(pkg(s)); err != nil {
 		t.Fatalf("a refused clear deleted files: %v", err)
 	}
 	busy.Store(0)
@@ -234,7 +323,14 @@ func TestRemoveAndClearCheckBusyWhenTheyRun(t *testing.T) {
 	if got := entries(t, filepath.Join(s.Home, ".nuget", "packages")); len(got) != 0 {
 		t.Fatalf("not cleared: %v", got)
 	}
+	relMu.Lock()
+	defer relMu.Unlock()
+	if want := []string{"20.18.0 false", "20.18.0 true"}; !slices.Equal(releases, want) {
+		t.Fatalf("releases %q, want %q", releases, want)
+	}
 }
+
+func pkg(s *Service) string { return filepath.Join(s.Home, ".nuget", "packages", "pkg", "a.nupkg") }
 
 func TestCloseInterruptsTheRunningOperationAndDropsTheRest(t *testing.T) {
 	tools, node := nodeTools()
@@ -242,7 +338,7 @@ func TestCloseInterruptsTheRunningOperationAndDropsTheRest(t *testing.T) {
 	node.started = make(chan string, 1)
 	s := newService(t, tools, &fakeDisk{})
 	s.Start()
-	for _, spec := range []string{"22", "24", "24"} {
+	for _, spec := range []string{"22", "24", "25"} {
 		if err := s.Install("node", spec); err != nil {
 			t.Fatal(err)
 		}
@@ -270,13 +366,16 @@ func TestCloseInterruptsTheRunningOperationAndDropsTheRest(t *testing.T) {
 func TestRecentKeepsTheLastTen(t *testing.T) {
 	tools, node := nodeTools()
 	node.have["22.11.0"] = true
+	for i := range 12 {
+		node.resolve["22."+strconv.Itoa(i)] = "22.11.0"
+	}
 	s, _ := queueService(t, tools)
-	for i := 0; i < 12; i++ {
-		if err := s.Install("node", "22"); err != nil {
+	for i := range 12 {
+		if err := s.Install("node", "22."+strconv.Itoa(i)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	waitFor(t, "twelve operations", func() bool { return eventCount(s, "install node 22 skipped") == 12 })
+	waitFor(t, "twelve operations", func() bool { return eventCount(s, " skipped: ") == 12 })
 	if n := len(s.Snapshot().Operations.Recent); n != 10 {
 		t.Fatalf("%d recent operations", n)
 	}

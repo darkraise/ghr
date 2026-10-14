@@ -35,6 +35,21 @@ func queuedUpdate(t *testing.T, h *harness, sum string) (dist string, fetched *[
 	return dist, &urls
 }
 
+// preparedUpdate queues the update with 2.338.0 already downloaded and
+// prepared, as the background prepare leaves it.
+func preparedUpdate(t *testing.T, h *harness) (fetched *[]string) {
+	t.Helper()
+	dist, fetched := queuedUpdate(t, h, tarballSum())
+	dir := filepath.Join(dist, "2.338.0")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte("#!/bin/sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return fetched
+}
+
 func current(t *testing.T, h *harness) string {
 	t.Helper()
 	p, err := h.host.ReadLink(h.m.Paths.Dist)
@@ -235,7 +250,7 @@ func TestUpdateCancelledBeforeTheSwitchKeepsCurrent(t *testing.T) {
 		name  string
 		setup func(t *testing.T, h *harness, dist string)
 	}{
-		{"after the dependency script", func(t *testing.T, h *harness, _ string) { h.host.onScript = h.m.Close }},
+		{"after the dependency script", func(t *testing.T, h *harness, _ string) { h.host.onScript = func(context.Context) { h.m.Close() } }},
 		{"reusing a complete version", func(t *testing.T, h *harness, dist string) {
 			ready := filepath.Join(dist, "2.338.0")
 			if err := os.MkdirAll(ready, 0o755); err != nil {
@@ -273,7 +288,8 @@ func TestUpdateCancelledBeforeTheSwitchKeepsCurrent(t *testing.T) {
 func TestFailedQueueClearSurvivesRestart(t *testing.T) {
 	h := newHarness(t)
 	queuedUpdate(t, h, "")
-	if err := os.MkdirAll(h.m.Paths.UpdateState+".tmp", 0o755); err != nil {
+	// A non-empty directory where the temp file goes cannot be removed or written.
+	if err := os.MkdirAll(filepath.Join(h.m.Paths.UpdateState+".tmp", "x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	h.m.runUpdate(h.m.maintCtx)

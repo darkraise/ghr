@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -197,6 +198,113 @@ func TestMeasureSkipsACacheBehindALinkOutOfTheHome(t *testing.T) {
 	}
 }
 
+// The link is swapped in after a check by path would have passed, so the walk
+// itself must stay inside the root it was given.
+func TestMeasureCacheWalksThroughTheOpenRoot(t *testing.T) {
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "w"), "w")
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".cache"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(home, ".cache", "pip")); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	r, err := os.OpenRoot(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	pip, _ := cacheByName("pip")
+	var noted []string
+	c := measureCache(context.Background(), r, home, pip, func(name string, err error) {
+		if err != nil {
+			noted = append(noted, name+": "+err.Error())
+		}
+	})
+	if c.Present || c.Bytes != 0 || c.Files != 0 {
+		t.Fatalf("measured outside the home: %+v", c)
+	}
+	if len(noted) != 1 || !strings.HasPrefix(noted[0], "pip: ") {
+		t.Fatalf("noted %q, want the refused walk named once", noted)
+	}
+}
+
+// swapFS is an fs.FS over a root that runs after() once the listing of dir
+// was read, as a job replacing that directory with a link would.
+type swapFS struct {
+	fs.FS
+	dir   string
+	after func()
+}
+
+func (f *swapFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	entries, err := fs.ReadDir(f.FS, name)
+	if name == f.dir && f.after != nil {
+		f.after()
+		f.after = nil
+	}
+	return entries, err
+}
+
+// A directory replaced by a link after its listing was read must not lead
+// the sizing of its entries out of the home. Entries of a directory opened
+// in an os.Root carry the size read through that directory, not one looked
+// up again by path.
+func TestWalkFSDoesNotSizeThroughAReplacedDirectory(t *testing.T) {
+	outside := t.TempDir()
+	big := make([]byte, 256<<10)
+	rand.Read(big)
+	writeFile(t, filepath.Join(outside, "f"), string(big))
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, "c", "sub", "f"), "x")
+	r, err := os.OpenRoot(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	swapped := false
+	fsys := &swapFS{FS: r.FS(), dir: "c/sub", after: func() {
+		sub := filepath.Join(home, "c", "sub")
+		if err := os.RemoveAll(sub); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, sub); err != nil {
+			t.Skip("no symlinks here:", err)
+		}
+		swapped = true
+	}}
+	u, _, _ := walkFS(context.Background(), fsys, "c")
+	if !swapped {
+		t.Fatal("the directory was not replaced")
+	}
+	if u.Bytes >= int64(len(big)) {
+		t.Fatalf("counted %d bytes, the size of a file outside the home", u.Bytes)
+	}
+}
+
+func TestWalkFSMatchesWalkInsideTheRoot(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, "c", "a"), strings.Repeat("x", 5000))
+	writeFile(t, filepath.Join(home, "c", "sub", "b"), "y")
+	r, err := os.OpenRoot(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	want, _, err := walk(filepath.Join(home, "c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := walkFS(context.Background(), r.FS(), "c")
+	if err != nil || !ok || got != want {
+		t.Fatalf("usage %+v, ok %v, err %v, want %+v", got, ok, err, want)
+	}
+	if _, ok, err := walkFS(context.Background(), r.FS(), "absent"); ok || err != nil {
+		t.Fatalf("a missing path: ok %v, err %v", ok, err)
+	}
+}
+
 func TestMeasureFollowsALinkInsideTheHome(t *testing.T) {
 	home := t.TempDir()
 	writeFile(t, filepath.Join(home, "elsewhere", "pip", "wheels", "w"), "w")
@@ -214,8 +322,65 @@ func TestMeasureFollowsALinkInsideTheHome(t *testing.T) {
 	}
 }
 
+// rootedDisk is a Docker that can also name its data root, as system.Docker does.
+type rootedDisk struct {
+	*fakeDisk
+	root string
+	err  error
+}
+
+func (d rootedDisk) DataRootBytes(context.Context) (system.DiskUsage, error) {
+	return system.DiskUsage{Root: d.root}, d.err
+}
+
+// otherFilesystem is a directory that is not on the temp dir's filesystem.
+func otherFilesystem(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("needs /proc, a filesystem of its own")
+	}
+	return "/proc"
+}
+
+func TestMeasureSaysWhetherTheCachesShareTheDataRootFilesystem(t *testing.T) {
+	home, tools := t.TempDir(), t.TempDir()
+	for _, c := range []struct {
+		name   string
+		docker func(t *testing.T) Docker
+		want   bool
+	}{
+		{"the data root is beside the caches", func(*testing.T) Docker { return rootedDisk{fakeDisk: &fakeDisk{}, root: home} }, true},
+		{"the data root is on another filesystem", func(t *testing.T) Docker { return rootedDisk{fakeDisk: &fakeDisk{}, root: otherFilesystem(t)} }, false},
+		{"the data root cannot be read", func(*testing.T) Docker {
+			return rootedDisk{fakeDisk: &fakeDisk{}, err: errors.New("docker is down")}
+		}, true},
+		{"the data root is gone", func(*testing.T) Docker { return rootedDisk{fakeDisk: &fakeDisk{}, root: filepath.Join(home, "absent")} }, true},
+		{"docker does not name its data root", func(*testing.T) Docker { return &fakeDisk{} }, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := measure(context.Background(), &fakeTools{root: tools}, c.docker(t), home, time.Now())
+			if m.cachesOnDataRoot != c.want {
+				t.Errorf("cachesOnDataRoot = %v, want %v", m.cachesOnDataRoot, c.want)
+			}
+		})
+	}
+}
+
+func TestMeasureSeesACacheRootOnAnotherFilesystem(t *testing.T) {
+	// The tool cache is the one root on another filesystem: the data root is
+	// beside the home.
+	home := t.TempDir()
+	m := measure(context.Background(), &fakeTools{root: otherFilesystem(t)}, rootedDisk{fakeDisk: &fakeDisk{}, root: home}, home, time.Now())
+	if m.cachesOnDataRoot {
+		t.Fatal("a tool cache on another filesystem was counted on the data root")
+	}
+}
+
 func TestEmptyMeasuredHasNoNilSlices(t *testing.T) {
 	m := emptyMeasured()
+	if !m.cachesOnDataRoot {
+		t.Error("before a measurement the caches are assumed to be on the data root")
+	}
 	if m.toolchains == nil || m.other == nil || m.caches == nil || m.docker == nil || m.cacheTypes == nil {
 		t.Fatalf("%+v", m)
 	}

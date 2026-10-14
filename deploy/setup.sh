@@ -287,7 +287,7 @@ EOF
 }
 
 # Polls `ghr status` until the API answers. A configured daemon adopts its runners
-# and reconciles with GitHub before it serves, so this can take several seconds.
+# before it serves, so this can take several seconds.
 wait_ready() {
   local deadline=$((SECONDS + READY_TIMEOUT)) out state
   log "waiting for ghr to become ready (up to ${READY_TIMEOUT}s)"

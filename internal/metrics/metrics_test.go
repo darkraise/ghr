@@ -223,6 +223,45 @@ func TestHourlyRollups(t *testing.T) {
 	}
 }
 
+func TestWritesCountsWhatChangesTheSeries(t *testing.T) {
+	h := newHost(t)
+	h.write(t, "cpu.stat", "usage_usec 0\n")
+	h.s.Path = filepath.Join(h.dir, "state", "metrics.json")
+	if n := h.s.Writes(); n != 0 {
+		t.Fatalf("a new sampler has %d writes", n)
+	}
+	for i := 0; i < 3; i++ {
+		before := h.s.Writes()
+		h.s.Sample()
+		if h.s.Writes() <= before {
+			t.Fatalf("sample %d did not count", i)
+		}
+		h.now = h.now.Add(time.Minute)
+	}
+	before := h.s.Writes()
+	h.s.Metrics()
+	h.s.Minutes()
+	h.s.Hours()
+	if n := h.s.Writes(); n != before {
+		t.Fatalf("reading counted: %d, was %d", n, before)
+	}
+	if err := h.s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if n := h.s.Writes(); n != before {
+		t.Fatalf("saving counted: %d, was %d", n, before)
+	}
+	back := NewSampler(h.s.Counts, h.s.Disk)
+	back.Now = func() time.Time { return h.now }
+	back.Path = h.s.Path
+	if err := back.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if back.Writes() == 0 {
+		t.Fatal("loading did not count")
+	}
+}
+
 func TestClockJumps(t *testing.T) {
 	h := newHost(t)
 	h.write(t, "cpu.stat", "usage_usec 0\n")

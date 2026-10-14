@@ -28,6 +28,7 @@ func TestStorageJSON(t *testing.T) {
 		},
 		LastPrune: &LastPrune{Trigger: "manual", Scope: "standard", StartedAt: now, FinishedAt: &now, Outcome: "ok",
 			Steps: []PruneStep{{Name: "dangling images", Freed: 9}, {Name: "disk usage", Error: "df failed"}}},
+		CachesOnDataRoot: true,
 	}
 	b, err := json.Marshal(st)
 	if err != nil {
@@ -41,7 +42,8 @@ func TestStorageJSON(t *testing.T) {
 		`"operations":{"current":{"id":"o1","kind":"install","target":"node 22","started_at":"2026-10-06T14:00:00Z","progress":"extracting"},"queued":2,` +
 		`"recent":[{"id":"o0","kind":"clear","target":"npm","started_at":"2026-10-06T14:00:00Z","finished_at":"2026-10-06T14:00:00Z","outcome":"ok","message":"cleared npm"}]},` +
 		`"last_prune":{"trigger":"manual","scope":"standard","started_at":"2026-10-06T14:00:00Z","finished_at":"2026-10-06T14:00:00Z","outcome":"ok",` +
-		`"steps":[{"name":"dangling images","freed":9},{"name":"disk usage","freed":0,"error":"df failed"}]}}`
+		`"steps":[{"name":"dangling images","freed":9},{"name":"disk usage","freed":0,"error":"df failed"}]},` +
+		`"caches_on_data_root":true}`
 	if string(b) != want {
 		t.Fatalf("json\n got %s\nwant %s", b, want)
 	}
@@ -52,7 +54,7 @@ func TestOperationsWithoutCurrentAndNoPrune(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"current":null`, `"recent":[]`, `"last_prune":null`} {
+	for _, want := range []string{`"current":null`, `"recent":[]`, `"last_prune":null`, `"caches_on_data_root":false`} {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("missing %s in %s", want, b)
 		}

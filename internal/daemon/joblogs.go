@@ -21,17 +21,23 @@ const (
 	parseLimit        = 4 << 20
 	logSlots          = 4
 	annotationEntries = 500
+	logMissEntries    = 1000
 	logRetryTTL       = 10 * time.Minute
 	// GitHub may not have stored a log yet when its job has only just
 	// completed. "No log" for a job that completed less than logSettle ago
 	// is therefore kept logSettleTTL, not logRetryTTL.
 	logSettle    = 2 * time.Minute
 	logSettleTTL = 15 * time.Second
+	// logLineOverhead is what a parsed line costs beyond its bytes in the
+	// raw log: a model.LogLine is 40 bytes, and the slices holding them
+	// grow by doubling.
+	logLineOverhead = 64
 )
 
 var (
-	// parsedLogBytes bounds the parsed-log cache by the raw logs' total size;
-	// tests shrink it before the cache is first used.
+	// parsedLogBytes bounds the parsed-log cache by the raw logs' total size
+	// plus a charge per parsed line; tests shrink it before the cache is
+	// first used.
 	parsedLogBytes int64 = 32 << 20
 	logDeadline          = 60 * time.Second
 	// logRequestWindow bounds each log request from its start (job read,
@@ -98,7 +104,7 @@ type logCache struct {
 	calls  map[int64]*logCall
 	parsed *lru.Cache[int64, model.JobLog]
 	notes  *lru.Cache[int64, jobNotes]
-	misses map[int64]logMiss
+	misses *lru.Cache[int64, logMiss]
 	gen    uint64 // the token generation parsed, notes and misses were filled under
 }
 
@@ -115,7 +121,7 @@ func (c *logCache) initLocked(gen uint64) {
 		c.gen = gen
 		c.parsed = lru.New[int64, model.JobLog](1<<30, parsedLogBytes)
 		c.notes = lru.New[int64, jobNotes](annotationEntries, 0)
-		c.misses = map[int64]logMiss{}
+		c.misses = lru.New[int64, logMiss](logMissEntries, 0)
 	}
 }
 
@@ -168,14 +174,14 @@ func (b *Backend) downloadLog(j logJob, call *logCall, queueWait time.Duration) 
 		case logParsed:
 			c.parsed.Add(j.id, res.log, size)
 			c.notes.Add(j.id, res.notes, 0)
-			delete(c.misses, j.id)
+			c.misses.Remove(j.id)
 		case logBusy:
 		default:
 			now, ttl := b.now(), logRetryTTL
 			if res.outcome == logNone && now.Sub(j.completedAt) < logSettle {
 				ttl = logSettleTTL
 			}
-			c.misses[j.id] = logMiss{until: now.Add(ttl), res: res}
+			c.misses.Add(j.id, logMiss{until: now.Add(ttl), res: res}, 0)
 		}
 	}
 	c.mu.Unlock()
@@ -214,7 +220,11 @@ func (b *Backend) readLog(j logJob, started chan struct{}, queueWait time.Durati
 	case err == nil:
 		steps := joblog.Parse(data, j.steps)
 		items, omitted := joblog.Annotations(j.id, j.name, steps)
-		return logResult{outcome: logParsed, log: model.JobLog{JobID: j.id, Steps: steps}, notes: jobNotes{items: items, omitted: omitted}}, int64(len(data))
+		size := int64(len(data))
+		for _, st := range steps {
+			size += int64(len(st.Lines)) * logLineOverhead
+		}
+		return logResult{outcome: logParsed, log: model.JobLog{JobID: j.id, Steps: steps}, notes: jobNotes{items: items, omitted: omitted}}, size
 	case errors.Is(err, github.ErrTooLarge):
 		return logResult{outcome: logTooLarge}, 0
 	case github.IsKind(err, github.ErrGone):
@@ -291,7 +301,7 @@ func (b *Backend) JobLog(ctx context.Context, repo string, jobID int64) (model.J
 		c.mu.Unlock()
 		return l, nil
 	}
-	if m, ok := c.misses[jobID]; ok && m.res.outcome != logFailed && b.now().Before(m.until) {
+	if m, ok := c.misses.Get(jobID); ok && m.res.outcome != logFailed && b.now().Before(m.until) {
 		c.mu.Unlock()
 		return flaggedLog(jobID, m.res.outcome), nil
 	}

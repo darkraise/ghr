@@ -29,6 +29,11 @@ const (
 	// maxCleanupFailures bounds consecutive failed Docker cleanups of one
 	// instance (about five minutes at finishRetry) before finish frees its slot.
 	maxCleanupFailures = 10
+	// rollbackTimeout bounds a failed spawn's rollback, which outlives the
+	// tick's context so that a cancelled tick leaks no registration.
+	rollbackTimeout = 30 * time.Second
+	// maxArchivedLog bounds each log file kept in an instance's archive.
+	maxArchivedLog = 16 << 20
 )
 
 // RandomID returns 6 lowercase hex characters.
@@ -45,14 +50,29 @@ func exists(path string) bool {
 	return !os.IsNotExist(err)
 }
 
-// uniqueID returns an ID with no live instance, instance dir, log archive or
-// pending history record, so retained logs and history never collide. An
-// unreadable path counts as taken, so the attempts are bounded.
+// realDirOrRemove returns nil when path is a directory itself, not a link to
+// one. Anything else there is removed, a link without following it, and
+// reported as fs.ErrNotExist.
+func realDirOrRemove(path string) error {
+	fi, err := os.Lstat(path)
+	if err != nil || fi.IsDir() {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return fs.ErrNotExist
+}
+
+// uniqueID returns an ID with no live instance, instance dir, log archive,
+// pending history record or history entry, so retained logs and history never
+// collide. An unreadable path counts as taken, so the attempts are bounded.
 func (m *Manager) uniqueID() (string, error) {
 	for range 1000 {
 		id := m.NewID()
 		m.mu.Lock()
 		_, taken := m.insts[id]
+		taken = taken || m.histIDs[id]
 		m.mu.Unlock()
 		if !taken && !exists(m.instanceDir(id)) && !exists(filepath.Join(m.Paths.Logs, id)) &&
 			!exists(m.pendingPath(id)) {
@@ -84,13 +104,18 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 	}
 	dir := m.instanceDir(id)
 	fail := func(err error) error {
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
+		defer cancel()
 		if rerr := removeAll(dir); rerr == nil {
 			m.removePrivate(id)
 		} else {
 			m.Events.Add("warn", r.Name, "spawn %s: remove dir: %v; reconciliation retries", id, rerr)
 		}
-		if derr := m.GH.DeleteRunner(ctx, r.Name, jit.Runner.ID); derr != nil {
-			m.Events.Add("warn", r.Name, "spawn %s: delete registration: %v", id, derr)
+		if derr := m.GH.DeleteRunner(dctx, r.Name, jit.Runner.ID); derr != nil && !github.IsKind(derr, github.ErrNotFound) {
+			m.mu.Lock()
+			m.undeleted[jit.Runner.ID] = registration{repo: r.Name, name: name}
+			m.mu.Unlock()
+			m.Events.Add("warn", r.Name, "spawn %s: delete registration: %v (reconciliation retries)", id, derr)
 		}
 		return err
 	}
@@ -106,8 +131,7 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 	if err := m.writePrivateMeta(meta); err != nil {
 		return fail(err)
 	}
-	// A copy for a person reading the directory; nothing trusts it while the
-	// private record exists.
+	// A copy for a person reading the directory; nothing trusts it.
 	if err := writeJSON(filepath.Join(dir, MetaFile), meta); err != nil {
 		return fail(err)
 	}
@@ -135,6 +159,16 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 		Command: []string{filepath.Join(dir, "run.sh"), "--jitconfig", jit.EncodedJITConfig},
 	}
 	if err := m.SD.Start(ctx, spec); err != nil {
+		// systemd-run can fail after the unit started, which would then run
+		// from dir with the registration. Reconcile stops an untracked unit
+		// and removes what it leaves once it is down.
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
+		serr := m.SD.Stop(dctx, spec.Unit)
+		cancel()
+		if serr != nil {
+			m.Events.Add("warn", r.Name, "spawn %s: stop after a failed start: %v; left for reconciliation", id, serr)
+			return err
+		}
 		return fail(err)
 	}
 	m.mu.Lock()
@@ -153,11 +187,12 @@ func parseTime(s string) (time.Time, bool) {
 // unparsable start time falls back to now.
 func jobInfo(rec JobRecord, now time.Time) *model.JobInfo {
 	runID, _ := strconv.ParseInt(rec.RunID, 10, 64)
+	attempt, _ := strconv.Atoi(rec.RunAttempt)
 	started, ok := parseTime(rec.StartedAt)
 	if !ok {
 		started = now
 	}
-	return &model.JobInfo{RunID: runID, RunNumber: rec.RunNumber, Workflow: rec.Workflow, Name: rec.Job, StartedAt: started}
+	return &model.JobInfo{RunID: runID, RunAttempt: attempt, RunNumber: rec.RunNumber, Workflow: rec.Workflow, Name: rec.Job, StartedAt: started}
 }
 
 // readJobFiles marks instances busy once their job-started hook has written job.json.
@@ -308,7 +343,7 @@ func (m *Manager) refreshUnits(ctx context.Context) {
 func (m *Manager) neverOnline(id string) (repo string, yes bool) {
 	m.mu.Lock()
 	i, ok := m.insts[id]
-	if !ok || i.State == sched.Cleaning || i.cameOnline || i.adopted || i.stopping {
+	if !ok || i.State == sched.Cleaning || i.cameOnline || i.adopted || i.stopping || i.startFailed {
 		m.mu.Unlock()
 		return "", false
 	}
@@ -377,8 +412,13 @@ type pending struct {
 	Deadline   time.Time          `json:"deadline"`
 }
 
-// pendingFor builds the record from job.json, falling back to the job the
-// manager confirmed through the jobs API. ok is false when no job ran.
+// pendingFor builds the record from the job the manager knows of, and from
+// job.json only when it knows none, for a job too short for a tick to see.
+// The known job is the one the jobs API confirmed or, until a tick confirms
+// it, job.json as an earlier tick or Adopt read it. The job can rewrite
+// job.json, so once a job is known the record moves only the finish time,
+// within the job's run time; finalize takes a conclusion only from a job of
+// that run on this runner. ok is false when no job ran.
 func (m *Manager) pendingFor(i instance, rec JobRecord, recOK bool) (pending, bool) {
 	if !recOK && i.Job == nil {
 		return pending{}, false
@@ -386,22 +426,28 @@ func (m *Manager) pendingFor(i instance, rec JobRecord, recOK bool) (pending, bo
 	now := m.Now()
 	e := model.HistoryEntry{ID: i.ID, Repo: i.Repo, Conclusion: "unknown", StartedAt: i.SpawnedAt, FinishedAt: now}
 	if i.Job != nil {
-		e.RunID, e.RunNumber, e.Workflow, e.JobName, e.HTMLURL = i.Job.RunID, i.Job.RunNumber, i.Job.Workflow, i.Job.Name, i.Job.HTMLURL
-		e.StartedAt = i.Job.StartedAt
-	}
-	if recOK {
+		e.RunID, e.RunAttempt, e.RunNumber, e.Workflow = i.Job.RunID, i.Job.RunAttempt, i.Job.RunNumber, i.Job.Workflow
+		e.JobName, e.HTMLURL, e.StartedAt = i.Job.Name, i.Job.HTMLURL, i.Job.StartedAt
+		// The jobs API has no run number, so it is the record's, as
+		// readJobFiles would have copied it at the next tick.
+		if e.RunNumber == "" && recOK {
+			e.RunNumber = rec.RunNumber
+			if e.Workflow == "" {
+				e.Workflow = rec.Workflow
+			}
+		}
+		if t, ok := parseTime(rec.FinishedAt); recOK && ok && !t.After(now) {
+			e.FinishedAt = t
+			if t.Before(e.StartedAt) {
+				e.FinishedAt = e.StartedAt
+			}
+		}
+	} else {
 		if id, err := strconv.ParseInt(rec.RunID, 10, 64); err == nil && id != 0 {
 			e.RunID = id
 		}
-		if rec.RunNumber != "" {
-			e.RunNumber = rec.RunNumber
-		}
-		if rec.Workflow != "" {
-			e.Workflow = rec.Workflow
-		}
-		if e.JobName == "" {
-			e.JobName = rec.Job
-		}
+		e.RunAttempt, _ = strconv.Atoi(rec.RunAttempt)
+		e.RunNumber, e.Workflow, e.JobName = rec.RunNumber, rec.Workflow, rec.Job
 		if t, ok := parseTime(rec.StartedAt); ok {
 			e.StartedAt = t
 		}
@@ -449,19 +495,34 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 		}
 	}
 
+	// The job owns _diag and may have swapped it for a link or a file. Only a
+	// real directory is archived: what follows runs as root on the archive.
 	archive := filepath.Join(m.Paths.Logs, id)
-	if diag := filepath.Join(dir, "_diag"); exists(diag) {
+	diag := filepath.Join(dir, "_diag")
+	if err := realDirOrRemove(diag); err == nil {
 		if err := os.MkdirAll(m.Paths.Logs, 0o755); err != nil {
 			return fmt.Errorf("archive logs: %w", err)
 		}
 		if err := os.Rename(diag, archive); err != nil {
 			return fmt.Errorf("archive logs: %w", err)
 		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("archive logs: %w", err)
 	}
-	if exists(archive) {
+	// Checked again, as a swap between the check and the rename moves the
+	// link instead.
+	if err := realDirOrRemove(archive); err == nil {
+		if err := pruneArchive(m.Paths.Logs, id); err != nil {
+			return fmt.Errorf("prune archived logs: %w", err)
+		}
 		if err := m.Host.ChownR(ctx, archive, "root"); err != nil {
 			return fmt.Errorf("chown archived logs: %w", err)
 		}
+		if err := trimArchive(m.Paths.Logs, id, m.Now()); err != nil {
+			return fmt.Errorf("trim archived logs: %w", err)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("archive logs: %w", err)
 	}
 
 	removed, err := m.cleanupDocker(ctx, cfg, id, i.Repo)
@@ -519,8 +580,16 @@ func (m *Manager) finish(ctx context.Context, id string) error {
 		return fmt.Errorf("remove %s: %w", dir, err)
 	}
 	m.removePrivate(id)
-	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil && !github.IsKind(err, github.ErrUnprocessable) {
-		m.Events.Add("warn", i.Repo, "delete registration %s: %v (reconciliation retries)", i.RunnerName, err)
+	if !i.deregistered {
+		if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil && !github.IsKind(err, github.ErrNotFound) {
+			// Reconcile retries it even if the repository stops being served.
+			m.mu.Lock()
+			m.undeleted[i.RunnerID] = registration{repo: i.Repo, name: i.RunnerName}
+			m.mu.Unlock()
+			if !github.IsKind(err, github.ErrUnprocessable) {
+				m.Events.Add("warn", i.Repo, "delete registration %s: %v (reconciliation retries)", i.RunnerName, err)
+			}
+		}
 	}
 
 	if !hadJob {
@@ -558,7 +627,15 @@ func (m *Manager) finalize(ctx context.Context, path string) {
 	e := p.Entry
 	final := false
 	if e.RunID != 0 {
-		jobs, err := m.GH.ListJobs(ctx, e.Repo, e.RunID)
+		var jobs []github.Job
+		var err error
+		// A re-run moves the latest attempt on, and its jobs can carry the
+		// same names on other runners.
+		if e.RunAttempt > 0 {
+			jobs, err = m.GH.ListAttemptJobs(ctx, e.Repo, e.RunID, e.RunAttempt)
+		} else {
+			jobs, err = m.GH.ListJobs(ctx, e.Repo, e.RunID)
+		}
 		if err != nil && !github.IsKind(err, github.ErrNotFound) {
 			if github.IsKind(err, github.ErrAuth) || github.IsKind(err, github.ErrRateLimit) {
 				m.apiErr(e.Repo, err, m.Now())
@@ -596,6 +673,7 @@ func (m *Manager) finalize(ctx context.Context, path string) {
 	}
 	m.mu.Lock()
 	m.recordLastJob(e)
+	m.histIDs[e.ID] = true
 	m.mu.Unlock()
 	level := "warn"
 	switch e.Conclusion {
@@ -750,9 +828,16 @@ func (m *Manager) deregisterIdle(ctx context.Context, i instance, now time.Time)
 		return idleBusy, false
 	}
 	if err := m.GH.DeleteRunner(ctx, i.Repo, i.RunnerID); err != nil {
-		if github.IsKind(err, github.ErrUnprocessable) {
+		switch {
+		case github.IsKind(err, github.ErrUnprocessable):
 			m.move(i.ID, sched.Busy, sched.Starting, sched.Idle)
 			return idleBusy, false
+		case github.IsKind(err, github.ErrNotFound):
+			if !m.registrationGone(ctx, i.Repo, i.RunnerID, now) {
+				return idleKept, false
+			}
+			m.markLost(i.ID)
+			return idleStopped, true
 		}
 		m.apiErr(i.Repo, err, now)
 		return idleKept, false
@@ -765,27 +850,61 @@ func (m *Manager) deregisterIdle(ctx context.Context, i instance, now time.Time)
 	return idleStopped, true
 }
 
-// stopStartTimedOut stops runners that never came online; finish deletes their registration.
+// stopStartTimedOut deregisters and stops runners that never came online.
+// GitHub refuses to delete a busy runner (422), so a job handed to one at the
+// last moment is never killed by the stop.
 func (m *Manager) stopStartTimedOut(ctx context.Context, cfg *config.Config, now time.Time) {
 	for _, id := range sched.StartTimedOut(cfg, m.schedInstances(cfg), now) {
 		m.mu.Lock()
 		i, ok := m.insts[id]
-		repo, answered := "", false
+		var cur instance
 		if ok {
-			repo, answered = i.Repo, i.answered
+			cur = *i
 		}
 		m.mu.Unlock()
 		// A stop a person asked for can finish and remove a runner while this
-		// loop is stopping another one. A runner the runners API did not answer
-		// for in this tick is left alone: an API pause or a failed call says
-		// nothing about whether it came online.
-		if !ok || !answered {
+		// loop is stopping another one, and a job recorded meanwhile makes it
+		// busy. A runner the runners API did not answer for in this tick is
+		// left alone: an API pause or a failed call says nothing about whether
+		// it came online. One already deregistered can take no job. One already
+		// stopped for its timeout waits for refreshUnits to see its unit exit.
+		if !ok || cur.State != sched.Starting || cur.startFailed || (!cur.answered && !cur.deregistered) {
 			continue
+		}
+		repo := cur.Repo
+		if !cur.deregistered {
+			if !m.apiAllowed(now) {
+				continue
+			}
+			// The runners API answered for it in this tick, so a 404 here
+			// means the registration is gone.
+			err := m.GH.DeleteRunner(ctx, repo, cur.RunnerID)
+			switch {
+			case github.IsKind(err, github.ErrUnprocessable):
+				m.move(id, sched.Busy, sched.Starting, sched.Idle)
+				continue
+			case err != nil && !github.IsKind(err, github.ErrNotFound):
+				m.apiErr(repo, err, now)
+				continue
+			}
+			m.mu.Lock()
+			if p := m.insts[id]; p != nil {
+				p.deregistered = true
+			}
+			m.mu.Unlock()
 		}
 		if err := m.SD.Stop(ctx, UnitPrefix+id); err != nil {
 			m.Events.Add("warn", repo, "stop %s: %v", id, err)
 			continue
 		}
-		m.Events.Add("warn", repo, "runner %s did not come online within %s; replaced", id, cfg.StartTimeout)
+		// Recorded now, not by the refreshUnits that sees the unit exit, because
+		// this tick can plan the replacement first.
+		m.mu.Lock()
+		if p := m.insts[id]; p != nil {
+			p.startFailed = true
+		}
+		m.mu.Unlock()
+		d := m.spawnFailed(repo, "runner did not come online", now)
+		m.Events.Add("warn", repo, "runner %s did not come online within %s; stopped, next spawn in %s", id, cfg.StartTimeout, d)
 	}
 }

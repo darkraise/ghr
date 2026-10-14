@@ -40,9 +40,8 @@ func mkfifo(t *testing.T, path string) {
 	}
 }
 
-// A job can write its instance directory, and root reads job.json and the
-// legacy ghr.json there: only a regular file of at most 1 MiB, and never
-// through a link.
+// A job can write its instance directory, and root reads job.json there:
+// only a regular file of at most 1 MiB, and never through a link.
 func TestReadJobJSONReadsOnlyASmallRegularFile(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) {
@@ -106,14 +105,16 @@ func TestAFIFONamedJobFileBlocksNeitherTickNorCleanup(t *testing.T) {
 	}
 }
 
-// Adoption reads both files of every instance directory. A FIFO in place of
-// job.json leaves a runner adopted without a job; one in place of the legacy
-// ghr.json is an instance with no readable metadata.
+// Adoption reads job.json in every instance directory, and a FIFO there
+// leaves a runner adopted without a job. One in place of ghr.json, beside no
+// metadata record, is not read at all.
 func TestAdoptIsNotBlockedByFIFOsInInstanceDirs(t *testing.T) {
 	h := newHarness(t)
 	makeInstance(t, h, "aaaaaa", "darkcloud", 1, false)
 	mkfifo(t, filepath.Join(h.m.instanceDir("aaaaaa"), JobFile))
 	makeInstance(t, h, "bbbbbb", "darkmem", 2, false)
+	os.Remove(filepath.Join(h.m.Paths.Private, "bbbbbb.json"))
+	os.Remove(filepath.Join(h.m.instanceDir("bbbbbb"), MetaFile))
 	mkfifo(t, filepath.Join(h.m.instanceDir("bbbbbb"), MetaFile))
 	h.sd.active["ghr-runner-aaaaaa"] = true
 	h.sd.active["ghr-runner-bbbbbb"] = true
@@ -126,7 +127,7 @@ func TestAdoptIsNotBlockedByFIFOsInInstanceDirs(t *testing.T) {
 	if h.state("aaaaaa") != "starting" {
 		t.Fatalf("aaaaaa %s", h.state("aaaaaa"))
 	}
-	if _, err := os.Stat(h.m.instanceDir("bbbbbb")); !os.IsNotExist(err) || !strings.Contains(h.eventText(), "instance bbbbbb had no readable ghr.json; stopped and removed") {
+	if _, err := os.Stat(h.m.instanceDir("bbbbbb")); !os.IsNotExist(err) || !strings.Contains(h.eventText(), "instance bbbbbb had no metadata record; stopped and removed") {
 		t.Fatalf("bbbbbb: stat %v\n%s", err, h.eventText())
 	}
 }

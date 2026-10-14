@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/darkraise/ghr/internal/model"
@@ -18,9 +19,14 @@ var (
 	ErrNotPresent     = errors.New("package cache not present")
 	ErrUnknownPreset  = errors.New("unknown toolchain preset")
 	ErrMissingVersion = errors.New("a toolchain version is required")
+	ErrQueueFull      = errors.New("too many storage operations are queued; try again when some have finished")
 )
 
-const recentOps = 10
+const (
+	recentOps = 10
+	// maxQueued is how many operations may wait behind the running one.
+	maxQueued = 50
+)
 
 func (s *Service) newID() string {
 	if s.NewID != nil {
@@ -31,20 +37,32 @@ func (s *Service) newID() string {
 	return s.now().UTC().Format("20060102T150405") + "-" + hex.EncodeToString(b[:])
 }
 
-func (s *Service) busy() int {
-	if s.Busy == nil {
-		return 0
+func (s *Service) hold(ctx context.Context) (func(), error) {
+	if s.Hold == nil {
+		return func() {}, nil
 	}
-	return s.Busy()
+	return s.Hold(ctx)
 }
 
+// enqueue queues ops after the waiting ones, leaving out any whose kind and
+// target already wait. It queues none of them when they would not all fit.
 func (s *Service) enqueue(ops ...*op) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return ErrClosed
 	}
-	s.queue = append(s.queue, ops...)
+	var add []*op
+	for _, o := range ops {
+		queued := func(q *op) bool { return q.Kind == o.Kind && q.Target == o.Target }
+		if !slices.ContainsFunc(s.queue, queued) && !slices.ContainsFunc(add, queued) {
+			add = append(add, o)
+		}
+	}
+	if len(s.queue)+len(add) > maxQueued {
+		return ErrQueueFull
+	}
+	s.queue = append(s.queue, add...)
 	select {
 	case s.wake <- struct{}{}:
 	default:
@@ -165,8 +183,8 @@ func (s *Service) installOp(tool string, inst toolchain.Installer, spec string) 
 	}
 }
 
-// Remove queues the removal of an installed version. It is refused when it
-// runs if any runner is busy then.
+// Remove queues the removal of an installed version. When it runs it holds
+// the runners until it ends, and it is refused if the hold is.
 func (s *Service) Remove(tool, version string) error {
 	inst, err := s.Tools.Get(tool)
 	if err != nil {
@@ -190,9 +208,11 @@ func (s *Service) Remove(tool, version string) error {
 	return s.enqueue(&op{
 		Operation: model.Operation{ID: s.newID(), Kind: "remove", Target: target},
 		run: func(ctx context.Context, progress func(string)) (string, string) {
-			if n := s.busy(); n > 0 {
-				return "refused", model.BusyError{N: n}.Error()
+			release, err := s.hold(ctx)
+			if err != nil {
+				return interruptedOr(ctx, "refused"), err.Error()
 			}
+			defer release()
 			progress("removing")
 			note := freed(s.toolchainBytes(ctx, tool, version))
 			if ctx.Err() != nil {
@@ -206,8 +226,8 @@ func (s *Service) Remove(tool, version string) error {
 	})
 }
 
-// Clear queues clearing a present package cache. It is refused when it runs
-// if any runner is busy then.
+// Clear queues clearing a present package cache. When it runs it holds the
+// runners until it ends, and it is refused if the hold is.
 func (s *Service) Clear(name string) error {
 	c, ok := cacheByName(name)
 	if !ok {
@@ -220,9 +240,11 @@ func (s *Service) Clear(name string) error {
 	return s.enqueue(&op{
 		Operation: model.Operation{ID: id, Kind: "clear", Target: name},
 		run: func(ctx context.Context, progress func(string)) (string, string) {
-			if n := s.busy(); n > 0 {
-				return "refused", model.BusyError{N: n}.Error()
+			release, err := s.hold(ctx)
+			if err != nil {
+				return interruptedOr(ctx, "refused"), err.Error()
 			}
+			defer release()
 			own, err := lookupOwner(s.User)
 			if err != nil {
 				return "failed", err.Error()

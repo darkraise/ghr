@@ -12,6 +12,16 @@ import (
 	"github.com/darkraise/ghr/internal/sched"
 )
 
+// lowRateRemaining is the remaining-calls count below which the demand poll
+// slows down.
+const lowRateRemaining = 1000
+
+// lowOnCalls reports whether the last seen quota is below lowRateRemaining;
+// RateRemaining is -1 before any request.
+func lowOnCalls(remaining int) bool {
+	return remaining >= 0 && remaining < lowRateRemaining
+}
+
 // Tick runs one poll → schedule → spawn → reap cycle. Every phase that calls
 // the GitHub API re-checks apiAllowed, because an earlier phase may have hit
 // a rate limit or an auth failure.
@@ -27,8 +37,12 @@ func (m *Manager) Tick(ctx context.Context) {
 	if m.apiAllowed(now) {
 		m.refreshRunners(ctx)
 	}
+	// A poll costs calls per active run, so with the quota running low it
+	// runs on every second tick; a skipped tick neither plans spawns nor
+	// starts an update, which both need a fresh answer.
+	slow := m.ticks%2 == 0 && lowOnCalls(m.GH.RateRemaining())
 	demandOK, unanswered := false, ""
-	if m.apiAllowed(now) {
+	if m.apiAllowed(now) && !slow {
 		demandOK, unanswered = m.gatherDemand(ctx, cfg, now)
 	}
 	m.noteBlocked(cfg)
@@ -41,8 +55,11 @@ func (m *Manager) Tick(ctx context.Context) {
 		m.stopDeregistered(ctx, now)
 	}
 	m.stopStartTimedOut(ctx, cfg, now)
-	m.startUpdateIfFree(ctx, cfg, now, demandOK, unanswered)
-	if m.apiAllowed(now) && !m.isDegraded() {
+	if !slow {
+		m.startUpdateIfFree(ctx, cfg, now, demandOK, unanswered)
+	}
+	m.prepareUpdate(now)
+	if m.apiAllowed(now) && !m.isDegraded() && !slow {
 		m.spawnPlanned(ctx, cfg, now)
 	}
 	if m.apiAllowed(now) && !m.isDegraded() && m.ticks%30 == 0 {
@@ -110,10 +127,11 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 		}
 	}
 	forget := func(name string) {
+		key := strings.ToLower(name)
 		m.mu.Lock()
-		delete(m.fails, name)
-		delete(m.retryAt, name)
-		delete(m.repoErr, name)
+		delete(m.fails, key)
+		delete(m.retryAt, key)
+		delete(m.repoErr, key)
 		m.mu.Unlock()
 	}
 	for _, r := range cfg.Repos {
@@ -121,7 +139,7 @@ func (m *Manager) gatherDemand(ctx context.Context, cfg *config.Config, now time
 			continue // forgetPaused has dropped what its last polls left behind
 		}
 		m.mu.Lock()
-		wait := now.Before(m.retryAt[r.Name])
+		wait := now.Before(m.retryAt[strings.ToLower(r.Name)])
 		m.mu.Unlock()
 		if wait {
 			missed(r)
@@ -181,10 +199,11 @@ func (m *Manager) forgetPaused(cfg *config.Config) {
 		if !r.Paused || m.unconfirmedBusy(r.Name) {
 			continue
 		}
+		key := strings.ToLower(r.Name)
 		m.mu.Lock()
-		delete(m.fails, r.Name)
-		delete(m.retryAt, r.Name)
-		delete(m.repoErr, r.Name)
+		delete(m.fails, key)
+		delete(m.retryAt, key)
+		delete(m.repoErr, key)
 		delete(m.demand, r.Name)
 		m.mu.Unlock()
 	}
@@ -252,15 +271,43 @@ func (m *Manager) confirm(id string, j github.Job, now time.Time) {
 	if i.Job != nil {
 		runNumber = i.Job.RunNumber
 	}
-	i.Job = &model.JobInfo{RunID: j.RunID, RunNumber: runNumber, Workflow: j.WorkflowName, Name: j.Name, HTMLURL: j.HTMLURL, StartedAt: started}
+	i.Job = &model.JobInfo{RunID: j.RunID, RunAttempt: j.RunAttempt, RunNumber: runNumber, Workflow: j.WorkflowName, Name: j.Name, HTMLURL: j.HTMLURL, StartedAt: started}
 }
 
-// spawnPlanned spawns what sched.Plan decides, nothing while a runner update
-// runs. It plans from planConfig, so a blocked repo gets nothing. Repos that
-// are unread, in an error state, or waiting after a failed start, are left
-// out of planning. Spawning stops as soon as the live config differs from the
-// one the plan used, so a pause or cap change made during polling is never
-// overridden.
+// maxSpawnsPerTick bounds one tick's spawns, so a burst of queued jobs does not
+// hold up reaping and polling for the minutes that many JIT registrations take.
+const maxSpawnsPerTick = 10
+
+// roundRobinByRepo reorders spawns to take one from each repo in turn, keeping
+// each repo's own order, so truncating the result cannot starve a later repo.
+func roundRobinByRepo(spawns []sched.Spawn) []sched.Spawn {
+	var repos []string
+	byRepo := map[string][]sched.Spawn{}
+	for _, s := range spawns {
+		key := strings.ToLower(s.Repo)
+		if _, ok := byRepo[key]; !ok {
+			repos = append(repos, key)
+		}
+		byRepo[key] = append(byRepo[key], s)
+	}
+	out := make([]sched.Spawn, 0, len(spawns))
+	for len(out) < len(spawns) {
+		for _, r := range repos {
+			if q := byRepo[r]; len(q) > 0 {
+				out = append(out, q[0])
+				byRepo[r] = q[1:]
+			}
+		}
+	}
+	return out
+}
+
+// spawnPlanned spawns what sched.Plan decides, at most maxSpawnsPerTick of it,
+// and nothing while a runner update runs or maintenance holds the runners. It
+// plans from planConfig, so a blocked repo gets nothing. Repos that are unread,
+// in an error state, or waiting after a failed start, are left out of planning.
+// Spawning stops as soon as the live config differs from the one the plan used,
+// so a pause or cap change made during polling is never overridden.
 func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time.Time) {
 	plan := m.planConfig(cfg)
 	var read []config.Repo
@@ -270,7 +317,7 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 		}
 	}
 	m.mu.Lock()
-	if m.upd.running {
+	if m.upd.running || m.held > 0 {
 		m.mu.Unlock()
 		return
 	}
@@ -278,13 +325,35 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 	planCfg := *plan
 	planCfg.Repos = nil
 	for _, r := range read {
-		if m.repoErr[r.Name] == "" && !now.Before(m.retryAt[r.Name]) && !now.Before(m.spawnRetryAt[strings.ToLower(r.Name)]) {
+		key := strings.ToLower(r.Name)
+		if m.repoErr[key] == "" && !now.Before(m.retryAt[key]) && !now.Before(m.spawnRetryAt[key]) {
 			planCfg.Repos = append(planCfg.Repos, r)
 		}
 	}
 	m.mu.Unlock()
+	spawns := sched.Plan(&planCfg, m.schedInstances(cfg), demand, now)
+	if len(spawns) == 0 {
+		return
+	}
+	if len(spawns) > maxSpawnsPerTick {
+		spawns = roundRobinByRepo(spawns)[:maxSpawnsPerTick]
+	}
+	// A runner is in insts only once its unit has started, so a hold taken
+	// meanwhile would not see it; spawning refuses holds until these end.
+	m.mu.Lock()
+	if m.held > 0 {
+		m.mu.Unlock()
+		return
+	}
+	m.spawning = true
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.spawning = false
+		m.mu.Unlock()
+	}()
 	failed := map[string]bool{}
-	for _, s := range sched.Plan(&planCfg, m.schedInstances(cfg), demand, now) {
+	for _, s := range spawns {
 		if m.Config() != cfg {
 			return
 		}

@@ -93,7 +93,12 @@ func (b *Backend) fingerprints() map[string]uint64 {
 	})
 	hash("storage", func() any { return b.storageFrom(status()) })
 	count("history", b.Hist.Writes)
-	hash("metrics", func() any { return b.Metrics() })
+	count("metrics", func() int64 {
+		if b.Sampler == nil {
+			return 0
+		}
+		return b.Sampler.Writes()
+	})
 	if b.GHS != nil {
 		count("github-storage", b.GHS.Version)
 	}

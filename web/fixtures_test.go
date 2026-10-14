@@ -178,7 +178,8 @@ func fixtureValues() map[string]any {
 				BuildCacheTypes: []model.BuildCacheType{{Type: "regular", Count: 10, Bytes: 334_000_000, Reclaimable: 300_000_000}},
 				DiskPct:         61,
 			},
-			MeasuredAt: ptr(at(-2 * time.Minute)),
+			CachesOnDataRoot: true,
+			MeasuredAt:       ptr(at(-2 * time.Minute)),
 			Operations: model.Operations{
 				Current: &model.Operation{ID: "op3", Kind: "install", Target: "node 24", StartedAt: at(-30 * time.Second), Progress: "extracting"},
 				Queued:  1,

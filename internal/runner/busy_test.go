@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -20,31 +21,32 @@ func addInstance(t *testing.T, h *harness, id string, state sched.State) {
 	}
 }
 
-func TestBusyCountCountsAHookRecordedJob(t *testing.T) {
+func TestHoldCountsAHookRecordedJob(t *testing.T) {
 	h := newHarness(t)
 	addInstance(t, h, "aaaaaa", sched.Idle)
-	addInstance(t, h, "bbbbbb", sched.Idle)
 	addInstance(t, h, "cccccc", sched.Busy)
-	if n := h.m.BusyCount(); n != 1 {
-		t.Fatalf("before the hook: %d busy", n)
+	if _, err := h.m.HoldForMaintenance(context.Background()); err == nil || err.Error() != "refused: 1 jobs running" {
+		t.Fatalf("before the hook: %v", err)
 	}
 	h.writeJob(t, "aaaaaa", 55)
-	if n := h.m.BusyCount(); n != 2 {
-		t.Fatalf("after the hook: %d busy", n)
+	if _, err := h.m.HoldForMaintenance(context.Background()); err == nil || err.Error() != "refused: 2 jobs running" {
+		t.Fatalf("after the hook: %v", err)
 	}
 	h.m.mu.Lock()
 	confirmed := h.m.insts["aaaaaa"].JobConfirmed
 	h.m.mu.Unlock()
 	if confirmed {
-		t.Fatal("BusyCount must not wait for GitHub to confirm the job")
+		t.Fatal("the hold must not wait for GitHub to confirm the job")
 	}
 }
 
-func TestBusyCountIgnoresCleaningInstances(t *testing.T) {
+func TestHoldIgnoresCleaningInstances(t *testing.T) {
 	h := newHarness(t)
 	addInstance(t, h, "aaaaaa", sched.Cleaning)
 	h.writeJob(t, "aaaaaa", 55)
-	if n := h.m.BusyCount(); n != 0 {
-		t.Fatalf("%d busy", n)
+	release, err := h.m.HoldForMaintenance(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
+	release()
 }

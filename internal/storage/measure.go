@@ -56,39 +56,67 @@ func walkCtx(ctx context.Context, path string) (usage, bool, error) {
 	} else if err != nil {
 		return u, false, err
 	}
-	var first error
-	seen := map[inode]bool{}
-	walkErr := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
-		if cerr := ctx.Err(); cerr != nil {
-			return cerr
-		}
-		if err == nil {
-			var fi fs.FileInfo
-			if fi, err = d.Info(); err == nil {
-				if id, linked := hardLink(fi); !linked {
-					u.Bytes += allocated(fi)
-				} else if !seen[id] {
-					seen[id] = true
-					u.Bytes += allocated(fi)
-				}
-				if fi.Mode().IsRegular() {
-					u.Files++
-					if fi.ModTime().After(u.Last) {
-						u.Last = fi.ModTime()
-					}
-				}
-				return nil
-			}
-		}
-		if !os.IsNotExist(err) && first == nil {
-			first = err
-		}
-		return nil
-	})
-	if first == nil {
-		first = walkErr
+	z := newSizer()
+	walkErr := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error { return z.visit(ctx, d, err) })
+	return z.result(walkErr)
+}
+
+// walkFS is walkCtx through fsys, which a caller holding an os.Root passes as
+// r.FS(), so that no link met on the way can lead the walk out of the root.
+// name is a slash-separated path under fsys.
+func walkFS(ctx context.Context, fsys fs.FS, name string) (usage, bool, error) {
+	if _, err := fs.Stat(fsys, name); errors.Is(err, fs.ErrNotExist) {
+		return usage{}, false, nil
+	} else if err != nil {
+		return usage{}, false, err
 	}
-	return u, true, first
+	z := newSizer()
+	walkErr := fs.WalkDir(fsys, name, func(_ string, d fs.DirEntry, err error) error { return z.visit(ctx, d, err) })
+	return z.result(walkErr)
+}
+
+// sizer sums what a directory walk meets.
+type sizer struct {
+	u     usage
+	first error
+	seen  map[inode]bool
+}
+
+func newSizer() *sizer { return &sizer{seen: map[inode]bool{}} }
+
+func (z *sizer) visit(ctx context.Context, d fs.DirEntry, err error) error {
+	if cerr := ctx.Err(); cerr != nil {
+		return cerr
+	}
+	if err == nil {
+		var fi fs.FileInfo
+		if fi, err = d.Info(); err == nil {
+			if id, linked := hardLink(fi); !linked {
+				z.u.Bytes += allocated(fi)
+			} else if !z.seen[id] {
+				z.seen[id] = true
+				z.u.Bytes += allocated(fi)
+			}
+			if fi.Mode().IsRegular() {
+				z.u.Files++
+				if fi.ModTime().After(z.u.Last) {
+					z.u.Last = fi.ModTime()
+				}
+			}
+			return nil
+		}
+	}
+	if !os.IsNotExist(err) && z.first == nil {
+		z.first = err
+	}
+	return nil
+}
+
+func (z *sizer) result(walkErr error) (usage, bool, error) {
+	if z.first == nil {
+		z.first = walkErr
+	}
+	return z.u, true, z.first
 }
 
 // measured is one complete measurement; the service swaps it into its
@@ -100,7 +128,10 @@ type measured struct {
 	caches     []model.PackageCache
 	docker     []model.DockerRow
 	cacheTypes []model.BuildCacheType
-	err        string
+	// cachesOnDataRoot is false when the tool cache or the runner home is on
+	// another filesystem than Docker's data root.
+	cachesOnDataRoot bool
+	err              string
 }
 
 // inHome refuses a cache path that resolves out of the home through a
@@ -119,16 +150,17 @@ func inHome(r *os.Root, rel string) error {
 
 func emptyMeasured() measured {
 	return measured{
-		toolchains: []model.Toolchain{},
-		other:      []model.Folder{},
-		caches:     []model.PackageCache{},
-		docker:     []model.DockerRow{},
-		cacheTypes: []model.BuildCacheType{},
+		cachesOnDataRoot: true,
+		toolchains:       []model.Toolchain{},
+		other:            []model.Folder{},
+		caches:           []model.PackageCache{},
+		docker:           []model.DockerRow{},
+		cacheTypes:       []model.BuildCacheType{},
 	}
 }
 
-// measureCache walks each of c's paths under home, skipping one that
-// resolves out of r, and names every failure through note.
+// measureCache walks each of c's paths under home through r, skipping one
+// that resolves out of it, and names every failure through note.
 func measureCache(ctx context.Context, r *os.Root, home string, c Cache, note func(string, error)) model.PackageCache {
 	pc := model.PackageCache{Name: c.Name, Label: c.Label, Paths: c.abs(home)}
 	for i, p := range pc.Paths {
@@ -136,7 +168,14 @@ func measureCache(ctx context.Context, r *os.Root, home string, c Cache, note fu
 			note(c.Name, err)
 			continue
 		}
-		u, ok, err := walkCtx(ctx, p)
+		var u usage
+		var ok bool
+		var err error
+		if r != nil {
+			u, ok, err = walkFS(ctx, r.FS(), c.Paths[i])
+		} else {
+			u, ok, err = walkCtx(ctx, p)
+		}
 		note(c.Name, err)
 		if !ok {
 			continue
@@ -198,6 +237,45 @@ func measure(ctx context.Context, tools Toolchains, docker Docker, home string, 
 	for _, t := range types {
 		m.cacheTypes = append(m.cacheTypes, model.BuildCacheType{Type: t.Type, Count: t.Count, Bytes: t.Bytes, Reclaimable: t.Reclaimable})
 	}
+	m.cachesOnDataRoot = cachesOnDataRoot(ctx, docker, tools.Root(), home)
 	m.err = strings.Join(errs, "; ")
 	return m
+}
+
+// cachesOnDataRoot reports whether the tool cache and the runner home are on
+// the filesystem holding Docker's data root. It answers yes when it cannot
+// tell, as ghr's installer keeps them on one filesystem.
+func cachesOnDataRoot(ctx context.Context, docker Docker, toolRoot, home string) bool {
+	d, ok := docker.(interface {
+		DataRootBytes(ctx context.Context) (system.DiskUsage, error)
+	})
+	if !ok {
+		return true
+	}
+	u, err := d.DataRootBytes(ctx)
+	if err != nil {
+		return true
+	}
+	want, ok := deviceOf(u.Root)
+	if !ok {
+		return true
+	}
+	for _, p := range []string{toolRoot, home} {
+		if dev, ok := deviceOf(p); ok && dev != want {
+			return false
+		}
+	}
+	return true
+}
+
+// deviceOf is the filesystem path is on.
+func deviceOf(path string) (uint64, bool) {
+	if path == "" {
+		return 0, false
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, false
+	}
+	return device(fi)
 }

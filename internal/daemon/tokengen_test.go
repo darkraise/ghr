@@ -78,7 +78,7 @@ func tokenCaches() []tokenCache {
 			func(b *Backend) { b.JobLog(ctx, "darkmem", 1003) }},
 		{"workflow file not found", "GetContent",
 			func(*fakeManager, *fakeGH) {},
-			func(b *Backend) error { _, _, err := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs()); return err },
+			func(b *Backend) error { b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs()); return nil },
 			func(gh *fakeGH) int { return gh.count("GetContent") },
 			nil},
 	}
@@ -131,8 +131,8 @@ func TestWorkflowFileBytesOutliveATokenChange(t *testing.T) {
 	b, _, gh := newBackend(t)
 	gh.content = map[string][]byte{contentKey("darkmem", ciPath, "abc"): []byte(ciYAML)}
 	for range 2 {
-		if g, note, err := b.runGraph(context.Background(), "darkmem", "abc", ciPath, ciJobs()); g == nil || note != "" || err != nil {
-			t.Fatalf("graph %+v note %q err %v", g, note, err)
+		if g, note := b.runGraph(context.Background(), "darkmem", "abc", ciPath, ciJobs()); g == nil || note != "" {
+			t.Fatalf("graph %+v note %q", g, note)
 		}
 		gh.ForgetCache()
 	}
