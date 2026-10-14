@@ -285,10 +285,7 @@ func (b *Backend) fetchDetail(ctx context.Context, repo string, watched bool, id
 	if err != nil {
 		return model.RunDetail{}, err
 	}
-	graph, note, err := b.runGraph(ctx, repo, shown.HeadSHA, shown.Path, jobs)
-	if err != nil {
-		return model.RunDetail{}, err
-	}
+	graph, note := b.runGraph(ctx, repo, shown.HeadSHA, shown.Path, jobs)
 
 	ours, herr := b.ghrJobs()
 	b.details.mu.Lock()

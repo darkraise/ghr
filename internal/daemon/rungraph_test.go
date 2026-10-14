@@ -47,9 +47,9 @@ func TestRunGraphNotes(t *testing.T) {
 			if tc.yaml != "" {
 				gh.content = map[string][]byte{contentKey("darkmem", tc.path, "abc"): []byte(tc.yaml)}
 			}
-			g, note, err := b.runGraph(context.Background(), "darkmem", "abc", tc.path, tc.jobs)
-			if err != nil || g != nil || note != tc.note {
-				t.Fatalf("graph %+v note %q err %v", g, note, err)
+			g, note := b.runGraph(context.Background(), "darkmem", "abc", tc.path, tc.jobs)
+			if g != nil || note != tc.note {
+				t.Fatalf("graph %+v note %q", g, note)
 			}
 			if len(tc.jobs) == 0 && gh.count("GetContent") != 0 {
 				t.Fatalf("the workflow file was read for a run with no jobs: %v", gh.calls)
@@ -61,9 +61,9 @@ func TestRunGraphNotes(t *testing.T) {
 func TestRunGraphBuildsFromTheFile(t *testing.T) {
 	b, _, gh := newBackend(t)
 	gh.content = map[string][]byte{contentKey("darkmem", ciPath, "abc"): []byte(ciYAML)}
-	g, note, err := b.runGraph(context.Background(), "darkmem", "abc", ciPath, ciJobs())
-	if err != nil || note != "" || g == nil || len(g.Nodes) != 2 {
-		t.Fatalf("graph %+v note %q err %v", g, note, err)
+	g, note := b.runGraph(context.Background(), "darkmem", "abc", ciPath, ciJobs())
+	if note != "" || g == nil || len(g.Nodes) != 2 {
+		t.Fatalf("graph %+v note %q", g, note)
 	}
 	if n := g.Nodes[1]; n.Key != "test" || n.Column != 1 || fmt.Sprint(n.Needs) != "[build]" || fmt.Sprint(n.JobIDs) != "[2]" {
 		t.Fatalf("node %+v", n)
@@ -73,9 +73,9 @@ func TestRunGraphBuildsFromTheFile(t *testing.T) {
 func TestRunGraphStripsARefFromThePath(t *testing.T) {
 	b, _, gh := newBackend(t)
 	gh.content = map[string][]byte{contentKey("darkmem", ciPath, "abc"): []byte(ciYAML)}
-	g, note, err := b.runGraph(context.Background(), "darkmem", "abc", ciPath+"@refs/heads/main", ciJobs())
-	if err != nil || note != "" || g == nil || len(g.Nodes) != 2 {
-		t.Fatalf("graph %+v note %q err %v", g, note, err)
+	g, note := b.runGraph(context.Background(), "darkmem", "abc", ciPath+"@refs/heads/main", ciJobs())
+	if note != "" || g == nil || len(g.Nodes) != 2 {
+		t.Fatalf("graph %+v note %q", g, note)
 	}
 }
 
@@ -90,9 +90,9 @@ func TestRunGraphNotesATransientError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			b, _, gh := newBackend(t)
 			gh.contentErr = tc.err
-			g, note, err := b.runGraph(context.Background(), "darkmem", "abc", ciPath, ciJobs())
-			if err != nil || g != nil || note != noteUnavailable {
-				t.Fatalf("graph %+v note %q err %v", g, note, err)
+			g, note := b.runGraph(context.Background(), "darkmem", "abc", ciPath, ciJobs())
+			if g != nil || note != noteUnavailable {
+				t.Fatalf("graph %+v note %q", g, note)
 			}
 		})
 	}
@@ -104,7 +104,7 @@ func TestWorkflowFileCache(t *testing.T) {
 		b, _, gh := newBackend(t)
 		gh.content = map[string][]byte{contentKey("darkmem", ciPath, "abc"): []byte(ciYAML)}
 		for range 2 {
-			if _, note, _ := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs()); note != "" {
+			if _, note := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs()); note != "" {
 				t.Fatalf("note %q", note)
 			}
 		}
@@ -118,11 +118,11 @@ func TestWorkflowFileCache(t *testing.T) {
 		b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs())
 		gh.content = map[string][]byte{contentKey("darkmem", ciPath, "abc"): []byte(ciYAML)}
 		clock.Store(actionsT0.Add(wfMissingTTL - time.Second).UnixNano())
-		if _, note, _ := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs()); note != noteNoFile || gh.count("GetContent") != 1 {
+		if _, note := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs()); note != noteNoFile || gh.count("GetContent") != 1 {
 			t.Fatalf("note %q, %d calls", note, gh.count("GetContent"))
 		}
 		clock.Store(actionsT0.Add(wfMissingTTL).UnixNano())
-		if _, note, _ := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs()); note != "" || gh.count("GetContent") != 2 {
+		if _, note := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs()); note != "" || gh.count("GetContent") != 2 {
 			t.Fatalf("note %q, %d calls", note, gh.count("GetContent"))
 		}
 	})
@@ -134,9 +134,9 @@ func TestWorkflowFileCache(t *testing.T) {
 		gh.contentErr = nil
 		gh.content = map[string][]byte{contentKey("darkmem", ciPath, "abc"): []byte(ciYAML)}
 		clock.Store(actionsT0.Add(24 * time.Hour).UnixNano())
-		g, note, err := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs())
-		if err != nil || g != nil || note != fmt.Sprintf(noteInvalid, ciPath) || gh.count("GetContent") != 1 {
-			t.Fatalf("graph %+v note %q err %v, %d calls", g, note, err, gh.count("GetContent"))
+		g, note := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs())
+		if g != nil || note != fmt.Sprintf(noteInvalid, ciPath) || gh.count("GetContent") != 1 {
+			t.Fatalf("graph %+v note %q, %d calls", g, note, gh.count("GetContent"))
 		}
 	})
 	t.Run("never keeps a 403", func(t *testing.T) {
@@ -145,7 +145,7 @@ func TestWorkflowFileCache(t *testing.T) {
 		b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs())
 		gh.contentErr = nil
 		gh.content = map[string][]byte{contentKey("darkmem", ciPath, "abc"): []byte(ciYAML)}
-		if g, note, _ := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs()); g == nil || note != "" {
+		if g, note := b.runGraph(ctx, "darkmem", "abc", ciPath, ciJobs()); g == nil || note != "" {
 			t.Fatalf("graph %+v note %q", g, note)
 		}
 	})

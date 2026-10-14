@@ -90,39 +90,39 @@ func (b *Backend) workflowFile(ctx context.Context, repo, sha, path string) ([]b
 // runGraph builds the job graph of a run from its workflow file at sha. When
 // no graph can be drawn it returns the note that says why, so a file that
 // cannot be read costs the graph and not the run page.
-func (b *Backend) runGraph(ctx context.Context, repo, sha, path string, jobs []github.Job) (graph *model.RunGraph, note string, err error) {
+func (b *Backend) runGraph(ctx context.Context, repo, sha, path string, jobs []github.Job) (graph *model.RunGraph, note string) {
 	// A defect in reading a workflow file costs the graph, not the run page.
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("run graph %s: panic: %v", path, r)
-			graph, note, err = nil, fmt.Sprintf(noteInvalid, path), nil
+			graph, note = nil, fmt.Sprintf(noteInvalid, path)
 		}
 	}()
 	// Without jobs there is nothing to lay out, so the file is not read.
 	if len(jobs) == 0 {
-		return nil, noteNoJobs, nil
+		return nil, noteNoJobs
 	}
 	if m := pathRef.FindStringSubmatch(path); m != nil {
 		path = m[1]
 	}
 	if !strings.HasPrefix(path, ".github/workflows/") {
-		return nil, noteNoFile, nil
+		return nil, noteNoFile
 	}
 	data, err := b.workflowFile(ctx, repo, sha, path)
 	var ge *github.APIError
 	switch {
 	case github.IsKind(err, github.ErrNotFound):
-		return nil, noteNoFile, nil
+		return nil, noteNoFile
 	case errors.As(err, &ge) && ge.Kind == github.ErrAuth && ge.Status == 403:
-		return nil, noteNoPermission, nil
+		return nil, noteNoPermission
 	case errors.Is(err, github.ErrBadContent):
-		return nil, fmt.Sprintf(noteInvalid, path), nil
+		return nil, fmt.Sprintf(noteInvalid, path)
 	case err != nil:
-		return nil, noteUnavailable, nil
+		return nil, noteUnavailable
 	}
 	w, err := wfgraph.Parse(data)
 	if err != nil {
-		return nil, fmt.Sprintf(noteInvalid, path), nil
+		return nil, fmt.Sprintf(noteInvalid, path)
 	}
 	in := make([]wfgraph.APIJob, 0, len(jobs))
 	for _, j := range jobs {
@@ -131,9 +131,9 @@ func (b *Backend) runGraph(ctx context.Context, repo, sha, path string, jobs []g
 	nodes, err := wfgraph.Build(w, in)
 	switch {
 	case errors.Is(err, wfgraph.ErrMismatch):
-		return nil, noteMismatch, nil
+		return nil, noteMismatch
 	case err != nil:
-		return nil, fmt.Sprintf(noteInvalid, path), nil
+		return nil, fmt.Sprintf(noteInvalid, path)
 	}
-	return &model.RunGraph{Nodes: nodes}, "", nil
+	return &model.RunGraph{Nodes: nodes}, ""
 }

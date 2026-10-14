@@ -441,8 +441,8 @@ func TestRunDetailPanicLeavesNoCallBehind(t *testing.T) {
 func TestRunGraphPanicCostsOnlyTheGraph(t *testing.T) {
 	b, _, gh := newBackend(t)
 	b.GH = &panickyGH{GitHub: gh, content: true}
-	g, note, err := b.runGraph(context.Background(), "darkmem", "abc", ciPath, ciJobs())
-	if err != nil || g != nil || note != fmt.Sprintf(noteInvalid, ciPath) {
-		t.Fatalf("graph %v, note %q, err %v", g, note, err)
+	g, note := b.runGraph(context.Background(), "darkmem", "abc", ciPath, ciJobs())
+	if g != nil || note != fmt.Sprintf(noteInvalid, ciPath) {
+		t.Fatalf("graph %v, note %q", g, note)
 	}
 }
