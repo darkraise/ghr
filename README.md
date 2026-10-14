@@ -34,7 +34,7 @@ ghr targets the space in between: one LXC or VM, native runners, nothing else to
 - **Toolchain cache.** Pre-installs Node, Python, Go, Java and .NET where `setup-*` actions find them, so jobs skip the download.
 - **Disk care.** Prunes Docker when the disk fills and manages the package caches jobs share.
 - **Artifact quota.** Tracks the month's GitHub artifact storage against your plan's allowance, warns before it runs out, and cleans up old artifacts.
-- **Runner updates.** ghr tracks new runner releases and GitHub's deadline for them. A queued update is downloaded in the background and installed once no job is running; runners are paused only for the switch.
+- **Updates.** ghr tracks new releases of itself and of the runner, with GitHub's deadline for the runner. A runner update is downloaded in the background and installed once no job is running; ghr installs its own update from the web UI or `ghr update ghr` and restarts without stopping running jobs.
 - **One-line install.** An idempotent installer that also upgrades.
 
 ## Quick start

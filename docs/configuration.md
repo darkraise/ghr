@@ -26,6 +26,11 @@ web:
   trusted_proxies: [10.0.0.2]   # reverse proxies, as IPs or CIDR prefixes, whose X-Forwarded-For names the browser; see web-ui.md
 github_storage:             # see artifact-storage.md
   included_mb: 500
+jobs:                       # background tasks; see Background tasks below
+  ghr_update_check: { enabled: true, every: 24h }
+  runner_update_check: { enabled: true, every: 24h }
+  prune: { enabled: true, every: 24h }
+  storage_measure: { enabled: true, every: 30m }
 repos:
   - name: my-repo
     max: 1                  # jobs at once; 0 = unlimited
@@ -44,6 +49,24 @@ When a runner ends, ghr archives its diagnostic logs, the `Runner_*.log` and `Wo
 
 - `queue`: at most `global_max` jobs at once across repositories, and at most each repository's `max` (default 1). Further jobs wait as "Queued" in GitHub until a slot frees.
 - `all`: no `global_max`; ghr never runs more than 99 runners in total, and starts at most 10 per poll. Repositories are unlimited within that unless `max` is set. Each repository keeps `warm` idle runners ready (default 1), so a job starts without waiting for a runner to register.
+
+## Background tasks
+
+The `jobs` block schedules the work ghr does on its own. Each task has `enabled` and `every`; a config without the block, or without one of its tasks, keeps the defaults shown in the reference. The web UI's Jobs page shows each task's last and next run, runs one now, and edits the block.
+
+| Task | What it does | Shortest `every` |
+|---|---|---|
+| `ghr_update_check` | asks GitHub for the newest ghr release; runs at start, then on its interval | 1h |
+| `runner_update_check` | asks GitHub for the newest runner release and its forced-update deadline; runs at start, then on its interval | 1h |
+| `prune` | removes history and logs older than `history_retention`; while on, a disk above `disk_high_water` also prunes Docker | 1h |
+| `storage_measure` | measures the disk use of Docker, toolchains and package caches for the Storage page | 5m |
+
+ghr refuses a shorter interval. Turning two of the tasks off writes a warning to Events:
+
+- `runner_update_check` off: GitHub stops assigning jobs to a runner past its forced-update deadline, and ghr no longer learns of new runner releases or deadlines.
+- `prune` off: history and logs older than history_retention are kept, and a full disk is no longer pruned automatically.
+
+With `prune` off ghr still measures the disk for the Dashboard. With `storage_measure` off the Storage page still measures when you refresh it or after a prune.
 
 ## Command line
 
@@ -64,7 +87,14 @@ ghr token set < new-token.txt # or prompts
 ghr kill <id>                 # stop a runner
 ghr logs <id> [-f]            # a runner's diagnostic log
 ghr history [--repo r] [--conclusion c] [--limit n]
-ghr runner-update [--cancel]  # queue a runner update; downloaded in the background, installed when no job is running or queued
+ghr update                    # ghr's and the runner's versions and update state
+ghr update --check            # run the update checks that are on, wait up to 60 s, then show
+ghr update ghr [--cancel]     # install the newest ghr release, or cancel the install before it replaces the files
+ghr update runner [--cancel]  # queue a runner update; downloaded in the background, installed when no job is running or queued
+ghr runner-update [--cancel]  # same as ghr update runner
+ghr jobs                      # background tasks with their last and next run
+ghr jobs run <name>           # run a background task now
+ghr jobs set <name> [--every <duration>] [--on | --off]
 ghr code                      # the web UI setup code, until a password is set
 ghr web set-password          # prompts, or reads stdin
 ghr web reset-password        # forget the password; the browser then needs a new code from ghr code

@@ -85,6 +85,18 @@ Re-run `setup.sh` the same way to upgrade Docker, the runner and ghr. It never o
 
 Prefer upgrading while no jobs run: a Docker upgrade restarts the Docker daemon, which stops the containers of running jobs. `setup.sh` stops ghr while it installs the runner, so a queued runner update cannot run at the same time; running runners are separate systemd units and keep their jobs. If `setup.sh` fails after that, it starts ghr again.
 
+### Updating ghr from the web UI or the command line
+
+Settings › Updates and `ghr update ghr` install the newest ghr release in place. ghr downloads the release's `ghr_linux_amd64.tar.gz` and `checksums.txt`, checks the archive's SHA-256, runs the new binary's `ghr version`, and waits until no toolchain install, prune or runner update is running. It then replaces the job hooks in `/opt/ghr/hooks`, `/opt/ghr/config.example.yaml` and `/usr/local/bin/ghr`, and restarts `ghr.service`. Running jobs keep running: their runners are separate units, and the new daemon adopts them. This updates ghr only; Docker and the runner still come from `setup.sh` and the runner update.
+
+The install needs the unit `setup.sh` writes: ghr runs as root as `ghr.service`, can write `/usr/local/bin` and `/opt/ghr`, and systemd restarts it (`Restart=always`). A ghr started by hand, or under a unit that makes those folders read-only, offers no install; upgrade with `setup.sh`.
+
+The previous binary is kept as `/opt/ghr/ghr.previous`. A new ghr that fails to start is restarted by systemd in a loop; roll back with:
+
+```bash
+install -m 0755 /opt/ghr/ghr.previous /usr/local/bin/ghr && systemctl restart ghr
+```
+
 ## Older releases
 
 - A first install needs v0.1.17 or later, the first release that ships its example config.

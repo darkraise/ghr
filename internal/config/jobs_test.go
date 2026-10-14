@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -114,5 +115,38 @@ func TestJobsLookup(t *testing.T) {
 	j.Ref(JobPrune).Enabled = false
 	if j.Prune.Enabled {
 		t.Fatal("Ref did not point into the block")
+	}
+}
+
+// The example config shows the jobs block commented out, with the defaults;
+// uncommented, it must parse to exactly those.
+func TestExampleConfigDocumentsTheJobsBlock(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "deploy", "config.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var block []string
+	in := false
+	for _, line := range strings.Split(string(data), "\n") {
+		switch {
+		case strings.HasPrefix(line, "# jobs:"):
+			in = true
+		case in && strings.HasPrefix(line, "#   "):
+		default:
+			in = false
+		}
+		if in {
+			block = append(block, strings.TrimPrefix(line, "# "))
+		}
+	}
+	if len(block) != 5 {
+		t.Fatalf("want a commented jobs block of 5 lines, got %q", block)
+	}
+	c, _, err := Parse([]byte(sample + strings.Join(block, "\n") + "\n"))
+	if err != nil {
+		t.Fatalf("the jobs block does not parse: %v\n%s", err, strings.Join(block, "\n"))
+	}
+	if c.Jobs != DefaultJobs() {
+		t.Fatalf("the jobs block reads %+v, want the defaults %+v", c.Jobs, DefaultJobs())
 	}
 }

@@ -8,9 +8,10 @@ ghr serves a browser UI with every page and action the `ghr` command offers. The
 | Runners | every runner with its state and diagnostic log |
 | Actions | workflow runs of the served and watched repositories, with each run's job graph, annotations and searchable step logs |
 | History | finished jobs with their durations and conclusions |
+| Jobs | ghr's background tasks with their last and next run; run one now, turn it on or off and change its interval |
 | Artifacts | the month's GitHub storage quota and each repository's artifacts, caches, retention and cleanup; see [Artifact storage](artifact-storage.md) |
 | Repositories | add and remove repositories, and set each one's caps, labels and pause |
-| Settings | scheduling, runner limits, disk, history and web access; the GitHub token, the storage policy, the runner software and the account; toolchains, package caches and Docker's disk use |
+| Settings | scheduling, runner limits, disk, history and web access; the GitHub token, the storage policy, updates of ghr and the runner, and the account; toolchains, package caches and Docker's disk use |
 
 The UI updates live over one long-lived request and falls back to polling when it cannot hold it open.
 
@@ -48,3 +49,9 @@ On the network the UI is plain HTTP: the password and the session cookie cross i
 - Every browser reaches ghr from the proxy's address. List the proxy's address, or a CIDR prefix that holds only proxies, such as a Docker bridge network dedicated to the proxy (`172.18.0.0/16`, if nothing but the proxy is attached to it), in `web.trusted_proxies` and restart ghr. The lockout after five wrong passwords then counts each browser by the address the proxy reports in `X-Forwarded-For`, and the proxy is held only to the total connection limit, not the per-address one. Without it a lockout shuts out everyone behind the proxy at once.
 - ghr reads `X-Forwarded-For` from the right and takes the first address that is not a trusted proxy, so a proxy may append to a header the browser sent, as nginx-proxy-manager does, or replace it. The proxy must set the header: one that passes the browser's own header on unchanged, as plain nginx does without `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, lets the browser choose the address it is counted under. List only proxies, since a browser at a trusted address can do the same: a prefix that also covers the LAN's browsers, such as the LAN's own subnet, lets each of them choose the address it is counted under and never be locked out.
 - Live updates use `/api/changes`. ghr marks it `X-Accel-Buffering: no`, which nginx honours, and sends a ping every 15 seconds, inside nginx's default 60-second read timeout, so nginx-proxy-manager needs no extra settings. Another proxy must pass the response through unbuffered and allow 15 seconds of silence.
+
+## Updates and jobs
+
+Settings › Updates shows the running ghr and runner versions. **Check now** runs both update checks that are on. When a newer ghr is out, **Install** replaces ghr and restarts it, as [Installation](installation.md#updating-ghr-from-the-web-ui-or-the-command-line) describes; the card follows each step, and the install can be cancelled until it starts replacing files. The runner part queues and cancels runner updates as before. A newer ghr is also announced above every page until it is installed or dismissed.
+
+The Jobs page lists the [background tasks](configuration.md#background-tasks). Its switches and intervals save to config.yaml through the save bar and apply without a restart. **Run now** runs a task at once; it is unavailable while the task is off, running or about to run.
