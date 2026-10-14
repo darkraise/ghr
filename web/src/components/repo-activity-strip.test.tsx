@@ -21,9 +21,9 @@ describe("RepoActivityStrip", () => {
     hours[8] = hour(8, { succeeded: 2, failed: 1 })
     hours[9] = hour(9, { cancelled: 1 })
     render(<RepoActivityStrip repo="darkmem" hours={hours} />)
-    const strip = screen.getByRole("img", { name: "darkmem, last 24 hours: 11 succeeded, 1 failed" })
+    const strip = screen.getByRole("img", { name: "darkmem, last 24 hours: 11 succeeded, 1 failed, 1 cancelled" })
     const cells = [...strip.children]
-    expect(cells.map((c) => c.getAttribute("data-cell")).slice(4, 10)).toEqual(["none", "ok-1", "ok-2", "ok-3", "bad", "ok-1"])
+    expect(cells.map((c) => c.getAttribute("data-cell")).slice(4, 10)).toEqual(["none", "ok-1", "ok-2", "ok-3", "bad", "unknown"])
     expect(cells[23]).toHaveAttribute("data-open", "true")
     expect(cells[23]).toHaveClass("outline-primary")
     expect(cells[22]).not.toHaveAttribute("data-open")
@@ -36,6 +36,15 @@ describe("RepoActivityStrip", () => {
     render(<RepoActivityStrip repo="darkmem" hours={hours} />)
     const strip = screen.getByRole("img", { name: "darkmem, last 24 hours: 1 succeeded, 0 failed, 2 unknown" })
     expect([...strip.children].map((c) => c.getAttribute("data-cell")).slice(3, 5)).toEqual(["unknown", "ok-1"])
+  })
+
+  it("counts cancelled jobs in the label and leaves them out of the green", () => {
+    const hours = Array.from({ length: 24 }, (_, i) => hour(i))
+    hours[3] = hour(3, { cancelled: 3 })
+    render(<RepoActivityStrip repo="darkmem" hours={hours} />)
+    const strip = screen.getByRole("img", { name: "darkmem, last 24 hours: 0 succeeded, 0 failed, 3 cancelled" })
+    expect(strip.children[3]).toHaveAttribute("data-cell", "unknown")
+    expect(strip.children[3]).not.toHaveClass("bg-success")
   })
 
   it("says when nothing ran", () => {
