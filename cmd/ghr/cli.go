@@ -331,7 +331,7 @@ func printHistory(out io.Writer, h []model.HistoryEntry) error {
 	fmt.Fprintln(w, "FINISHED\tREPO\tRUN\tJOB\tRESULT\tDURATION")
 	for _, e := range h {
 		fmt.Fprintf(w, "%s\t%s\t#%s\t%s\t%s\t%s\n", e.FinishedAt.Local().Format("2006-01-02 15:04"), safe(e.Repo), safe(e.RunNumber), safe(e.JobName),
-			e.Conclusion, e.FinishedAt.Sub(e.StartedAt).Round(time.Second))
+			safe(e.Conclusion), e.FinishedAt.Sub(e.StartedAt).Round(time.Second))
 	}
 	return w.Flush()
 }
@@ -418,7 +418,7 @@ func printStatus(out io.Writer, st model.Status) {
 		fmt.Fprintln(out, artifactsLine(*a))
 	}
 	if st.Degraded {
-		fmt.Fprintf(out, "DEGRADED: %s\n", st.DegradedReason)
+		fmt.Fprintf(out, "DEGRADED: %s\n", safe(st.DegradedReason))
 	}
 	fmt.Fprintln(out)
 	w := tabwriter.NewWriter(out, 0, 2, 2, ' ', 0)
@@ -433,7 +433,7 @@ func printStatus(out io.Writer, st model.Status) {
 		}
 		last := "-"
 		if r.LastJob != nil {
-			last = fmt.Sprintf("%s #%s %s (%s ago)", r.LastJob.Conclusion, safe(r.LastJob.RunNumber), safe(r.LastJob.JobName),
+			last = fmt.Sprintf("%s #%s %s (%s ago)", safe(r.LastJob.Conclusion), safe(r.LastJob.RunNumber), safe(r.LastJob.JobName),
 				st.Now.Sub(r.LastJob.FinishedAt).Round(time.Minute))
 		}
 		fmt.Fprintf(w, "%s\t%s\t%d/%s\t%d\t%s\n", safe(r.Name), state, r.Active, maxText(r.Max), r.Queued, last)
@@ -450,7 +450,7 @@ func printStatus(out io.Writer, st model.Status) {
 		if i.Job != nil {
 			job = fmt.Sprintf("%s #%s", safe(i.Job.Name), safe(i.Job.RunNumber))
 		}
-		state := i.State
+		state := safe(i.State)
 		if i.Stopping {
 			state = "stopping"
 		}
@@ -461,11 +461,12 @@ func printStatus(out io.Writer, st model.Status) {
 
 // runnerLine is the status line about the GitHub Actions runner version.
 func runnerLine(st model.Status) string {
+	checkError := stdoutLine()(st.RunnerUpdate.CheckError)
 	u := st.RunnerUpdate
 	if u.Installed == "" {
 		s := "runner version unknown (no dist/current)"
 		if u.CheckError != "" {
-			s += "  last check failed: " + u.CheckError
+			s += "  last check failed: " + checkError
 		}
 		return s
 	}
@@ -485,7 +486,7 @@ func runnerLine(st model.Status) string {
 		s += "  queued: runs when no job is running or queued"
 	}
 	if u.CheckError != "" {
-		s += "  last check failed: " + u.CheckError
+		s += "  last check failed: " + checkError
 	}
 	return s
 }

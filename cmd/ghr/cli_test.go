@@ -474,6 +474,29 @@ func TestSingleLineFieldsCannotAddARowAtATerminal(t *testing.T) {
 	}
 }
 
+func TestRemainingStatusFieldsEscapeControlsAtATerminal(t *testing.T) {
+	const evil = "x\x1b[2J\nFAKE\x1b]0;t\a"
+	st := model.Status{Mode: "queue", GlobalMax: 1, Degraded: true, DegradedReason: evil,
+		RunnerUpdate: model.RunnerUpdate{Installed: "2.330.0", CheckError: evil},
+		Repos:        []model.RepoStatus{{Name: "r", LastJob: &model.HistoryEntry{Conclusion: evil, RunNumber: "1", JobName: "j"}}},
+		Instances:    []model.InstanceStatus{{ID: "a3f9c1", Repo: "r", State: evil}}}
+	hist := []model.HistoryEntry{{Repo: "r", RunNumber: "1", JobName: "j", Conclusion: evil}}
+	for _, on := range []bool{true, false} {
+		stubStdoutTerminal(t, on)
+		var status, history bytes.Buffer
+		printStatus(&status, st)
+		printHistory(&history, hist)
+		for what, out := range map[string]string{"status": status.String(), "history": history.String()} {
+			if on && (strings.ContainsAny(out, "\x1b\a") || strings.Contains(out, "\nFAKE")) {
+				t.Errorf("%s at a terminal kept a control byte or a new line: %q", what, out)
+			}
+			if !on && !strings.Contains(out, "\x1b") {
+				t.Errorf("%s in a pipe lost the raw bytes: %q", what, out)
+			}
+		}
+	}
+}
+
 type failWriter struct{}
 
 func (failWriter) Write([]byte) (int, error) { return 0, errors.New("closed") }
