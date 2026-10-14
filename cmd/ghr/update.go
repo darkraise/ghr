@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -141,13 +142,20 @@ func checkUpdates(ctx context.Context, c *api.Client, out io.Writer) error {
 		return err
 	}
 	var asked []string
+	// A check already running or about to run, as both are when the daemon
+	// has just started, refuses a second request; waiting for it is as good.
+	joined := map[string]bool{}
 	for _, name := range []string{config.JobGhrUpdateCheck, config.JobRunnerUpdateCheck} {
 		if j, ok := findJob(before.Jobs, name); !ok || !j.Enabled {
 			fmt.Fprintf(out, "%s is off; skipped\n", name)
 			continue
 		}
 		if err := c.RunJob(ctx, name); err != nil {
-			return err
+			var ae *api.Error
+			if !errors.As(err, &ae) || ae.Status != http.StatusConflict {
+				return err
+			}
+			joined[name] = true
 		}
 		asked = append(asked, name)
 	}
@@ -160,7 +168,7 @@ func checkUpdates(ctx context.Context, c *api.Client, out io.Writer) error {
 		var busy []string
 		for _, name := range asked {
 			j, _ := findJob(st.Jobs, name)
-			if j.Running || j.Pending || j.LastStart == nil || j.LastStart.Before(before.Now) {
+			if j.Running || j.Pending || (!joined[name] && (j.LastStart == nil || j.LastStart.Before(before.Now))) {
 				busy = append(busy, name)
 			}
 		}
@@ -178,8 +186,9 @@ func checkUpdates(ctx context.Context, c *api.Client, out io.Writer) error {
 }
 
 // installGhr starts installing the newest ghr release and follows it until
-// the daemon runs it. The daemon goes away while it restarts, so a failed
-// status read after the swap is the restart, not an error.
+// the daemon runs it. The daemon goes away while it restarts, and with no work
+// to wait for that can fall between two polls, so once the install has
+// started a failed status read is the restart, not an error.
 func installGhr(ctx context.Context, c *api.Client, out io.Writer) error {
 	st, err := c.Status(ctx)
 	if err != nil {
@@ -196,9 +205,11 @@ func installGhr(ctx context.Context, c *api.Client, out io.Writer) error {
 	for {
 		st, err := c.Status(ctx)
 		switch {
-		case err != nil && restarting.IsZero():
-			return err
-		case err == nil:
+		case err != nil:
+			if restarting.IsZero() {
+				restarting = time.Now()
+			}
+		default:
 			g := st.GhrUpdate
 			if g.Installed == tag {
 				fmt.Fprintf(out, "ghr %s is running\n", tag)

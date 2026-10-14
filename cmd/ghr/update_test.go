@@ -81,6 +81,7 @@ type scriptedDaemon struct {
 	mu       sync.Mutex
 	statuses []*model.Status
 	reqs     []string
+	conflict []string // request paths answered 409, as a task already running is
 }
 
 func newScriptedDaemon(t *testing.T, statuses ...*model.Status) *scriptedDaemon {
@@ -103,6 +104,11 @@ func newScriptedDaemon(t *testing.T, statuses ...*model.Status) *scriptedDaemon 
 		}
 		body, _ := io.ReadAll(r.Body)
 		d.reqs = append(d.reqs, strings.TrimSpace(r.Method+" "+r.URL.EscapedPath()+" "+string(body)))
+		if slices.Contains(d.conflict, r.URL.EscapedPath()) {
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{"error": "already running or about to run"})
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(srv.Close)
@@ -207,6 +213,34 @@ func TestUpdateCheckSkipsACheckThatIsOff(t *testing.T) {
 	}
 }
 
+// Both checks are due when the daemon starts, so one may already be about to
+// run, or running since before the request, when --check asks for it.
+func TestUpdateCheckJoinsACheckInFlight(t *testing.T) {
+	started := updNow.Add(-time.Minute)
+	before := &model.Status{Now: updNow, Jobs: updJobs()}
+	before.Jobs[0].Pending = true
+	running := &model.Status{Now: updNow, Jobs: updJobs()}
+	running.Jobs[0].Running = true
+	running.Jobs[0].LastStart = &started
+	done := &model.Status{Now: updNow, Jobs: updJobs()}
+	done.Jobs[0].LastStart = &started
+	for i := range done.Jobs {
+		if done.Jobs[i].Name == "runner_update_check" {
+			s := updNow.Add(time.Second)
+			done.Jobs[i].LastStart = &s
+		}
+	}
+	d := newScriptedDaemon(t, before, running, done)
+	d.conflict = []string{"/jobs/ghr_update_check/run"}
+	code, _, errOut := runCLI(t, "", "update", "--check")
+	if code != 0 {
+		t.Fatalf("exit %d err %q", code, errOut)
+	}
+	if got := d.requests(); !slices.Equal(got, []string{"POST /jobs/ghr_update_check/run", "POST /jobs/runner_update_check/run"}) {
+		t.Fatalf("requests %q", got)
+	}
+}
+
 func TestUpdateCheckGivesUp(t *testing.T) {
 	before := &model.Status{Now: updNow, Jobs: updJobs()}
 	running := &model.Status{Now: updNow, Jobs: updJobs()}
@@ -241,6 +275,24 @@ func TestUpdateGhrFollowsTheInstall(t *testing.T) {
 		"restarting ghr\n" +
 		"ghr v0.1.26 is running\n"
 	if code != 0 || out != want {
+		t.Fatalf("exit %d err %q\n got %q\nwant %q", code, errOut, out, want)
+	}
+	if got := d.requests(); !slices.Equal(got, []string{"POST /ghr-update"}) {
+		t.Fatalf("requests %q", got)
+	}
+}
+
+// With no work to wait for, the daemon can swap and drop its socket between
+// two polls, so the last status the CLI saw is still an early step.
+func TestUpdateGhrSurvivesAFastRestart(t *testing.T) {
+	d := newScriptedDaemon(t,
+		&model.Status{GhrUpdate: model.GhrUpdate{Installed: "v0.1.25", Latest: "v0.1.26", Newer: true}},
+		&model.Status{GhrUpdate: model.GhrUpdate{Installed: "v0.1.25", Latest: "v0.1.26", Installing: true, Step: "download"}},
+		nil,
+		&model.Status{GhrUpdate: model.GhrUpdate{Installed: "v0.1.26", Latest: "v0.1.26", LastOutcome: "ok"}},
+	)
+	code, out, errOut := runCLI(t, "", "update", "ghr")
+	if want := "installing ghr v0.1.26\ndownloading\nghr v0.1.26 is running\n"; code != 0 || out != want {
 		t.Fatalf("exit %d err %q\n got %q\nwant %q", code, errOut, out, want)
 	}
 	if got := d.requests(); !slices.Equal(got, []string{"POST /ghr-update"}) {
