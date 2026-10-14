@@ -155,7 +155,7 @@ func TestCheckTokenNeedsRunnerAndRunAccess(t *testing.T) {
 	if err := check("good"); err != nil {
 		t.Fatalf("a token with every permission was rejected: %v", err)
 	}
-	for tok, perm := range map[string]string{"no-admin": "Administration", "no-runs": "Actions"} {
+	for tok, perm := range map[string]string{"no-admin": "Administration: read/write", "no-runs": "Actions: read/write"} {
 		if err := check(tok); err == nil || !strings.Contains(err.Error(), perm) {
 			t.Errorf("%s: got %v, want a rejection naming %s", tok, err, perm)
 		}

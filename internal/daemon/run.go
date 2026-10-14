@@ -167,7 +167,7 @@ func checkToken(ctx context.Context, c *github.Client, repo string) error {
 		return fmt.Errorf("listing runners failed; the token needs Administration: read/write: %w", err)
 	}
 	if _, err := c.ListRuns(ctx, repo, "queued"); err != nil {
-		return fmt.Errorf("listing workflow runs failed; the token needs Actions: read: %w", err)
+		return fmt.Errorf("listing workflow runs failed; the token needs Actions: read/write: %w", err)
 	}
 	return nil
 }
