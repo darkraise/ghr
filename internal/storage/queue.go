@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/darkraise/ghr/internal/model"
@@ -18,9 +19,14 @@ var (
 	ErrNotPresent     = errors.New("package cache not present")
 	ErrUnknownPreset  = errors.New("unknown toolchain preset")
 	ErrMissingVersion = errors.New("a toolchain version is required")
+	ErrQueueFull      = errors.New("too many storage operations are queued; try again when some have finished")
 )
 
-const recentOps = 10
+const (
+	recentOps = 10
+	// maxQueued is how many operations may wait behind the running one.
+	maxQueued = 50
+)
 
 func (s *Service) newID() string {
 	if s.NewID != nil {
@@ -38,13 +44,25 @@ func (s *Service) hold(ctx context.Context) (func(), error) {
 	return s.Hold(ctx)
 }
 
+// enqueue queues ops after the waiting ones, leaving out any whose kind and
+// target already wait. It queues none of them when they would not all fit.
 func (s *Service) enqueue(ops ...*op) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return ErrClosed
 	}
-	s.queue = append(s.queue, ops...)
+	var add []*op
+	for _, o := range ops {
+		queued := func(q *op) bool { return q.Kind == o.Kind && q.Target == o.Target }
+		if !slices.ContainsFunc(s.queue, queued) && !slices.ContainsFunc(add, queued) {
+			add = append(add, o)
+		}
+	}
+	if len(s.queue)+len(add) > maxQueued {
+		return ErrQueueFull
+	}
+	s.queue = append(s.queue, add...)
 	select {
 	case s.wake <- struct{}{}:
 	default:

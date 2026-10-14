@@ -84,6 +84,7 @@ func TestStorageErrorsMapToStatuses(t *testing.T) {
 		{fmt.Errorf("%w: node 20.0.0", toolchain.ErrNotInstalled), 404},
 		{fmt.Errorf("%w %q", storage.ErrUnknownCache, "bogus"), 404},
 		{fmt.Errorf("%w: cargo", storage.ErrNotPresent), 409},
+		{storage.ErrQueueFull, 409},
 		{storage.ErrClosed, 503},
 	} {
 		fs.err = tc.err

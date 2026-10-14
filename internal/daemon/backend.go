@@ -1019,7 +1019,7 @@ func storageErr(err error) error {
 		return api.BadRequest(err.Error())
 	case errors.Is(err, toolchain.ErrNotInstalled), errors.Is(err, storage.ErrUnknownCache):
 		return api.NotFound(err.Error())
-	case errors.Is(err, storage.ErrNotPresent), errors.Is(err, storage.ErrMeasuring):
+	case errors.Is(err, storage.ErrNotPresent), errors.Is(err, storage.ErrMeasuring), errors.Is(err, storage.ErrQueueFull):
 		return api.Conflict(err.Error())
 	case errors.Is(err, storage.ErrClosed):
 		return &api.Error{Status: http.StatusServiceUnavailable, Msg: err.Error()}
