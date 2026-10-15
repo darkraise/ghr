@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "d
 import { Spinner } from "darkraise-ui/components/spinner"
 import { ToggleGroup, ToggleGroupItem } from "darkraise-ui/components/toggle-group"
 import { PageHeader } from "darkraise-ui/layout"
+import { BookMarked } from "lucide-react"
 import { useEffect } from "react"
 import { useActions, useConfig } from "@/api/hooks"
 import type { ActionsRun } from "@/api/types"
@@ -32,6 +33,7 @@ import { errorText } from "@/query"
 
 const ALL = "__all__"
 
+const REPO = "inline-flex items-center gap-1 font-semibold text-foreground"
 const BRANCH = "rounded-full bg-branch px-2 py-0.5 font-mono text-xs text-primary"
 const GHR = "rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-foreground"
 
@@ -49,8 +51,11 @@ function ActionRow({ run, now, wide }: { run: ActionsRun; now: number; wide: boo
       }
       facts={
         <>
+          <span className={REPO}>
+            <BookMarked size={13} aria-hidden="true" className="shrink-0" />
+            {run.repo}
+          </span>
           <span>{`${run.workflow} #${run.run_number}`}</span>
-          <span>{run.repo}</span>
           {by && <span>{by}</span>}
           {run.branch && <span className={BRANCH}>{run.branch}</span>}
           {run.ghr && <span className={GHR}>ghr</span>}
