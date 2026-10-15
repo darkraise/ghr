@@ -2,7 +2,7 @@
 
 A GitHub plan includes a monthly allowance of storage for Actions artifacts and Packages, 500 MB on the Free plan. GitHub counts it in GB-hours over the month, so an artifact kept for days keeps using the allowance long after its upload, and deleting artifacts once the allowance is spent does not let uploads through again before the next month.
 
-The **Artifacts** page shows the month's use against the allowance and each repository's artifacts, caches, retention and cleanup. The storage policy is set under **Settings → GitHub storage**. A banner on every page warns before the allowance runs out. The [token permissions](installation.md#requirements) it needs are listed with the requirements.
+The **Artifacts** page shows the month's use against the allowance and each repository's artifacts, caches, retention and cleanup. The storage policy is set under **Settings → GitHub storage**. A banner on every page warns before the allowance runs out; **I know** hides it until the level rises or the month changes. The [token permissions](installation.md#requirements) it needs are listed with the requirements.
 
 ## Keeping under the allowance
 

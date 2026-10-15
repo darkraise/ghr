@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { StorageAlert } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
-import { bannerText, canDismiss, dismiss, gbh, isDismissed, utcDay } from "./quota"
+import { bannerText, dismiss, gbh, isDismissed, utcDay } from "./quota"
 
 const alert = (over: Partial<StorageAlert>): StorageAlert => ({ ...fixtures.storageAlert, ...over })
 
@@ -29,10 +29,6 @@ describe("quota text", () => {
   ])("words the %j banner", (over, want) => {
     expect(bannerText(alert(over))).toBe(want)
   })
-
-  it("lets only the early levels be dismissed", () => {
-    expect(["", "projected", "warn", "critical", "exhausted"].map(canDismiss)).toEqual([false, true, true, false, false])
-  })
 })
 
 describe("banner dismissal", () => {
@@ -48,10 +44,11 @@ describe("banner dismissal", () => {
     expect(isDismissed(alert({ level: "warn", month: "2026-11" }))).toBe(false)
   })
 
-  it("never hides a level that cannot be dismissed", () => {
+  it("hides the severe levels too", () => {
     const critical = alert({ level: "critical" })
     dismiss(critical)
-    expect(isDismissed(critical)).toBe(false)
+    expect(isDismissed(critical)).toBe(true)
+    expect(isDismissed(alert({ level: "exhausted" }))).toBe(false)
   })
 
   it("shows the banner when local storage cannot be read or written", () => {

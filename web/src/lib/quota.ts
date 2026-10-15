@@ -1,4 +1,4 @@
-import type { QuotaLevel, StorageAlert } from "@/api/types"
+import type { StorageAlert } from "@/api/types"
 
 export const CLEANUP_WARNING =
   "Cleanup does not protect an artifact that a different run downloads later, such as one a workflow_run workflow, a download by run ID or a nightly job reading the last build needs."
@@ -36,17 +36,10 @@ export function bannerText(alert: StorageAlert): string {
   }
 }
 
-const DISMISSABLE: readonly QuotaLevel[] = ["projected", "warn"]
-
-export function canDismiss(level: string): boolean {
-  return (DISMISSABLE as readonly string[]).includes(level)
-}
-
 const dismissKey = (alert: StorageAlert) => `ghr-quota-dismissed:${alert.month}:${alert.level}`
 
 // Local storage can be missing or refuse access; the banner then shows.
 export function isDismissed(alert: StorageAlert): boolean {
-  if (!canDismiss(alert.level)) return false
   try {
     return localStorage.getItem(dismissKey(alert)) === "1"
   } catch {
@@ -55,7 +48,6 @@ export function isDismissed(alert: StorageAlert): boolean {
 }
 
 export function dismiss(alert: StorageAlert): void {
-  if (!canDismiss(alert.level)) return
   try {
     localStorage.setItem(dismissKey(alert), "1")
   } catch {

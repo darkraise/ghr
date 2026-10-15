@@ -20,18 +20,18 @@ beforeEach(() => localStorage.clear())
 afterEach(() => vi.restoreAllMocks())
 
 describe("quota banner", () => {
-  it.each<[Partial<StorageAlert>, string, string, boolean]>([
-    [{ level: "projected", used_pct: 40 }, PROJECTED, "border-warning", true],
-    [{ level: "warn", used_pct: 72 }, WARN, "border-warning", true],
-    [{ level: "critical" }, CRITICAL, "border-destructive", false],
-    [{ level: "exhausted", used_pct: 103 }, EXHAUSTED, "border-destructive", false],
-  ])("shows %j with its style, and a Dismiss button only for the early levels", async (over, title, border, dismissable) => {
+  it.each<[Partial<StorageAlert>, string, string]>([
+    [{ level: "projected", used_pct: 40 }, PROJECTED, "border-warning"],
+    [{ level: "warn", used_pct: 72 }, WARN, "border-warning"],
+    [{ level: "critical" }, CRITICAL, "border-destructive"],
+    [{ level: "exhausted", used_pct: 103 }, EXHAUSTED, "border-destructive"],
+  ])("shows %j with its style and an I know button", async (over, title, border) => {
     mockApi(routes(over))
     renderApp("/")
     const banner = await screen.findByRole("region", { name: title })
     expect(banner).toHaveClass(border)
     expect(within(banner).getByRole("link", { name: "Go to Artifacts" })).toHaveAttribute("href", "/artifacts")
-    expect(within(banner).queryByRole("button", { name: "Dismiss" }) !== null).toBe(dismissable)
+    expect(within(banner).getByRole("button", { name: "I know" })).toBeInTheDocument()
   })
 
   it.each([
@@ -45,22 +45,22 @@ describe("quota banner", () => {
   })
 
   it("stays dismissed for that level and month, and comes back at the next level", async () => {
-    mockApi(routes({ level: "warn", used_pct: 72 }))
+    mockApi(routes({ level: "critical" }))
     const { user, unmount } = renderApp("/")
-    const banner = await screen.findByRole("region", { name: WARN })
-    await user.click(within(banner).getByRole("button", { name: "Dismiss" }))
-    await waitFor(() => expect(screen.queryByRole("region", { name: WARN })).toBeNull())
+    const banner = await screen.findByRole("region", { name: CRITICAL })
+    await user.click(within(banner).getByRole("button", { name: "I know" }))
+    await waitFor(() => expect(screen.queryByRole("region", { name: CRITICAL })).toBeNull())
     unmount()
 
-    mockApi(routes({ level: "warn", used_pct: 72 }))
+    mockApi(routes({ level: "critical" }))
     const again = renderApp("/")
     await waitFor(() => expect(again.queryClient.getQueryData(keys.status)).toBeDefined())
-    expect(screen.queryByRole("region", { name: WARN })).toBeNull()
+    expect(screen.queryByRole("region", { name: CRITICAL })).toBeNull()
     again.unmount()
 
-    mockApi(routes({ level: "critical" }))
+    mockApi(routes({ level: "exhausted", used_pct: 103 }))
     renderApp("/")
-    expect(await screen.findByRole("region", { name: CRITICAL })).toBeInTheDocument()
+    expect(await screen.findByRole("region", { name: EXHAUSTED })).toBeInTheDocument()
   })
 
   it("can still be dismissed for this visit without local storage", async () => {
@@ -73,7 +73,7 @@ describe("quota banner", () => {
     mockApi(routes({ level: "warn", used_pct: 72 }))
     const { user } = renderApp("/")
     const banner = await screen.findByRole("region", { name: WARN })
-    await user.click(within(banner).getByRole("button", { name: "Dismiss" }))
+    await user.click(within(banner).getByRole("button", { name: "I know" }))
     await waitFor(() => expect(screen.queryByRole("region", { name: WARN })).toBeNull())
   })
 
