@@ -38,7 +38,8 @@ describe("Run page", () => {
     expect(summary.getByRole("link", { name: "#87" })).toHaveAttribute("href", "https://github.com/darkraise/darkmem/pull/87")
     expect(summary.getByText("Failed")).toBeInTheDocument()
     expect(summary.getByText("4m10s")).toHaveClass("font-mono")
-    expect(summary.getByText("2")).toHaveClass("font-mono")
+    const artifactsFact = within(summary.getByText("Artifacts").parentElement as HTMLElement)
+    expect(artifactsFact.getByText("2")).toHaveClass("font-mono")
   })
 
   it("lists the run's artifacts", async () => {
