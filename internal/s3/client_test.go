@@ -2,6 +2,7 @@ package s3_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
@@ -235,6 +236,35 @@ func TestHeadIsAPlainSignedGet(t *testing.T) {
 		if strings.HasPrefix(r, "HEAD ") {
 			t.Fatalf("requests %q include a HEAD", srv.Requests())
 		}
+	}
+}
+
+func TestHeadAsksForAnUncompressedAnswer(t *testing.T) {
+	body := pattern(1000)
+	// Compresses whenever the client accepts gzip, as a compressing proxy does.
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			zw := gzip.NewWriter(w)
+			zw.Write(body)
+			zw.Close()
+			return
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	c, err := s3.New(srv.URL, "artifacts", "us-east-1", testCred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.HTTP = srv.Client()
+	h, err := c.Head(context.Background(), "o/r/1/dist.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Size != int64(len(body)) {
+		t.Fatalf("size %d, want %d", h.Size, len(body))
 	}
 }
 

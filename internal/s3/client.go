@@ -133,13 +133,16 @@ func (c *Client) objectURL(key string, q url.Values) string {
 }
 
 type call struct {
-	method  string
-	key     string
-	query   url.Values
-	header  http.Header
-	body    io.ReadSeeker
-	size    int64
-	payload string // SHA-256 hex of the body, or UnsignedPayload
+	method string
+	key    string
+	query  url.Values
+	header http.Header
+	// unsigned headers are set after signing, so a proxy that rewrites
+	// them does not break the signature.
+	unsigned http.Header
+	body     io.ReadSeeker
+	size     int64
+	payload  string // SHA-256 hex of the body, or UnsignedPayload
 }
 
 // do sends a signed request. A status of 300 or more comes back as *Error.
@@ -172,6 +175,9 @@ func (c *Client) do(ctx context.Context, k call) (*http.Response, error) {
 		payload = HashHex(nil)
 	}
 	SignRequest(req, c.Cred, c.Region, payload, c.now())
+	for name, vs := range k.unsigned {
+		req.Header[name] = vs
+	}
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
 		return nil, err
@@ -297,9 +303,10 @@ func headFrom(resp *http.Response) Head {
 
 // Head reads an object's details from the headers of a GET whose body is
 // never read, because proxies such as Cloudflare's refuse signed HEAD requests
-// and drop Range headers.
+// and drop Range headers. It asks for the body uncompressed, since a
+// compressed answer carries no Content-Length for the size.
 func (c *Client) Head(ctx context.Context, key string) (Head, error) {
-	resp, err := c.do(ctx, call{method: http.MethodGet, key: key})
+	resp, err := c.do(ctx, call{method: http.MethodGet, key: key, unsigned: http.Header{"Accept-Encoding": {"identity"}}})
 	if err != nil {
 		return Head{}, err
 	}
