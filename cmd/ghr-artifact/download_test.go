@@ -104,6 +104,35 @@ func TestDownload(t *testing.T) {
 	}
 }
 
+func TestDownloadRelativeWorkspace(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		wantPath string
+	}{
+		{"default path", nil, ""},
+		{"relative path", []string{"--path", "out"}, "out"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.seed(t, 100, "dist", map[string]string{"a.txt": "a"}, "")
+			t.Chdir(filepath.Dir(h.ws))
+			h.env["GITHUB_WORKSPACE"] = filepath.Base(h.ws)
+			code, stdout, stderr := h.run(t, append([]string{"download", "--name", "dist"}, tc.args...)...)
+			if code != 0 {
+				t.Fatalf("code %d\nstdout %s\nstderr %s", code, stdout, stderr)
+			}
+			dir := filepath.Join(h.ws, tc.wantPath)
+			if got := tree(t, h.ws); !reflect.DeepEqual(got, map[string]string{filepath.ToSlash(filepath.Join(tc.wantPath, "a.txt")): "a"}) {
+				t.Errorf("files %v", got)
+			}
+			if out := h.outputs(t); !reflect.DeepEqual(out, map[string]string{"download-path": dir}) {
+				t.Errorf("outputs %v, want download-path %s", out, dir)
+			}
+		})
+	}
+}
+
 func TestDownloadMissing(t *testing.T) {
 	for _, tc := range []struct {
 		name string

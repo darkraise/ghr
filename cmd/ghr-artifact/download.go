@@ -47,20 +47,15 @@ func download(ctx context.Context, args []string, env func(string) string, stdou
 	} else if _, err := path.Match(*pattern, ""); err != nil {
 		return usageError(fmt.Sprintf("--pattern %q is not a valid glob", *pattern))
 	}
-	var runID int64
-	if *runFlag != "" {
-		id, err := strconv.ParseInt(*runFlag, 10, 64)
-		if err != nil || id <= 0 {
-			return usageError(fmt.Sprintf("--run-id %q is not a run ID", *runFlag))
-		}
-		runID = id
-	}
 	j, err := loadJob(env, *storeFlag, *keyFlag)
 	if err != nil {
 		return err
 	}
-	if runID == 0 {
-		runID = j.runID
+	runID := j.runID
+	if *runFlag != "" {
+		if runID, err = strconv.ParseInt(*runFlag, 10, 64); err != nil || runID <= 0 {
+			return usageError(fmt.Sprintf("--run-id %q is not a run ID", *runFlag))
+		}
 	}
 	target, err := resolvePath(*dest, j.workspace)
 	if err != nil {
@@ -97,13 +92,9 @@ func download(ctx context.Context, args []string, env func(string) string, stdou
 			dir = filepath.Join(target, m.name)
 		}
 		files, err := fetch(ctx, client, j, m, dir)
-		if objectMissing(err) {
-			if *name != "" {
-				found = nil
-				break
-			}
-			// Listed a moment ago, so something deleted it during the download.
-			return describe(err, j.store)
+		if *name != "" && objectMissing(err) {
+			found = nil
+			break
 		}
 		if err != nil {
 			return err
@@ -129,7 +120,7 @@ func download(ctx context.Context, args []string, env func(string) string, stdou
 
 func resolvePath(p, workspace string) (string, error) {
 	if p == "" {
-		p = workspace
+		return filepath.Abs(workspace)
 	}
 	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
 		home, err := os.UserHomeDir()
