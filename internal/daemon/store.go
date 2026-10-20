@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/darkraise/ghr/internal/config"
+	"github.com/darkraise/ghr/internal/fsutil"
 )
 
 // ErrConfigured refuses a first-run configure once ghr has an owner and a token.
@@ -206,35 +206,5 @@ func (s *Store) writeToken(tok string) error {
 // writeTokenFile writes the token file (0600, temporary file and rename)
 // without publishing it; the caller holds s.mu.
 func (s *Store) writeTokenFile(tok string) error {
-	tmp, err := os.CreateTemp(filepath.Dir(s.TokenPath), ".token-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.WriteString(tok + "\n"); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp.Name(), s.TokenPath); err != nil {
-		return err
-	}
-	// Syncing the directory makes the rename survive a power loss. Some
-	// platforms, Windows among them, cannot sync a directory, so it is best
-	// effort.
-	if d, err := os.Open(filepath.Dir(s.TokenPath)); err == nil {
-		d.Sync()
-		d.Close()
-	}
-	return nil
+	return fsutil.WritePrivate(s.TokenPath, []byte(tok+"\n"))
 }
