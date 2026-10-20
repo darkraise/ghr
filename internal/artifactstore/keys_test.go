@@ -91,6 +91,8 @@ func TestCheckKeyInput(t *testing.T) {
 		{"empty secret", "AKIA01", "", "", "", "the secret is empty"},
 		{"id on two lines", "AKIA\n01", "secret", "", "", "the key ID must be on one line"},
 		{"secret with CR", "AKIA01", "sec\rret", "", "", "the secret must be on one line"},
+		{"secret with a tab", "AKIA01", "sec\tret", "", "", "the secret must not contain control characters"},
+		{"id with NUL", "AKIA\x0001", "secret", "", "", "the key ID must not contain control characters"},
 		{"secret over 64 KB", "AKIA01", long + "s", "", "", "the secret is longer than 64 KB"},
 		{"id over 64 KB", long + "s", "secret", "", "", "the key ID is longer than 64 KB"},
 		{"id with a colon", "AKIA:01", "secret", "", "", "the key ID must not contain a colon"},

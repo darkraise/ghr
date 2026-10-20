@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/darkraise/ghr/internal/fsutil"
 )
@@ -70,6 +71,8 @@ func CheckKeyInput(id, secret string) (string, string, error) {
 			return "", "", errors.New(f.what + " is empty")
 		case strings.ContainsAny(f.v, "\r\n"):
 			return "", "", errors.New(f.what + " must be on one line")
+		case strings.IndexFunc(f.v, unicode.IsControl) >= 0:
+			return "", "", errors.New(f.what + " must not contain control characters")
 		case len(f.v) > maxKeyInput:
 			return "", "", errors.New(f.what + " is longer than 64 KB")
 		}
