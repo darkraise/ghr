@@ -738,6 +738,4 @@ func (s *Service) Summary() *model.ArtifactStoreSummary {
 	return out
 }
 
-func (s *Service) syncRepos(cfg *config.Config, keys Keys) {}
-
 func (s *Service) cleanup(cfg *config.Config, b Bucket) {}
