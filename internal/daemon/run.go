@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/darkraise/ghr/internal/api"
+	"github.com/darkraise/ghr/internal/artifactstore"
 	"github.com/darkraise/ghr/internal/changes"
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/events"
@@ -210,6 +211,7 @@ type running struct {
 	m       *runner.Manager
 	space   *storage.Service
 	ghs     *ghstorage.Service
+	as      *artifactstore.Service
 	b       *Backend
 	sampled chan struct{}
 	wake    chan struct{}
@@ -279,12 +281,20 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 	sampled := make(chan struct{})
 	go func() { sampler.Run(ctx, time.Minute); close(sampled) }()
 
-	ghs := &ghstorage.Service{GH: gh, Config: store.Config, Events: ev, Wake: hub.Wake, Describe: storageErrText(owner)}
+	// One budget for both services, so GitHub storage cleanup and the
+	// artifact variable and secret writes together stay under GitHub's limit.
+	budget := &ghstorage.Budget{}
+	ghs := &ghstorage.Service{GH: gh, Config: store.Config, Events: ev, Wake: hub.Wake, Describe: storageErrText(owner), Budget: budget}
 	ghs.Start()
+	as := &artifactstore.Service{
+		GH: gh, Config: store.Config, Events: ev, KeysPath: o.ArtifactKeysPath, CachePath: o.ArtifactCachePath,
+		Budget: budget, Wake: hub.Wake, Describe: storageErrText(owner),
+	}
+	as.Start()
 
 	wake := make(chan struct{}, 1)
 	b := &Backend{
-		Store: store, M: m, GH: gh, Events: ev, Hist: hist, Space: space, GHS: ghs,
+		Store: store, M: m, GH: gh, Events: ev, Hist: hist, Space: space, GHS: ghs, AS: as,
 		CheckToken: func(ctx context.Context, token, repo string) error {
 			c := github.New(owner, func() string { return token })
 			c.BaseURL = gh.BaseURL
@@ -332,7 +342,7 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 		b.StartGhrChecks()
 	}
 	hub.SetSources(b.fingerprints, b.staleActivity)
-	return &running{m: m, space: space, ghs: ghs, b: b, sampled: sampled, wake: wake}, nil
+	return &running{m: m, space: space, ghs: ghs, as: as, b: b, sampled: sampled, wake: wake}, nil
 }
 
 // storageErrText words a repository's GitHub storage error as the Actions
@@ -540,6 +550,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	defer rt.space.Close()
 	defer rt.ghs.Close()
+	defer rt.as.Close()
 	// Handler first: GET /setup reports configured only once the full API serves.
 	handler.Store(su.routes(api.NewServer(rt.b)))
 	su.backend.Store(rt.b)
@@ -575,6 +586,7 @@ func Run(ctx context.Context, o Options) error {
 			m.Close()
 			rt.space.Close()
 			rt.ghs.Close()
+			rt.as.Close()
 			rt.b.Close()
 			<-rt.sampled
 			done := make(chan struct{})
@@ -582,6 +594,7 @@ func Run(ctx context.Context, o Options) error {
 				m.Wait()
 				rt.space.Wait()
 				rt.ghs.Wait()
+				rt.as.Wait()
 				rt.b.Wait()
 				close(done)
 			}()

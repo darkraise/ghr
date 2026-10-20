@@ -96,6 +96,9 @@ type Backend struct {
 	// GHS is the GitHub artifact storage service; nil in tests that do not
 	// use it.
 	GHS GitHubStorageService
+	// AS is the self-hosted artifact storage service; nil in tests that do
+	// not use it.
+	AS ArtifactStoreService
 	// CheckToken validates a candidate token by reading repo, its runners and its runs with it.
 	CheckToken func(ctx context.Context, token, repo string) error
 	// CheckTokenOwner validates a candidate token when there is no runner
@@ -321,6 +324,9 @@ func (b *Backend) Status() model.Status {
 	st.WebListenError = b.WebListenErr
 	if b.GHS != nil {
 		st.GitHubStorage = b.GHS.Alert()
+	}
+	if b.AS != nil {
+		st.ArtifactStore = b.AS.Summary()
 	}
 	b.daemonStatus(&st)
 	return st

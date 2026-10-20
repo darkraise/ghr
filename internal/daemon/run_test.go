@@ -265,6 +265,7 @@ func testOptions(t *testing.T, cfg string) Options {
 			Pending: filepath.Join(dir, "pending"), Private: filepath.Join(dir, "private"), ToolCache: filepath.Join(dir, "toolcache"), Hooks: "/opt/ghr/hooks", Home: filepath.Join(dir, "home")},
 		GitHubURL: fakeGitHub(t).URL, Systemd: &recSD{}, Docker: nopDocker{}, Disk: nopDisk{}, Host: dirHost{}, Reload: make(chan os.Signal, 1),
 		SetupPendingPath: filepath.Join(dir, "setup-pending"), ToolchainsPendingPath: filepath.Join(dir, "toolchains-pending"),
+		ArtifactKeysPath: filepath.Join(dir, "artifact-store-keys"), ArtifactCachePath: filepath.Join(dir, "artifact-store-meta.json"),
 	}
 }
 
