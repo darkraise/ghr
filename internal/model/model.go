@@ -45,6 +45,9 @@ type Status struct {
 	// GitHubStorage is the artifact storage quota's level, absent until the
 	// first billing read.
 	GitHubStorage *StorageAlert `json:"github_storage,omitempty"`
+	// ArtifactStore is the self-hosted artifact storage summary, absent
+	// while it is not set up.
+	ArtifactStore *ArtifactStoreSummary `json:"artifact_store,omitempty"`
 }
 
 type RestartStatus struct {

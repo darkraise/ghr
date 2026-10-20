@@ -97,7 +97,8 @@ type OperationFailure struct {
 }
 
 // Deletion is one artifact or cache ghr deleted. Kind is "artifact" or
-// "cache"; By is "cleanup" or "manual".
+// "cache"; By is "cleanup", "expired" or "manual". Store is "rustfs" for
+// self-hosted storage and empty for GitHub.
 type Deletion struct {
 	At    time.Time `json:"at"`
 	Repo  string    `json:"repo"`
@@ -106,6 +107,7 @@ type Deletion struct {
 	Bytes int64     `json:"bytes"`
 	Age   string    `json:"age"`
 	By    string    `json:"by"`
+	Store string    `json:"store,omitempty"`
 }
 
 // StorageAlert is the quota's level in GET /status.
