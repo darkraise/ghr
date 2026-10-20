@@ -65,8 +65,8 @@ ghr aborts multipart uploads left open for more than 24 hours, so the bucket nee
 ## Set up ghr
 
 1. **Grant the token two more permissions** on the repositories you will switch on: Variables: read and write, and Secrets: read and write. [Installation](installation.md#requirements) lists them with the others. Until you switch a repository on, the token can do without them: ghr reads each switched-off repository once after it starts, to remove anything of its own left there, and a refusal there counts as off.
-2. **Enter the connection** under Settings → Self-hosted storage: the endpoint (such as `https://s3.example.com`), the bucket and the region. RustFS accepts any region; keep `us-east-1` unless your server says otherwise.
-3. **Enter both keys** with each key's **Replace** button. ghr keeps them in `/etc/ghr/artifact-store-keys`, readable only by root, and shows only a shortened key ID afterwards. On the host, `ghr artifact-store set-key admin` and `ghr artifact-store set-key job` do the same: at a terminal they ask for the ID and the secret without echoing them, and from a file or pipe they read them as two lines:
+2. **Enter the connection** under Settings → Self-hosted storage: the endpoint (such as `https://s3.example.com`), the bucket and the region. RustFS accepts any region; keep `us-east-1` unless your server says otherwise. Press **Save changes**: Test connection checks the saved connection, not what is typed.
+3. **Enter both keys** with each key's **Set** button (it reads **Replace** once a key is set). ghr keeps them in `/etc/ghr/artifact-store-keys`, readable only by root, and shows only a shortened key ID afterwards. On the host, `ghr artifact-store set-key admin` and `ghr artifact-store set-key job` do the same: at a terminal they ask for the ID and the secret without echoing them, and from a file or pipe they read them as two lines:
 
    ```bash
    ghr artifact-store set-key job < job-key.txt
