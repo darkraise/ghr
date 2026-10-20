@@ -1,7 +1,10 @@
 // Package model holds the types shared by the daemon, the control API and its clients.
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Status struct {
 	Now time.Time `json:"now"`
@@ -280,8 +283,21 @@ type ConfigPatch struct {
 	RunnerLimits     *RunnerLimitsPatch   `json:"runner_limits,omitempty"`
 	Web              *WebPatch            `json:"web,omitempty"`
 	GitHubStorage    *GitHubStoragePatch  `json:"github_storage,omitempty"`
+	ArtifactStore    *ArtifactStorePatch  `json:"artifact_store,omitempty"`
 	Repos            map[string]RepoPatch `json:"repos,omitempty"`
 	Jobs             map[string]JobPatch  `json:"jobs,omitempty"`
+}
+
+// ArtifactStorePatch changes the artifact_store block's connection and
+// policy. Repositories are switched on and off through their own routes;
+// Repos is read only to refuse a patch that carries it.
+type ArtifactStorePatch struct {
+	Endpoint      *string         `json:"endpoint,omitempty"`
+	Bucket        *string         `json:"bucket,omitempty"`
+	Region        *string         `json:"region,omitempty"`
+	CleanupMaxAge *string         `json:"cleanup_max_age,omitempty"`
+	CapacityGB    *int            `json:"capacity_gb,omitempty"`
+	Repos         json.RawMessage `json:"repos,omitempty"`
 }
 
 type AddRepoRequest struct {

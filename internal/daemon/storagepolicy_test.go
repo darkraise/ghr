@@ -82,3 +82,64 @@ func TestPatchGitHubStorageRejects(t *testing.T) {
 		t.Fatalf("a refused patch changed the block: %+v", got)
 	}
 }
+
+func TestApplyArtifactStorePatch(t *testing.T) {
+	str := func(s string) *string { return &s }
+	gb := func(n int) *int { return &n }
+	start := config.ArtifactStore{Endpoint: "https://s3.example.sg", Bucket: "gha-artifacts", Region: "ap-southeast-1",
+		CleanupMaxAge: "3d", CapacityGB: 50, Repos: map[string]config.ArtifactRepo{"darkmem": {Enabled: true}}}
+	repos := map[string]config.ArtifactRepo{"darkmem": {Enabled: true}}
+	for _, tc := range []struct {
+		name  string
+		from  config.ArtifactStore
+		patch model.ArtifactStorePatch
+		want  config.ArtifactStore
+	}{
+		{"set from empty", config.ArtifactStore{},
+			model.ArtifactStorePatch{Endpoint: str(" https://s3.example.sg/ "), Bucket: str(" gha-artifacts "), Region: str("ap-southeast-1"), CleanupMaxAge: str("72h"), CapacityGB: gb(50)},
+			config.ArtifactStore{Endpoint: "https://s3.example.sg", Bucket: "gha-artifacts", Region: "ap-southeast-1", CleanupMaxAge: "3d", CapacityGB: 50}},
+		{"defaults stored empty", start,
+			model.ArtifactStorePatch{Region: str("us-east-1"), CleanupMaxAge: str("168h")},
+			config.ArtifactStore{Endpoint: "https://s3.example.sg", Bucket: "gha-artifacts", CapacityGB: 50, Repos: repos}},
+		{"cleanup off", start,
+			model.ArtifactStorePatch{CleanupMaxAge: str("off")},
+			config.ArtifactStore{Endpoint: "https://s3.example.sg", Bucket: "gha-artifacts", Region: "ap-southeast-1", CleanupMaxAge: "off", CapacityGB: 50, Repos: repos}},
+		{"cleanup back to the default", start,
+			model.ArtifactStorePatch{CleanupMaxAge: str("")},
+			config.ArtifactStore{Endpoint: "https://s3.example.sg", Bucket: "gha-artifacts", Region: "ap-southeast-1", CapacityGB: 50, Repos: repos}},
+		{"cleared connection", start,
+			model.ArtifactStorePatch{Endpoint: str(""), Bucket: str(""), Region: str(""), CapacityGB: gb(0)},
+			config.ArtifactStore{CleanupMaxAge: "3d", Repos: repos}},
+		{"untouched fields kept", start,
+			model.ArtifactStorePatch{CapacityGB: gb(80)},
+			config.ArtifactStore{Endpoint: "https://s3.example.sg", Bucket: "gha-artifacts", Region: "ap-southeast-1", CleanupMaxAge: "3d", CapacityGB: 80, Repos: repos}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &config.Config{ArtifactStore: tc.from}
+			if err := applyArtifactStorePatch(c, &tc.patch); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(c.ArtifactStore, tc.want) {
+				t.Fatalf("block %+v, want %+v", c.ArtifactStore, tc.want)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name  string
+		patch model.ArtifactStorePatch
+		want  string
+	}{
+		{"an unreadable duration", model.ArtifactStorePatch{CleanupMaxAge: str("soon")}, `artifact_store.cleanup_max_age: invalid duration "soon"`},
+		{"repository switches", model.ArtifactStorePatch{CapacityGB: gb(80), Repos: []byte(`{"darkmem":{"enabled":false}}`)},
+			"artifact_store.repos is set per repository on the Artifacts page"},
+	} {
+		c := &config.Config{ArtifactStore: start}
+		err := applyArtifactStorePatch(c, &tc.patch)
+		if apiStatus(err) != 400 || err.Error() != tc.want {
+			t.Errorf("%s: err %v, want 400 %q", tc.name, err, tc.want)
+		}
+		if !reflect.DeepEqual(c.ArtifactStore, start) {
+			t.Errorf("%s: a refused patch changed the block to %+v", tc.name, c.ArtifactStore)
+		}
+	}
+}

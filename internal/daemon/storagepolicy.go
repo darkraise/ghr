@@ -58,3 +58,43 @@ func applyStoragePatch(c *config.Config, p *model.GitHubStoragePatch) error {
 	}
 	return nil
 }
+
+// applyArtifactStorePatch writes an artifact_store patch into c; Validate
+// judges the values it stores. A region or cleanup age equal to its default
+// is stored empty, so a block back at its defaults is not written.
+func applyArtifactStorePatch(c *config.Config, p *model.ArtifactStorePatch) error {
+	if len(p.Repos) > 0 {
+		return api.BadRequest("artifact_store.repos is set per repository on the Artifacts page")
+	}
+	a := &c.ArtifactStore
+	if p.Endpoint != nil {
+		a.Endpoint = strings.TrimSuffix(strings.TrimSpace(*p.Endpoint), "/")
+	}
+	if p.Bucket != nil {
+		a.Bucket = strings.TrimSpace(*p.Bucket)
+	}
+	if p.Region != nil {
+		a.Region = strings.TrimSpace(*p.Region)
+		if a.Region == config.DefaultArtifactRegion {
+			a.Region = ""
+		}
+	}
+	if p.CleanupMaxAge != nil {
+		v := strings.TrimSpace(*p.CleanupMaxAge)
+		if v != "" && v != "off" {
+			d, err := config.ParseDuration(v)
+			if err != nil {
+				return api.BadRequest("artifact_store.cleanup_max_age: " + err.Error())
+			}
+			v = config.ShortDuration(d.D())
+			if d.D() == config.DefaultArtifactCleanup {
+				v = ""
+			}
+		}
+		a.CleanupMaxAge = v
+	}
+	if p.CapacityGB != nil {
+		a.CapacityGB = *p.CapacityGB
+	}
+	return nil
+}
