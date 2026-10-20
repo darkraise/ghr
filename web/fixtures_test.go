@@ -178,6 +178,9 @@ func fixtureValues() map[string]any {
 			Web:        config.Web{Listen: "0.0.0.0:8080", Hosts: []string{"ghr.lan"}},
 			GitHubStorage: config.GitHubStorage{CleanupMaxAge: config.Duration(48 * time.Hour),
 				Repos: map[string]config.StorageOverride{"darkmem": {Cleanup: "6h"}}},
+			ArtifactStore: config.ArtifactStore{Endpoint: "https://s3.example.sg", Bucket: "gha-artifacts", Region: "us-east-1",
+				CleanupMaxAge: "7d", CapacityGB: 50,
+				Repos: map[string]config.ArtifactRepo{"darkmem": {Enabled: true, Cleanup: "3d"}, "darkcloud": {Enabled: true}}},
 			Jobs: config.DefaultJobs(),
 		},
 		"storage": model.Storage{
@@ -246,6 +249,7 @@ func fixtureValues() map[string]any {
 			},
 		},
 		"github-storage": githubStorageFixture(),
+		"artifact-store": artifactStoreFixture(),
 		"storage-alert": model.StorageAlert{Level: "critical", Month: "2026-10", UsedGBHours: 330.5, IncludedGBHours: 363.28125,
 			UsedPct: 91, RunsOutAt: ptr(at(60 * time.Hour)), ResetsAt: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)},
 		"toolchain-choices": []model.ToolchainChoice{{Spec: "22.11.0", Version: "22.11.0", LTS: true}, {Spec: "24.9.0", Version: "24.9.0"}},
@@ -392,6 +396,59 @@ func githubStorageFixture() model.GitHubStorage {
 		Deletions: []model.Deletion{
 			{At: at(-9 * time.Minute), Repo: "darkmem", Kind: "artifact", Name: "coverage-old", Bytes: 52_428_800, Age: "3d", By: "cleanup"},
 			{At: at(-2 * time.Hour), Repo: "darkcloud", Kind: "cache", Name: "node-cache-Linux-x64-npm-0b1c", Bytes: 31_457_280, Age: "5d", By: "manual"},
+		},
+	}
+}
+
+// artifactStoreFixture is a set-up store: one repository on and set, one on
+// whose secret the token could not write, one whose variable another daemon
+// owns, and one public repository.
+func artifactStoreFixture() model.ArtifactStore {
+	const sha = "a1f9c3e0d4b5c6a7b8c9d0e1f2a3b4c5d6e7f8a9"
+	return model.ArtifactStore{
+		Configured: true, Endpoint: "https://s3.example.sg", Bucket: "gha-artifacts", Region: "us-east-1",
+		AdminKey:  &model.ArtifactKeyInfo{ID: "GHRK…7Q2X", SetAt: at(-53 * time.Hour)},
+		JobKey:    &model.ArtifactKeyInfo{ID: "JOBK…M4TA", SetAt: at(-52 * time.Hour)},
+		CheckedAt: ptr(at(-5 * time.Minute)),
+		UsedBytes: 423_751_200, Count: 5, CapacityBytes: 50_000_000_000,
+		Repos: []model.ArtifactStoreRepo{
+			{Name: "darkmem", Private: true, Enabled: true, State: "set", Cleanup: "3d", CleanupSource: "override",
+				Bytes: 13_751_200, Count: 4, Items: []model.ArtifactStoreItem{
+					{Key: "darkraise/darkmem/102/e2e-report.zip", Name: "e2e-report", RunID: 102, Attempt: 2, Workflow: "ci",
+						Job: "E2E (api)", Branch: "fix/cache-key", SHA: sha, Bytes: 8_900_000, Files: 12,
+						Digest:     "sha256:05b7e3c7be55b19c6b57fd7c1b7706e5b2242ca2bea4aa4b61595af8a937239d",
+						UploadedAt: at(-15 * time.Minute), ExpiresAt: ptr(at(5*24*time.Hour - 15*time.Minute))},
+					{Key: "darkraise/darkmem/102/coverage-report.zip", Name: "coverage-report", RunID: 102, Attempt: 2, Workflow: "ci",
+						Job: "Backend tests", Branch: "fix/cache-key", SHA: sha, Bytes: 51_200, Files: 3,
+						Digest:     "sha256:8dee3fc3d8b3aca4bda7762ead5166ec81a6f78d410b04fc9f869ad67583d243",
+						UploadedAt: at(-13 * time.Minute)},
+					{Key: "darkraise/darkmem/101/frontend-dist.zip", Name: "frontend-dist", RunID: 101, Attempt: 1, Workflow: "ci",
+						Job: "build", Branch: "renovate/runner", SHA: sha, Bytes: 2_400_000, Files: 40,
+						Digest:     "sha256:d435b3adc5abbcda85993760f7125c1f589c8156130a940ee562c8a5ea4f5463",
+						UploadedAt: at(-17 * time.Hour)},
+					{Key: "darkraise/darkmem/95/frontend-dist.zip", Name: "frontend-dist", RunID: 95, Attempt: 1, Workflow: "ci",
+						Job: "build", Branch: "master", SHA: sha, Bytes: 2_400_000, Files: 40,
+						Digest:     "sha256:fdd326930fb1e10467979448ba7011e188ae89e4a4a65adf8fcb5c5957ce5f6d",
+						UploadedAt: at(-4 * 24 * time.Hour)},
+				}},
+			{Name: "darkcloud", Private: true, Enabled: true, State: "error",
+				StateError: "token lacks secrets=write on darkraise/darkcloud: grant it in the PAT settings",
+				Cleanup:    "7d", CleanupSource: "global", Bytes: 410_000_000, Count: 1, Items: []model.ArtifactStoreItem{
+					{Key: "darkraise/darkcloud/77/image-cache.zip", Name: "image-cache", RunID: 77, Attempt: 1, Workflow: "build",
+						Job: "image", Branch: "main", SHA: sha, Bytes: 410_000_000, Files: 1,
+						Digest:     "sha256:fd05544f5a9f392ded6367befa21384bfe3036adbfc3d99471fc21d0759f7007",
+						UploadedAt: at(-54 * time.Hour), ExpiresAt: ptr(at(18 * time.Hour))},
+				}},
+			{Name: "docs", Private: true, State: "foreign",
+				StateError: "GHR_ARTIFACT_STORE points to https://s3.other.example, bucket ci-artifacts, which is not this ghr's storage; ghr leaves it alone",
+				Cleanup:    "7d", CleanupSource: "global", Items: []model.ArtifactStoreItem{}},
+			{Name: "old-docs", State: "public", Cleanup: "7d", CleanupSource: "global", Items: []model.ArtifactStoreItem{}},
+		},
+		Deletions: []model.Deletion{
+			{At: at(-7 * time.Minute), Repo: "darkmem", Kind: "artifact", Name: "frontend-dist · run 90", Bytes: 2_400_000,
+				Age: "3d", By: "cleanup", Store: "rustfs"},
+			{At: at(-3 * time.Hour), Repo: "darkcloud", Kind: "artifact", Name: "image-cache · run 70", Bytes: 410_000_000,
+				Age: "5d", By: "expired", Store: "rustfs"},
 		},
 	}
 }

@@ -1,0 +1,162 @@
+{
+  "configured": true,
+  "endpoint": "https://s3.example.sg",
+  "bucket": "gha-artifacts",
+  "region": "us-east-1",
+  "admin_key": {
+    "id": "GHRK…7Q2X",
+    "set_at": "2026-10-01T09:05:00Z"
+  },
+  "job_key": {
+    "id": "JOBK…M4TA",
+    "set_at": "2026-10-01T10:05:00Z"
+  },
+  "checked_at": "2026-10-03T14:00:00Z",
+  "used_bytes": 423751200,
+  "count": 5,
+  "capacity_bytes": 50000000000,
+  "repos": [
+    {
+      "name": "darkmem",
+      "private": true,
+      "enabled": true,
+      "state": "set",
+      "cleanup": "3d",
+      "cleanup_source": "override",
+      "bytes": 13751200,
+      "count": 4,
+      "items": [
+        {
+          "key": "darkraise/darkmem/102/e2e-report.zip",
+          "name": "e2e-report",
+          "run_id": 102,
+          "attempt": 2,
+          "workflow": "ci",
+          "job": "E2E (api)",
+          "branch": "fix/cache-key",
+          "sha": "a1f9c3e0d4b5c6a7b8c9d0e1f2a3b4c5d6e7f8a9",
+          "bytes": 8900000,
+          "files": 12,
+          "digest": "sha256:05b7e3c7be55b19c6b57fd7c1b7706e5b2242ca2bea4aa4b61595af8a937239d",
+          "uploaded_at": "2026-10-03T13:50:00Z",
+          "expires_at": "2026-10-08T13:50:00Z"
+        },
+        {
+          "key": "darkraise/darkmem/102/coverage-report.zip",
+          "name": "coverage-report",
+          "run_id": 102,
+          "attempt": 2,
+          "workflow": "ci",
+          "job": "Backend tests",
+          "branch": "fix/cache-key",
+          "sha": "a1f9c3e0d4b5c6a7b8c9d0e1f2a3b4c5d6e7f8a9",
+          "bytes": 51200,
+          "files": 3,
+          "digest": "sha256:8dee3fc3d8b3aca4bda7762ead5166ec81a6f78d410b04fc9f869ad67583d243",
+          "uploaded_at": "2026-10-03T13:52:00Z"
+        },
+        {
+          "key": "darkraise/darkmem/101/frontend-dist.zip",
+          "name": "frontend-dist",
+          "run_id": 101,
+          "attempt": 1,
+          "workflow": "ci",
+          "job": "build",
+          "branch": "renovate/runner",
+          "sha": "a1f9c3e0d4b5c6a7b8c9d0e1f2a3b4c5d6e7f8a9",
+          "bytes": 2400000,
+          "files": 40,
+          "digest": "sha256:d435b3adc5abbcda85993760f7125c1f589c8156130a940ee562c8a5ea4f5463",
+          "uploaded_at": "2026-10-02T21:05:00Z"
+        },
+        {
+          "key": "darkraise/darkmem/95/frontend-dist.zip",
+          "name": "frontend-dist",
+          "run_id": 95,
+          "attempt": 1,
+          "workflow": "ci",
+          "job": "build",
+          "branch": "master",
+          "sha": "a1f9c3e0d4b5c6a7b8c9d0e1f2a3b4c5d6e7f8a9",
+          "bytes": 2400000,
+          "files": 40,
+          "digest": "sha256:fdd326930fb1e10467979448ba7011e188ae89e4a4a65adf8fcb5c5957ce5f6d",
+          "uploaded_at": "2026-09-29T14:05:00Z"
+        }
+      ]
+    },
+    {
+      "name": "darkcloud",
+      "private": true,
+      "enabled": true,
+      "state": "error",
+      "state_error": "token lacks secrets=write on darkraise/darkcloud: grant it in the PAT settings",
+      "cleanup": "7d",
+      "cleanup_source": "global",
+      "bytes": 410000000,
+      "count": 1,
+      "items": [
+        {
+          "key": "darkraise/darkcloud/77/image-cache.zip",
+          "name": "image-cache",
+          "run_id": 77,
+          "attempt": 1,
+          "workflow": "build",
+          "job": "image",
+          "branch": "main",
+          "sha": "a1f9c3e0d4b5c6a7b8c9d0e1f2a3b4c5d6e7f8a9",
+          "bytes": 410000000,
+          "files": 1,
+          "digest": "sha256:fd05544f5a9f392ded6367befa21384bfe3036adbfc3d99471fc21d0759f7007",
+          "uploaded_at": "2026-10-01T08:05:00Z",
+          "expires_at": "2026-10-04T08:05:00Z"
+        }
+      ]
+    },
+    {
+      "name": "docs",
+      "private": true,
+      "enabled": false,
+      "state": "foreign",
+      "state_error": "GHR_ARTIFACT_STORE points to https://s3.other.example, bucket ci-artifacts, which is not this ghr's storage; ghr leaves it alone",
+      "cleanup": "7d",
+      "cleanup_source": "global",
+      "bytes": 0,
+      "count": 0,
+      "items": []
+    },
+    {
+      "name": "old-docs",
+      "private": false,
+      "enabled": false,
+      "state": "public",
+      "cleanup": "7d",
+      "cleanup_source": "global",
+      "bytes": 0,
+      "count": 0,
+      "items": []
+    }
+  ],
+  "deletions": [
+    {
+      "at": "2026-10-03T13:58:00Z",
+      "repo": "darkmem",
+      "kind": "artifact",
+      "name": "frontend-dist · run 90",
+      "bytes": 2400000,
+      "age": "3d",
+      "by": "cleanup",
+      "store": "rustfs"
+    },
+    {
+      "at": "2026-10-03T11:05:00Z",
+      "repo": "darkcloud",
+      "kind": "artifact",
+      "name": "image-cache · run 70",
+      "bytes": 410000000,
+      "age": "5d",
+      "by": "expired",
+      "store": "rustfs"
+    }
+  ]
+}

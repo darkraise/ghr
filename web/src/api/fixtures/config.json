@@ -50,6 +50,22 @@
       }
     }
   },
+  "artifact_store": {
+    "endpoint": "https://s3.example.sg",
+    "bucket": "gha-artifacts",
+    "region": "us-east-1",
+    "cleanup_max_age": "7d",
+    "capacity_gb": 50,
+    "repos": {
+      "darkcloud": {
+        "enabled": true
+      },
+      "darkmem": {
+        "enabled": true,
+        "cleanup": "3d"
+      }
+    }
+  },
   "jobs": {
     "ghr_update_check": {
       "enabled": true,
