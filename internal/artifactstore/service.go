@@ -391,7 +391,7 @@ func (s *Service) pass() {
 		return
 	}
 	keys := s.loadKeys()
-	s.syncRepos(cfg, keys)
+	s.syncRepos(cfg)
 	if keys.Admin == nil {
 		return
 	}

@@ -35,6 +35,7 @@ type fakeGH struct {
 	runsErr   map[string]error
 	remaining int
 	calls     []string
+	onGetVar  func(repo string) // when set, runs at the start of every GetVariable
 }
 
 func newFakeGH() *fakeGH {
@@ -91,6 +92,9 @@ func (f *fakeGH) ListRuns(_ context.Context, repo, status string) ([]github.Run,
 
 func (f *fakeGH) GetVariable(_ context.Context, repo, name string) (string, bool, error) {
 	f.call("GetVariable %s %s", repo, name)
+	if f.onGetVar != nil {
+		f.onGetVar(repo)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	key := strings.ToLower(repo)

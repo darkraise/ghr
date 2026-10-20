@@ -25,10 +25,10 @@ func (s *Service) rateLow() bool {
 
 // syncRepos reads the owner's repositories' visibility, then brings each
 // covered repository's variable and secret in line with its switch. Each
-// repository is synced with the config as it is then, so a switch saved
-// during the pass is not undone. It stops while the token is below the
-// reserve kept for the runner manager.
-func (s *Service) syncRepos(cfg *config.Config, keys Keys) {
+// repository is synced with the config and keys as they are then, so a
+// switch or job key saved during the pass is not undone. It stops while the
+// token is below the reserve kept for the runner manager.
+func (s *Service) syncRepos(cfg *config.Config) {
 	if s.rateLow() {
 		return
 	}
@@ -38,6 +38,9 @@ func (s *Service) syncRepos(cfg *config.Config, keys Keys) {
 			return
 		}
 		s.syncMu.Lock()
+		s.mu.Lock()
+		keys := s.keys
+		s.mu.Unlock()
 		st := s.syncOne(s.ctx, s.Config(), keys, repo, visErr, true)
 		if s.ctx.Err() == nil {
 			s.setSync(repo, st)

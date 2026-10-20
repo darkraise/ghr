@@ -243,6 +243,29 @@ func TestAJobKeyReplacementRewritesEverySwitchedOnRepository(t *testing.T) {
 	}
 }
 
+func TestAPassUsesAJobKeyReplacedDuringIt(t *testing.T) {
+	e := newTestEnv(t)
+	e.cfg.WatchRepos = []string{"homelab"}
+	e.gh.addRepo("homelab", true)
+	e.enable("darkmem")
+	e.enable("homelab")
+	e.gh.onGetVar = func(repo string) {
+		if repo == "darkmem" {
+			e.gh.onGetVar = nil
+			if err := e.s.SetKey("job", "NEWJOBKEY0002", "new-job-secret"); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	e.s.pass()
+	if got := e.gh.secrets["homelab"]; got != "NEWJOBKEY0002:new-job-secret" {
+		t.Fatalf("homelab secret %q, want the key set before the pass reached it", got)
+	}
+	if got := e.gh.vars["homelab"]; got != e.storeJSON("NEWJOBKEY0002") {
+		t.Fatalf("homelab variable %q, want the new key id", got)
+	}
+}
+
 func TestSyncRewritesTheSecretWhenTheJobKeyIsReplacedUnderTheSameID(t *testing.T) {
 	e := newTestEnv(t)
 	e.enable("darkmem")
