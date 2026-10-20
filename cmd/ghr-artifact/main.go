@@ -188,6 +188,12 @@ func describe(err error, store artifact.Store) error {
 		}
 		return fmt.Errorf("%s answered %s", store.Endpoint, detail)
 	}
+	switch {
+	case errors.Is(err, context.Canceled):
+		return errors.New("stopped by a signal, as when the job is cancelled")
+	case errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf("gave up after %s", opTimeout)
+	}
 	var ue *url.Error
 	if errors.As(err, &ue) {
 		return fmt.Errorf("cannot reach %s: %w", store.Endpoint, ue.Err)

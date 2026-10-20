@@ -3,7 +3,9 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -218,6 +220,21 @@ func TestDescribeA403(t *testing.T) {
 	} {
 		if got := describe(tc.err, store).Error(); !strings.HasPrefix(got, tc.want) {
 			t.Errorf("%s: %q, want it to start %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestDescribeAStop(t *testing.T) {
+	store := artifact.Store{Endpoint: "https://s3.example.com", Bucket: "gha"}
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{&url.Error{Op: "Get", URL: store.Endpoint, Err: context.Canceled}, "stopped by a signal, as when the job is cancelled"},
+		{&url.Error{Op: "Put", URL: store.Endpoint, Err: context.DeadlineExceeded}, "gave up after 6h0m0s"},
+	} {
+		if got := describe(tc.err, store).Error(); got != tc.want {
+			t.Errorf("%v: %q, want %q", tc.err, got, tc.want)
 		}
 	}
 }
