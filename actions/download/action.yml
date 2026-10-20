@@ -1,0 +1,118 @@
+name: Download a build artifact (ghr)
+description: Download a build artifact from the store ghr set up for this repository, falling back to GitHub's artifact storage
+author: darkraise
+inputs:
+  name:
+    description: Name of the artifact to download. If unspecified, all artifacts for the run are downloaded.
+    required: false
+  artifact-ids:
+    description: >
+      IDs of GitHub artifacts to download, comma-separated. Either inputs artifact-ids or name can be used,
+      but not both. IDs exist only on GitHub, so these downloads always come from GitHub.
+    required: false
+  path:
+    description: Destination path. Supports basic tilde expansion. Defaults to $GITHUB_WORKSPACE
+    required: false
+  pattern:
+    description: A glob pattern matching the artifacts that should be downloaded. Ignored if name is specified.
+    required: false
+  merge-multiple:
+    description: >
+      When multiple artifacts are matched, this changes the behavior of the destination directories.
+      If true, the downloaded artifacts will be in the same directory specified by path.
+      If false, the downloaded artifacts will be extracted into individual named directories within the specified path.
+    required: false
+    default: 'false'
+  github-token:
+    description: >
+      The GitHub token used to authenticate with the GitHub API. GitHub needs it to download artifacts
+      from a different workflow run; the artifact store does not.
+    required: false
+  run-id:
+    description: The id of the workflow run where the desired download artifact was uploaded from.
+    required: false
+    default: ${{ github.run_id }}
+  store:
+    description: >
+      The GHR_ARTIFACT_STORE repository variable ghr writes. Empty reads the GHR_ARTIFACT_STORE
+      environment variable; when both are empty the artifact comes from GitHub.
+    default: ''
+  key:
+    description: The job key from the GHR_ARTIFACT_KEY repository secret. Needed when the store is set.
+    default: ''
+  version:
+    description: >
+      The ghr release, such as v0.2.0, to fetch ghr-artifact from. Empty uses the release tag this
+      action is referenced by.
+    default: ''
+outputs:
+  download-path:
+    description: Path of artifact download
+    value: ${{ steps.ghr.outputs.download-path || steps.fallback.outputs.download-path || steps.github.outputs.download-path }}
+runs:
+  using: composite
+  steps:
+    - name: Download from GitHub
+      id: github
+      if: (inputs.store == '' && env.GHR_ARTIFACT_STORE == '') || inputs.artifact-ids != ''
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      with:
+        name: ${{ inputs.name }}
+        artifact-ids: ${{ inputs.artifact-ids }}
+        path: ${{ inputs.path }}
+        pattern: ${{ inputs.pattern }}
+        merge-multiple: ${{ inputs.merge-multiple }}
+        github-token: ${{ inputs.github-token }}
+        run-id: ${{ inputs.run-id }}
+    - name: Fetch ghr-artifact
+      id: fetch
+      if: (inputs.store != '' || env.GHR_ARTIFACT_STORE != '') && inputs.artifact-ids == ''
+      shell: bash
+      env:
+        GHR_VERSION: ${{ inputs.version }}
+        GHR_ACTION_REF: ${{ github.action_ref }}
+      run: |
+        tool=$(bash "$GITHUB_ACTION_PATH/../lib/fetch.sh")
+        echo "path=$tool" >> "$GITHUB_OUTPUT"
+    - name: Download from the artifact store
+      id: ghr
+      if: (inputs.store != '' || env.GHR_ARTIFACT_STORE != '') && inputs.artifact-ids == ''
+      shell: bash
+      env:
+        GHR_TOOL: ${{ steps.fetch.outputs.path }}
+        GHR_ARTIFACT_STORE: ${{ inputs.store || env.GHR_ARTIFACT_STORE }}
+        GHR_ARTIFACT_KEY: ${{ inputs.key }}
+        IN_NAME: ${{ inputs.name }}
+        IN_PATH: ${{ inputs.path }}
+        IN_PATTERN: ${{ inputs.pattern }}
+        IN_MERGE_MULTIPLE: ${{ inputs.merge-multiple }}
+        IN_RUN_ID: ${{ inputs.run-id }}
+      run: |
+        code=0
+        "$GHR_TOOL" download \
+          --name "$IN_NAME" \
+          --path "$IN_PATH" \
+          --pattern "$IN_PATTERN" \
+          --merge-multiple="$IN_MERGE_MULTIPLE" \
+          --run-id "$IN_RUN_ID" || code=$?
+        # 3: nothing matched in the store; the next steps look on GitHub.
+        [ "$code" -eq 3 ] || exit "$code"
+    - name: Explain the GitHub fallback for another run
+      if: steps.ghr.outputs.missing == 'true' && inputs.run-id != github.run_id && inputs.github-token == ''
+      shell: bash
+      env:
+        IN_RUN_ID: ${{ inputs.run-id }}
+      run: |
+        echo "::error::No artifact matched in the artifact store for run $IN_RUN_ID, and GitHub needs github-token to download another run's artifacts; pass github-token with actions: read to the download action."
+        exit 1
+    - name: Download from GitHub (fallback)
+      id: fallback
+      if: steps.ghr.outputs.missing == 'true'
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path }}
+        pattern: ${{ inputs.pattern }}
+        merge-multiple: ${{ inputs.merge-multiple }}
+        github-token: ${{ inputs.github-token }}
+        run-id: ${{ inputs.run-id }}
