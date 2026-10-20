@@ -472,6 +472,7 @@ describe("Settings sections", () => {
       "General",
       "GitHub token",
       "GitHub storage",
+      "Self-hosted storage",
       "Updates",
       "Account",
       "Toolchains",
@@ -488,6 +489,7 @@ describe("Settings sections", () => {
   it.each([
     ["token", "GitHub token"],
     ["github-storage", "GitHub storage"],
+    ["self-hosted-storage", "Self-hosted storage"],
     ["updates", "Updates"],
     ["account", "Account"],
     ["toolchains", "Toolchains"],

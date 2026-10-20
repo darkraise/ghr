@@ -3,6 +3,7 @@ import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { useEffect, type ReactNode } from "react"
 import { AccountSection } from "@/components/account-section"
+import { ArtifactStoreSection } from "@/components/artifact-store-section"
 import { ErrorLine } from "@/components/page/error-line"
 import { GitHubStorageSection } from "@/components/github-storage-section"
 import { SideGroup, SideLayout } from "@/components/page/side-layout"
@@ -21,6 +22,7 @@ const CONFIG = [
   { id: "", title: "General" },
   { id: "token", title: "GitHub token" },
   { id: "github-storage", title: "GitHub storage" },
+  { id: "self-hosted-storage", title: "Self-hosted storage" },
   { id: "updates", title: "Updates" },
   { id: "account", title: "Account" },
 ] as const
@@ -94,6 +96,8 @@ function SectionContent({ section }: { section: string }) {
       )
     case "github-storage":
       return <GitHubStorageSection />
+    case "self-hosted-storage":
+      return <ArtifactStoreSection />
     case "updates":
       return (
         <Titled title="Updates">
