@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery, useQueryClient, type QueryClient } from "@t
 import { useEffect, useRef } from "react"
 import { api } from "./client"
 import { useLive } from "./live"
-import type { ActivityWindow, Config, GhrEvent, GitHubStorage, LogChunk, RunAnnotations, RunDetail, Status, Storage } from "./types"
+import type { ActivityWindow, ArtifactStore, Config, GhrEvent, GitHubStorage, LogChunk, RunAnnotations, RunDetail, Status, Storage } from "./types"
 
 export const POLL_FAST = 1000
 export const POLL_SLOW = 5000
@@ -39,6 +39,8 @@ export const keys = {
   token: ["token"] as const,
   storage: ["storage"] as const,
   githubStorage: ["github-storage"] as const,
+  artifactStore: ["artifact-store"] as const,
+  artifactRunObjects: (repo: string, id: number) => ["artifact-store", "run", repo, id] as const,
   availableRepos: ["available-repos"] as const,
   labelCheck: (name: string) => ["label-check", name] as const,
   registrations: (name: string) => ["registrations", name] as const,
@@ -317,6 +319,21 @@ export function useGitHubStorage() {
     queryKey: keys.githubStorage,
     queryFn: ({ signal }) => api.githubStorage(signal),
     refetchInterval: (q) => livePoll(live, githubStorageBusy(q.state.data) ? POLL_FAST : POLL_SLOW),
+  })
+}
+
+// A delete reports its progress only in the snapshot, so the snapshot is read
+// every second while one runs.
+export function artifactStoreBusy(store?: ArtifactStore): boolean {
+  return store?.operation !== undefined && store.operation.finished_at === undefined
+}
+
+export function useArtifactStore() {
+  const live = useLive()
+  return useQuery({
+    queryKey: keys.artifactStore,
+    queryFn: ({ signal }) => api.artifactStore(signal),
+    refetchInterval: (q) => livePoll(live, artifactStoreBusy(q.state.data) ? POLL_FAST : POLL_SLOW),
   })
 }
 

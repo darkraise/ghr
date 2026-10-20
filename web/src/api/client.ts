@@ -3,6 +3,13 @@ import type {
   Activity,
   ActivityWindow,
   AddRepoRequest,
+  ArtifactKeyWhich,
+  ArtifactLink,
+  ArtifactLinkTTL,
+  ArtifactStore,
+  ArtifactStoreItem,
+  ArtifactStoreRepo,
+  ArtifactStoreTest,
   AuthState,
   AvailableRepo,
   Config,
@@ -232,4 +239,17 @@ export const api = {
     send("POST", `/api/github-storage/${seg(repo)}/caches/delete`, body),
   setRetention: (repo: string, days: number) => send("PUT", `/api/github-storage/${seg(repo)}/retention`, { days }),
   setRetentionAll: (days: number) => send("POST", "/api/github-storage/retention", { days }),
+  artifactStore: (signal?: AbortSignal) => request<ArtifactStore>("GET", "/api/artifact-store", undefined, signal),
+  refreshArtifactStore: () => send("POST", "/api/artifact-store/refresh"),
+  testArtifactStore: () => request<ArtifactStoreTest>("POST", "/api/artifact-store/test"),
+  setArtifactKey: (which: ArtifactKeyWhich, id: string, secret: string) => send("PUT", "/api/artifact-store/keys", { which, id, secret }),
+  // Answers once the repository's variable and secret are applied, with its new state.
+  setArtifactRepo: (repo: string, body: { enabled?: boolean; cleanup?: string }) =>
+    request<ArtifactStoreRepo>("PUT", `/api/artifact-store/repos/${seg(repo)}`, body),
+  enablePrivateArtifactRepos: () => request<ArtifactStoreRepo[]>("POST", "/api/artifact-store/repos/enable-private"),
+  artifactRunObjects: (repo: string, runId: number, signal?: AbortSignal) =>
+    request<ArtifactStoreItem[]>("GET", `/api/artifact-store/${seg(repo)}/runs/${runId}`, undefined, signal),
+  // Answers 202; the progress shows in the snapshot.
+  deleteArtifactObjects: (repo: string, keys: string[]) => send("POST", `/api/artifact-store/${seg(repo)}/artifacts/delete`, { keys }),
+  artifactLink: (key: string, ttl: ArtifactLinkTTL) => request<ArtifactLink>("POST", "/api/artifact-store/link", { key, ttl }),
 }

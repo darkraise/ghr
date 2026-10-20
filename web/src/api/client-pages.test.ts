@@ -4,7 +4,19 @@ import { mockApi, noContent } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
 import { api } from "./client"
-import { annotationsPoll, keys, logSettling, POLL_ACTIONS, POLL_SAFETY, POLL_SLOW, runDetailPoll, useJobLog, useRunAnnotations, useRunDetail } from "./hooks"
+import {
+  annotationsPoll,
+  artifactStoreBusy,
+  keys,
+  logSettling,
+  POLL_ACTIONS,
+  POLL_SAFETY,
+  POLL_SLOW,
+  runDetailPoll,
+  useJobLog,
+  useRunAnnotations,
+  useRunDetail,
+} from "./hooks"
 
 const ok = () => noContent()
 
@@ -39,6 +51,20 @@ describe("api for the later pages", () => {
     ["deleteCaches all", () => api.deleteCaches("darkmem", { all: true }), "POST", "/api/github-storage/darkmem/caches/delete", { all: true }],
     ["setRetention", () => api.setRetention("darkmem", 7), "PUT", "/api/github-storage/darkmem/retention", { days: 7 }],
     ["setRetentionAll", () => api.setRetentionAll(5), "POST", "/api/github-storage/retention", { days: 5 }],
+    ["refreshArtifactStore", () => api.refreshArtifactStore(), "POST", "/api/artifact-store/refresh", undefined],
+    ["testArtifactStore", () => api.testArtifactStore(), "POST", "/api/artifact-store/test", undefined],
+    ["setArtifactKey", () => api.setArtifactKey("job", "JOBKEXAMPLE", "s3cr3t"), "PUT", "/api/artifact-store/keys", { which: "job", id: "JOBKEXAMPLE", secret: "s3cr3t" }],
+    ["setArtifactRepo on", () => api.setArtifactRepo("dark mem", { enabled: true }), "PUT", "/api/artifact-store/repos/dark%20mem", { enabled: true }],
+    ["setArtifactRepo cleanup", () => api.setArtifactRepo("darkmem", { cleanup: "3d" }), "PUT", "/api/artifact-store/repos/darkmem", { cleanup: "3d" }],
+    ["enablePrivateArtifactRepos", () => api.enablePrivateArtifactRepos(), "POST", "/api/artifact-store/repos/enable-private", undefined],
+    [
+      "deleteArtifactObjects",
+      () => api.deleteArtifactObjects("darkmem", ["darkraise/darkmem/95/frontend-dist.zip"]),
+      "POST",
+      "/api/artifact-store/darkmem/artifacts/delete",
+      { keys: ["darkraise/darkmem/95/frontend-dist.zip"] },
+    ],
+    ["artifactLink", () => api.artifactLink("darkraise/darkmem/102/e2e-report.zip", "24h"), "POST", "/api/artifact-store/link", { key: "darkraise/darkmem/102/e2e-report.zip", ttl: "24h" }],
   ])("%s sends its request", async (_name, call, method, path, body) => {
     const { calls } = mockApi({ [`${method} ${path}`]: ok })
     await call()
@@ -61,6 +87,14 @@ describe("api for the later pages", () => {
     expect(await api.storagePreview("2d")).toEqual(preview)
     await api.storagePreview("off", "dark mem")
     expect(calls.map((c) => c.search)).toEqual(["", "?cleanup=2d", "?cleanup=off&repo=dark+mem"])
+  })
+
+  it("reads the artifact store snapshot and a run's objects", async () => {
+    const items = fixtures.artifactStore.repos[0]?.items.filter((i) => i.run_id === 102) ?? []
+    const { calls } = mockApi({ "GET /api/artifact-store": fixtures.artifactStore, "GET /api/artifact-store/darkmem/runs/102": items })
+    expect((await api.artifactStore()).repos).toHaveLength(4)
+    expect((await api.artifactRunObjects("darkmem", 102)).map((i) => i.name)).toEqual(["e2e-report", "coverage-report"])
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /api/artifact-store", "GET /api/artifact-store/darkmem/runs/102"])
   })
 
   it("sends a replacement token as plain text, unchanged", async () => {
@@ -120,6 +154,11 @@ describe("api for the run pages", () => {
     expect(keys.runDetail("DarkMem", 102, undefined)).toEqual(["run-detail", "darkmem", 102, 0])
     expect(keys.runAnnotations("darkmem", 102, 1)).toEqual(["run-annotations", "darkmem", 102, 1])
     expect(keys.jobLog("DarkMem", 1002)).toEqual(["job-log", "darkmem", 1002])
+  })
+
+  it("keys a run's objects under the artifact store, so a store change refetches them", () => {
+    expect(keys.artifactStore).toEqual(["artifact-store"])
+    expect(keys.artifactRunObjects("darkmem", 102)).toEqual(["artifact-store", "run", "darkmem", 102])
   })
 
   it.each([
@@ -187,5 +226,17 @@ describe("useJobLog", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe("artifactStoreBusy", () => {
+  const op = { id: "op-9", kind: "delete-objects", repo: "darkmem", total: 2, done: 1, bytes: 0, failed: [], started_at: "2026-10-03T14:04:00Z" }
+  it.each([
+    ["no snapshot", undefined, false],
+    ["no operation", fixtures.artifactStore, false],
+    ["a running delete", { ...fixtures.artifactStore, operation: op }, true],
+    ["a finished delete", { ...fixtures.artifactStore, operation: { ...op, finished_at: "2026-10-03T14:04:30Z" } }, false],
+  ])("is %s", (_why, store, want) => {
+    expect(artifactStoreBusy(store)).toBe(want)
   })
 })
