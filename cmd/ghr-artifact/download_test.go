@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/darkraise/ghr/internal/artifact"
+	"github.com/darkraise/ghr/internal/s3"
 	"github.com/darkraise/ghr/internal/s3/s3test"
 )
 
@@ -199,6 +200,24 @@ func TestDownloadStoreErrorsDoNotFallBack(t *testing.T) {
 		}
 		if len(h.outputs(t)) != 0 {
 			t.Errorf("%s %s: outputs written: %v", tc.op, tc.code, h.outputs(t))
+		}
+	}
+}
+
+func TestDescribeA403(t *testing.T) {
+	store := artifact.Store{Endpoint: "https://s3.example.com", Bucket: "gha"}
+	for _, tc := range []struct {
+		name string
+		err  *s3.Error
+		want string
+	}{
+		{"a proxy's page", &s3.Error{Status: 403},
+			"https://s3.example.com answered HTTP 403 without an S3 error; a proxy in front of the store may have blocked the request"},
+		{"the store's refusal", &s3.Error{Status: 403, Code: "AccessDenied", Message: "Access Denied."},
+			"https://s3.example.com refused the job key (AccessDenied: Access Denied.); check the job key's policy on the store"},
+	} {
+		if got := describe(tc.err, store).Error(); !strings.HasPrefix(got, tc.want) {
+			t.Errorf("%s: %q, want it to start %q", tc.name, got, tc.want)
 		}
 	}
 }

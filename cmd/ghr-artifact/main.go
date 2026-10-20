@@ -181,6 +181,8 @@ func describe(err error, store artifact.Store) error {
 		switch {
 		case se.Code == "NoSuchBucket":
 			return fmt.Errorf("bucket %s does not exist on %s; create it, or fix the bucket in ghr's Settings", store.Bucket, store.Endpoint)
+		case se.Status == 403 && se.Code == "":
+			return fmt.Errorf("%s answered HTTP 403 without an S3 error; a proxy in front of the store may have blocked the request, such as Cloudflare's challenge for runner addresses", store.Endpoint)
 		case se.Status == 403 || se.Code == "AccessDenied" || se.Code == "InvalidAccessKeyId" || se.Code == "SignatureDoesNotMatch":
 			return fmt.Errorf("%s refused the job key (%s); check the job key's policy on the store, or replace the job key in ghr", store.Endpoint, detail)
 		}
