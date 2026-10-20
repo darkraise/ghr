@@ -38,11 +38,13 @@ func (s *Service) syncRepos(cfg *config.Config, keys Keys) {
 		}
 		s.syncMu.Lock()
 		st := s.syncOne(s.ctx, s.Config(), keys, repo, visErr, true)
+		if s.ctx.Err() == nil {
+			s.setSync(repo, st)
+		}
 		s.syncMu.Unlock()
 		if s.ctx.Err() != nil {
 			return
 		}
-		s.setSync(repo, st)
 	}
 }
 
@@ -304,8 +306,8 @@ func (s *Service) SyncRepo(ctx context.Context, repo string) (model.ArtifactStor
 	}
 	s.syncMu.Lock()
 	st := s.syncOne(ctx, cfg, keys, repo, visErr, false)
-	s.syncMu.Unlock()
 	s.setSync(repo, st)
+	s.syncMu.Unlock()
 	for _, r := range s.Snapshot().Repos {
 		if strings.EqualFold(r.Name, repo) {
 			return r, nil
