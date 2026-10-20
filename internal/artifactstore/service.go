@@ -506,6 +506,9 @@ func (s *Service) details(ctx context.Context, b Bucket, objs []object, cache ma
 			o.raw, o.Meta, o.Headed = c.Meta, artifact.ParseMeta(c.Meta), true
 			continue
 		}
+		if ctx.Err() != nil {
+			continue
+		}
 		sem <- struct{}{}
 		wg.Add(1)
 		go func() {
@@ -518,7 +521,9 @@ func (s *Service) details(ctx context.Context, b Bucket, objs []object, cache ma
 			case s3.IsNotFound(err):
 				gone[i] = true
 			case err != nil:
-				log.Printf("artifact store: cannot read the details of %s: %v", o.Key, err)
+				if ctx.Err() == nil {
+					log.Printf("artifact store: cannot read the details of %s: %v", o.Key, err)
+				}
 			default:
 				o.raw, o.Meta, o.Headed = h.Meta, artifact.ParseMeta(h.Meta), true
 			}

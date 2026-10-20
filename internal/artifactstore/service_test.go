@@ -1,9 +1,11 @@
 package artifactstore
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"reflect"
 	"slices"
@@ -13,7 +15,31 @@ import (
 
 	"github.com/darkraise/ghr/internal/artifact"
 	"github.com/darkraise/ghr/internal/config"
+	"github.com/darkraise/ghr/internal/s3"
 )
+
+func TestShutdownStopsReadingDetails(t *testing.T) {
+	e := newTestEnv(t)
+	for run := range int64(20) {
+		e.putArtifact("darkmem", run+1, "dist", 5, time.Hour)
+	}
+	b, err := e.s.NewBucket(e.cfg.ArtifactStore, s3.Credentials{AccessKeyID: adminID, SecretAccessKey: adminSecret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := b.List(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	e.s.Close()
+	e.s.details(e.s.ctx, b, classify(listed, "darkraise"), map[string]cacheEntry{})
+	if logs.Len() != 0 {
+		t.Fatalf("logged after shutdown:\n%s", logs.String())
+	}
+}
 
 func TestNotSetUpIsIdle(t *testing.T) {
 	e := newTestEnv(t)
