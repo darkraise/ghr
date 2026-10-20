@@ -67,6 +67,7 @@ type Service struct {
 	NewID    func() string                       // operation ids; nil makes random ones
 	Describe func(err error, repo string) string // a repository's error text; nil means err.Error()
 	Wake     func()                              // called after every snapshot change; must not block
+	Budget   *Budget                             // GitHub writes; nil means a budget of its own
 
 	version atomic.Int64
 
@@ -88,9 +89,6 @@ type Service struct {
 	opRunning bool
 
 	cleanupErr map[string]string // lower-case repo → the failure the last cleanup event was written for; only the pass touches it
-
-	writeMu sync.Mutex
-	writes  []time.Time // guarded by writeMu: the writes of the last hour
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -133,6 +131,9 @@ func (s *Service) init() {
 	s.retention = map[string]retentionRead{}
 	s.deleted = map[string]time.Time{}
 	s.cleanupErr = map[string]string{}
+	if s.Budget == nil {
+		s.Budget = &Budget{Now: s.now}
+	}
 }
 
 // Start runs a full pass at once, then the inventory every

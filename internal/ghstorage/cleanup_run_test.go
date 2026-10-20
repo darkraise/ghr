@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/darkraise/ghr/internal/config"
+	"github.com/darkraise/ghr/internal/events"
 	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 )
@@ -273,6 +274,55 @@ func TestWritesStayWithinTheHourlyBudget(t *testing.T) {
 	}
 }
 
+// A budget given to a service is the one its writes count against, so two
+// services that share it stay under WriteBudget together.
+func TestBudgetIsSharedAndHourly(t *testing.T) {
+	clock := &fakeClock{t: time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)}
+	b := &Budget{Now: clock.Now}
+	first := clock.Now()
+	ran := 0
+	for i := range WriteBudget {
+		if err := b.Do(func() error { ran++; return nil }); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+		clock.Add(time.Second)
+	}
+	err := b.Do(func() error { t.Fatal("ran past the budget"); return nil })
+	var be *BudgetError
+	if !errors.As(err, &be) || !be.RetryAt.Equal(first.Add(time.Hour)) || ran != WriteBudget {
+		t.Fatalf("err = %v after %d writes, want a BudgetError until %v", err, ran, first.Add(time.Hour))
+	}
+	s := &Service{GH: newFakeGH(), Config: testConfig, Events: events.New(), Now: clock.Now, Budget: b}
+	s.init()
+	t.Cleanup(func() { s.Close(); s.Wait() })
+	if s.Budget != b {
+		t.Fatal("init replaced the budget the service was given")
+	}
+	if err := s.write(func() error { t.Fatal("the service wrote past the shared budget"); return nil }); !errors.As(err, &be) {
+		t.Fatalf("service write: %v, want a BudgetError", err)
+	}
+	clock.Add(time.Hour - WriteBudget*time.Second)
+	if err := b.Do(func() error { return nil }); err != nil {
+		t.Fatalf("an hour after the first write: %v", err)
+	}
+}
+
+func TestActiveRuns(t *testing.T) {
+	gh := newFakeGH()
+	gh.runs["darkmem"] = map[string][]github.Run{"queued": {{ID: 7}}, "in_progress": {{ID: 8}, {ID: 9}}}
+	active, err := ActiveRuns(context.Background(), gh, "darkmem")
+	if err != nil || !reflect.DeepEqual(active, map[int64]bool{7: true, 8: true, 9: true}) {
+		t.Fatalf("active %v err %v", active, err)
+	}
+	if got := gh.callsLike("ListRuns darkmem"); len(got) != len(ActiveStatuses) {
+		t.Fatalf("listed %v, want one listing per active status", got)
+	}
+	gh.runs["darkmem"]["waiting"] = make([]github.Run, 1000)
+	if _, err := ActiveRuns(context.Background(), gh, "darkmem"); err == nil || err.Error() != "more than 1,000 active runs; cleanup skipped" {
+		t.Fatalf("a listing that may be cut off: %v", err)
+	}
+}
+
 func TestCleanupStopsWhenTheBudgetIsUsed(t *testing.T) {
 	gh := newFakeGH()
 	s, clock := newTestService(t, gh, cleanupConfig())
@@ -304,13 +354,13 @@ func TestDeletionsKeepTheNewest(t *testing.T) {
 
 func TestSizeAndAgeTexts(t *testing.T) {
 	for in, want := range map[int64]string{0: "0 B", 1023: "1023 B", 2048: "2 KB", 340 << 20: "340 MB", 3 * model.GiB / 2: "1.5 GB"} {
-		if got := sizeText(in); got != want {
-			t.Errorf("sizeText(%d) = %q, want %q", in, got, want)
+		if got := SizeText(in); got != want {
+			t.Errorf("SizeText(%d) = %q, want %q", in, got, want)
 		}
 	}
 	for in, want := range map[time.Duration]string{-time.Minute: "0m", 59 * time.Minute: "59m", 30 * time.Hour: "30h", 50 * time.Hour: "2d"} {
-		if got := ageText(in); got != want {
-			t.Errorf("ageText(%v) = %q, want %q", in, got, want)
+		if got := AgeText(in); got != want {
+			t.Errorf("AgeText(%v) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -419,8 +469,8 @@ func TestCleanupRechecksThePolicyBeforeEachDelete(t *testing.T) {
 				t.Fatalf("deletes %v, want %v", got, tc.want)
 			}
 			st := s.Snapshot()
-			if len(st.Deletions) != len(tc.want) || len(s.writes) != len(tc.want) {
-				t.Fatalf("%d deletions and %d writes, want %d: a skipped pick writes and records nothing", len(st.Deletions), len(s.writes), len(tc.want))
+			if len(st.Deletions) != len(tc.want) || len(s.Budget.writes) != len(tc.want) {
+				t.Fatalf("%d deletions and %d writes, want %d: a skipped pick writes and records nothing", len(st.Deletions), len(s.Budget.writes), len(tc.want))
 			}
 			if got := eventsLike(s.Events, "cleanup deleted"); len(got) != min(len(tc.want), 1) {
 				t.Fatalf("events %q", got)

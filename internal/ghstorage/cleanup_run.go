@@ -7,9 +7,11 @@ import (
 	"log"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/darkraise/ghr/internal/config"
+	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 )
 
@@ -33,31 +35,52 @@ func (e *BudgetError) Error() string {
 	return "GitHub write budget used up; try again after " + e.RetryAt.UTC().Format(time.RFC3339)
 }
 
-// write runs one GitHub write. Writes run one at a time, so a runner start
-// waiting for the client's write slot waits behind at most one of them.
-func (s *Service) write(fn func() error) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	now := s.now()
-	s.writes = slices.DeleteFunc(s.writes, func(t time.Time) bool { return now.Sub(t) >= time.Hour })
-	if len(s.writes) >= WriteBudget {
-		return &BudgetError{RetryAt: s.writes[0].Add(time.Hour)}
+// Budget keeps GitHub writes within WriteBudget in any hour. Services that
+// share one stay under it together.
+type Budget struct {
+	Now func() time.Time // nil means time.Now
+
+	mu     sync.Mutex
+	writes []time.Time // the writes of the last hour
+}
+
+// Do runs fn as one GitHub write. Writes run one at a time, so a runner
+// start waiting for the client's write slot waits behind at most one of
+// them.
+func (b *Budget) Do(fn func() error) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now()
+	if b.Now != nil {
+		now = b.Now()
 	}
-	s.writes = append(s.writes, now)
+	b.writes = slices.DeleteFunc(b.writes, func(t time.Time) bool { return now.Sub(t) >= time.Hour })
+	if len(b.writes) >= WriteBudget {
+		return &BudgetError{RetryAt: b.writes[0].Add(time.Hour)}
+	}
+	b.writes = append(b.writes, now)
 	return fn()
 }
+
+// write runs one GitHub write within the service's budget.
+func (s *Service) write(fn func() error) error { return s.Budget.Do(fn) }
 
 // maxStatusRuns is how many runs GitHub returns for one status filter; a
 // listing that long may be cut off.
 const maxStatusRuns = 1000
 
-// activeRuns lists the ids of repo's runs that have not completed. It fails
+// RunLister lists a repository's workflow runs with one status.
+type RunLister interface {
+	ListRuns(ctx context.Context, repo, status string) ([]github.Run, error)
+}
+
+// ActiveRuns lists the ids of repo's runs that have not completed. It fails
 // when a status listing may be incomplete, since a missed run would let its
 // artifacts be deleted.
-func (s *Service) activeRuns(ctx context.Context, repo string) (map[int64]bool, error) {
+func ActiveRuns(ctx context.Context, gh RunLister, repo string) (map[int64]bool, error) {
 	active := map[int64]bool{}
 	for _, status := range ActiveStatuses {
-		runs, err := s.GH.ListRuns(ctx, repo, status)
+		runs, err := gh.ListRuns(ctx, repo, status)
 		if err != nil {
 			return nil, err
 		}
@@ -101,7 +124,7 @@ func (s *Service) cleanup(cfg *config.Config, gen uint64) {
 			log.Printf("github storage: cleanup stopped: the token is below the rate reserve")
 			return
 		}
-		active, err := s.activeRuns(ctx, d.repo)
+		active, err := ActiveRuns(ctx, s.GH, d.repo)
 		if err != nil {
 			s.setRowError(d.repo, s.describe(err, d.repo), gen)
 			continue
@@ -161,7 +184,7 @@ func (s *Service) cleanup(cfg *config.Config, gen uint64) {
 	}
 	for _, repo := range order {
 		t := tallies[repo]
-		s.Events.Add("info", repo, "cleanup deleted %d artifacts (%s)", t.n, sizeText(t.bytes))
+		s.Events.Add("info", repo, "cleanup deleted %d artifacts (%s)", t.n, SizeText(t.bytes))
 	}
 	if len(order) > 0 {
 		cur := s.Config()
@@ -219,9 +242,9 @@ func (s *Service) deleteArtifact(ctx context.Context, repo string, it model.Arti
 	s.removeItem("artifact", repo, it.ID)
 	if deleted {
 		now := s.now()
-		age := ageText(now.Sub(it.CreatedAt))
+		age := AgeText(now.Sub(it.CreatedAt))
 		s.recordDeletion(model.Deletion{At: now, Repo: repo, Kind: "artifact", Name: it.Name, Bytes: it.Bytes, Age: age, By: by})
-		log.Printf("github storage: deleted artifact %s (%s) in %s, age %s", it.Name, sizeText(it.Bytes), repo, age)
+		log.Printf("github storage: deleted artifact %s (%s) in %s, age %s", it.Name, SizeText(it.Bytes), repo, age)
 	}
 	s.bump()
 	return deleted, nil
@@ -236,7 +259,7 @@ func (s *Service) recordDeletion(d model.Deletion) {
 	}
 }
 
-func sizeText(n int64) string {
+func SizeText(n int64) string {
 	switch {
 	case n >= model.GiB:
 		return fmt.Sprintf("%.1f GB", float64(n)/model.GiB)
@@ -248,7 +271,7 @@ func sizeText(n int64) string {
 	return fmt.Sprintf("%d B", n)
 }
 
-func ageText(d time.Duration) string {
+func AgeText(d time.Duration) string {
 	switch {
 	case d >= 48*time.Hour:
 		return fmt.Sprintf("%dd", d/(24*time.Hour))

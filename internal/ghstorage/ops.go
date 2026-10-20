@@ -128,9 +128,9 @@ func (s *Service) deleteCache(ctx context.Context, repo string, c model.CacheIte
 	s.removeItem("cache", repo, c.ID)
 	if deleted {
 		now := s.now()
-		age := ageText(now.Sub(c.LastUsedAt))
+		age := AgeText(now.Sub(c.LastUsedAt))
 		s.recordDeletion(model.Deletion{At: now, Repo: repo, Kind: "cache", Name: c.Key, Bytes: c.Bytes, Age: age, By: by})
-		log.Printf("github storage: deleted cache %s (%s) in %s, age %s", c.Key, sizeText(c.Bytes), repo, age)
+		log.Printf("github storage: deleted cache %s (%s) in %s, age %s", c.Key, SizeText(c.Bytes), repo, age)
 	}
 	s.bump()
 	return deleted, nil
@@ -166,7 +166,7 @@ func (s *Service) DeleteArtifacts(repo string, req model.DeleteArtifactsRequest)
 	s.runOp(func(ctx context.Context) {
 		var todo []model.ArtifactItem
 		if age > 0 {
-			active, err := s.activeRuns(ctx, name)
+			active, err := ActiveRuns(ctx, s.GH, name)
 			if err != nil {
 				s.fail(model.OperationFailure{Repo: name, Error: s.describe(err, name)})
 			} else {
@@ -182,7 +182,7 @@ func (s *Service) DeleteArtifacts(repo string, req model.DeleteArtifactsRequest)
 			deleted, err := s.deleteArtifact(ctx, name, todo[i], "manual")
 			return deleted, todo[i].Bytes, todo[i].ID, err
 		})
-		s.finishOp(name, "deleted %d artifacts (%s)", n, sizeText(bytes))
+		s.finishOp(name, "deleted %d artifacts (%s)", n, SizeText(bytes))
 	})
 	return op.ID, nil
 }
@@ -217,7 +217,7 @@ func (s *Service) DeleteCaches(repo string, req model.DeleteCachesRequest) (stri
 			deleted, err := s.deleteCache(ctx, name, todo[i], "manual")
 			return deleted, todo[i].Bytes, todo[i].ID, err
 		})
-		s.finishOp(name, "deleted %d caches (%s)", n, sizeText(bytes))
+		s.finishOp(name, "deleted %d caches (%s)", n, SizeText(bytes))
 	})
 	return op.ID, nil
 }
