@@ -83,6 +83,11 @@ type Options struct {
 	OptDir string
 	// UpdateRecordPath keeps the tag a ghr install restarts into.
 	UpdateRecordPath string
+	// ArtifactKeysPath holds the self-hosted artifact store's access keys,
+	// readable by root only; ArtifactCachePath keeps its object metadata
+	// across restarts.
+	ArtifactKeysPath  string
+	ArtifactCachePath string
 
 	// Test seams: zero values use GitHub, systemd, Docker, the host, an HTTP
 	// download and SIGHUP.
@@ -117,6 +122,8 @@ func DefaultOptions() Options {
 		ReleaseBase:           selfupdate.DefaultBase,
 		OptDir:                "/opt/ghr",
 		UpdateRecordPath:      "/var/lib/ghr/ghr-update.json",
+		ArtifactKeysPath:      "/etc/ghr/artifact-store-keys",
+		ArtifactCachePath:     "/var/lib/ghr/artifact-store-meta.json",
 		Paths: runner.Paths{
 			Dist:        "/opt/ghr/dist/current",
 			Instances:   "/var/lib/ghr/instances",
