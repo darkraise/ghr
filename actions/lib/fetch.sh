@@ -61,6 +61,9 @@ if ! verified "$bin"; then
     die "$asset from $base does not match ghr-artifact-checksums.txt; the download is damaged or was changed"
   fi
   chmod 0755 "$tmp"
-  mv -f "$tmp" "$bin"
+  if ! mv -f "$tmp" "$bin"; then
+    rm -f "$tmp"
+    verified "$bin" || die "cannot move the downloaded $asset into $dir"
+  fi
 fi
 printf '%s\n' "$bin"
