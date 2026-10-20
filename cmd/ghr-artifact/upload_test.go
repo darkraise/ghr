@@ -399,7 +399,7 @@ func TestUploadStoreRefusal(t *testing.T) {
 		status   int
 		want     string
 	}{
-		{"head", "AccessDenied", 403, " refused the job key ("},
+		{"get", "AccessDenied", 403, " refused the job key ("},
 		{"put", "AccessDenied", 403, " refused the job key (AccessDenied"},
 		{"put", "NoSuchBucket", 404, "ghr-artifact: bucket gha does not exist on https://127.0.0.1:"},
 		{"put", "InternalError", 500, " answered InternalError"},

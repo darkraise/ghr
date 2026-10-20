@@ -295,40 +295,16 @@ func headFrom(resp *http.Response) Head {
 	return h
 }
 
-// Head reads an object's details with a one-byte ranged GET, because proxies
-// such as Cloudflare's refuse signed HEAD requests.
+// Head reads an object's details from the headers of a GET whose body is
+// never read, because proxies such as Cloudflare's refuse signed HEAD requests
+// and drop Range headers.
 func (c *Client) Head(ctx context.Context, key string) (Head, error) {
-	resp, err := c.do(ctx, call{method: http.MethodGet, key: key, header: http.Header{"Range": {"bytes=0-0"}}})
-	var e *Error
-	if errors.As(err, &e) && e.Status == http.StatusRequestedRangeNotSatisfiable {
-		return c.headOfEmpty(ctx, key)
-	}
-	if err != nil {
-		return Head{}, err
-	}
-	resp.Body.Close()
-	h := headFrom(resp)
-	if resp.StatusCode == http.StatusPartialContent {
-		_, total, found := strings.Cut(resp.Header.Get("Content-Range"), "/")
-		size, err := strconv.ParseInt(total, 10, 64)
-		if !found || err != nil || size < 0 {
-			return Head{}, errors.New("s3: the store answered a ranged read without a usable Content-Range header")
-		}
-		h.Size = size
-	}
-	return h, nil
-}
-
-// headOfEmpty answers for an object no range can be read from.
-func (c *Client) headOfEmpty(ctx context.Context, key string) (Head, error) {
 	resp, err := c.do(ctx, call{method: http.MethodGet, key: key})
 	if err != nil {
 		return Head{}, err
 	}
 	resp.Body.Close()
-	h := headFrom(resp)
-	h.Size = 0
-	return h, nil
+	return headFrom(resp), nil
 }
 
 // Get streams the object; the caller closes the body.

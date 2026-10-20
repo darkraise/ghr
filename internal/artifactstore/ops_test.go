@@ -239,7 +239,7 @@ func TestTestChecks(t *testing.T) {
 			{Name: "head", OK: false, Detail: "not run: the listing failed"}}},
 		{"the read fails", func(e *testEnv) {
 			e.putArtifact("darkmem", 10, "dist", 5, time.Hour)
-			e.srv.FailNext("head", 500, "InternalError")
+			e.srv.FailNext("get", 500, "InternalError")
 		}, []model.ArtifactStoreCheck{
 			{Name: "reach", OK: true, Detail: "reached "},
 			{Name: "list", OK: true, Detail: "listed 1 objects"},

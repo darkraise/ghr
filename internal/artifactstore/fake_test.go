@@ -274,7 +274,8 @@ func (e *testEnv) requests(prefix string) int {
 }
 
 // heads counts the object detail reads. The s3 client makes them as GETs of
-// one object, so they are the GETs whose path goes below the bucket.
+// one object whose body it never reads, so they are the GETs whose path goes
+// below the bucket.
 func (e *testEnv) heads() int { return e.requests("GET /gha/") }
 
 // row returns the snapshot's row for repo, failing the test without one.

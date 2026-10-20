@@ -236,7 +236,7 @@ func TestAnUnreadableCacheIsRebuilt(t *testing.T) {
 func TestAFailedHeadIsReadAgain(t *testing.T) {
 	e := newTestEnv(t)
 	e.put("darkraise/darkmem/10/dist.zip", 5, time.Hour, artifact.Meta{RunID: 10, Attempt: 3}.Map())
-	e.srv.FailNext("head", 500, "InternalError")
+	e.srv.FailNext("get", 500, "InternalError")
 	e.s.pass()
 	it := row(t, e.s.Snapshot(), "darkmem").Items[0]
 	if it.RunID != 10 || it.Attempt != 0 {

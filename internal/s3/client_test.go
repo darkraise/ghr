@@ -220,18 +220,16 @@ func recordRequests(c *s3.Client) *[]sentRequest {
 	return &sent
 }
 
-func TestHeadIsASignedRangedGet(t *testing.T) {
+func TestHeadIsAPlainSignedGet(t *testing.T) {
 	c, srv := newClient(t)
 	sent := recordRequests(c)
 	srv.Put("o/r/1/dist.zip", s3test.Object{Body: pattern(1000)})
 	if _, err := c.Head(context.Background(), "o/r/1/dist.zip"); err != nil {
 		t.Fatal(err)
 	}
-	if len(*sent) != 1 || (*sent)[0].method != http.MethodGet || (*sent)[0].rangeHeader != "bytes=0-0" {
-		t.Fatalf("sent %+v, want one GET with Range bytes=0-0", *sent)
-	}
-	if !strings.Contains(";"+(*sent)[0].signedHeaders+";", ";range;") {
-		t.Fatalf("signed headers %q do not include range", (*sent)[0].signedHeaders)
+	if len(*sent) != 1 || (*sent)[0].method != http.MethodGet || (*sent)[0].rangeHeader != "" ||
+		(*sent)[0].signedHeaders != "host;x-amz-content-sha256;x-amz-date" {
+		t.Fatalf("sent %+v, want one GET without Range signed over host, x-amz-content-sha256 and x-amz-date", *sent)
 	}
 	for _, r := range srv.Requests() {
 		if strings.HasPrefix(r, "HEAD ") {
@@ -272,8 +270,8 @@ func TestHeadOfAnEmptyObject(t *testing.T) {
 	if h.Size != 0 || h.ETag != md5Hex(nil) || h.ContentType != "application/zip" || h.Meta["ghr-run-id"] != "7" {
 		t.Fatalf("head %+v", h)
 	}
-	if len(*sent) != 2 || (*sent)[0].rangeHeader != "bytes=0-0" || (*sent)[1].method != http.MethodGet || (*sent)[1].rangeHeader != "" {
-		t.Fatalf("sent %+v, want the ranged GET then a plain GET", *sent)
+	if len(*sent) != 1 || (*sent)[0].method != http.MethodGet {
+		t.Fatalf("sent %+v, want one GET", *sent)
 	}
 }
 
@@ -286,9 +284,9 @@ func TestHeadOfAMissingKey(t *testing.T) {
 	}
 }
 
-// ranged starts a TLS server answering every request with handler and
+// stubServer starts a TLS server answering every request with handler and
 // returns a client for it.
-func ranged(t *testing.T, handler http.HandlerFunc) *s3.Client {
+func stubServer(t *testing.T, handler http.HandlerFunc) *s3.Client {
 	t.Helper()
 	ts := httptest.NewTLSServer(handler)
 	t.Cleanup(ts.Close)
@@ -311,9 +309,9 @@ func (b countingBody) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func TestHeadWhenTheServerIgnoresRange(t *testing.T) {
+func TestHeadDoesNotReadTheBody(t *testing.T) {
 	body := pattern(4096)
-	c := ranged(t, func(w http.ResponseWriter, r *http.Request) {
+	c := stubServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", `"abc"`)
 		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 		w.Write(body)
@@ -333,24 +331,6 @@ func TestHeadWhenTheServerIgnoresRange(t *testing.T) {
 	}
 	if h.Size != 4096 || h.ETag != "abc" || read != 0 {
 		t.Fatalf("head %+v after reading %d body bytes, want size 4096 and none read", h, read)
-	}
-}
-
-func TestHeadWithoutContentRangeIsAnError(t *testing.T) {
-	for name, contentRange := range map[string]string{"missing": "", "unparsable": "bytes 0-0/many", "unknown total": "bytes 0-0/*"} {
-		t.Run(name, func(t *testing.T) {
-			c := ranged(t, func(w http.ResponseWriter, r *http.Request) {
-				if contentRange != "" {
-					w.Header().Set("Content-Range", contentRange)
-				}
-				w.WriteHeader(http.StatusPartialContent)
-				w.Write([]byte("x"))
-			})
-			h, err := c.Head(context.Background(), "secret/key.zip")
-			if err == nil || !strings.HasPrefix(err.Error(), "s3: ") || strings.Contains(err.Error(), "secret/key.zip") {
-				t.Fatalf("head %+v err %v, want an s3 error that does not name the key", h, err)
-			}
-		})
 	}
 }
 
