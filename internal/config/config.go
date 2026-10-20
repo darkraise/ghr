@@ -73,6 +73,8 @@ type Config struct {
 	Web Web `yaml:"web,omitempty" json:"web,omitzero"`
 	// GitHubStorage sets the artifact storage allowance, warnings and cleanup.
 	GitHubStorage GitHubStorage `yaml:"github_storage,omitempty" json:"github_storage,omitzero"`
+	// ArtifactStore keeps switched-on repositories' artifacts on an S3 server.
+	ArtifactStore ArtifactStore `yaml:"artifact_store,omitempty" json:"artifact_store,omitzero"`
 	// Jobs schedules ghr's background tasks.
 	Jobs Jobs `yaml:"jobs,omitempty" json:"jobs"`
 }
@@ -687,6 +689,7 @@ func (c *Config) Validate() ([]string, error) {
 		}
 	}
 	errs = append(errs, c.GitHubStorage.validate()...)
+	errs = append(errs, c.ArtifactStore.validate()...)
 	jobErrs, jobWarnings := c.Jobs.validate()
 	errs = append(errs, jobErrs...)
 	warnings = append(warnings, jobWarnings...)
