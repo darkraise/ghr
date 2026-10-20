@@ -162,19 +162,19 @@ export function ArtifactStoreTable({ store, config, offline }: { store: Artifact
     onSuccess: (rows) => {
       const failed = rows.filter(unset)
       if (failed.length === 0) toast.success("Turned on for every private repository")
-      else toast.error(`Could not turn on ${failed.map((r) => r.name).join(", ")}; their rows say why`)
+      else toast.error(`Could not turn on ${failed.map((r) => r.name).join(", ")}; ${failed.length === 1 ? "its row says" : "their rows say"} why`)
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.artifactStore }),
   })
 
   function turnAllOn() {
     if (waiting.length === 0) {
-      toast("Every private repository is already on")
+      toast("Every private repository ghr can change is already on")
       return
     }
     setConfirm({
       title: `Turn on RustFS for ${repositories(waiting.length)}?`,
-      body: `ghr sets the GHR_ARTIFACT_STORE variable and GHR_ARTIFACT_KEY secret of ${waiting.map((r) => r.name).join(", ")}. Their workflows then upload to RustFS.`,
+      body: `ghr sets the GHR_ARTIFACT_STORE variable and GHR_ARTIFACT_KEY secret of ${waiting.map((r) => r.name).join(", ")}. ${waiting.length === 1 ? "Its" : "Their"} workflows then upload to RustFS.`,
       action: "Turn on",
       run: () => allOn.mutate(),
     })
