@@ -376,6 +376,17 @@ func TestDeleteStopsAtFailedRequest(t *testing.T) {
 	}
 }
 
+func TestDeleteOneByOneFailsOnAMissingBucket(t *testing.T) {
+	c, srv := newClient(t)
+	srv.DisableBatchDelete()
+	srv.FailNext("delete", http.StatusNotFound, "NoSuchBucket")
+	deleted, err := c.Delete(context.Background(), []string{"a"})
+	var e *s3.Error
+	if len(deleted) != 0 || !errors.As(err, &e) || e.Code != "NoSuchBucket" {
+		t.Fatalf("deleted %q err %v, want nothing deleted and NoSuchBucket", deleted, err)
+	}
+}
+
 func TestListUploadsAndAbort(t *testing.T) {
 	ctx := context.Background()
 	c, srv := newClient(t)

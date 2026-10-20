@@ -357,7 +357,8 @@ type deleteResult struct {
 const deleteBatch = 1000
 
 // Delete removes keys and returns the ones it removed. A key that did not
-// exist counts as removed. It stops at a failed request; per-key failures
+// exist counts as removed; a missing bucket fails the call. It stops at a
+// failed request; per-key failures
 // inside a batch answer are skipped and the first one is returned at the end.
 func (c *Client) Delete(ctx context.Context, keys []string) (deleted []string, err error) {
 	var firstKeyErr error
@@ -382,7 +383,7 @@ func (c *Client) Delete(ctx context.Context, keys []string) (deleted []string, e
 		}
 		for _, key := range chunk {
 			resp, err := c.do(ctx, call{method: http.MethodDelete, key: key})
-			if err != nil && !IsNotFound(err) {
+			if err != nil && (!IsNotFound(err) || bucketMissing(err)) {
 				return deleted, err
 			}
 			if resp != nil {
@@ -392,6 +393,11 @@ func (c *Client) Delete(ctx context.Context, keys []string) (deleted []string, e
 		}
 	}
 	return deleted, firstKeyErr
+}
+
+func bucketMissing(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.Code == "NoSuchBucket"
 }
 
 func (c *Client) deleteBatch(ctx context.Context, keys []string) (deleted []string, keyErr, err error) {
