@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import { keys } from "@/api/hooks"
 import type { Deletion, GitHubOperation } from "@/api/types"
 import { fixtures } from "@/test/fixtures"
+import { mergeDeletions } from "@/lib/artifact-store"
 import { withQuery } from "@/test/query"
 import { OperationProgress, RecentDeletions } from "./storage-operations"
 
@@ -51,6 +52,11 @@ describe("OperationProgress", () => {
     expect(screen.getByText("darkcloud: its maximum is 90 days")).toBeInTheDocument()
   })
 
+  it("names a delete on the self-hosted store", () => {
+    draw(<OperationProgress operation={{ ...finished, kind: "delete-objects", failed: [] }} />)
+    expect(screen.getByText("Deleted artifacts in darkmem")).toBeInTheDocument()
+  })
+
   it("shows nothing before any operation", () => {
     const { container } = draw(<OperationProgress operation={undefined} />)
     expect(container).toBeEmptyDOMElement()
@@ -65,6 +71,19 @@ describe("RecentDeletions", () => {
     expect(rows.map((r) => [...r.querySelectorAll("td, th")].map((c) => c.textContent))).toEqual([
       ["13:56", "darkmem", "artifact", "coverage-old", "52.4 MB", "3d", "Cleanup"],
       ["12:05", "darkcloud", "cache", "node-cache-Linux-x64-npm-0b1c", "31.5 MB", "5d", "Manual"],
+    ])
+  })
+
+  it("shows each deletion's store when both stores are listed, and an expiry as the reason", () => {
+    draw(<RecentDeletions deletions={mergeDeletions(fixtures.githubStorage.deletions, fixtures.artifactStore.deletions)} showStore />)
+    const region = screen.getByRole("region", { name: "Recent deletions" })
+    expect(within(region).getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["Time", "Store", "Repository", "Kind", "Name", "Size", "Age", "By"])
+    const rows = within(region).getAllByRole("row").slice(1)
+    expect(rows.map((r) => [...r.querySelectorAll("td, th")].map((c) => c.textContent))).toEqual([
+      ["13:58", "RustFS", "darkmem", "artifact", "frontend-dist · run 90", "2.4 MB", "3d", "Cleanup"],
+      ["13:56", "GitHub", "darkmem", "artifact", "coverage-old", "52.4 MB", "3d", "Cleanup"],
+      ["12:05", "GitHub", "darkcloud", "cache", "node-cache-Linux-x64-npm-0b1c", "31.5 MB", "5d", "Manual"],
+      ["11:05", "RustFS", "darkcloud", "artifact", "image-cache · run 70", "410.0 MB", "5d", "Expired"],
     ])
   })
 

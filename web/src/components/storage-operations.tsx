@@ -1,6 +1,7 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "darkraise-ui/components/table"
 import type { Deletion, GitHubOperation } from "@/api/types"
 import { Section } from "@/components/page/section"
+import { storeName } from "@/lib/artifact-store"
 import { dateTime, humanBytes, shortWhen } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
 
@@ -8,7 +9,10 @@ const VERBS: Record<string, [running: string, finished: string]> = {
   "delete-artifacts": ["Deleting artifacts", "Deleted artifacts"],
   "delete-caches": ["Deleting caches", "Deleted caches"],
   "set-retention": ["Setting retention", "Set retention"],
+  "delete-objects": ["Deleting artifacts", "Deleted artifacts"],
 }
+
+const BY: Record<string, string> = { cleanup: "Cleanup", expired: "Expired" }
 
 export function OperationProgress({ operation }: { operation: GitHubOperation | undefined }) {
   const now = useNow()
@@ -47,7 +51,7 @@ export function OperationProgress({ operation }: { operation: GitHubOperation | 
   )
 }
 
-export function RecentDeletions({ deletions }: { deletions: Deletion[] }) {
+export function RecentDeletions({ deletions, showStore = false }: { deletions: Deletion[]; showStore?: boolean }) {
   const now = useNow()
   return (
     <Section id="deletions" title="Recent deletions" flush>
@@ -59,6 +63,7 @@ export function RecentDeletions({ deletions }: { deletions: Deletion[] }) {
             <TableHeader>
               <TableRow>
                 <TableHead className="pl-4">Time</TableHead>
+                {showStore && <TableHead>Store</TableHead>}
                 <TableHead>Repository</TableHead>
                 <TableHead>Kind</TableHead>
                 <TableHead>Name</TableHead>
@@ -69,18 +74,19 @@ export function RecentDeletions({ deletions }: { deletions: Deletion[] }) {
             </TableHeader>
             <TableBody>
               {deletions.map((d, i) => (
-                <TableRow key={`${d.at}-${d.repo}-${d.name}-${i}`}>
+                <TableRow key={`${d.at}-${d.store ?? ""}-${d.repo}-${d.name}-${i}`}>
                   <TableCell className="pl-4 whitespace-nowrap text-muted-foreground">
                     <time dateTime={d.at} title={dateTime(d.at)}>
                       {shortWhen(d.at, now)}
                     </time>
                   </TableCell>
+                  {showStore && <TableCell>{storeName(d.store)}</TableCell>}
                   <TableCell>{d.repo}</TableCell>
                   <TableCell>{d.kind}</TableCell>
                   <TableCell className="font-mono text-xs break-all whitespace-normal">{d.name}</TableCell>
                   <TableCell className="text-right font-mono whitespace-nowrap">{humanBytes(d.bytes)}</TableCell>
                   <TableCell className="text-right font-mono">{d.age}</TableCell>
-                  <TableCell className="pr-4">{d.by === "cleanup" ? "Cleanup" : "Manual"}</TableCell>
+                  <TableCell className="pr-4">{BY[d.by] ?? "Manual"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
