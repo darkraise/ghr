@@ -75,7 +75,8 @@ describe("Run page", () => {
     )
     renderApp("/actions/darkmem/runs/102")
     const summary = within(await screen.findByRole("region", { name: "Summary" }))
-    await waitFor(() => expect(summary.getByText(String(fixtures.runDetail.artifacts.length + objects.length))).toHaveClass("font-mono"))
+    const fact = within(summary.getByText("Artifacts").parentElement as HTMLElement)
+    await waitFor(() => expect(fact.getByText(String(fixtures.runDetail.artifacts.length + objects.length))).toHaveClass("font-mono"))
   })
 
   it("draws the job graph with tiles linking to the job pages", async () => {
