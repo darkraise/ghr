@@ -21,6 +21,7 @@ import {
   useHistory,
   useLogTail,
   useMetrics,
+  useRunObjects,
   useStatus,
   useSteps,
   useStorage,
@@ -115,6 +116,22 @@ describe("hooks the stream does not cover", () => {
     act(() => setLive(true))
     renderHook(use, { wrapper })
     await waitFor(() => expect(interval(queryClient, key)).toBe(want))
+  })
+})
+
+describe("useRunObjects", () => {
+  it("polls while the run is active, live or not, and reads once more when it completes", async () => {
+    const { calls } = mockApi({ "GET /api/artifact-store/darkmem/runs/102": [] })
+    const reads = () => calls.filter((c) => c.path === "/api/artifact-store/darkmem/runs/102").length
+    const key = keys.artifactRunObjects("darkmem", 102)
+    const { queryClient, wrapper } = withQuery()
+    act(() => setLive(true))
+    const { rerender } = renderHook(({ active }) => useRunObjects("darkmem", 102, true, active), { wrapper, initialProps: { active: true } })
+    await waitFor(() => expect(reads()).toBe(1))
+    expect(interval(queryClient, key)).toBe(POLL_ACTIONS)
+    rerender({ active: false })
+    await waitFor(() => expect(reads()).toBe(2))
+    expect(interval(queryClient, key)).toBe(false)
   })
 })
 

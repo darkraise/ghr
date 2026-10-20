@@ -338,13 +338,25 @@ export function useArtifactStore() {
 }
 
 // Listed live rather than taken from the snapshot, so an upload shows before
-// the next 15-minute inventory.
-export function useRunObjects(repo: string, runId: number, selfHosted: boolean) {
-  return useQuery({
+// the next 15-minute inventory. The change stream does not report uploads, so
+// the list is read again while the run is active, and once more when it
+// completes, since a run's last step often uploads.
+export function useRunObjects(repo: string, runId: number, selfHosted: boolean, active: boolean) {
+  const query = useQuery({
     queryKey: keys.artifactRunObjects(repo, runId),
     queryFn: ({ signal }) => api.artifactRunObjects(repo, runId, signal),
     enabled: selfHosted,
+    refetchInterval: selfHosted && active ? POLL_ACTIONS : false,
   })
+  const wasActive = useRef(active)
+  const { refetch } = query
+  useEffect(() => {
+    // Both of the run page's readers see the run complete; the second must
+    // not cancel the first one's read.
+    if (wasActive.current && !active && selfHosted) void refetch({ cancelRefetch: false })
+    wasActive.current = active
+  }, [active, selfHosted, refetch])
+  return query
 }
 
 export function useLabelCheck(name: string, enabled: boolean) {

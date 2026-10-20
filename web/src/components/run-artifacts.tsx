@@ -36,13 +36,15 @@ export function ArtifactsSection({
   runId,
   artifacts,
   selfHosted,
+  active,
 }: {
   repo: string
   runId: number
   artifacts: RunArtifact[]
   selfHosted: boolean
+  active: boolean
 }) {
-  const objects = useRunObjects(repo, runId, selfHosted)
+  const objects = useRunObjects(repo, runId, selfHosted, active)
   const items = selfHosted ? (objects.data ?? []) : []
   const failed = selfHosted && objects.isError
   const total = artifacts.length + items.length

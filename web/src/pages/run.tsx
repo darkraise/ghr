@@ -189,7 +189,7 @@ function RunSummary({ run, owner }: { run: RunDetail; owner: string }) {
   const now = useNow()
   const status = useStatus()
   const selfHosted = status.data?.artifact_store !== undefined
-  const objects = useRunObjects(run.repo, run.id, selfHosted)
+  const objects = useRunObjects(run.repo, run.id, selfHosted, isRunActive(run.status))
   const onAttempt = useAttemptNavigate(run)
   const annotations = useRunAnnotations(run.repo, run.id, run.attempt, isRunActive(run.status), true)
   const { jobLink, summaryLink } = linksFor(run)
@@ -204,7 +204,7 @@ function RunSummary({ run, owner }: { run: RunDetail; owner: string }) {
         <JobsTimeline run={run} now={now} jobLink={jobLink} />
       )}
       <AnnotationsSection data={annotations.data} error={annotations.error} onRetry={() => void annotations.refetch()} jobLink={jobLink} />
-      <ArtifactsSection repo={run.repo} runId={run.id} artifacts={run.artifacts} selfHosted={selfHosted} />
+      <ArtifactsSection repo={run.repo} runId={run.id} artifacts={run.artifacts} selfHosted={selfHosted} active={isRunActive(run.status)} />
     </RunFrame>
   )
 }
