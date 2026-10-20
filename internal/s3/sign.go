@@ -127,17 +127,28 @@ func canonicalURI(u *url.URL) string {
 }
 
 // canonicalQuery is also the query the client sends, so the wire form and the
-// signed form never differ.
+// signed form never differ. SigV4 sorts by escaped key and then by escaped
+// value; sorting whole "key=value" strings would put "a-b=" before "a=".
 func canonicalQuery(q url.Values) string {
-	pairs := make([]string, 0, len(q))
+	type pair struct{ k, v string }
+	pairs := make([]pair, 0, len(q))
 	for k, vs := range q {
 		ek := escape(k, false)
 		for _, v := range vs {
-			pairs = append(pairs, ek+"="+escape(v, false))
+			pairs = append(pairs, pair{ek, escape(v, false)})
 		}
 	}
-	sort.Strings(pairs)
-	return strings.Join(pairs, "&")
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].k != pairs[j].k {
+			return pairs[i].k < pairs[j].k
+		}
+		return pairs[i].v < pairs[j].v
+	})
+	parts := make([]string, len(pairs))
+	for i, p := range pairs {
+		parts[i] = p.k + "=" + p.v
+	}
+	return strings.Join(parts, "&")
 }
 
 func canonicalHeaders(req *http.Request) (signed, canonical string) {

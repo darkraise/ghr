@@ -170,6 +170,14 @@ func TestPresignTTL(t *testing.T) {
 	}
 }
 
+func TestCanonicalQuerySortsByKeyThenValue(t *testing.T) {
+	q := map[string][]string{"a-b": {"1"}, "a": {"2", "1"}, "a.c": {"x"}, "a1": {""}}
+	want := "a=1&a=2&a-b=1&a.c=x&a1="
+	if got := canonicalQuery(q); got != want {
+		t.Fatalf("canonicalQuery = %q, want %q", got, want)
+	}
+}
+
 func TestPresignKeepsEncodedPath(t *testing.T) {
 	got, err := Presign(http.MethodGet, "https://s3.example.sg/artifacts/o/r/1/my%20file%2Bv2.zip", exampleCred, "us-east-1", time.Hour, exampleTime)
 	if err != nil {
