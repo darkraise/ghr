@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -131,7 +132,17 @@ func (s *Server) SeedUpload(key string, initiated time.Time) string {
 	return s.openUpload(key, initiated.UTC().Truncate(time.Second), Object{})
 }
 
+var operations = []string{"list", "list-uploads", "delete-objects", "head", "get", "put",
+	"create-multipart", "upload-part", "complete", "abort", "delete"}
+
+// FailNext makes the next request of operation op fail with status and code.
+// s3.Client.Head sends a GET, so "get" fails it; "head" fails only a HEAD
+// request. A name that is not an operation panics, since its failure would
+// never fire.
 func (s *Server) FailNext(op string, status int, code string) {
+	if !slices.Contains(operations, op) {
+		panic("s3test: FailNext: unknown operation " + strconv.Quote(op))
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.fail[op] = failure{status: status, code: code}

@@ -377,6 +377,16 @@ func TestFailNextFailsOneRequest(t *testing.T) {
 	}
 }
 
+func TestFailNextRefusesAnUnknownOperation(t *testing.T) {
+	s := NewServer(t, "artifacts")
+	defer func() {
+		if recover() == nil {
+			t.Fatal("FailNext accepted an operation the server never names")
+		}
+	}()
+	s.FailNext("head-object", http.StatusServiceUnavailable, "SlowDown")
+}
+
 func TestFailNextWithStatusOK(t *testing.T) {
 	s := NewServer(t, "artifacts")
 	s.FailNext("complete", http.StatusOK, "InternalError")
