@@ -417,6 +417,18 @@ func (g *partGate) RoundTrip(r *http.Request) (*http.Response, error) {
 	return g.base.RoundTrip(r)
 }
 
+func TestUploadRefusesMoreThanTenThousandParts(t *testing.T) {
+	c, srv := newClient(t)
+	size := int64(10000*s3.PartSize + 1)
+	err := c.Upload(context.Background(), "o/r/1/dist.zip", bytes.NewReader(nil), size, s3.PutOptions{})
+	if err == nil || !strings.Contains(err.Error(), "larger than the 10000 parts of 16 MiB an upload can hold") {
+		t.Fatalf("err %v", err)
+	}
+	if got := srv.Requests(); len(got) != 0 {
+		t.Fatalf("requests %q before refusing", got)
+	}
+}
+
 func TestUploadMultipart(t *testing.T) {
 	c, srv := newClient(t)
 	gate := &partGate{base: srv.HTTPClient().Transport, want: 3, all: make(chan struct{})}

@@ -14,7 +14,10 @@ import (
 	"time"
 )
 
-const abortTimeout = 30 * time.Second
+const (
+	abortTimeout = 30 * time.Second
+	maxParts     = 10000 // S3's limit for one multipart upload
+)
 
 // Upload stores size bytes of f under key: one PUT below PartSize, otherwise a
 // multipart upload with PartConcurrency parts in flight. A failed multipart
@@ -22,6 +25,9 @@ const abortTimeout = 30 * time.Second
 func (c *Client) Upload(ctx context.Context, key string, f io.ReaderAt, size int64, opt PutOptions) error {
 	if size < PartSize {
 		return c.Put(ctx, key, io.NewSectionReader(f, 0, size), size, opt)
+	}
+	if size > maxParts*PartSize {
+		return fmt.Errorf("s3: %s is %d bytes, larger than the %d parts of %d MiB an upload can hold", key, size, maxParts, PartSize>>20)
 	}
 	id, err := c.createMultipart(ctx, key, opt)
 	if err != nil {
