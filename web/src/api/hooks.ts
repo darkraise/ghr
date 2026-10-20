@@ -337,6 +337,16 @@ export function useArtifactStore() {
   })
 }
 
+// Listed live rather than taken from the snapshot, so an upload shows before
+// the next 15-minute inventory.
+export function useRunObjects(repo: string, runId: number, selfHosted: boolean) {
+  return useQuery({
+    queryKey: keys.artifactRunObjects(repo, runId),
+    queryFn: ({ signal }) => api.artifactRunObjects(repo, runId, signal),
+    enabled: selfHosted,
+  })
+}
+
 export function useLabelCheck(name: string, enabled: boolean) {
   return useQuery({
     queryKey: keys.labelCheck(name),

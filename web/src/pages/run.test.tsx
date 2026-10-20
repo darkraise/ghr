@@ -64,6 +64,20 @@ describe("Run page", () => {
     expect(artifacts.getByRole("button", { name: "Download frontend-dist" })).toBeInTheDocument()
   })
 
+  it("counts the run's RustFS artifacts in the summary", async () => {
+    const objects = fixtures.artifactStore.repos[0]?.items.filter((i) => i.run_id === 102) ?? []
+    expect(objects.length).toBeGreaterThan(0)
+    mockApi(
+      runRoutes({
+        "GET /api/status": { ...fixtures.status, artifact_store: { used_bytes: 423751200, capacity_bytes: 50000000000, repos_on: 2 } },
+        "GET /api/artifact-store/darkmem/runs/102": objects,
+      }),
+    )
+    renderApp("/actions/darkmem/runs/102")
+    const summary = within(await screen.findByRole("region", { name: "Summary" }))
+    await waitFor(() => expect(summary.getByText(String(fixtures.runDetail.artifacts.length + objects.length))).toHaveClass("font-mono"))
+  })
+
   it("draws the job graph with tiles linking to the job pages", async () => {
     mockApi(runRoutes())
     renderApp("/actions/darkmem/runs/102")

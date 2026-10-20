@@ -5,7 +5,7 @@ import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { memo, useId, type ReactNode } from "react"
 import { api } from "@/api/client"
-import { logSettling, useConfig, useJobLog, useRunAnnotations, useRunDetail, useStatus } from "@/api/hooks"
+import { logSettling, useConfig, useJobLog, useRunAnnotations, useRunDetail, useRunObjects, useStatus } from "@/api/hooks"
 import type { RunDetail, RunJob } from "@/api/types"
 import { LogViewer } from "@/components/log-viewer"
 import { ErrorLine } from "@/components/page/error-line"
@@ -156,7 +156,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function SummaryFacts({ run, owner, now }: { run: RunDetail; owner: string; now: number }) {
+function SummaryFacts({ run, owner, now, artifactCount }: { run: RunDetail; owner: string; now: number; artifactCount: number }) {
   const links = githubLinks(owner, run)
   return (
     <dl className="grid grid-cols-2 gap-4 min-[800px]:grid-cols-4">
@@ -179,7 +179,7 @@ function SummaryFacts({ run, owner, now }: { run: RunDetail; owner: string; now:
         <span className="font-mono">{dur(runTotalMs(run, now))}</span>
       </Fact>
       <Fact label="Artifacts">
-        <span className="font-mono">{run.artifacts.length}</span>
+        <span className="font-mono">{artifactCount}</span>
       </Fact>
     </dl>
   )
@@ -188,13 +188,15 @@ function SummaryFacts({ run, owner, now }: { run: RunDetail; owner: string; now:
 function RunSummary({ run, owner }: { run: RunDetail; owner: string }) {
   const now = useNow()
   const status = useStatus()
+  const selfHosted = status.data?.artifact_store !== undefined
+  const objects = useRunObjects(run.repo, run.id, selfHosted)
   const onAttempt = useAttemptNavigate(run)
   const annotations = useRunAnnotations(run.repo, run.id, run.attempt, isRunActive(run.status), true)
   const { jobLink, summaryLink } = linksFor(run)
   return (
     <RunFrame run={run} owner={owner} now={now} current="summary" jobLink={jobLink} summaryLink={summaryLink} onAttempt={onAttempt}>
       <Section title="Summary">
-        <SummaryFacts run={run} owner={owner} now={now} />
+        <SummaryFacts run={run} owner={owner} now={now} artifactCount={run.artifacts.length + (selfHosted ? (objects.data?.length ?? 0) : 0)} />
       </Section>
       {run.graph ? (
         <JobGraph graph={run.graph} jobs={run.jobs} path={run.path} event={run.event} now={now} jobLink={jobLink} />
@@ -202,7 +204,7 @@ function RunSummary({ run, owner }: { run: RunDetail; owner: string }) {
         <JobsTimeline run={run} now={now} jobLink={jobLink} />
       )}
       <AnnotationsSection data={annotations.data} error={annotations.error} onRetry={() => void annotations.refetch()} jobLink={jobLink} />
-      <ArtifactsSection repo={run.repo} runId={run.id} artifacts={run.artifacts} selfHosted={status.data?.artifact_store !== undefined} />
+      <ArtifactsSection repo={run.repo} runId={run.id} artifacts={run.artifacts} selfHosted={selfHosted} />
     </RunFrame>
   )
 }

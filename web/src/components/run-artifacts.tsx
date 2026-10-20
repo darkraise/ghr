@@ -1,8 +1,8 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 import { Button } from "darkraise-ui/components/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "darkraise-ui/components/table"
 import { api } from "@/api/client"
-import { keys } from "@/api/hooks"
+import { useRunObjects } from "@/api/hooks"
 import type { RunArtifact } from "@/api/types"
 import { CopyLinkMenu, DownloadObject } from "@/components/artifact-store-items"
 import { ErrorLine } from "@/components/page/error-line"
@@ -42,13 +42,7 @@ export function ArtifactsSection({
   artifacts: RunArtifact[]
   selfHosted: boolean
 }) {
-  // Listed live rather than taken from the snapshot, so an upload shows before
-  // the next 15-minute inventory.
-  const objects = useQuery({
-    queryKey: keys.artifactRunObjects(repo, runId),
-    queryFn: ({ signal }) => api.artifactRunObjects(repo, runId, signal),
-    enabled: selfHosted,
-  })
+  const objects = useRunObjects(repo, runId, selfHosted)
   const items = selfHosted ? (objects.data ?? []) : []
   const failed = selfHosted && objects.isError
   const total = artifacts.length + items.length
