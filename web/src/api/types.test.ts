@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { fixtures, runRoutes } from "@/test/fixtures"
+import { authedRoutes, fixtures, runRoutes } from "@/test/fixtures"
 import actionsJson from "./fixtures/actions.json"
 import activityBucketsJson from "./fixtures/activity-buckets.json"
 import activityLanesJson from "./fixtures/activity-lanes.json"
+import artifactStoreJson from "./fixtures/artifact-store.json"
 import availableReposJson from "./fixtures/available-repos.json"
 import choicesJson from "./fixtures/toolchain-choices.json"
 import configJson from "./fixtures/config.json"
@@ -26,6 +27,7 @@ import tokenJson from "./fixtures/token.json"
 import type {
   Actions,
   Activity,
+  ArtifactStore,
   AvailableRepo,
   Config,
   Container,
@@ -227,6 +229,63 @@ describe("GitHub storage fixtures", () => {
     })
     expect(fixtures.config.github_storage).toEqual({ cleanup_max_age: "2d", repos: { darkmem: { cleanup: "6h" } } })
     expect(fixtures.status).not.toHaveProperty("github_storage")
+  })
+})
+
+describe("artifact store fixtures", () => {
+  const snap: ArtifactStore = artifactStoreJson
+
+  it("the snapshot carries the keys, the totals, the rows and the deletions", () => {
+    expect([snap.configured, snap.endpoint, snap.bucket, snap.region]).toEqual([true, "https://s3.example.sg", "gha-artifacts", "us-east-1"])
+    expect(snap.admin_key).toEqual({ id: "GHRK…7Q2X", set_at: "2026-10-01T09:05:00Z" })
+    expect(snap.job_key).toEqual({ id: "JOBK…M4TA", set_at: "2026-10-01T10:05:00Z" })
+    expect([snap.checked_at, snap.used_bytes, snap.count, snap.capacity_bytes]).toEqual(["2026-10-03T14:00:00Z", 423751200, 5, 50000000000])
+    expect(snap).not.toHaveProperty("error")
+    expect(snap).not.toHaveProperty("other_bytes")
+    expect(snap).not.toHaveProperty("operation")
+    expect(snap.repos.map((r) => [r.name, r.private, r.enabled, r.state, r.cleanup, r.cleanup_source, r.bytes, r.count, r.items.length])).toEqual([
+      ["darkmem", true, true, "set", "3d", "override", 13751200, 4, 4],
+      ["darkcloud", true, true, "error", "7d", "global", 410000000, 1, 1],
+      ["docs", true, false, "foreign", "7d", "global", 0, 0, 0],
+      ["old-docs", false, false, "public", "7d", "global", 0, 0, 0],
+    ])
+    expect(snap.repos[0]).not.toHaveProperty("state_error")
+    expect(snap.repos[1]?.state_error).toBe("token lacks secrets=write on darkraise/darkcloud: grant it in the PAT settings")
+    expect(snap.repos[0]?.items[0]).toEqual({
+      key: "darkraise/darkmem/102/e2e-report.zip",
+      name: "e2e-report",
+      run_id: 102,
+      attempt: 2,
+      workflow: "ci",
+      job: "E2E (api)",
+      branch: "fix/cache-key",
+      sha: "a1f9c3e0d4b5c6a7b8c9d0e1f2a3b4c5d6e7f8a9",
+      bytes: 8900000,
+      files: 12,
+      digest: "sha256:05b7e3c7be55b19c6b57fd7c1b7706e5b2242ca2bea4aa4b61595af8a937239d",
+      uploaded_at: "2026-10-03T13:50:00Z",
+      expires_at: "2026-10-08T13:50:00Z",
+    })
+    expect(snap.repos[0]?.items[1]).not.toHaveProperty("expires_at")
+    expect(snap.deletions.map((d) => [d.at, d.store, d.by])).toEqual([
+      ["2026-10-03T13:58:00Z", "rustfs", "cleanup"],
+      ["2026-10-03T11:05:00Z", "rustfs", "expired"],
+    ])
+    expect(fixtures.githubStorage.deletions[0]).not.toHaveProperty("store")
+  })
+
+  it("the config block keeps its names, the status has no summary, and the app serves the snapshot", () => {
+    expect(fixtures.config.artifact_store).toEqual({
+      endpoint: "https://s3.example.sg",
+      bucket: "gha-artifacts",
+      region: "us-east-1",
+      cleanup_max_age: "7d",
+      capacity_gb: 50,
+      repos: { darkcloud: { enabled: true }, darkmem: { enabled: true, cleanup: "3d" } },
+    })
+    expect(fixtures.status).not.toHaveProperty("artifact_store")
+    expect(fixtures.artifactStore).toEqual(snap)
+    expect(authedRoutes()["GET /api/artifact-store"]).toEqual(snap)
   })
 })
 

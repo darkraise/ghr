@@ -1,6 +1,7 @@
 import actionsJson from "@/api/fixtures/actions.json"
 import activityBucketsJson from "@/api/fixtures/activity-buckets.json"
 import activityLanesJson from "@/api/fixtures/activity-lanes.json"
+import artifactStoreJson from "@/api/fixtures/artifact-store.json"
 import availableReposJson from "@/api/fixtures/available-repos.json"
 import configJson from "@/api/fixtures/config.json"
 import containersJson from "@/api/fixtures/containers.json"
@@ -23,6 +24,7 @@ import choicesJson from "@/api/fixtures/toolchain-choices.json"
 import type {
   Actions,
   Activity,
+  ArtifactStore,
   AvailableRepo,
   Config,
   Container,
@@ -66,6 +68,7 @@ const runAnnotations: RunAnnotations = runAnnotationsJson
 const jobLog: JobLog = jobLogJson
 const githubStorage: GitHubStorage = githubStorageJson
 const storageAlert: StorageAlert = storageAlertJson
+const artifactStore: ArtifactStore = artifactStoreJson
 
 export const fixtures = {
   status,
@@ -90,6 +93,7 @@ export const fixtures = {
   jobLog,
   githubStorage,
   storageAlert,
+  artifactStore,
 }
 
 export function authedRoutes(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -104,6 +108,7 @@ export function authedRoutes(over: Record<string, unknown> = {}): Record<string,
     "GET /api/storage": fixtures.storage,
     "GET /api/actions": fixtures.actions,
     "GET /api/github-storage": fixtures.githubStorage,
+    "GET /api/artifact-store": fixtures.artifactStore,
     ...over,
   }
 }

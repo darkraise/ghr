@@ -157,6 +157,7 @@ export interface Status {
   restart: RestartStatus
   web_listen_error?: WebListenError
   github_storage?: StorageAlert
+  artifact_store?: ArtifactStoreSummary
   ghr_update?: GhrUpdate
   jobs?: JobStatus[]
 }
@@ -253,6 +254,7 @@ export interface Config {
   watch_repos?: string[]
   web?: WebConfig
   github_storage?: GitHubStorageConfig
+  artifact_store?: ArtifactStoreConfig
   jobs?: JobsConfig
 }
 
@@ -428,6 +430,7 @@ export interface ConfigPatch {
   repos?: Record<string, RepoPatch>
   web?: WebPatch
   github_storage?: GitHubStoragePatch
+  artifact_store?: ArtifactStorePatch
   jobs?: Partial<Record<JobName, JobPatch>>
 }
 
@@ -738,7 +741,10 @@ export interface Deletion {
   name: string
   bytes: number
   age: string
+  // cleanup, expired or manual
   by: string
+  // "rustfs" for the self-hosted store; absent for GitHub, as in snapshots from before it existed
+  store?: string
 }
 
 export interface GitHubStorage {
@@ -781,4 +787,107 @@ export interface StoragePreview {
   repo: string
   count: number
   bytes: number
+}
+
+// The key IDs arrive shortened; the API never returns a secret.
+export interface ArtifactKeyInfo {
+  id: string
+  set_at: string
+}
+
+export interface ArtifactStoreItem {
+  key: string
+  name: string
+  run_id: number
+  attempt: number
+  workflow?: string
+  job?: string
+  branch?: string
+  sha?: string
+  bytes: number
+  files: number
+  digest?: string
+  uploaded_at: string
+  expires_at?: string
+}
+
+// set, missing, stale, foreign, public, error or off
+export type ArtifactRepoState = string
+
+export interface ArtifactStoreRepo {
+  name: string
+  private: boolean
+  enabled: boolean
+  state: ArtifactRepoState
+  state_error?: string
+  // "off" or an age such as "7d"
+  cleanup: string
+  // override, global or default
+  cleanup_source: string
+  bytes: number
+  count: number
+  // Newest first, at most 500; count is the total.
+  items: ArtifactStoreItem[]
+}
+
+export interface ArtifactStore {
+  configured: boolean
+  endpoint?: string
+  bucket?: string
+  region?: string
+  admin_key?: ArtifactKeyInfo
+  job_key?: ArtifactKeyInfo
+  checked_at?: string
+  error?: string
+  used_bytes: number
+  count: number
+  capacity_bytes?: number
+  other_bytes?: number
+  repos: ArtifactStoreRepo[]
+  operation?: GitHubOperation
+  deletions: Deletion[]
+}
+
+export interface ArtifactStoreSummary {
+  used_bytes: number
+  capacity_bytes?: number
+  repos_on: number
+  error?: string
+}
+
+export interface ArtifactStoreCheck {
+  name: string
+  ok: boolean
+  detail: string
+}
+
+export interface ArtifactStoreTest {
+  checks: ArtifactStoreCheck[]
+}
+
+export type ArtifactLinkTTL = "1h" | "24h" | "7d"
+
+export type ArtifactKeyWhich = "admin" | "job"
+
+export interface ArtifactLink {
+  url: string
+  expires_at: string
+}
+
+export interface ArtifactStoreConfig {
+  endpoint?: string
+  bucket?: string
+  region?: string
+  cleanup_max_age?: string
+  capacity_gb?: number
+  repos?: Record<string, { enabled?: boolean; cleanup?: string }>
+}
+
+// Repository switches and cleanup go through PUT /artifact-store/repos/{repo}, not here.
+export interface ArtifactStorePatch {
+  endpoint?: string
+  bucket?: string
+  region?: string
+  cleanup_max_age?: string
+  capacity_gb?: number
 }
