@@ -305,6 +305,12 @@ func (s *Service) SyncRepo(ctx context.Context, repo string) (model.ArtifactStor
 		visErr = s.readVisibility(ctx, cfg.Owner)
 	}
 	s.syncMu.Lock()
+	// A removal's switch-off may have held syncMu while this call waited.
+	cfg = s.Config()
+	if cfg.Repo(repo) == nil && !cfg.Watched(repo) {
+		s.syncMu.Unlock()
+		return model.ArtifactStoreRepo{}, ErrUnknownRepo
+	}
 	st := s.syncOne(ctx, cfg, keys, repo, visErr, false)
 	s.setSync(repo, st)
 	s.syncMu.Unlock()
