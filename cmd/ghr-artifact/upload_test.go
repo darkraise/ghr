@@ -207,6 +207,16 @@ func TestUpload(t *testing.T) {
 	}
 }
 
+func TestUploadOutputFailureSaysTheUploadHappened(t *testing.T) {
+	h := newHarness(t)
+	h.write(t, map[string]string{"dist/a.txt": "a"})
+	h.env["GITHUB_OUTPUT"] = h.temp
+	code, _, stderr := h.run(t, "upload", "--name", "dist", "--path", "dist")
+	if code != 1 || !strings.Contains(stderr, "uploaded darkraise/demo/100/dist.zip, but cannot write the step outputs") {
+		t.Fatalf("code %d stderr %q", code, stderr)
+	}
+}
+
 func TestUploadMultipart(t *testing.T) {
 	h := newHarness(t)
 	data := make([]byte, s3.PartSize+s3.PartSize/2)

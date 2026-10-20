@@ -117,5 +117,8 @@ func upload(ctx context.Context, args []string, env func(string) string, stdout,
 		return describe(err, j.store)
 	}
 	fmt.Fprintf(stdout, "Uploaded %s: %d files, %d bytes, %s\n", key, len(files), size, digest)
-	return writeOutputs(env("GITHUB_OUTPUT"), "object-key", key, "artifact-digest", digest)
+	if err := writeOutputs(env("GITHUB_OUTPUT"), "object-key", key, "artifact-digest", digest); err != nil {
+		return fmt.Errorf("uploaded %s, but cannot write the step outputs: %w", key, err)
+	}
+	return nil
 }
