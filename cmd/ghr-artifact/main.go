@@ -171,7 +171,6 @@ func loadJob(env func(string) string, storeFlag, keyFlag string) (job, error) {
 func describe(err error, store artifact.Store) error {
 	var se *s3.Error
 	if errors.As(err, &se) {
-		// A HEAD answer has no body, so its error carries only the status.
 		detail := se.Code
 		if se.Message != "" {
 			detail += ": " + se.Message

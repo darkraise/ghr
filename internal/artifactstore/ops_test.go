@@ -292,13 +292,13 @@ func TestRunObjects(t *testing.T) {
 	if len(items) != 2 || items[0].Key != logs || items[1].Key != dist || items[0].Attempt != 1 || items[0].Bytes != 7 {
 		t.Fatalf("items %+v, want logs then dist with their details", items)
 	}
-	if n := e.requests("HEAD "); n != 2 {
+	if n := e.heads(); n != 2 {
 		t.Fatalf("%d heads before any pass, want 2", n)
 	}
 	e.s.pass()
-	heads := e.requests("HEAD ")
-	if _, err := e.s.RunObjects(context.Background(), "darkmem", 10); err != nil || e.requests("HEAD ") != heads {
-		t.Fatalf("RunObjects after a pass: %v with %d heads, want the cache used", err, e.requests("HEAD ")-heads)
+	heads := e.heads()
+	if _, err := e.s.RunObjects(context.Background(), "darkmem", 10); err != nil || e.heads() != heads {
+		t.Fatalf("RunObjects after a pass: %v with %d heads, want the cache used", err, e.heads()-heads)
 	}
 	if items, err := e.s.RunObjects(context.Background(), "darkmem", 11); err != nil || items == nil || len(items) != 0 {
 		t.Fatalf("a run without artifacts: %v, %v; want an empty list", items, err)

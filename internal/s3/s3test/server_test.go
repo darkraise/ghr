@@ -158,6 +158,66 @@ func TestGetAndHeadServeObject(t *testing.T) {
 	}
 }
 
+func TestGetServesOneRange(t *testing.T) {
+	s := NewServer(t, "artifacts")
+	s.Put("k", Object{
+		Body:        []byte("0123456789"),
+		Meta:        map[string]string{"ghr-run-id": "1"},
+		ContentType: "application/zip",
+	})
+	s.Put("empty", Object{})
+	ranged := func(key, spec string) reply {
+		return send(t, s, http.MethodGet, "/artifacts/"+key, http.Header{"Range": {spec}}, nil)
+	}
+
+	r := ranged("k", "bytes=2-5")
+	if r.status != http.StatusPartialContent || r.body != "2345" || r.header.Get("Content-Range") != "bytes 2-5/10" ||
+		r.header.Get("Content-Length") != "4" || r.header.Get("ETag") != etag([]byte("0123456789")) ||
+		r.header.Get("Content-Type") != "application/zip" || r.header.Get("X-Amz-Meta-Ghr-Run-Id") != "1" {
+		t.Fatalf("bytes=2-5: %d %q %v", r.status, r.body, r.header)
+	}
+	r = ranged("k", "bytes=8-99")
+	if r.status != http.StatusPartialContent || r.body != "89" || r.header.Get("Content-Range") != "bytes 8-9/10" {
+		t.Fatalf("bytes=8-99: %d %q %v", r.status, r.body, r.header)
+	}
+	r = ranged("k", "bytes=10-12")
+	if r.status != http.StatusRequestedRangeNotSatisfiable || r.code() != "InvalidRange" {
+		t.Fatalf("bytes=10-12: %d %s", r.status, r.body)
+	}
+	r = ranged("empty", "bytes=0-0")
+	if r.status != http.StatusRequestedRangeNotSatisfiable || r.code() != "InvalidRange" {
+		t.Fatalf("empty object: %d %s", r.status, r.body)
+	}
+	if r := send(t, s, http.MethodGet, "/artifacts/empty", nil, nil); r.status != http.StatusOK || r.body != "" {
+		t.Fatalf("plain GET of the empty object: %d %q", r.status, r.body)
+	}
+	if r := send(t, s, http.MethodGet, "/artifacts/k", nil, nil); r.status != http.StatusOK || r.body != "0123456789" || r.header.Get("Content-Range") != "" {
+		t.Fatalf("plain GET: %d %q %v", r.status, r.body, r.header)
+	}
+	if r := ranged("missing", "bytes=0-0"); r.status != http.StatusNotFound || r.code() != "NoSuchKey" {
+		t.Fatalf("missing key: %d %s", r.status, r.body)
+	}
+}
+
+func TestFailNextHeadHitsOnlyAGetWithRange(t *testing.T) {
+	s := NewServer(t, "artifacts")
+	s.Put("k", Object{Body: []byte("v")})
+	s.FailNext("head", http.StatusServiceUnavailable, "SlowDown")
+	if r := send(t, s, http.MethodGet, "/artifacts/k", nil, nil); r.status != http.StatusOK {
+		t.Fatalf("plain GET consumed the head failure: %d %s", r.status, r.body)
+	}
+	if r := send(t, s, http.MethodGet, "/artifacts/k", http.Header{"Range": {"bytes=0-0"}}, nil); r.status != http.StatusServiceUnavailable || r.code() != "SlowDown" {
+		t.Fatalf("ranged GET: %d %s", r.status, r.body)
+	}
+	if r := send(t, s, http.MethodGet, "/artifacts/k", http.Header{"Range": {"bytes=0-0"}}, nil); r.status != http.StatusPartialContent {
+		t.Fatalf("second ranged GET: %d %s", r.status, r.body)
+	}
+	s.FailNext("get", http.StatusServiceUnavailable, "SlowDown")
+	if r := send(t, s, http.MethodGet, "/artifacts/k", http.Header{"Range": {"bytes=0-0"}}, nil); r.status != http.StatusPartialContent {
+		t.Fatalf("ranged GET consumed the get failure: %d %s", r.status, r.body)
+	}
+}
+
 func TestPutStoresObject(t *testing.T) {
 	s := NewServer(t, "artifacts")
 	h := http.Header{}

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -88,7 +90,7 @@ func TestErrorsAndNotFound(t *testing.T) {
 
 	_, err := c.Head(ctx, "o/r/1/missing.zip")
 	var e *s3.Error
-	if !errors.As(err, &e) || e.Status != http.StatusNotFound || !s3.IsNotFound(err) || err.Error() != "s3: 404 Not Found" {
+	if !errors.As(err, &e) || e.Status != http.StatusNotFound || !s3.IsNotFound(err) || err.Error() != "s3: 404 NoSuchKey: The specified key does not exist." {
 		t.Fatalf("head missing: %v", err)
 	}
 	_, _, err = c.Get(ctx, "o/r/1/missing.zip")
@@ -193,8 +195,162 @@ func TestPutHeadGetRoundTrip(t *testing.T) {
 	}
 	check("Get", h)
 	const path = "/artifacts/o/r/1/my%20file%2B%C3%BC.zip"
-	if got := strings.Join(srv.Requests(), "|"); got != "PUT "+path+"|HEAD "+path+"|GET "+path {
+	if got := strings.Join(srv.Requests(), "|"); got != "PUT "+path+"|GET "+path+"|GET "+path {
 		t.Fatalf("requests %q", got)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+type sentRequest struct{ method, rangeHeader, signedHeaders string }
+
+// recordRequests makes c note the method, Range header and signed header list
+// of every request it sends.
+func recordRequests(c *s3.Client) *[]sentRequest {
+	var sent []sentRequest
+	next := c.HTTP.Transport
+	c.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		_, signed, _ := strings.Cut(r.Header.Get("Authorization"), "SignedHeaders=")
+		signed, _, _ = strings.Cut(signed, ",")
+		sent = append(sent, sentRequest{r.Method, r.Header.Get("Range"), signed})
+		return next.RoundTrip(r)
+	})}
+	return &sent
+}
+
+func TestHeadIsASignedRangedGet(t *testing.T) {
+	c, srv := newClient(t)
+	sent := recordRequests(c)
+	srv.Put("o/r/1/dist.zip", s3test.Object{Body: pattern(1000)})
+	if _, err := c.Head(context.Background(), "o/r/1/dist.zip"); err != nil {
+		t.Fatal(err)
+	}
+	if len(*sent) != 1 || (*sent)[0].method != http.MethodGet || (*sent)[0].rangeHeader != "bytes=0-0" {
+		t.Fatalf("sent %+v, want one GET with Range bytes=0-0", *sent)
+	}
+	if !strings.Contains(";"+(*sent)[0].signedHeaders+";", ";range;") {
+		t.Fatalf("signed headers %q do not include range", (*sent)[0].signedHeaders)
+	}
+	for _, r := range srv.Requests() {
+		if strings.HasPrefix(r, "HEAD ") {
+			t.Fatalf("requests %q include a HEAD", srv.Requests())
+		}
+	}
+}
+
+func TestHeadOfAMultiByteObject(t *testing.T) {
+	c, srv := newClient(t)
+	body := pattern(70000)
+	modified := time.Date(2026, 10, 15, 8, 30, 0, 0, time.UTC)
+	srv.Put("o/r/1/dist.zip", s3test.Object{
+		Body:               body,
+		Meta:               map[string]string{"ghr-run-id": "7"},
+		ContentType:        "application/zip",
+		ContentDisposition: `attachment; filename="dist.zip"`,
+		LastModified:       modified,
+	})
+	h, err := c.Head(context.Background(), "o/r/1/dist.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Size != 70000 || h.ETag != md5Hex(body) || !h.LastModified.Equal(modified) || h.ContentType != "application/zip" ||
+		h.ContentDisposition != `attachment; filename="dist.zip"` || len(h.Meta) != 1 || h.Meta["ghr-run-id"] != "7" {
+		t.Fatalf("head %+v", h)
+	}
+}
+
+func TestHeadOfAnEmptyObject(t *testing.T) {
+	c, srv := newClient(t)
+	sent := recordRequests(c)
+	srv.Put("o/r/1/empty.zip", s3test.Object{ContentType: "application/zip", Meta: map[string]string{"ghr-run-id": "7"}})
+	h, err := c.Head(context.Background(), "o/r/1/empty.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Size != 0 || h.ETag != md5Hex(nil) || h.ContentType != "application/zip" || h.Meta["ghr-run-id"] != "7" {
+		t.Fatalf("head %+v", h)
+	}
+	if len(*sent) != 2 || (*sent)[0].rangeHeader != "bytes=0-0" || (*sent)[1].method != http.MethodGet || (*sent)[1].rangeHeader != "" {
+		t.Fatalf("sent %+v, want the ranged GET then a plain GET", *sent)
+	}
+}
+
+func TestHeadOfAMissingKey(t *testing.T) {
+	c, _ := newClient(t)
+	_, err := c.Head(context.Background(), "o/r/1/missing.zip")
+	var e *s3.Error
+	if !errors.As(err, &e) || e.Status != http.StatusNotFound || e.Code != "NoSuchKey" || !s3.IsNotFound(err) {
+		t.Fatalf("head missing: %v", err)
+	}
+}
+
+// ranged starts a TLS server answering every request with handler and
+// returns a client for it.
+func ranged(t *testing.T, handler http.HandlerFunc) *s3.Client {
+	t.Helper()
+	ts := httptest.NewTLSServer(handler)
+	t.Cleanup(ts.Close)
+	c, err := s3.New(ts.URL, "artifacts", "us-east-1", testCred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.HTTP = ts.Client()
+	return c
+}
+
+type countingBody struct {
+	io.ReadCloser
+	read *int
+}
+
+func (b countingBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	*b.read += n
+	return n, err
+}
+
+func TestHeadWhenTheServerIgnoresRange(t *testing.T) {
+	body := pattern(4096)
+	c := ranged(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `"abc"`)
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.Write(body)
+	})
+	read := 0
+	next := c.HTTP.Transport
+	c.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		resp, err := next.RoundTrip(r)
+		if resp != nil {
+			resp.Body = countingBody{resp.Body, &read}
+		}
+		return resp, err
+	})}
+	h, err := c.Head(context.Background(), "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Size != 4096 || h.ETag != "abc" || read != 0 {
+		t.Fatalf("head %+v after reading %d body bytes, want size 4096 and none read", h, read)
+	}
+}
+
+func TestHeadWithoutContentRangeIsAnError(t *testing.T) {
+	for name, contentRange := range map[string]string{"missing": "", "unparsable": "bytes 0-0/many", "unknown total": "bytes 0-0/*"} {
+		t.Run(name, func(t *testing.T) {
+			c := ranged(t, func(w http.ResponseWriter, r *http.Request) {
+				if contentRange != "" {
+					w.Header().Set("Content-Range", contentRange)
+				}
+				w.WriteHeader(http.StatusPartialContent)
+				w.Write([]byte("x"))
+			})
+			h, err := c.Head(context.Background(), "secret/key.zip")
+			if err == nil || !strings.HasPrefix(err.Error(), "s3: ") || strings.Contains(err.Error(), "secret/key.zip") {
+				t.Fatalf("head %+v err %v, want an s3 error that does not name the key", h, err)
+			}
+		})
 	}
 }
 

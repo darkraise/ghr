@@ -126,7 +126,7 @@ func TestInventoryBuildsTheRows(t *testing.T) {
 	if o := row(t, st, "old-repo"); o.Enabled || o.State != "off" {
 		t.Errorf("old-repo row %+v: an entry for an uncovered repository is ignored", o)
 	}
-	if n := e.requests("HEAD "); n != 4 {
+	if n := e.heads(); n != 4 {
 		t.Errorf("%d heads, want one per artifact of the owner", n)
 	}
 	sum := e.s.Summary()
@@ -174,13 +174,13 @@ func TestTheMetadataCacheSavesHeads(t *testing.T) {
 	b := e.putArtifact("darkmem", 11, "logs", 5, time.Hour)
 	e.s.pass()
 	e.s.pass()
-	if n := e.requests("HEAD "); n != 2 {
+	if n := e.heads(); n != 2 {
 		t.Fatalf("%d heads after two passes, want 2: the second reads the cache", n)
 	}
 	e.clock.Add(time.Minute)
 	e.put(a, 7, 0, artifact.Meta{RunID: 10, Attempt: 2}.Map())
 	e.s.pass()
-	if n := e.requests("HEAD "); n != 3 {
+	if n := e.heads(); n != 3 {
 		t.Fatalf("%d heads after a changed object, want 3", n)
 	}
 	if it := row(t, e.s.Snapshot(), "darkmem").Items[0]; it.Key != a || it.Attempt != 2 || it.Bytes != 7 {
@@ -200,7 +200,7 @@ func TestTheMetadataCacheSavesHeads(t *testing.T) {
 
 	restarted := e.newService()
 	restarted.pass()
-	if n := e.requests("HEAD "); n != 3 {
+	if n := e.heads(); n != 3 {
 		t.Fatalf("%d heads after a restart, want still 3: the cache file survives", n)
 	}
 	if it := row(t, restarted.Snapshot(), "darkmem").Items[0]; it.Attempt != 2 {
@@ -220,7 +220,7 @@ func TestAnUnreadableCacheIsRebuilt(t *testing.T) {
 				t.Fatal(err)
 			}
 			e.s.pass()
-			if n := e.requests("HEAD "); n != 1 {
+			if n := e.heads(); n != 1 {
 				t.Fatalf("%d heads, want the object read again", n)
 			}
 			if got := eventsLike(e.s.Events, "artifact store: discarded the metadata cache"); len(got) != 1 {
@@ -243,8 +243,8 @@ func TestAFailedHeadIsReadAgain(t *testing.T) {
 		t.Fatalf("item %+v, want listed from its key without details", it)
 	}
 	e.s.pass()
-	if it := row(t, e.s.Snapshot(), "darkmem").Items[0]; it.Attempt != 3 || e.requests("HEAD ") != 2 {
-		t.Fatalf("item %+v after %d heads, want the details read on the next pass", it, e.requests("HEAD "))
+	if it := row(t, e.s.Snapshot(), "darkmem").Items[0]; it.Attempt != 3 || e.heads() != 2 {
+		t.Fatalf("item %+v after %d heads, want the details read on the next pass", it, e.heads())
 	}
 }
 
@@ -393,7 +393,7 @@ func TestOnlyTheOwnersArtifactsAreHeaded(t *testing.T) {
 	e.put("darkraise/darkmem/notes/readme.md", 4, time.Hour, nil)
 	e.s.pass()
 	st := e.s.Snapshot()
-	if n := e.requests("HEAD "); n != 0 || st.OtherBytes != 8 || st.Count != 0 {
+	if n := e.heads(); n != 0 || st.OtherBytes != 8 || st.Count != 0 {
 		t.Fatalf("%d heads, other %d, count %d; want other prefixes only counted", n, st.OtherBytes, st.Count)
 	}
 	if !slices.Equal(cacheKeys(t, e.s.CachePath), []string{}) {

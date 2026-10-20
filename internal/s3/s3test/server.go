@@ -184,7 +184,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	op := operation(r.Method, q, bucketLevel)
+	op := operation(r.Method, q, bucketLevel, r.Header.Get("Range") != "")
 	if op == "" {
 		writeError(w, r, http.StatusNotImplemented, "NotImplemented", "s3test does not implement "+r.Method+" "+r.URL.RequestURI())
 		return
@@ -198,7 +198,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	case "list":
 		s.list(w, r, q)
 	case "head", "get":
-		s.get(w, r, key, op == "get")
+		s.get(w, r, key)
 	case "put":
 		s.put(w, r, key, body)
 	case "create-multipart":
@@ -232,7 +232,9 @@ func (s *Server) splitPath(p string) (key string, bucketLevel, ok bool) {
 	return "", false, false
 }
 
-func operation(method string, q url.Values, bucketLevel bool) string {
+// operation names what a request does. A GET with a Range header is the
+// client's way to read an object's details, so it counts as "head".
+func operation(method string, q url.Values, bucketLevel, ranged bool) string {
 	has := func(k string) bool { _, ok := q[k]; return ok }
 	if bucketLevel {
 		switch {
@@ -249,6 +251,9 @@ func operation(method string, q url.Values, bucketLevel bool) string {
 	case http.MethodHead:
 		return "head"
 	case http.MethodGet:
+		if ranged {
+			return "head"
+		}
 		return "get"
 	case http.MethodPut:
 		if has("partNumber") && has("uploadId") {
@@ -329,11 +334,46 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request, q url.Values) {
 	writeXML(w, http.StatusOK, res)
 }
 
-func (s *Server) get(w http.ResponseWriter, r *http.Request, key string, withBody bool) {
+// parseRange reads a single "bytes=first-last" range. Like S3, it treats any
+// other form as no range at all.
+func parseRange(spec string) (first, last int64, ok bool) {
+	spec, found := strings.CutPrefix(spec, "bytes=")
+	if !found {
+		return 0, 0, false
+	}
+	a, b, found := strings.Cut(spec, "-")
+	if !found {
+		return 0, 0, false
+	}
+	first, err := strconv.ParseInt(a, 10, 64)
+	if err != nil || first < 0 {
+		return 0, 0, false
+	}
+	last, err = strconv.ParseInt(b, 10, 64)
+	if err != nil || last < first {
+		return 0, 0, false
+	}
+	return first, last, true
+}
+
+func (s *Server) get(w http.ResponseWriter, r *http.Request, key string) {
 	o, ok := s.objects[key]
 	if !ok {
 		writeError(w, r, http.StatusNotFound, "NoSuchKey", "The specified key does not exist.")
 		return
+	}
+	body, status := o.Body, http.StatusOK
+	var contentRange string
+	if first, last, ok := parseRange(r.Header.Get("Range")); ok && r.Method == http.MethodGet {
+		size := int64(len(o.Body))
+		if first >= size {
+			w.Header().Set("Content-Range", "bytes */"+strconv.FormatInt(size, 10))
+			writeError(w, r, http.StatusRequestedRangeNotSatisfiable, "InvalidRange", "The requested range is not satisfiable")
+			return
+		}
+		last = min(last, size-1)
+		body, status = o.Body[first:last+1], http.StatusPartialContent
+		contentRange = fmt.Sprintf("bytes %d-%d/%d", first, last, size)
 	}
 	h := w.Header()
 	ct := o.ContentType
@@ -344,15 +384,18 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request, key string, withBod
 	if o.ContentDisposition != "" {
 		h.Set("Content-Disposition", o.ContentDisposition)
 	}
-	h.Set("Content-Length", strconv.Itoa(len(o.Body)))
+	if contentRange != "" {
+		h.Set("Content-Range", contentRange)
+	}
+	h.Set("Content-Length", strconv.Itoa(len(body)))
 	h.Set("ETag", etag(o.Body))
 	h.Set("Last-Modified", o.LastModified.Format(http.TimeFormat))
 	for k, v := range o.Meta {
 		h.Set("X-Amz-Meta-"+k, v)
 	}
-	w.WriteHeader(http.StatusOK)
-	if withBody {
-		w.Write(o.Body)
+	w.WriteHeader(status)
+	if r.Method != http.MethodHead {
+		w.Write(body)
 	}
 }
 
