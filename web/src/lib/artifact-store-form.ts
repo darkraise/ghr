@@ -27,7 +27,8 @@ const equal: Equal = (_key, a, b) => String(a).trim() === String(b).trim()
 function storeErrors(v: StoreValues): Partial<Record<StoreKey, string>> {
   const out: Partial<Record<StoreKey, string>> = {}
   const endpoint = v.endpoint.trim()
-  if (endpoint !== "" && !endpoint.startsWith("https://")) out.endpoint = "Enter an https:// address; ghr refuses plain http"
+  if (endpoint.startsWith("http://")) out.endpoint = "Enter an https:// address; ghr refuses plain http"
+  else if (endpoint !== "" && !endpoint.startsWith("https://")) out.endpoint = "Start the address with https://"
   if (endpoint !== "" && v.bucket.trim() === "") out.bucket = "Enter the bucket the endpoint holds"
   return out
 }

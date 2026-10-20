@@ -63,6 +63,7 @@ describe("Self-hosted storage section", () => {
 
   it.each<[string, string, string]>([
     ["Endpoint", "http://s3.example.sg", "Enter an https:// address; ghr refuses plain http"],
+    ["Endpoint", "s3.example.sg", "Start the address with https://"],
   ])("refuses %s %s before sending", async (name, value, error) => {
     const { user, calls } = await draw()
     await user.clear(box(name))
