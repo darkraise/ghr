@@ -73,7 +73,7 @@ ghr aborts multipart uploads left open for more than 24 hours, so the bucket nee
    ```
 
 4. **Test the connection.** Test connection reaches the endpoint, lists the bucket and reads one object's metadata, all with the admin key. A workflow's first upload proves the job key.
-5. **Set the policy.** The cleanup age applies to artifacts uploaded without `retention-days`: 7 days unless you change it, at least 24 hours, or `off`. Capacity, in decimal GB, is optional; the Artifacts page shows use against it. ghr does not read the server's disk.
+5. **Set the policy.** The cleanup age applies to artifacts uploaded without `retention-days`: 7 days unless you change it, at least 24 hours, or `off`. A repository's own age, set in its row on the Artifacts page, may go down to 1 hour. Capacity, in decimal GB, is optional; the Artifacts page shows use against it. ghr does not read the server's disk.
 6. **Turn repositories on** in the Artifacts page's Self-hosted tab, one at a time or with **Turn on for all private repositories**. ghr writes the repository's variable and secret before it answers, so the next run uses the bucket. Public repositories cannot be switched on.
 
 The settings live in `config.yaml`:
