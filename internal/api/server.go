@@ -121,6 +121,15 @@ type Backend interface {
 	DeleteGitHubCaches(repo string, req model.DeleteCachesRequest) (model.OperationStarted, error)
 	SetGitHubRetention(ctx context.Context, repo string, days int) error
 	SetGitHubRetentionAll(days int) (model.OperationStarted, error)
+	ArtifactStore() model.ArtifactStore
+	RefreshArtifactStore() error
+	TestArtifactStore(ctx context.Context) (model.ArtifactStoreTest, error)
+	SetArtifactKey(req model.ArtifactKeyRequest) error
+	SetArtifactRepo(ctx context.Context, repo string, req model.ArtifactRepoRequest) (model.ArtifactStoreRepo, error)
+	EnablePrivateArtifactRepos(ctx context.Context) ([]model.ArtifactStoreRepo, error)
+	ArtifactRunObjects(ctx context.Context, repo string, runID int64) ([]model.ArtifactStoreItem, error)
+	DeleteArtifactObjects(repo string, req model.ArtifactDeleteRequest) (model.OperationStarted, error)
+	ArtifactLink(req model.ArtifactLinkRequest) (model.ArtifactLink, error)
 }
 
 func NewServer(b Backend) http.Handler {
@@ -468,6 +477,65 @@ func NewServer(b Backend) http.Handler {
 			return
 		}
 		respond(w, nil, b.SetGitHubRetention(r.Context(), r.PathValue("repo"), req.Days))
+	})
+	mux.HandleFunc("GET /artifact-store", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.ArtifactStore()) })
+	mux.HandleFunc("POST /artifact-store/refresh", accepted(func(*http.Request) error { return b.RefreshArtifactStore() }))
+	mux.HandleFunc("POST /artifact-store/test", func(w http.ResponseWriter, r *http.Request) {
+		res, err := b.TestArtifactStore(r.Context())
+		respond(w, res, err)
+	})
+	mux.HandleFunc("PUT /artifact-store/keys", func(w http.ResponseWriter, r *http.Request) {
+		var req model.ArtifactKeyRequest
+		if err := decode(w, r, &req); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		respond(w, nil, b.SetArtifactKey(req))
+	})
+	mux.HandleFunc("PUT /artifact-store/repos/{repo}", func(w http.ResponseWriter, r *http.Request) {
+		var req model.ArtifactRepoRequest
+		if err := decode(w, r, &req); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		row, err := b.SetArtifactRepo(r.Context(), r.PathValue("repo"), req)
+		respond(w, row, err)
+	})
+	mux.HandleFunc("POST /artifact-store/repos/enable-private", func(w http.ResponseWriter, r *http.Request) {
+		rows, err := b.EnablePrivateArtifactRepos(r.Context())
+		if rows == nil {
+			rows = []model.ArtifactStoreRepo{}
+		}
+		respond(w, rows, err)
+	})
+	mux.HandleFunc("GET /artifact-store/{repo}/runs/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := positive(r.PathValue("id"), "run id")
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		items, err := b.ArtifactRunObjects(r.Context(), r.PathValue("repo"), id)
+		if items == nil {
+			items = []model.ArtifactStoreItem{}
+		}
+		respond(w, items, err)
+	})
+	mux.HandleFunc("POST /artifact-store/{repo}/artifacts/delete", func(w http.ResponseWriter, r *http.Request) {
+		var req model.ArtifactDeleteRequest
+		if err := decode(w, r, &req); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		started(w)(b.DeleteArtifactObjects(r.PathValue("repo"), req))
+	})
+	mux.HandleFunc("POST /artifact-store/link", func(w http.ResponseWriter, r *http.Request) {
+		var req model.ArtifactLinkRequest
+		if err := decode(w, r, &req); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		l, err := b.ArtifactLink(req)
+		respond(w, l, err)
 	})
 	return mux
 }
