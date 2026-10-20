@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/ghr/internal/artifact"
 	"github.com/darkraise/ghr/internal/config"
@@ -239,6 +240,38 @@ func TestAJobKeyReplacementRewritesEverySwitchedOnRepository(t *testing.T) {
 		if r := row(t, e.s.Snapshot(), repo); r.State != "set" {
 			t.Errorf("%s state %q", repo, r.State)
 		}
+	}
+}
+
+func TestSyncRewritesTheSecretWhenTheJobKeyIsReplacedUnderTheSameID(t *testing.T) {
+	e := newTestEnv(t)
+	e.enable("darkmem")
+	e.gh.vars["darkmem"], e.gh.secrets["darkmem"] = e.storeJSON(jobID), artifact.FormatKey(jobID, jobSecret)
+	e.s.pass()
+	if got := e.writes(); len(got) != 0 {
+		t.Fatalf("writes %v with the secret current, want none", got)
+	}
+	e.clock.Add(time.Minute)
+	if err := e.s.SetKey("job", jobID, "rotated-secret"); err != nil {
+		t.Fatal(err)
+	}
+	e.s.pass()
+	want := []string{setSecret}
+	if got := e.writes(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("writes %v after the job key was replaced, want %v", got, want)
+	}
+	if got := e.gh.secrets["darkmem"]; got != artifact.FormatKey(jobID, "rotated-secret") {
+		t.Fatalf("secret %q, want the replaced key", got)
+	}
+	if r := row(t, e.s.Snapshot(), "darkmem"); r.State != "set" || r.StateError != "" {
+		t.Fatalf("state %q, error %q; want set", r.State, r.StateError)
+	}
+	if n := len(eventsLike(e.s.Events, "artifact store: wrote the GHR_ARTIFACT_KEY secret")); n != 1 {
+		t.Fatalf("events %q, want one secret write", eventsLike(e.s.Events, ""))
+	}
+	e.s.pass()
+	if got := e.writes(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("writes after a third pass %v, want none added", got)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/darkraise/ghr/internal/artifact"
 	"github.com/darkraise/ghr/internal/config"
@@ -82,6 +83,12 @@ func (s *Service) setSync(repo string, st repoSync) {
 	defer s.mu.Unlock()
 	s.syncs[strings.ToLower(repo)] = st
 	s.bump()
+}
+
+func (s *Service) markSecret(lk string, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.secretAt[lk] = at
 }
 
 func (s *Service) syncState(repo string) string {
@@ -204,7 +211,17 @@ func (s *Service) syncOne(ctx context.Context, cfg *config.Config, keys Keys, re
 		return repoSync{state: "error", err: s.rowErr(err, repo)}
 	}
 	cur, _ := artifact.ParseStore(val)
-	writeSecret := !has || !found || cur.KeyID != keys.Job.ID
+	lk := strings.ToLower(repo)
+	s.mu.Lock()
+	at, seen := s.secretAt[lk]
+	s.mu.Unlock()
+	// GitHub never shows a secret, so only ghr's own record shows a job key
+	// replaced under the same ID. With no record yet, as after a restart,
+	// the key_id is trusted.
+	writeSecret := !has || !found || cur.KeyID != keys.Job.ID || (seen && !at.Equal(keys.Job.SetAt))
+	if !writeSecret {
+		s.markSecret(lk, keys.Job.SetAt)
+	}
 	writeVar := !found || val != want
 	if !writeSecret && !writeVar {
 		return repoSync{state: "set"}
@@ -224,6 +241,7 @@ func (s *Service) syncOne(ctx context.Context, cfg *config.Config, keys Keys, re
 		if err != nil {
 			return repoSync{state: "error", err: s.rowErr(err, repo)}
 		}
+		s.markSecret(lk, keys.Job.SetAt)
 		wrote = append(wrote, "the "+artifact.SecretName+" secret")
 	}
 	if writeVar {
@@ -344,6 +362,9 @@ func (s *Service) SwitchOff(ctx context.Context, repo string) error {
 	if err := s.removeOurs(ctx, repo, found, false); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	delete(s.secretAt, strings.ToLower(repo))
+	s.mu.Unlock()
 	s.setSync(repo, repoSync{state: "off"})
 	return nil
 }

@@ -118,6 +118,7 @@ type Service struct {
 	cache     map[string]cacheEntry // object key → its details; nil until the first inventory loads it
 	private   map[string]bool       // lower-case repo → private, from the last visibility read
 	syncs     map[string]repoSync   // lower-case repo → its variable and secret state
+	secretAt  map[string]time.Time  // lower-case repo → SetAt of the job key ghr last wrote to, or found current in, its secret
 	deleted   map[string]time.Time  // object key → when deleted
 	deletions []model.Deletion      // newest first
 	op        *model.GitHubOperation
@@ -195,6 +196,7 @@ func (s *Service) init() {
 	s.kick = make(chan struct{}, 1)
 	s.private = map[string]bool{}
 	s.syncs = map[string]repoSync{}
+	s.secretAt = map[string]time.Time{}
 	s.deleted = map[string]time.Time{}
 	s.cleanupErr = map[string]string{}
 	if s.Budget == nil {
