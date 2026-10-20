@@ -64,7 +64,7 @@ ghr aborts multipart uploads left open for more than 24 hours, so the bucket nee
 
 ## Set up ghr
 
-1. **Grant the token two more permissions** on the repositories you will switch on: Variables: read and write, and Secrets: read and write. [Installation](installation.md#requirements) lists them with the others. Until you switch a repository on, the token can do without them: ghr reads each switched-off repository once after it starts, to remove anything of its own left there, and a refusal there counts as off.
+1. **Grant the token two more permissions** on the repositories you will switch on: Variables: read and write, and Secrets: read and write. [Installation](installation.md#requirements) lists them with the others. Until you switch a repository on, the token can do without them: ghr reads each switched-off repository once after it starts, to remove anything of its own left there, and a refusal there counts as off. A switched-off repository whose read failed, or that holds another ghr's variable, is read again on every pass.
 2. **Enter the connection** under Settings → Self-hosted storage: the endpoint (such as `https://s3.example.com`), the bucket and the region. RustFS accepts any region; keep `us-east-1` unless your server says otherwise. Press **Save changes**: Test connection checks the saved connection, not what is typed.
 3. **Enter both keys** with each key's **Set** button (it reads **Replace** once a key is set). ghr keeps them in `/etc/ghr/artifact-store-keys`, readable only by root, and shows only a shortened key ID afterwards. On the host, `ghr artifact-store set-key admin` and `ghr artifact-store set-key job` do the same: at a terminal they ask for the ID and the secret without echoing them, and from a file or pipe they read them as two lines:
 
@@ -124,7 +124,7 @@ jobs:
 - **Reference a release tag.** Replace `vX.Y.Z` with a ghr release, such as the one you run; Settings → Self-hosted storage shows the snippet with it filled in. The actions fetch `ghr-artifact` from that release and check it against the release's `ghr-artifact-checksums.txt` on every run. A commit SHA or branch fails with "reference a ghr release tag such as @vX.Y.Z, or set `version`".
 - **Pass the key per step.** Give `key` only to the upload and download steps, not to the job's `env`, so no other step sees it.
 - **Inputs.** The upload action takes the inputs of `actions/upload-artifact@v4`; the download action takes those of `actions/download-artifact@v4` except `repository`. Both also take `store` (the variable's value; `GHR_ARTIFACT_STORE` from the environment when empty), `key` and `version` (the release to fetch the tool from, when the reference is not a release tag).
-- **Outputs.** The upload sets `object-key` and `artifact-digest`; the download sets `download-path`.
+- **Outputs.** The upload sets `object-key` and `artifact-digest`; the download sets `download-path`. The upload's `artifact-id` and `artifact-url` are set only when it went to GitHub, and a download by `artifact-ids` always uses GitHub.
 - **Runners.** The tool is built for Linux on x64 and ARM64 and for Windows on x64. macOS runners are not supported.
 
 Adding the actions to a repository that is still off changes nothing: its variable is empty, so they run GitHub's actions.
