@@ -17,6 +17,11 @@ import (
 
 var ErrNoFiles = errors.New("no files matched")
 
+var (
+	maxExtractEntries        = 1_000_000
+	maxExtractBytes   uint64 = 64 << 30
+)
+
 type globPattern struct {
 	negate bool
 	segs   []string
@@ -307,27 +312,42 @@ func Extract(r io.ReaderAt, size int64, dest string) (files int, err error) {
 	if err != nil && !errors.Is(err, zip.ErrInsecurePath) {
 		return 0, err
 	}
+	if len(zr.File) > maxExtractEntries {
+		return 0, fmt.Errorf("the zip has more than %d entries", maxExtractEntries)
+	}
 	paths := make([]string, len(zr.File))
+	var total uint64
 	for i, f := range zr.File {
 		if paths[i], err = entryPath(f); err != nil {
 			return 0, err
 		}
+		// archive/zip fails an entry that inflates past its declared size, so
+		// the declared sizes bound what is written.
+		if f.UncompressedSize64 > maxExtractBytes-total {
+			return 0, fmt.Errorf("the zip's files come to over the %d GiB limit", maxExtractBytes>>30)
+		}
+		total += f.UncompressedSize64
 	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return 0, err
 	}
+	// os.Root refuses a symbolic link already in dest that points outside it.
+	root, err := os.OpenRoot(dest)
+	if err != nil {
+		return 0, err
+	}
+	defer root.Close()
 	for i, f := range zr.File {
-		target := filepath.Join(dest, paths[i])
 		if f.Mode().IsDir() {
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := root.MkdirAll(paths[i], 0o755); err != nil {
 				return files, err
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := root.MkdirAll(filepath.Dir(paths[i]), 0o755); err != nil {
 			return files, err
 		}
-		if err := extractFile(f, target); err != nil {
+		if err := extractFile(root, f, paths[i]); err != nil {
 			return files, err
 		}
 		files++
@@ -335,13 +355,13 @@ func Extract(r io.ReaderAt, size int64, dest string) (files int, err error) {
 	return files, nil
 }
 
-func extractFile(f *zip.File, target string) error {
+func extractFile(root *os.Root, f *zip.File, target string) error {
 	src, err := f.Open()
 	if err != nil {
 		return err
 	}
 	defer src.Close()
-	dst, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	dst, err := root.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}

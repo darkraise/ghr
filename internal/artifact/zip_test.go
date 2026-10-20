@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -247,6 +248,102 @@ func TestExtractRefusesEscapingEntries(t *testing.T) {
 		if entries, _ := os.ReadDir(parent); len(entries) != 0 {
 			t.Errorf("%q: wrote %v before refusing", tc.name, entries)
 		}
+	}
+}
+
+func oneFileZip(t *testing.T, name, body string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestExtractRefusesALinkOutOfTheDestination(t *testing.T) {
+	body := oneFileZip(t, "out/a.txt", "a")
+	outside := t.TempDir()
+	dest := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dest, "out")); err != nil {
+		t.Skipf("cannot create a symbolic link: %v", err)
+	}
+	if _, err := Extract(bytes.NewReader(body), int64(len(body)), dest); err == nil {
+		t.Fatal("wrote through a link that leaves the destination")
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("wrote %v outside the destination", entries)
+	}
+}
+
+func TestExtractFollowsALinkInsideTheDestination(t *testing.T) {
+	body := oneFileZip(t, "out/a.txt", "a")
+	dest := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dest, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("build", filepath.Join(dest, "out")); err != nil {
+		t.Skipf("cannot create a symbolic link: %v", err)
+	}
+	if n, err := Extract(bytes.NewReader(body), int64(len(body)), dest); err != nil || n != 1 {
+		t.Fatalf("extracted %d, %v", n, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dest, "build", "a.txt")); err != nil || string(got) != "a" {
+		t.Fatalf("build/a.txt = %q, %v", got, err)
+	}
+}
+
+// rawZip writes empty stored entries whose headers declare size bytes each, so
+// a test can claim a large archive without writing one.
+func rawZip(t *testing.T, entries int, size uint64) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for i := range entries {
+		if _, err := zw.CreateRaw(&zip.FileHeader{Name: fmt.Sprintf("f%d.txt", i), Method: zip.Store, UncompressedSize64: size}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestExtractRefusesAnOversizedArchive(t *testing.T) {
+	defer func(n int) { maxExtractEntries = n }(maxExtractEntries)
+	maxExtractEntries = 10
+	for _, tc := range []struct {
+		name    string
+		entries int
+		size    uint64
+		wantErr string
+	}{
+		{"too many entries", 11, 0, "more than 10 entries"},
+		{"too large", 2, maxExtractBytes/2 + 1, "over the 64 GiB limit"},
+		{"overflowing sizes", 2, 1 << 63, "over the 64 GiB limit"},
+	} {
+		body := rawZip(t, tc.entries, tc.size)
+		parent := t.TempDir()
+		dest := filepath.Join(parent, "dest")
+		_, err := Extract(bytes.NewReader(body), int64(len(body)), dest)
+		if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+			t.Errorf("%s: error %v, want %q", tc.name, err, tc.wantErr)
+		}
+		if entries, _ := os.ReadDir(parent); len(entries) != 0 {
+			t.Errorf("%s: wrote %v before refusing", tc.name, entries)
+		}
+	}
+	body := rawZip(t, 10, 0)
+	if n, err := Extract(bytes.NewReader(body), int64(len(body)), t.TempDir()); err != nil || n != 10 {
+		t.Fatalf("at the entry limit: extracted %d, %v", n, err)
 	}
 }
 
