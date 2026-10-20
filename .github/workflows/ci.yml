@@ -109,6 +109,22 @@ jobs:
           tar -C dist -czf dist/ghr_linux_amd64.tar.gz ghr
           tar -tzf dist/ghr_linux_amd64.tar.gz | grep -qx ghr/config.example.yaml
           (cd dist && sha256sum ghr_linux_amd64.tar.gz > checksums.txt)
+      - name: ghr-artifact
+        if: env.VERSION != ''
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          # These stay out of checksums.txt: older setup.sh copies verify every line of that file.
+          for target in linux/amd64 linux/arm64 windows/amd64; do
+            os=${target%/*}
+            arch=${target#*/}
+            ext=
+            [ "$os" != windows ] || ext=.exe
+            GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+              -o "dist/ghr-artifact_${os}_${arch}${ext}" ./cmd/ghr-artifact
+          done
+          (cd dist && sha256sum ghr-artifact_linux_amd64 ghr-artifact_linux_arm64 ghr-artifact_windows_amd64.exe > ghr-artifact-checksums.txt)
+          test "$(dist/ghr-artifact_linux_amd64 version)" = "$VERSION"
       - name: setup.sh
         if: env.VERSION != ''
         run: |
@@ -122,8 +138,14 @@ jobs:
           subject-path: |
             dist/ghr_linux_amd64.tar.gz
             dist/setup.sh
+            dist/ghr-artifact_linux_amd64
+            dist/ghr-artifact_linux_arm64
+            dist/ghr-artifact_windows_amd64.exe
       - name: publish
         if: env.VERSION != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$VERSION" dist/ghr_linux_amd64.tar.gz dist/checksums.txt dist/setup.sh --target "$GITHUB_SHA" --generate-notes
+        run: |
+          gh release create "$VERSION" dist/ghr_linux_amd64.tar.gz dist/checksums.txt dist/setup.sh \
+            dist/ghr-artifact_linux_amd64 dist/ghr-artifact_linux_arm64 dist/ghr-artifact_windows_amd64.exe \
+            dist/ghr-artifact-checksums.txt --target "$GITHUB_SHA" --generate-notes
