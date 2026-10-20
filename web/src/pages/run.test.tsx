@@ -49,6 +49,21 @@ describe("Run page", () => {
     expect(artifacts.getByText("Expired")).toBeInTheDocument()
   })
 
+  it("lists the run's RustFS artifacts once the store is set up", async () => {
+    const objects = fixtures.artifactStore.repos[0]?.items.filter((i) => i.run_id === 102) ?? []
+    mockApi(
+      runRoutes({
+        "GET /api/status": { ...fixtures.status, artifact_store: { used_bytes: 423751200, capacity_bytes: 50000000000, repos_on: 2 } },
+        "GET /api/artifact-store/darkmem/runs/102": objects,
+      }),
+    )
+    renderApp("/actions/darkmem/runs/102")
+    const artifacts = within(await screen.findByRole("region", { name: "Artifacts" }))
+    expect(await artifacts.findByRole("button", { name: "Download e2e-report" })).toBeInTheDocument()
+    expect(artifacts.getByRole("button", { name: "Copy a link to e2e-report" })).toBeInTheDocument()
+    expect(artifacts.getByRole("button", { name: "Download frontend-dist" })).toBeInTheDocument()
+  })
+
   it("draws the job graph with tiles linking to the job pages", async () => {
     mockApi(runRoutes())
     renderApp("/actions/darkmem/runs/102")

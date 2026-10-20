@@ -5,7 +5,7 @@ import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { memo, useId, type ReactNode } from "react"
 import { api } from "@/api/client"
-import { logSettling, useConfig, useJobLog, useRunAnnotations, useRunDetail } from "@/api/hooks"
+import { logSettling, useConfig, useJobLog, useRunAnnotations, useRunDetail, useStatus } from "@/api/hooks"
 import type { RunDetail, RunJob } from "@/api/types"
 import { LogViewer } from "@/components/log-viewer"
 import { ErrorLine } from "@/components/page/error-line"
@@ -187,6 +187,7 @@ function SummaryFacts({ run, owner, now }: { run: RunDetail; owner: string; now:
 
 function RunSummary({ run, owner }: { run: RunDetail; owner: string }) {
   const now = useNow()
+  const status = useStatus()
   const onAttempt = useAttemptNavigate(run)
   const annotations = useRunAnnotations(run.repo, run.id, run.attempt, isRunActive(run.status), true)
   const { jobLink, summaryLink } = linksFor(run)
@@ -201,7 +202,7 @@ function RunSummary({ run, owner }: { run: RunDetail; owner: string }) {
         <JobsTimeline run={run} now={now} jobLink={jobLink} />
       )}
       <AnnotationsSection data={annotations.data} error={annotations.error} onRetry={() => void annotations.refetch()} jobLink={jobLink} />
-      <ArtifactsSection repo={run.repo} artifacts={run.artifacts} />
+      <ArtifactsSection repo={run.repo} runId={run.id} artifacts={run.artifacts} selfHosted={status.data?.artifact_store !== undefined} />
     </RunFrame>
   )
 }
