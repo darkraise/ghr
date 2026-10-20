@@ -120,6 +120,22 @@ func TestExpiredObjectsAreCappedFirst(t *testing.T) {
 	}
 }
 
+func TestAnExpiryPastTheRetentionCapIsCapped(t *testing.T) {
+	e := newTestEnv(t)
+	e.cfg.ArtifactStore.Repos = map[string]config.ArtifactRepo{"darkmem": {Cleanup: "off"}}
+	now := e.clock.Now()
+	far := now.AddDate(10, 0, 0)
+	capped := e.putExpiring("darkmem", 1, "capped", artifact.MaxRetentionDays*day+time.Hour, far)
+	kept := e.putExpiring("darkmem", 2, "kept", artifact.MaxRetentionDays*day-time.Hour, far)
+	e.s.pass()
+	if got := e.srv.Keys(); !reflect.DeepEqual(got, []string{kept}) {
+		t.Fatalf("keys left %v, want only %s: %s is past the %d-day cap", got, kept, capped, artifact.MaxRetentionDays)
+	}
+	if d := e.s.Snapshot().Deletions; len(d) != 1 || d[0].By != "expired" {
+		t.Fatalf("deletions %+v, want one expired", d)
+	}
+}
+
 func TestAFailedActiveRunCheckSkipsOnlyTheAgeRule(t *testing.T) {
 	e := newTestEnv(t)
 	e.s.Describe = func(err error, repo string) string { return "described: " + err.Error() }

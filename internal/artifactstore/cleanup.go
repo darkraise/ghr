@@ -54,7 +54,10 @@ func (s *Service) cleanup(cfg *config.Config, b Bucket) {
 			continue
 		}
 		if o.Meta.Expires != nil {
-			if !now.Before(*o.Meta.Expires) {
+			// Only ghr-artifact caps retention-days, and the job key can write
+			// any metadata, so the cap is applied here too.
+			limit := o.LastModified.AddDate(0, 0, artifact.MaxRetentionDays)
+			if !now.Before(*o.Meta.Expires) || !now.Before(limit) {
 				expired = append(expired, pick{object: o, by: "expired", listed: true})
 			}
 			continue
