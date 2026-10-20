@@ -53,16 +53,19 @@ func (s *Service) cleanup(cfg *config.Config, b Bucket) {
 		if o.Repo == "" || !o.Headed {
 			continue
 		}
+		// A listing without a time would make the object look ancient, so
+		// only its own expiry applies to it.
+		known := !o.LastModified.IsZero()
 		if o.Meta.Expires != nil {
 			// Only ghr-artifact caps retention-days, and the job key can write
 			// any metadata, so the cap is applied here too.
 			limit := o.LastModified.AddDate(0, 0, artifact.MaxRetentionDays)
-			if !now.Before(*o.Meta.Expires) || !now.Before(limit) {
+			if !now.Before(*o.Meta.Expires) || (known && !now.Before(limit)) {
 				expired = append(expired, pick{object: o, by: "expired", listed: true})
 			}
 			continue
 		}
-		if age, _ := a.CleanupFor(o.Repo); age > 0 && now.Sub(o.LastModified) > age {
+		if age, _ := a.CleanupFor(o.Repo); known && age > 0 && now.Sub(o.LastModified) > age {
 			aged[o.Repo] = append(aged[o.Repo], pick{object: o, by: "cleanup", listed: true})
 		}
 	}

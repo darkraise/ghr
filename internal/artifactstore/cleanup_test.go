@@ -136,6 +136,25 @@ func TestAnExpiryPastTheRetentionCapIsCapped(t *testing.T) {
 	}
 }
 
+// A listing that gives no time must not make an object look ancient.
+func TestAnObjectWithoutATimeIsNotAged(t *testing.T) {
+	e := newTestEnv(t)
+	expiring := e.putExpiring("darkmem", 1, "expiring", time.Hour, e.clock.Now().AddDate(0, 0, 30))
+	plain := e.putArtifact("darkmem", 2, "plain", 5, time.Hour)
+	e.s.pass()
+	for i := range e.s.objects {
+		e.s.objects[i].LastModified = time.Time{}
+	}
+	b, err := e.s.NewBucket(e.cfg.ArtifactStore, s3.Credentials{AccessKeyID: adminID, SecretAccessKey: adminSecret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.s.cleanup(e.cfg, b)
+	if got, want := e.srv.Keys(), []string{expiring, plain}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("keys left %v, want %v", got, want)
+	}
+}
+
 func TestAFailedActiveRunCheckSkipsOnlyTheAgeRule(t *testing.T) {
 	e := newTestEnv(t)
 	e.s.Describe = func(err error, repo string) string { return "described: " + err.Error() }
