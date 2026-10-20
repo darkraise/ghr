@@ -8,6 +8,7 @@ The **Artifacts** page shows the month's use against the allowance and each repo
 
 1. **Lower the retention** to a few days on repositories whose artifacts are only used within their own run: a repository's Retention on the Artifacts page, or **Set retention** for all of them. GitHub's retention also limits how long it keeps runs and logs, which the Actions and log pages read.
 2. **Set a cleanup age** for the rest, under Settings → GitHub storage; a repository's own age is set in its row on the Artifacts page. At the end of each inventory, every 15 minutes, ghr deletes the artifacts older than it, oldest first and at most 100 at a time, skipping the artifacts of runs that have not completed. The global age is at least 24 hours; a repository's override may go down to 1 hour, or turn cleanup off for it.
+3. **Move artifacts off GitHub** for the repositories that upload the most: [Self-hosted artifacts](self-hosted-artifacts.md) stores them on your own S3 server, for jobs on GitHub-hosted runners too.
 
 Cleanup does not protect an artifact that a different run downloads later, such as one a `workflow_run` workflow, a download by run ID or a nightly job reading the last build needs.
 

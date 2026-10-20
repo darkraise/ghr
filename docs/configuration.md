@@ -26,6 +26,10 @@ web:
   trusted_proxies: [10.0.0.2]   # reverse proxies, as IPs or CIDR prefixes, whose X-Forwarded-For names the browser; see web-ui.md
 github_storage:             # see artifact-storage.md
   included_mb: 500
+artifact_store:             # self-hosted artifact storage; see self-hosted-artifacts.md
+  endpoint: https://s3.example.com
+  bucket: gha-artifacts
+  cleanup_max_age: 7d       # empty is 7d; off, or at least 24h
 jobs:                       # background tasks; see Background tasks below
   ghr_update_check: { enabled: true, every: 24h }
   runner_update_check: { enabled: true, every: 24h }
@@ -42,6 +46,8 @@ watch_repos: [other-repo]   # shown on the Actions page; ghr runs no runners for
 ```
 
 Durations take `s`, `m`, `h` and `d` suffixes.
+
+A ghr release from before [self-hosted artifacts](self-hosted-artifacts.md) refuses a config with an `artifact_store` block, because config loading rejects fields it does not know. Remove the block before downgrading.
 
 When a runner ends, ghr archives its diagnostic logs, the `Runner_*.log` and `Worker_*.log` files that `ghr logs` shows, each cut to its first 16 MiB, and removes them `history_retention` after the job ended. Step output is not kept; GitHub has it.
 
@@ -87,6 +93,8 @@ ghr token set < new-token.txt # or prompts
 ghr kill <id>                 # stop a runner
 ghr logs <id> [-f]            # a runner's diagnostic log
 ghr history [--repo r] [--conclusion c] [--limit n]
+ghr artifact-store            # the self-hosted artifact store: connection, totals and each repository
+ghr artifact-store set-key admin|job   # replace a key: prompts for its ID and secret, or reads them as two lines of stdin
 ghr update                    # ghr's and the runner's versions and update state
 ghr update --check            # run the update checks that are on, wait up to 60 s, then show
 ghr update ghr [--cancel]     # install the newest ghr release, or cancel the install before it replaces the files

@@ -24,6 +24,15 @@ The Artifacts page also covers every other repository of the owner the token can
 
 For an organization, reading storage use needs an organization admin's token with **Administration: read** on the organization. The quota can only be read when the token belongs to the owner. Without these permissions ghr runs jobs as usual, and the Artifacts page says which permission is missing.
 
+[Self-hosted artifacts](self-hosted-artifacts.md) also needs, on each repository you switch on:
+
+| Permission | Needed for |
+|---|---|
+| Variables: read and write | writing the `GHR_ARTIFACT_STORE` variable |
+| Secrets: read and write | writing the `GHR_ARTIFACT_KEY` secret |
+
+Without them a switched-on repository's row on the Artifacts page shows which permission is missing; switched-off repositories stay off.
+
 ## Install
 
 As root on the host:

@@ -9,9 +9,9 @@ ghr serves a browser UI with every page and action the `ghr` command offers. The
 | Actions | workflow runs of the served and watched repositories, with each run's job graph, annotations and searchable step logs |
 | History | finished jobs with their durations and conclusions |
 | Jobs | ghr's background tasks with their last and next run; run one now, turn it on or off and change its interval |
-| Artifacts | the month's GitHub storage quota and each repository's artifacts, caches, retention and cleanup; see [Artifact storage](artifact-storage.md) |
+| Artifacts | the month's GitHub storage quota and each repository's artifacts, caches, retention and cleanup; on the Self-hosted tab, the bucket's use and each repository's switch, artifacts and cleanup; see [Artifact storage](artifact-storage.md) and [Self-hosted artifacts](self-hosted-artifacts.md) |
 | Repositories | add and remove repositories, and set each one's caps, labels and pause |
-| Settings | scheduling, runner limits, disk, history and web access; the GitHub token, the storage policy, updates of ghr and the runner, and the account; toolchains, package caches and Docker's disk use |
+| Settings | scheduling, runner limits, disk, history and web access; the GitHub token, the storage policy, self-hosted storage, updates of ghr and the runner, and the account; toolchains, package caches and Docker's disk use |
 
 The UI updates live over one long-lived request and falls back to polling when it cannot hold it open.
 
@@ -55,3 +55,7 @@ On the network the UI is plain HTTP: the password and the session cookie cross i
 Settings › Updates shows the running ghr and runner versions. **Check now** runs both update checks that are on. When a newer ghr is out, **Install** replaces ghr and restarts it, as [Installation](installation.md#updating-ghr-from-the-web-ui-or-the-command-line) describes; the card follows each step, and the install can be cancelled until it starts replacing files. The runner part queues and cancels runner updates as before. A newer ghr is also announced above every page until it is installed or dismissed.
 
 The Jobs page lists the [background tasks](configuration.md#background-tasks). Its switches and intervals save to config.yaml through the save bar and apply without a restart. **Run now** runs a task at once; it is unavailable while the task is off, running or about to run.
+
+## Self-hosted artifacts
+
+The Artifacts page has two tabs, **GitHub** and **Self-hosted**, and the address keeps the one shown (`/artifacts?store=self-hosted`). **Policy** and **Check now** act on the tab's store. Before setup, the Self-hosted tab explains the feature and leads to Settings › Self-hosted storage, which holds the connection, the admin and job keys, a connection test, the cleanup age and capacity, and a workflow snippet to copy. A run's Artifacts card lists the artifacts of both stores. [Self-hosted artifacts](self-hosted-artifacts.md) describes the setup.
