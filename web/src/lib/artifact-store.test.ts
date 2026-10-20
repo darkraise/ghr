@@ -86,7 +86,7 @@ describe("expiryText", () => {
 
 describe("selfHostedSummary", () => {
   it("sums up the check, the cleanup and the repositories on", () => {
-    expect(selfHostedSummary(fixtures.artifactStore, fixtures.config, now)).toBe("Checked 14:00 · cleanup 7d (1 repository override) · 2 repositories use RustFS")
+    expect(selfHostedSummary(fixtures.artifactStore, fixtures.config, now)).toBe("Checked 14:00 · cleanup 7d (1 repository override) · 2 repositories on")
   })
 
   it("reads an empty global age as the 7-day default and counts one repository", () => {
@@ -96,7 +96,7 @@ describe("selfHostedSummary", () => {
       repos: fixtures.artifactStore.repos.map((r) => ({ ...r, cleanup_source: "global", enabled: r.name === "darkmem" })),
     }
     const config = { ...fixtures.config, artifact_store: { endpoint: "https://s3.example.sg", bucket: "gha-artifacts" } }
-    expect(selfHostedSummary(store, config, now)).toBe("Not checked yet · cleanup 7d · 1 repository uses RustFS")
+    expect(selfHostedSummary(store, config, now)).toBe("Not checked yet · cleanup 7d · 1 repository on")
   })
 
   it("says when nothing is set up, and nothing before the snapshot", () => {

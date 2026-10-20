@@ -39,7 +39,7 @@ export function ArtifactStoreUsage({ store }: { store: ArtifactStore }) {
       <div className={TILES}>
         <StatCard label="Used" value={used} unit={capacity > 0 ? `of ${humanBytes(capacity)}` : undefined} />
         <StatCard label="Artifacts" value={count(store.count)} />
-        <StatCard label="Repositories using RustFS" value={on} unit={`of ${privateRepos} private`} />
+        <StatCard label="Repositories on" value={on} unit={`of ${privateRepos} private`} />
         <StatCard label="Bucket" value={<span className="text-sm break-all">{`${host(store.endpoint)} / ${store.bucket ?? ""}`}</span>} />
       </div>
       <div className="flex flex-col gap-3 p-4">

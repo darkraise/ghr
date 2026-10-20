@@ -24,7 +24,7 @@ describe("ArtifactStoreUsage", () => {
     expect(within(used).getByText("423.8 MB")).toBeInTheDocument()
     expect(within(used).getByText("of 50.0 GB")).toBeInTheDocument()
     expect(within(within(card).getByRole("region", { name: "Artifacts" })).getByText("5")).toBeInTheDocument()
-    const on = within(card).getByRole("region", { name: "Repositories using RustFS" })
+    const on = within(card).getByRole("region", { name: "Repositories on" })
     expect(within(on).getByText("2")).toBeInTheDocument()
     expect(within(on).getByText("of 3 private")).toBeInTheDocument()
     expect(within(within(card).getByRole("region", { name: "Bucket" })).getByText("s3.example.sg / gha-artifacts")).toBeInTheDocument()

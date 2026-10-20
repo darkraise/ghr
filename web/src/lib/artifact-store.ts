@@ -83,5 +83,5 @@ export function selfHostedSummary(store: ArtifactStore | undefined, config: Conf
   const n = store.repos.filter((r) => r.cleanup_source === "override").length
   const overrides = n === 0 ? "" : ` (${n} repository override${n === 1 ? "" : "s"})`
   const on = store.repos.filter((r) => r.enabled).length
-  return `${checked} · cleanup ${globalCleanup(config)}${overrides} · ${repositories(on)} ${on === 1 ? "uses" : "use"} RustFS`
+  return `${checked} · cleanup ${globalCleanup(config)}${overrides} · ${repositories(on)} on`
 }
