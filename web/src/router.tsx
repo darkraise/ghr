@@ -15,6 +15,7 @@ import { RouteError } from "./components/route-error"
 import type { DetailTab } from "./components/runner-panel"
 import { Shell } from "./components/shell"
 import { parseActionsSearch, type ActionsSearch } from "./lib/actions"
+import { parseArtifactsSearch, type ArtifactsSearch } from "./lib/artifact-store"
 import { parseHistorySearch, type HistorySearch } from "./lib/history"
 import { loginSearch, safeRedirect } from "./lib/redirect"
 import { parseJobSearch, parseRunSearch, type JobSearch, type RunSearch } from "./lib/run-details"
@@ -165,7 +166,16 @@ const jobRoute = createRoute({
   component: JobPage,
   errorComponent: RunNotFound,
 })
-const artifactsRoute = createRoute({ getParentRoute: () => appRoute, path: "/artifacts", component: ArtifactsPage })
+const artifactsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/artifacts",
+  // As History: naming the key keeps a value the parser dropped from coming back.
+  validateSearch: (search: Record<string, unknown>): ArtifactsSearch => ({
+    store: undefined,
+    ...parseArtifactsSearch(search),
+  }),
+  component: ArtifactsPage,
+})
 const toolchainsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/toolchains",
