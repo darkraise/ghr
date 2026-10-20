@@ -213,12 +213,14 @@ type testEnv struct {
 	dir   string
 }
 
+var testStart = time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+
 // newTestEnv builds the environment. Its service runs no loop: the test runs
 // passes with e.s.pass(). The clock starts at 2026-10-15 12:00 UTC.
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 	e := &testEnv{t: t, gh: newFakeGH(), srv: s3test.NewServer(t, "gha"), dir: t.TempDir(),
-		clock: &fakeClock{t: time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)}}
+		clock: &fakeClock{t: testStart}}
 	e.cfg = &config.Config{Owner: "darkraise", Repos: []config.Repo{{Name: "darkmem"}},
 		ArtifactStore: config.ArtifactStore{Endpoint: e.srv.URL(), Bucket: "gha"}}
 	e.gh.addRepo("darkmem", true)

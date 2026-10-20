@@ -7,7 +7,7 @@ Release assets, caches and Packages stay on GitHub.
 ## How it works
 
 - **Two access keys.** ghr holds an **admin key**, which lists, reads and deletes the bucket's objects for the Artifacts page and cleanup and never leaves the host, and a **job key**, which can list, read and write the bucket but not delete.
-- **One variable and one secret per repository.** Turning a repository on makes ghr write two things into it: the `GHR_ARTIFACT_STORE` repository variable, which names the endpoint, bucket, region and the job key's ID, and the `GHR_ARTIFACT_KEY` repository secret, which holds the job key. Turning it off deletes both.
+- **One variable and one secret per repository.** Turning a repository on makes ghr write two things into it: the `GHR_ARTIFACT_STORE` repository variable, which names the endpoint, bucket, region, and the job key's ID and when it was set, and the `GHR_ARTIFACT_KEY` repository secret, which holds the job key. Turning it off deletes both.
 - **The actions decide per run.** `darkraise/ghr/actions/upload` and `/download` read the variable. When it is empty they run `actions/upload-artifact@v4` and `actions/download-artifact@v4` with the same inputs; when it is set they zip and upload to the bucket themselves, or download and unzip from it.
 - **Layout.** Each artifact is one object, `<owner>/<repo>/<run id>/<name>.zip`, zipped the way `actions/upload-artifact@v4` zips it.
 

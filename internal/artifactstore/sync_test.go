@@ -17,9 +17,14 @@ import (
 
 var forbidden = &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible by personal access token"}
 
-// storeJSON is the variable this environment's store writes with key id.
+// storeJSON is the variable this environment's store writes with key id,
+// set when the environment starts.
 func (e *testEnv) storeJSON(keyID string) string {
-	return artifact.Store{V: 1, Endpoint: e.srv.URL(), Bucket: "gha", Region: config.DefaultArtifactRegion, KeyID: keyID}.JSON()
+	return e.storeJSONAt(keyID, testStart)
+}
+
+func (e *testEnv) storeJSONAt(keyID string, setAt time.Time) string {
+	return artifact.Store{V: 1, Endpoint: e.srv.URL(), Bucket: "gha", Region: config.DefaultArtifactRegion, KeyID: keyID, KeySetAt: setAt}.JSON()
 }
 
 func (e *testEnv) enable(repo string) {
@@ -87,7 +92,7 @@ func TestSyncStates(t *testing.T) {
 			e.cfg.ArtifactStore.Region = "ap-southeast-1"
 			e.gh.vars["darkmem"], e.gh.secrets["darkmem"] = e.storeJSON(jobID), jobKey
 		}, "set", "", []string{setVar}, func(e *testEnv) string {
-			return artifact.Store{V: 1, Endpoint: e.srv.URL(), Bucket: "gha", Region: "ap-southeast-1", KeyID: jobID}.JSON()
+			return artifact.Store{V: 1, Endpoint: e.srv.URL(), Bucket: "gha", Region: "ap-southeast-1", KeyID: jobID, KeySetAt: testStart}.JSON()
 		}, jobKey, "artifact store: wrote the GHR_ARTIFACT_STORE variable"},
 		{"another daemon's variable", func(e *testEnv) {
 			e.enable("darkmem")
@@ -279,22 +284,114 @@ func TestSyncRewritesTheSecretWhenTheJobKeyIsReplacedUnderTheSameID(t *testing.T
 		t.Fatal(err)
 	}
 	e.s.pass()
-	want := []string{setSecret}
+	want := []string{setSecret, setVar}
 	if got := e.writes(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("writes %v after the job key was replaced, want %v", got, want)
 	}
 	if got := e.gh.secrets["darkmem"]; got != artifact.FormatKey(jobID, "rotated-secret") {
 		t.Fatalf("secret %q, want the replaced key", got)
 	}
+	if got, want := e.gh.vars["darkmem"], e.storeJSONAt(jobID, testStart.Add(time.Minute)); got != want {
+		t.Fatalf("variable %q, want %q", got, want)
+	}
 	if r := row(t, e.s.Snapshot(), "darkmem"); r.State != "set" || r.StateError != "" {
 		t.Fatalf("state %q, error %q; want set", r.State, r.StateError)
 	}
-	if n := len(eventsLike(e.s.Events, "artifact store: wrote the GHR_ARTIFACT_KEY secret")); n != 1 {
+	if n := len(eventsLike(e.s.Events, "artifact store: wrote the GHR_ARTIFACT_KEY secret and the GHR_ARTIFACT_STORE variable")); n != 1 {
 		t.Fatalf("events %q, want one secret write", eventsLike(e.s.Events, ""))
 	}
 	e.s.pass()
 	if got := e.writes(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("writes after a third pass %v, want none added", got)
+	}
+}
+
+func TestARestartStillRewritesASameIDReplacement(t *testing.T) {
+	e := newTestEnv(t)
+	e.enable("darkmem")
+	e.s.pass()
+	e.clock.Add(time.Minute)
+	if err := e.s.SetKey("job", jobID, "rotated-secret"); err != nil {
+		t.Fatal(err)
+	}
+	e.s = e.newService()
+	e.s.pass()
+	if got, want := e.writes(), []string{setSecret, setVar, setSecret, setVar}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("writes %v, want %v", got, want)
+	}
+	if got := e.gh.secrets["darkmem"]; got != artifact.FormatKey(jobID, "rotated-secret") {
+		t.Fatalf("secret %q, want the replaced key", got)
+	}
+}
+
+func TestSyncRetriesAFailedSecretWrite(t *testing.T) {
+	e := newTestEnv(t)
+	e.enable("darkmem")
+	e.s.pass()
+	e.clock.Add(time.Minute)
+	if err := e.s.SetKey("job", jobID, "rotated-secret"); err != nil {
+		t.Fatal(err)
+	}
+	e.gh.writeErr["darkmem"] = forbidden
+	e.s.pass()
+	if r := row(t, e.s.Snapshot(), "darkmem"); r.State != "error" {
+		t.Fatalf("state %q after a failed write, want error", r.State)
+	}
+	delete(e.gh.writeErr, "darkmem")
+	e.s.pass()
+	if got := e.gh.secrets["darkmem"]; got != artifact.FormatKey(jobID, "rotated-secret") {
+		t.Fatalf("secret %q after the retry, want the replaced key", got)
+	}
+}
+
+func TestSwitchOffDropsTheSecretRecord(t *testing.T) {
+	e := newTestEnv(t)
+	e.enable("darkmem")
+	e.s.pass()
+	if _, ok := e.s.secretKey["darkmem"]; !ok {
+		t.Fatal("no record after the secret was written")
+	}
+	if err := e.s.SwitchOff(context.Background(), "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := e.s.secretKey["darkmem"]; ok {
+		t.Fatalf("record %+v after SwitchOff, want none", got)
+	}
+}
+
+func TestSyncDropsTheRecordOfARepositoryThatLeftTheConfig(t *testing.T) {
+	e := newTestEnv(t)
+	e.cfg.WatchRepos = []string{"homelab"}
+	e.gh.addRepo("homelab", true)
+	e.enable("darkmem")
+	e.enable("homelab")
+	e.s.pass()
+	if _, ok := e.s.secretKey["homelab"]; !ok {
+		t.Fatal("no record for homelab after its secret was written")
+	}
+	e.cfg.WatchRepos = nil
+	delete(e.cfg.ArtifactStore.Repos, "homelab")
+	e.s.pass()
+	if got, ok := e.s.secretKey["homelab"]; ok {
+		t.Fatalf("homelab record %+v after it left the config, want none", got)
+	}
+	if _, ok := e.s.secretKey["darkmem"]; !ok {
+		t.Fatal("darkmem record dropped")
+	}
+}
+
+// With the variable unreadable only ghr's record describes the secret, so it
+// must tell keys apart by ID as well as by when they were set.
+func TestSyncRewritesTheSecretForANewKeyIDSetAtTheSameTime(t *testing.T) {
+	e := newTestEnv(t)
+	e.enable("darkmem")
+	e.gh.setVarErr["darkmem"] = forbidden
+	e.s.pass()
+	e.setKeys(Keys{Admin: &Key{ID: adminID, Secret: adminSecret, SetAt: testStart},
+		Job: &Key{ID: "NEWJOBKEY0002", Secret: "new-job-secret", SetAt: testStart}})
+	e.s.pass()
+	if got := e.gh.secrets["darkmem"]; got != "NEWJOBKEY0002:new-job-secret" {
+		t.Fatalf("secret %q, want the new key", got)
 	}
 }
 
@@ -359,7 +456,7 @@ func TestSyncRepo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Name != "darkmem" || r.State != "set" || !r.Private || !r.Enabled || e.gh.vars["darkmem"] != e.storeJSON(jobID) {
+	if r.Name != "darkmem" || r.State != "set" || !r.Private || !r.Enabled || e.gh.vars["darkmem"] != e.storeJSONAt(jobID, time.Time{}) {
 		t.Fatalf("row %+v, variable %q", r, e.gh.vars["darkmem"])
 	}
 	e.enable("homelab")

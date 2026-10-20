@@ -29,6 +29,7 @@ func (s *Service) rateLow() bool {
 // switch or job key saved during the pass is not undone. It stops while the
 // token is below the reserve kept for the runner manager.
 func (s *Service) syncRepos(cfg *config.Config) {
+	s.dropMarks(cfg)
 	if s.rateLow() {
 		return
 	}
@@ -88,10 +89,35 @@ func (s *Service) setSync(repo string, st repoSync) {
 	s.bump()
 }
 
-func (s *Service) markSecret(lk string, at time.Time) {
+// keyMark names a job key by its ID and the time it was set; together they
+// tell a key replaced under the same ID from the one before.
+type keyMark struct {
+	id    string
+	setAt time.Time
+}
+
+func (m keyMark) is(k *Key) bool { return m.id == k.ID && m.setAt.Equal(k.SetAt) }
+
+func (s *Service) markSecret(lk string, k *Key) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.secretAt[lk] = at
+	s.secretKey[lk] = keyMark{id: k.ID, setAt: k.SetAt}
+}
+
+// dropMarks forgets the secret record of every repository cfg no longer
+// covers.
+func (s *Service) dropMarks(cfg *config.Config) {
+	keep := map[string]bool{}
+	for _, repo := range covered(cfg) {
+		keep[strings.ToLower(repo)] = true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for lk := range s.secretKey {
+		if !keep[lk] {
+			delete(s.secretKey, lk)
+		}
+	}
 }
 
 func (s *Service) syncState(repo string) string {
@@ -208,7 +234,7 @@ func (s *Service) syncOne(ctx context.Context, cfg *config.Config, keys Keys, re
 	if keys.Job == nil {
 		return repoSync{state: "error", err: ErrNoJobKey.Error()}
 	}
-	want := artifact.Store{V: 1, Endpoint: a.Endpoint, Bucket: a.Bucket, Region: a.RegionOrDefault(), KeyID: keys.Job.ID}.JSON()
+	want := artifact.Store{V: 1, Endpoint: a.Endpoint, Bucket: a.Bucket, Region: a.RegionOrDefault(), KeyID: keys.Job.ID, KeySetAt: keys.Job.SetAt}.JSON()
 	has, err := s.secretExists(ctx, repo)
 	if err != nil {
 		return repoSync{state: "error", err: s.rowErr(err, repo)}
@@ -216,16 +242,20 @@ func (s *Service) syncOne(ctx context.Context, cfg *config.Config, keys Keys, re
 	cur, _ := artifact.ParseStore(val)
 	lk := strings.ToLower(repo)
 	s.mu.Lock()
-	at, seen := s.secretAt[lk]
+	mark, seen := s.secretKey[lk]
 	s.mu.Unlock()
-	// GitHub never shows a secret, so only ghr's own record shows a job key
-	// replaced under the same ID. With no record yet, as after a restart,
-	// the key_id is trusted. A token without Variables access reads the
-	// variable as missing, so with a record a missing variable alone does
-	// not rewrite the secret.
-	writeSecret := !has || (found && cur.KeyID != keys.Job.ID) || (seen && !at.Equal(keys.Job.SetAt)) || (!seen && !found)
+	// GitHub never shows a secret. ghr's own record of the key it wrote
+	// there wins; without one, as after a restart, the variable names the
+	// key written with it. A token without Variables access reads the
+	// variable as missing, so with a record a missing or stale variable
+	// alone does not rewrite the secret.
+	current := found && cur.KeyID == keys.Job.ID && cur.KeySetAt.Equal(keys.Job.SetAt)
+	if seen {
+		current = mark.is(keys.Job)
+	}
+	writeSecret := !has || !current
 	if !writeSecret {
-		s.markSecret(lk, keys.Job.SetAt)
+		s.markSecret(lk, keys.Job)
 	}
 	writeVar := !found || val != want
 	if !writeSecret && !writeVar {
@@ -246,7 +276,7 @@ func (s *Service) syncOne(ctx context.Context, cfg *config.Config, keys Keys, re
 		if err != nil {
 			return repoSync{state: "error", err: s.rowErr(err, repo)}
 		}
-		s.markSecret(lk, keys.Job.SetAt)
+		s.markSecret(lk, keys.Job)
 		wrote = append(wrote, "the "+artifact.SecretName+" secret")
 	}
 	if writeVar {
@@ -368,7 +398,7 @@ func (s *Service) SwitchOff(ctx context.Context, repo string) error {
 		return err
 	}
 	s.mu.Lock()
-	delete(s.secretAt, strings.ToLower(repo))
+	delete(s.secretKey, strings.ToLower(repo))
 	s.mu.Unlock()
 	s.setSync(repo, repoSync{state: "off"})
 	return nil

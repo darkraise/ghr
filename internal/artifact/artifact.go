@@ -29,6 +29,9 @@ type Store struct {
 	Bucket   string `json:"bucket"`
 	Region   string `json:"region"`
 	KeyID    string `json:"key_id"`
+	// KeySetAt is when the job key in GHR_ARTIFACT_KEY was set, so a key
+	// replaced under the same ID shows in the variable.
+	KeySetAt time.Time `json:"key_set_at,omitzero"`
 }
 
 func ParseStore(s string) (Store, error) {
