@@ -217,8 +217,10 @@ func (s *Service) syncOne(ctx context.Context, cfg *config.Config, keys Keys, re
 	s.mu.Unlock()
 	// GitHub never shows a secret, so only ghr's own record shows a job key
 	// replaced under the same ID. With no record yet, as after a restart,
-	// the key_id is trusted.
-	writeSecret := !has || !found || cur.KeyID != keys.Job.ID || (seen && !at.Equal(keys.Job.SetAt))
+	// the key_id is trusted. A token without Variables access reads the
+	// variable as missing, so with a record a missing variable alone does
+	// not rewrite the secret.
+	writeSecret := !has || (found && cur.KeyID != keys.Job.ID) || (seen && !at.Equal(keys.Job.SetAt)) || (!seen && !found)
 	if !writeSecret {
 		s.markSecret(lk, keys.Job.SetAt)
 	}

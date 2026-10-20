@@ -275,6 +275,22 @@ func TestSyncRewritesTheSecretWhenTheJobKeyIsReplacedUnderTheSameID(t *testing.T
 	}
 }
 
+// A token without Variables access reads the variable as missing, so only
+// ghr's record tells that the secret it wrote is still current.
+func TestSyncWritesTheSecretOnceWhileTheVariableWriteFails(t *testing.T) {
+	e := newTestEnv(t)
+	e.enable("darkmem")
+	e.gh.setVarErr["darkmem"] = forbidden
+	e.s.pass()
+	e.s.pass()
+	if got, want := e.writes(), []string{setSecret, setVar, setVar}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("writes %v over two passes, want %v", got, want)
+	}
+	if r := row(t, e.s.Snapshot(), "darkmem"); r.State != "error" {
+		t.Fatalf("state %q, want error", r.State)
+	}
+}
+
 func TestSyncShowsNoSecret(t *testing.T) {
 	e := newTestEnv(t)
 	e.enable("darkmem")

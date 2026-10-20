@@ -30,6 +30,7 @@ type fakeGH struct {
 	secrets   map[string]string                  // repo → GHR_ARTIFACT_KEY value
 	readErr   map[string]error                   // repo → the answer of every read of its variable and secret
 	writeErr  map[string]error                   // repo → the answer of every write to its variable and secret
+	setVarErr map[string]error                   // repo → the answer of every SetVariable, after writeErr
 	runs      map[string]map[string][]github.Run // repo → status → runs
 	runsErr   map[string]error
 	remaining int
@@ -40,7 +41,7 @@ func newFakeGH() *fakeGH {
 	return &fakeGH{
 		remaining: -1,
 		vars:      map[string]string{}, secrets: map[string]string{},
-		readErr: map[string]error{}, writeErr: map[string]error{},
+		readErr: map[string]error{}, writeErr: map[string]error{}, setVarErr: map[string]error{},
 		runs: map[string]map[string][]github.Run{}, runsErr: map[string]error{},
 	}
 }
@@ -106,6 +107,9 @@ func (f *fakeGH) SetVariable(_ context.Context, repo, name, value string) error 
 	defer f.mu.Unlock()
 	key := strings.ToLower(repo)
 	if err := f.writeErr[key]; err != nil {
+		return err
+	}
+	if err := f.setVarErr[key]; err != nil {
 		return err
 	}
 	f.vars[key] = value
