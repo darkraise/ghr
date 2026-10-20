@@ -334,6 +334,19 @@ func (c *Client) PruneScope(ctx context.Context, scope string) error {
 	return c.call(ctx, http.MethodPost, "/prune/"+url.PathEscape(scope), nil, nil)
 }
 
+// ArtifactStore returns the self-hosted artifact storage snapshot.
+func (c *Client) ArtifactStore(ctx context.Context) (model.ArtifactStore, error) {
+	var s model.ArtifactStore
+	err := c.call(ctx, http.MethodGet, "/artifact-store", nil, &s)
+	return s, err
+}
+
+// SetArtifactKey replaces the admin or the job key of self-hosted artifact
+// storage.
+func (c *Client) SetArtifactKey(ctx context.Context, req model.ArtifactKeyRequest) error {
+	return c.call(ctx, http.MethodPut, "/artifact-store/keys", jsonBody(req), nil)
+}
+
 // ResetWebPassword forgets the web UI password and ends its sessions. The
 // route exists on the Unix socket only.
 func (c *Client) ResetWebPassword(ctx context.Context) error {

@@ -138,6 +138,10 @@ const usage = `usage: ghr [command]
   cache list | clear <name>       clear is held the same way as toolchain rm
   prune [--scope <scope>]         standard (default), build-cache-keep,
                                   build-cache-all, dangling-images, unused-volumes
+  artifact-store                  self-hosted artifact storage: keys, usage, repositories
+  artifact-store set-key admin|job
+                                  replace a key (prompts, or reads the ID and the
+                                  secret as two lines of stdin)
   code                            web UI setup code, until a password is set
   web reset-password              forget the web UI password
   web set-password                set the web UI password (prompts, or reads stdin)

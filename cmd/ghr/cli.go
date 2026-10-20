@@ -117,6 +117,8 @@ func cli(ctx context.Context, c *api.Client, args []string, stdin io.Reader, out
 		return cacheCmd(ctx, c, args[1:], out)
 	case "prune":
 		return pruneCmd(ctx, c, args[1:], out)
+	case "artifact-store":
+		return artifactStoreCmd(ctx, c, args[1:], stdin, out, errOut)
 	case "setup":
 		return setupCmd(ctx, c, args[1:], stdin, out, errOut)
 	case "code":
@@ -410,6 +412,9 @@ func printStatus(out io.Writer, st model.Status) {
 	fmt.Fprintln(out, runnerLine(st))
 	if a := st.GitHubStorage; a != nil {
 		fmt.Fprintln(out, artifactsLine(*a))
+	}
+	if s := st.ArtifactStore; s != nil {
+		fmt.Fprintln(out, artifactStoreLine(*s))
 	}
 	if st.Degraded {
 		fmt.Fprintf(out, "DEGRADED: %s\n", safe(st.DegradedReason))

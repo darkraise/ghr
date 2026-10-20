@@ -83,6 +83,8 @@ func fakeDaemon(t *testing.T) *[]recorded {
 			json.NewEncoder(w).Encode(sampleStorage(now))
 		case r.URL.Path == "/toolchains/available":
 			json.NewEncoder(w).Encode([]model.ToolchainChoice{{Spec: "21", Version: "21.0.8+9", LTS: true}, {Spec: "24", Version: "24.0.2+12"}})
+		case r.URL.Path == "/artifact-store":
+			json.NewEncoder(w).Encode(sampleArtifactStore(now))
 		default:
 			w.WriteHeader(http.StatusNoContent)
 		}
@@ -820,5 +822,152 @@ func TestStatusPrintsTheArtifactQuota(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("artifacts line %q, want %q in:\n%s", got, tc.want, out.String())
 		}
+	}
+}
+
+func sampleArtifactStore(now time.Time) model.ArtifactStore {
+	checked := now.Add(-5 * time.Minute)
+	return model.ArtifactStore{
+		Configured: true, Endpoint: "https://s3.example.test", Bucket: "gha-artifacts", Region: "us-east-1",
+		AdminKey:  &model.ArtifactKeyInfo{ID: "ADMI…1234", SetAt: now.Add(-time.Hour)},
+		CheckedAt: &checked, UsedBytes: 12_400_000_000, Count: 321, CapacityBytes: 50_000_000_000, OtherBytes: 1_200_000_000,
+		Repos: []model.ArtifactStoreRepo{
+			{Name: "darkmem", Private: true, Enabled: true, State: "set", Cleanup: "3d", CleanupSource: "override", Bytes: 1_200_000_000, Count: 34},
+			{Name: "darkcloud", Private: true, State: "off", Cleanup: "7d", CleanupSource: "default"},
+			{Name: "homelab", Private: true, Enabled: true, State: "error",
+				StateError: "token lacks secrets=write on darkraise/homelab: grant it in the PAT settings", Cleanup: "7d", CleanupSource: "global"},
+		},
+		Deletions: []model.Deletion{},
+	}
+}
+
+func TestArtifactStoreCommandPrintsTheStore(t *testing.T) {
+	reqs := fakeDaemon(t)
+	code, out, errOut := runCLI(t, "", "artifact-store")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if r := (*reqs)[0]; r.method != "GET" || r.path != "/artifact-store" {
+		t.Fatalf("request %+v", r)
+	}
+	s := sampleArtifactStore(time.Date(2026, 10, 3, 14, 0, 0, 0, time.UTC))
+	for _, want := range []string{
+		"endpoint https://s3.example.test  bucket gha-artifacts  region us-east-1\n",
+		"admin key ADMI…1234 (set " + stamp(s.AdminKey.SetAt) + ")  job key not set\n",
+		"used 12.4 GB of 50.0 GB, 321 artifacts, 1.2 GB outside ghr's prefixes\n",
+		"listed " + stamp(*s.CheckedAt) + "\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	rows := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		if f := strings.Fields(line); len(f) > 0 {
+			rows[f[0]] = strings.Join(f, " ")
+		}
+	}
+	for _, want := range []string{
+		"REPO STATE ON SIZE ARTIFACTS CLEANUP",
+		"darkmem set on 1.2 GB 34 3d (override)",
+		"darkcloud off off 0 B 0 7d (default)",
+		"homelab error: token lacks secrets=write on darkraise/homelab: grant it in the PAT settings on 0 B 0 7d (global)",
+	} {
+		if got := rows[strings.Fields(want)[0]]; got != want {
+			t.Errorf("row %q, want %q in:\n%s", got, want, out)
+		}
+	}
+}
+
+func TestArtifactStoreCommandBeforeSetup(t *testing.T) {
+	var out bytes.Buffer
+	printArtifactStore(&out, model.ArtifactStore{Repos: []model.ArtifactStoreRepo{}})
+	if want := "self-hosted storage is not set up; set it up in the web UI under Settings › Self-hosted storage\n"; out.String() != want {
+		t.Fatalf("output %q", out.String())
+	}
+}
+
+func TestStatusPrintsTheArtifactStore(t *testing.T) {
+	for _, tc := range []struct {
+		summary *model.ArtifactStoreSummary
+		want    string
+	}{
+		{&model.ArtifactStoreSummary{UsedBytes: 12_400_000_000, CapacityBytes: 50_000_000_000, ReposOn: 2},
+			"artifact store: 12.4 GB of 50.0 GB, 2 repositories on"},
+		{&model.ArtifactStoreSummary{UsedBytes: 900_000_000, ReposOn: 1}, "artifact store: 900.0 MB, 1 repository on"},
+		{&model.ArtifactStoreSummary{}, "artifact store: 0 B, 0 repositories on"},
+		{&model.ArtifactStoreSummary{UsedBytes: 5, ReposOn: 2, Error: "no admin key set"}, "artifact store: no admin key set"},
+		{nil, ""},
+	} {
+		var out bytes.Buffer
+		printStatus(&out, model.Status{Mode: "queue", GlobalMax: 1, ArtifactStore: tc.summary})
+		got := ""
+		for _, line := range strings.Split(out.String(), "\n") {
+			if strings.HasPrefix(line, "artifact store") {
+				got = line
+			}
+		}
+		if got != tc.want {
+			t.Errorf("artifact store line %q, want %q in:\n%s", got, tc.want, out.String())
+		}
+	}
+}
+
+func TestArtifactStoreSetKeyReadsTwoLines(t *testing.T) {
+	reqs := fakeDaemon(t)
+	stubPasswordInput(t, false)
+	code, out, errOut := runCLI(t, "JOBKEY12345678\r\njob-secret-value\r\n", "artifact-store", "set-key", "job")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if r := (*reqs)[0]; r.method != "PUT" || r.path != "/artifact-store/keys" ||
+		r.body != `{"which":"job","id":"JOBKEY12345678","secret":"job-secret-value"}` {
+		t.Fatalf("request %+v", r)
+	}
+	if out != "job key set; switched-on repositories get it on the next pass\n" || strings.Contains(out+errOut, "job-secret-value") {
+		t.Fatalf("stdout %q stderr %q", out, errOut)
+	}
+}
+
+// At a terminal both halves are asked for without echo, so neither reaches
+// the screen or the scrollback.
+func TestArtifactStoreSetKeyPromptsAtATerminal(t *testing.T) {
+	reqs := fakeDaemon(t)
+	stubPasswordInput(t, true, "ADMINKEY1234", "admin-secret-value")
+	code, out, errOut := runCLI(t, "", "artifact-store", "set-key", "admin")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if r := (*reqs)[0]; r.body != `{"which":"admin","id":"ADMINKEY1234","secret":"admin-secret-value"}` {
+		t.Fatalf("request %+v", r)
+	}
+	if out != "admin key set\n" || errOut != "Access key ID: \nSecret access key: \n" {
+		t.Fatalf("stdout %q stderr %q", out, errOut)
+	}
+}
+
+func TestArtifactStoreSetKeyRefusals(t *testing.T) {
+	reqs := fakeDaemon(t)
+	stubPasswordInput(t, false)
+	for _, tc := range []struct {
+		stdin string
+		args  []string
+		code  int
+		err   string
+	}{
+		{"JOBKEY12345678\n", []string{"artifact-store", "set-key", "job"}, 1,
+			"ghr: give the access key ID and the secret access key on two lines of standard input\n"},
+		{"a\nb\nc\n", []string{"artifact-store", "set-key", "job"}, 1,
+			"ghr: give the access key ID and the secret access key on two lines of standard input\n"},
+		{"a\nb\n", []string{"artifact-store", "set-key", "root"}, 2, "ghr: usage: ghr artifact-store [set-key admin|job]\n"},
+		{"", []string{"artifact-store", "show"}, 2, "ghr: usage: ghr artifact-store [set-key admin|job]\n"},
+	} {
+		code, _, errOut := runCLI(t, tc.stdin, tc.args...)
+		if code != tc.code || !strings.HasPrefix(errOut, tc.err) {
+			t.Errorf("%v: exit %d stderr %q", tc.args, code, errOut)
+		}
+	}
+	if len(*reqs) != 0 {
+		t.Fatalf("a refused command reached the daemon: %v", *reqs)
 	}
 }
