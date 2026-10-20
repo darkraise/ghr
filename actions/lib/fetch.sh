@@ -33,7 +33,7 @@ dir="${RUNNER_TOOL_CACHE//\\//}/ghr-artifact/$version"
 bin="$dir/$asset"
 
 fetch() {
-  curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 600 -o "$2" "$1"
+  curl -fsSL --retry 3 --retry-delay 2 --retry-max-time 600 --retry-connrefused --connect-timeout 20 --max-time 600 -o "$2" "$1"
 }
 
 work=$(mktemp -d)
