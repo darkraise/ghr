@@ -615,6 +615,11 @@ func (b *Backend) PatchConfig(ctx context.Context, p model.ConfigPatch) error {
 				return err
 			}
 		}
+		if p.ArtifactStore != nil {
+			if err := applyArtifactStorePatch(c, p.ArtifactStore); err != nil {
+				return err
+			}
+		}
 		// Sorted, so the unknown task or bad interval reported is always the same one.
 		for _, name := range slices.Sorted(maps.Keys(p.Jobs)) {
 			jp := p.Jobs[name]

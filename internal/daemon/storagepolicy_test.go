@@ -143,3 +143,58 @@ func TestApplyArtifactStorePatch(t *testing.T) {
 		}
 	}
 }
+
+func TestPatchArtifactStore(t *testing.T) {
+	b, _, _ := newBackend(t)
+	if _, err := b.Store.Update(func(c *config.Config) error {
+		c.ArtifactStore.Repos = map[string]config.ArtifactRepo{"darkmem": {Enabled: true}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := patchJSON(t, b, `{"artifact_store":{"endpoint":"https://s3.example.sg","bucket":"gha-artifacts","region":"ap-southeast-1","cleanup_max_age":"2d","capacity_gb":50}}`); err != nil {
+		t.Fatal(err)
+	}
+	want := config.ArtifactStore{Endpoint: "https://s3.example.sg", Bucket: "gha-artifacts", Region: "ap-southeast-1", CleanupMaxAge: "2d", CapacityGB: 50,
+		Repos: map[string]config.ArtifactRepo{"darkmem": {Enabled: true}}}
+	if got := b.Store.Config().ArtifactStore; !reflect.DeepEqual(got, want) {
+		t.Fatalf("block %+v", got)
+	}
+	saved, _, err := config.Load(b.Store.ConfigPath)
+	if err != nil || !reflect.DeepEqual(saved.ArtifactStore, want) {
+		t.Fatalf("not persisted: %+v %v", saved.ArtifactStore, err)
+	}
+	for _, tc := range []struct {
+		body, want string
+	}{
+		{`{"endpoint":"http://s3.example.sg"}`, "artifact_store.endpoint must be an https URL without a path, query or user info"},
+		{`{"endpoint":"https://s3.example.sg/minio"}`, "artifact_store.endpoint must be an https URL without a path, query or user info"},
+		{`{"bucket":"GHA"}`, "artifact_store.bucket must be 3 to 63 lower-case letters"},
+		{`{"capacity_gb":-1}`, "artifact_store.capacity_gb must not be negative"},
+		{`{"cleanup_max_age":"soon"}`, `artifact_store.cleanup_max_age: invalid duration "soon"`},
+		{`{"cleanup_max_age":"23h"}`, "artifact_store.cleanup_max_age must be off or a duration of at least 24h"},
+		{`{"repos":{"darkmem":{"enabled":false}}}`, "artifact_store.repos is set per repository on the Artifacts page"},
+	} {
+		err := patchJSON(t, b, `{"artifact_store":`+tc.body+`}`)
+		if apiStatus(err) != 400 || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err %v, want 400 %q", tc.body, err, tc.want)
+		}
+	}
+	if got := b.Store.Config().ArtifactStore; !reflect.DeepEqual(got, want) {
+		t.Fatalf("a refused patch changed the block: %+v", got)
+	}
+	// Back to every default with no repository entries: the block is no longer written.
+	if _, err := b.Store.Update(func(c *config.Config) error { c.ArtifactStore.Repos = nil; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := patchJSON(t, b, `{"artifact_store":{"endpoint":"","bucket":"","region":"us-east-1","cleanup_max_age":"7d","capacity_gb":0}}`); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.Store.Config().ArtifactStore; !reflect.DeepEqual(got, config.ArtifactStore{}) {
+		t.Fatalf("block %+v", got)
+	}
+	data, err := os.ReadFile(b.Store.ConfigPath)
+	if err != nil || strings.Contains(string(data), "artifact_store") {
+		t.Fatalf("default block saved: %v\n%s", err, data)
+	}
+}
