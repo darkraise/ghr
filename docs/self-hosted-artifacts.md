@@ -60,7 +60,7 @@ The server must be reachable over HTTPS at one address from every runner, GitHub
 
 ghr aborts multipart uploads left open for more than 24 hours, so the bucket needs no lifecycle rule for them.
 
-**Behind Cloudflare's proxy.** Through a Cloudflare tunnel to a RustFS server, signed HEAD requests were refused with 403, so ghr reads object details with a ranged GET instead. Uploads whose requests ran longer than about 100 seconds still failed with a 524 timeout. For large uploads, point ghr and the runners at the store's direct address where you can.
+**Behind Cloudflare's proxy.** Through a Cloudflare tunnel to a RustFS server, signed HEAD requests were refused with 403 and Range headers were dropped, so ghr reads object details from the headers of a plain GET. Uploads whose requests ran longer than about 100 seconds still failed with a 524 timeout. For large uploads, point ghr and the runners at the store's direct address where you can.
 
 ## Set up ghr
 
