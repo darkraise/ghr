@@ -413,8 +413,10 @@ func (s *Service) setListErr(msg string) {
 }
 
 // inventory lists the whole bucket and reads the details of new or changed
-// objects. A failed listing keeps the last one with the error and reports
-// false.
+// objects. It reports whether the cleanup may run on the listing: not after
+// a failed listing, which keeps the last one with the error, nor after one
+// where an object vanished before its details were read, since a bucket
+// deleted after the listing answers those reads the same way.
 func (s *Service) inventory(cfg *config.Config, b Bucket) bool {
 	ctx, cancel := context.WithTimeout(s.ctx, listTimeout)
 	listed, err := b.List(ctx, "")
@@ -429,7 +431,9 @@ func (s *Service) inventory(cfg *config.Config, b Bucket) bool {
 	if cache == nil {
 		cache = s.loadCache()
 	}
-	objs := s.details(s.ctx, b, classify(listed, cfg.Owner), cache)
+	classified := classify(listed, cfg.Owner)
+	n := len(classified)
+	objs := s.details(s.ctx, b, classified, cache)
 	if s.ctx.Err() != nil {
 		return false
 	}
@@ -455,6 +459,10 @@ func (s *Service) inventory(cfg *config.Config, b Bucket) bool {
 	s.objects = slices.DeleteFunc(objs, s.isDeleted)
 	s.checkedAt, s.listErr, s.listedFor = now, "", connKey(cfg.ArtifactStore)
 	s.bump()
+	if vanished := n - len(objs); vanished > 0 {
+		log.Printf("artifact store: cleanup waits for the next pass: %d objects vanished after the listing", vanished)
+		return false
+	}
 	return true
 }
 
@@ -737,5 +745,3 @@ func (s *Service) Summary() *model.ArtifactStoreSummary {
 	}
 	return out
 }
-
-func (s *Service) cleanup(cfg *config.Config, b Bucket) {}
