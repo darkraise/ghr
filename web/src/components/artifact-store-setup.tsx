@@ -116,7 +116,7 @@ function KeyForm({ which, replacing, onClose }: { which: ArtifactKeyWhich; repla
         <Label htmlFor="artifact-key-id">Access key ID</Label>
         <Input id="artifact-key-id" autoComplete="off" className="font-mono" value={id} onChange={(e) => setId(e.target.value)} />
         <Label htmlFor="artifact-key-secret">Secret access key</Label>
-        <Input id="artifact-key-secret" type="password" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} />
+        <Input id="artifact-key-secret" type="password" autoComplete="new-password" value={secret} onChange={(e) => setSecret(e.target.value)} />
         {error && <ErrorLine>{error}</ErrorLine>}
       </DialogBody>
       <DialogFooter>

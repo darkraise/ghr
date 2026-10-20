@@ -117,7 +117,7 @@ function ReplaceTokenForm({ onClose }: { onClose: () => void }) {
       </DialogHeader>
       <DialogBody className="flex flex-col gap-2">
         <Label htmlFor="new-token">Token</Label>
-        <Input id="new-token" type="password" autoComplete="off" value={text} onChange={(e) => setText(e.target.value)} />
+        <Input id="new-token" type="password" autoComplete="new-password" value={text} onChange={(e) => setText(e.target.value)} />
         {error && <ErrorLine>{error}</ErrorLine>}
       </DialogBody>
       <DialogFooter>

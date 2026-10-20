@@ -90,7 +90,7 @@ function GitHubStep({ owner, onSaved }: { owner: string; onSaved: () => void }) 
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor="token">Token</Label>
-        <Input id="token" type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} />
+        <Input id="token" type="password" autoComplete="new-password" value={token} onChange={(e) => setToken(e.target.value)} />
         <p className="text-xs text-muted-foreground">
           A fine-grained PAT with {TOKEN_PERMISSIONS}
         </p>

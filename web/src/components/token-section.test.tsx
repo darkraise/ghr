@@ -82,6 +82,7 @@ describe("GitHub token section", () => {
     await user.click(within(dialog).getByRole("button", { name: "Replace" }))
     expect(within(dialog).getByText("Paste the new token first")).toBeInTheDocument()
 
+    expect(within(dialog).getByLabelText("Token")).toHaveAttribute("autocomplete", "new-password")
     await user.type(within(dialog).getByLabelText("Token"), "github_pat_new")
     await user.click(within(dialog).getByRole("button", { name: "Replace" }))
     const ask = await screen.findByRole("alertdialog")

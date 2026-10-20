@@ -22,6 +22,7 @@ afterEach(() => {
 async function submitGitHub(user: ReturnType<typeof renderApp>["user"], owner: string | null) {
   await screen.findByRole("heading", { name: "Set up ghr" })
   if (owner !== null) await user.type(screen.getByLabelText("GitHub owner"), owner)
+  expect(screen.getByLabelText("Token")).toHaveAttribute("autocomplete", "new-password")
   await user.type(screen.getByLabelText("Token"), "tok")
   await user.click(screen.getByRole("button", { name: "Save and start ghr" }))
 }

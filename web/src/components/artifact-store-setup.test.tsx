@@ -43,6 +43,7 @@ describe("Self-hosted storage keys", () => {
     const dialog = await screen.findByRole("dialog")
     expect(within(dialog).getByText("Replace the job key")).toBeInTheDocument()
     expect(within(dialog).getByLabelText("Secret access key")).toHaveAttribute("type", "password")
+    expect(within(dialog).getByLabelText("Secret access key")).toHaveAttribute("autocomplete", "new-password")
     await user.type(within(dialog).getByLabelText("Access key ID"), "JOBKNEWKEY01")
     await user.type(within(dialog).getByLabelText("Secret access key"), "s3cr3t-value")
     await user.click(within(dialog).getByRole("button", { name: "Save" }))
