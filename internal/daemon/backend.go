@@ -688,6 +688,10 @@ func (b *Backend) PatchConfig(ctx context.Context, p model.ConfigPatch) error {
 	if p.GitHubStorage != nil && b.GHS != nil {
 		b.GHS.PolicyChanged()
 	}
+	if p.ArtifactStore != nil && b.AS != nil {
+		b.AS.PolicyChanged()
+		b.AS.Kick()
+	}
 	return nil
 }
 
@@ -781,15 +785,23 @@ func (b *Backend) WatchRepo(ctx context.Context, name string) error {
 	return nil
 }
 
-// UnwatchRepo never calls GitHub, so a repository GitHub no longer shows can
-// always be unwatched. The check runs inside the update so two concurrent
-// removals cannot both succeed.
+// UnwatchRepo calls GitHub only to switch off the repository's self-hosted
+// storage, so a repository whose storage is off can always be unwatched, even
+// one GitHub no longer shows. The check runs again inside the update so two
+// concurrent removals cannot both succeed.
 func (b *Backend) UnwatchRepo(name string) error {
+	if !b.Store.Config().Watched(name) {
+		return api.NotFound("repo " + name + " is not watched")
+	}
+	if err := b.switchOffArtifacts(name, "it is still watched"); err != nil {
+		return err
+	}
 	if err := b.update(func(c *config.Config) error {
 		if !c.Watched(name) {
 			return api.NotFound("repo " + name + " is not watched")
 		}
 		c.WatchRepos = slices.DeleteFunc(c.WatchRepos, func(w string) bool { return strings.EqualFold(w, name) })
+		dropArtifactRepo(&c.ArtifactStore, name)
 		return nil
 	}); err != nil {
 		return err
@@ -800,10 +812,14 @@ func (b *Backend) UnwatchRepo(name string) error {
 
 // RemoveRepo pauses the repo and records the removal in config.yaml (paused +
 // removing in one write), so it survives a restart; FinalizeRemovals deletes the
-// repo once its runners are gone. A per-repo resume cancels it.
+// repo once its runners are gone. A per-repo resume cancels it. Self-hosted
+// storage is switched off first and stays off when the removal is cancelled.
 func (b *Backend) RemoveRepo(name string) error {
 	if b.Store.Config().Repo(name) == nil {
 		return api.NotFound("unknown repo " + name)
+	}
+	if err := b.switchOffArtifacts(name, "it was not removed"); err != nil {
+		return err
 	}
 	if err := b.update(func(c *config.Config) error {
 		r := c.Repo(name)
@@ -812,6 +828,7 @@ func (b *Backend) RemoveRepo(name string) error {
 		}
 		r.Paused = true
 		r.Removing = true
+		dropArtifactRepo(&c.ArtifactStore, name)
 		return nil
 	}); err != nil {
 		return err
@@ -853,6 +870,7 @@ func (b *Backend) FinalizeRemovals() {
 				}
 			}
 			c.Repos = out
+			dropArtifactRepo(&c.ArtifactStore, name)
 			return nil
 		})
 		switch {
@@ -924,6 +942,9 @@ func (b *Backend) SetToken(ctx context.Context, token string) error {
 	b.GH.ForgetCache()
 	if b.GHS != nil {
 		b.GHS.TokenChanged()
+	}
+	if b.AS != nil {
+		b.AS.Kick()
 	}
 	b.dropLabelChecks()
 	b.M.ClearDegraded()
@@ -1032,6 +1053,10 @@ func (b *Backend) Reload() ([]string, error) {
 		} else {
 			b.GHS.Kick()
 		}
+	}
+	if b.AS != nil {
+		b.AS.PolicyChanged()
+		b.AS.Kick()
 	}
 	if b.Wake != nil {
 		b.Wake()
