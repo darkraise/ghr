@@ -55,6 +55,8 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "upload":
 		err = upload(ctx, args[1:], env, stdout, stderr)
+	case "download":
+		err = download(ctx, args[1:], env, stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return 0
@@ -68,6 +70,8 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	switch {
 	case err == nil, errors.Is(err, flag.ErrHelp):
 		return 0
+	case errors.Is(err, errMissing):
+		return 3
 	case errors.As(err, &ue):
 		if ue != "" {
 			fmt.Fprintln(stderr, "ghr-artifact:", ue)
@@ -221,6 +225,8 @@ const usage = `usage: ghr-artifact <command> [flags]
 
   upload --name <name> --path <paths> [--retention-days n] [--if-no-files-found warn|error|ignore]
          [--overwrite] [--compression-level 0-9] [--include-hidden-files]
+  download [--name <name> | --pattern <glob>] [--merge-multiple] [--path <dir>] [--run-id <id>]
+           exits 3 when nothing matched
   version
 
 Every command takes --store and --key, which default to $GHR_ARTIFACT_STORE and $GHR_ARTIFACT_KEY.
