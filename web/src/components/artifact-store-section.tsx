@@ -1,6 +1,7 @@
 import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { NumberField } from "@/components/number-field"
+import { ConnectionCheck, KeyFields, WorkflowsCard } from "@/components/artifact-store-setup"
 import { ErrorLine } from "@/components/page/error-line"
 import { Field, FieldGroup, FieldInput } from "@/components/page/field"
 import { SaveBar } from "@/components/save-bar"
@@ -67,6 +68,8 @@ export function ArtifactStoreSection() {
                   onChange={(e) => form.set("region")(e.target.value)}
                 />
               </Field>
+              <KeyFields offline={offline} />
+              <ConnectionCheck offline={offline} />
             </FieldGroup>
             <FieldGroup id="artifact-policy" title="Policy">
               <Field
@@ -103,6 +106,7 @@ export function ArtifactStoreSection() {
                 />
               </Field>
             </FieldGroup>
+            <WorkflowsCard />
           </div>
           <SaveBar count={form.changed.length} saving={form.saving} disabled={offline} onSave={() => void form.save()} onDiscard={form.discard} />
           <UnsavedGuard count={form.changed.length} page="Self-hosted storage" saving={form.saving} onSave={form.save} onDiscard={form.discard} />
