@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"github.com/darkraise/ghr/internal/artifact"
+	"github.com/darkraise/ghr/internal/endpoint"
 	"github.com/darkraise/ghr/internal/s3"
 	"github.com/darkraise/ghr/internal/s3/s3test"
 )
@@ -25,20 +28,27 @@ const (
 )
 
 type harness struct {
-	srv    *s3test.Server
-	env    map[string]string
-	ws     string
-	temp   string
-	output string
+	srv      *s3test.Server
+	env      map[string]string
+	ws       string
+	temp     string
+	output   string
+	settings string
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	srv := s3test.NewServer(t, "gha")
+	return harnessOn(t, s3test.NewServer(t, "gha"))
+}
+
+// harnessOn runs ghr-artifact against srv, with a settings file naming srv
+// and the test job key in GHR_ARTIFACT_SETTINGS.
+func harnessOn(t *testing.T, srv *s3test.Server) *harness {
+	t.Helper()
 	srv.CheckAuth(s3.Credentials{AccessKeyID: testKeyID, SecretAccessKey: testSecret}, "us-east-1")
 	orig := newClient
-	newClient = func(store artifact.Store, cred s3.Credentials) (*s3.Client, error) {
-		c, err := s3.New(store.Endpoint, store.Bucket, store.Region, cred)
+	newClient = func(st artifact.Settings) (*s3.Client, error) {
+		c, err := orig(st)
 		if err != nil {
 			return nil, err
 		}
@@ -47,7 +57,8 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { newClient = orig })
 	dir := t.TempDir()
-	h := &harness{srv: srv, ws: filepath.Join(dir, "ws"), temp: filepath.Join(dir, "temp"), output: filepath.Join(dir, "output")}
+	h := &harness{srv: srv, ws: filepath.Join(dir, "ws"), temp: filepath.Join(dir, "temp"), output: filepath.Join(dir, "output"),
+		settings: filepath.Join(dir, "artifact-store.json")}
 	for _, d := range []string{h.ws, h.temp} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
@@ -56,22 +67,33 @@ func newHarness(t *testing.T) *harness {
 	if err := os.WriteFile(h.output, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	store := artifact.Store{V: 1, Endpoint: srv.URL(), Bucket: "gha", Region: "us-east-1", KeyID: testKeyID}
+	h.writeSettings(t, h.validSettings().JSON())
 	h.env = map[string]string{
-		"GHR_ARTIFACT_STORE": store.JSON(),
-		"GHR_ARTIFACT_KEY":   artifact.FormatKey(testKeyID, testSecret),
-		"GITHUB_REPOSITORY":  "Darkraise/Demo",
-		"GITHUB_RUN_ID":      "100",
-		"GITHUB_RUN_ATTEMPT": "1",
-		"GITHUB_WORKFLOW":    "CI",
-		"GITHUB_JOB":         "build",
-		"GITHUB_SHA":         "abc123",
-		"GITHUB_REF_NAME":    "main",
-		"GITHUB_WORKSPACE":   h.ws,
-		"RUNNER_TEMP":        h.temp,
-		"GITHUB_OUTPUT":      h.output,
+		"GHR_ARTIFACT_SETTINGS": h.settings,
+		"GITHUB_REPOSITORY":     "Darkraise/Demo",
+		"GITHUB_RUN_ID":         "100",
+		"GITHUB_RUN_ATTEMPT":    "1",
+		"GITHUB_WORKFLOW":       "CI",
+		"GITHUB_JOB":            "build",
+		"GITHUB_SHA":            "abc123",
+		"GITHUB_REF_NAME":       "main",
+		"GITHUB_WORKSPACE":      h.ws,
+		"RUNNER_TEMP":           h.temp,
+		"GITHUB_OUTPUT":         h.output,
 	}
 	return h
+}
+
+func (h *harness) validSettings() artifact.Settings {
+	return artifact.Settings{V: artifact.SettingsVersion, Endpoint: h.srv.URL(), Bucket: "gha", Region: "us-east-1",
+		KeyID: testKeyID, Secret: testSecret}
+}
+
+func (h *harness) writeSettings(t *testing.T, b []byte) {
+	t.Helper()
+	if err := os.WriteFile(h.settings, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (h *harness) run(t *testing.T, args ...string) (code int, stdout, stderr string) {
@@ -358,48 +380,184 @@ func TestUploadNoFiles(t *testing.T) {
 	}
 }
 
-func TestStoreAndKeyErrors(t *testing.T) {
-	other := artifact.Store{V: 1, Endpoint: "https://s3.example.sg", Bucket: "gha", Region: "us-east-1", KeyID: testKeyID}
+func TestSettingsErrors(t *testing.T) {
+	type edit func(t *testing.T, h *harness)
+	settings := func(change func(st *artifact.Settings)) edit {
+		return func(t *testing.T, h *harness) {
+			st := h.validSettings()
+			change(&st)
+			h.writeSettings(t, st.JSON())
+		}
+	}
 	for _, tc := range []struct {
-		name     string
-		env      map[string]string
-		args     []string
-		wantCode int
-		want     string
+		name string
+		edit edit
+		args func(h *harness) []string
+		want func(h *harness) string
 	}{
-		{"empty key", map[string]string{"GHR_ARTIFACT_KEY": ""}, nil, 1,
-			"ghr-artifact: pass key: ${{ secrets.GHR_ARTIFACT_KEY }} to the action\n"},
-		{"key from another job key", map[string]string{"GHR_ARTIFACT_KEY": "OLDKEY:" + testSecret}, nil, 1,
-			"ghr-artifact: GHR_ARTIFACT_KEY is out of date; turn the repository off and on in ghr\n"},
-		{"malformed key", map[string]string{"GHR_ARTIFACT_KEY": testSecret}, nil, 1,
-			"ghr-artifact: GHR_ARTIFACT_KEY: the key is not in the form <access key id>:<secret>\n"},
-		{"empty store", map[string]string{"GHR_ARTIFACT_STORE": ""}, nil, 1,
-			"ghr-artifact: GHR_ARTIFACT_STORE: the store is empty\n"},
-		{"--key overrides the environment", map[string]string{"GHR_ARTIFACT_KEY": ""},
-			[]string{"--key", artifact.FormatKey("OLDKEY", testSecret)}, 1,
-			"ghr-artifact: GHR_ARTIFACT_KEY is out of date; turn the repository off and on in ghr\n"},
-		{"--store overrides the environment", map[string]string{"GHR_ARTIFACT_STORE": ""},
-			[]string{"--store", strings.Replace(other.JSON(), `"v":1`, `"v":9`, 1)}, 1,
-			"ghr-artifact: GHR_ARTIFACT_STORE: store version 9 is not supported; use a newer ghr-artifact\n"},
-		{"invalid name", nil, []string{"--name", "a/b"}, 1, `ghr-artifact: the artifact name is not valid: "a/b". Contains the following character: Forward slash /.`},
-		{"no repository", map[string]string{"GITHUB_REPOSITORY": ""}, nil, 1,
-			`ghr-artifact: GITHUB_REPOSITORY "" is not owner/repo; run ghr-artifact in a GitHub Actions job` + "\n"},
+		{name: "no path",
+			edit: func(t *testing.T, h *harness) { h.env["GHR_ARTIFACT_SETTINGS"] = "" },
+			want: func(h *harness) string {
+				return "ghr-artifact: no settings file: pass --settings or set GHR_ARTIFACT_SETTINGS; ghr's upload and download actions pass the file ghr wrote for its runner\n"
+			}},
+		{name: "missing file",
+			edit: func(t *testing.T, h *harness) { os.Remove(h.settings) },
+			want: func(h *harness) string {
+				return "ghr-artifact: ghr's artifact store settings " + h.settings + " do not exist; this job did not run on a ghr runner switched on for self-hosted storage\n"
+			}},
+		{name: "a directory",
+			edit: func(t *testing.T, h *harness) {
+				os.Remove(h.settings)
+				if err := os.Mkdir(h.settings, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: func(h *harness) string {
+				return "ghr-artifact: cannot read ghr's artifact store settings " + h.settings + ": is a directory\n"
+			}},
+		{name: "unreadable file",
+			edit: func(t *testing.T, h *harness) {
+				if os.Geteuid() == 0 {
+					t.Skip("root reads a file of any mode")
+				}
+				if err := os.Chmod(h.settings, 0); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: func(h *harness) string {
+				return "ghr-artifact: cannot read ghr's artifact store settings " + h.settings + ": permission denied\n"
+			}},
+		{name: "malformed JSON",
+			edit: func(t *testing.T, h *harness) {
+				b := h.validSettings().JSON()
+				h.writeSettings(t, b[:len(b)-1])
+			},
+			want: func(h *harness) string {
+				return "ghr-artifact: ghr's artifact store settings " + h.settings + ": the settings are not valid JSON\n"
+			}},
+		{name: "unsupported version",
+			edit: settings(func(st *artifact.Settings) { st.V = 2 }),
+			want: func(h *harness) string {
+				return "ghr-artifact: ghr's artifact store settings " + h.settings + ": settings version 2 is not supported; use a newer ghr-artifact\n"
+			}},
+		{name: "refused endpoint",
+			edit: settings(func(st *artifact.Settings) { st.Endpoint = "http://s3.example.com" }),
+			want: func(h *harness) string {
+				return "ghr-artifact: ghr's artifact store settings " + h.settings + ": the endpoint is refused: " + endpoint.MsgHTTPName + "\n"
+			}},
+		{name: "no bucket",
+			edit: settings(func(st *artifact.Settings) { st.Bucket = "" }),
+			want: func(h *harness) string {
+				return "ghr-artifact: ghr's artifact store settings " + h.settings + ": the settings name no bucket\n"
+			}},
+		{name: "no region",
+			edit: settings(func(st *artifact.Settings) { st.Region = "" }),
+			want: func(h *harness) string {
+				return "ghr-artifact: ghr's artifact store settings " + h.settings + ": the settings name no region\n"
+			}},
+		{name: "no key ID",
+			edit: settings(func(st *artifact.Settings) { st.KeyID = "" }),
+			want: func(h *harness) string {
+				return "ghr-artifact: ghr's artifact store settings " + h.settings + ": the settings name no key_id\n"
+			}},
+		{name: "no secret",
+			edit: settings(func(st *artifact.Settings) { st.Secret = "" }),
+			want: func(h *harness) string {
+				return "ghr-artifact: ghr's artifact store settings " + h.settings + ": the settings name no secret\n"
+			}},
+		{name: "--settings overrides the environment",
+			args: func(h *harness) []string { return []string{"--settings", h.settings + ".other"} },
+			want: func(h *harness) string {
+				return "ghr-artifact: ghr's artifact store settings " + h.settings + ".other do not exist; this job did not run on a ghr runner switched on for self-hosted storage\n"
+			}},
+		{name: "invalid name",
+			args: func(h *harness) []string { return []string{"--name", "a/b"} },
+			want: func(h *harness) string {
+				return `ghr-artifact: the artifact name is not valid: "a/b". Contains the following character: Forward slash /.`
+			}},
+		{name: "no repository",
+			edit: func(t *testing.T, h *harness) { h.env["GITHUB_REPOSITORY"] = "" },
+			want: func(h *harness) string {
+				return `ghr-artifact: GITHUB_REPOSITORY "" is not owner/repo; run ghr-artifact in a GitHub Actions job` + "\n"
+			}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
 			h.write(t, map[string]string{"dist/a.txt": "a"})
-			for k, v := range tc.env {
-				h.env[k] = v
+			if tc.edit != nil {
+				tc.edit(t, h)
 			}
-			args := append([]string{"upload", "--name", "dist", "--path", "dist"}, tc.args...)
+			args := []string{"upload", "--name", "dist", "--path", "dist"}
+			if tc.args != nil {
+				args = append(args, tc.args(h)...)
+			}
 			code, _, stderr := h.run(t, args...)
-			if code != tc.wantCode || !strings.HasPrefix(stderr, tc.want) {
-				t.Errorf("code %d stderr %q, want %d %q", code, stderr, tc.wantCode, tc.want)
+			if want := tc.want(h); code != 1 || !strings.HasPrefix(stderr, want) {
+				t.Errorf("code %d stderr %q, want 1 %q", code, stderr, want)
 			}
 			if reqs := h.srv.Requests(); len(reqs) != 0 {
 				t.Errorf("requests before the inputs were checked: %v", reqs)
 			}
 		})
+	}
+}
+
+// TestSettingsEndpoints checks ghr-artifact against the endpoint rule's shared
+// vectors. newClient stops each accepted endpoint before any request.
+func TestSettingsEndpoints(t *testing.T) {
+	b, err := os.ReadFile("../../internal/endpoint/testdata/vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors []struct{ Endpoint, Error string }
+	if err := json.Unmarshal(b, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t)
+	h.write(t, map[string]string{"dist/a.txt": "a"})
+	var got []string
+	orig := newClient
+	newClient = func(st artifact.Settings) (*s3.Client, error) {
+		got = append(got, st.Endpoint)
+		return nil, errors.New("stopped before any request")
+	}
+	t.Cleanup(func() { newClient = orig })
+	for _, v := range vectors {
+		st := h.validSettings()
+		st.Endpoint = v.Endpoint
+		h.writeSettings(t, st.JSON())
+		got = nil
+		code, _, stderr := h.run(t, "upload", "--name", "dist", "--path", "dist")
+		want := "ghr-artifact: stopped before any request\n"
+		if v.Error != "" {
+			want = "ghr-artifact: ghr's artifact store settings " + h.settings + ": the endpoint is refused: " + v.Error + "\n"
+		}
+		if code != 1 || stderr != want {
+			t.Errorf("%q: code %d stderr %q, want %q", v.Endpoint, code, stderr, want)
+		}
+		if v.Error == "" && !reflect.DeepEqual(got, []string{v.Endpoint}) {
+			t.Errorf("%q: the client got %q", v.Endpoint, got)
+		}
+	}
+}
+
+func TestPlainHTTPStore(t *testing.T) {
+	h := harnessOn(t, s3test.NewPlainServer(t, "gha"))
+	if !strings.HasPrefix(h.srv.URL(), "http://127.0.0.1:") {
+		t.Fatalf("the fake store is at %s, want a plain http loopback address", h.srv.URL())
+	}
+	h.write(t, map[string]string{"dist/a.txt": "a"})
+	if code, stdout, stderr := h.run(t, "upload", "--name", "dist", "--path", "dist"); code != 0 {
+		t.Fatalf("upload: code %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+	if _, ok := h.srv.Object("darkraise/demo/100/dist.zip"); !ok {
+		t.Fatalf("keys %q", h.srv.Keys())
+	}
+	if code, stdout, stderr := h.run(t, "download", "--name", "dist", "--path", "out"); code != 0 {
+		t.Fatalf("download: code %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+	if got := tree(t, filepath.Join(h.ws, "out")); !reflect.DeepEqual(got, map[string]string{"a.txt": "a"}) {
+		t.Errorf("files %v", got)
 	}
 }
 
@@ -444,10 +602,23 @@ func TestUsage(t *testing.T) {
 		{[]string{"upload", "--name", "x"}, 2, "", "ghr-artifact: --path is required"},
 		{[]string{"upload", "--path", "x", "--if-no-files-found", "maybe"}, 2, "", "ghr-artifact: --if-no-files-found must be warn, error or ignore"},
 		{[]string{"upload", "--path", "x", "--compression-level", "10"}, 2, "", "ghr-artifact: --compression-level must be between 0 and 9"},
+		{[]string{"upload", "--path", "x", "--store", "{}"}, 2, "", "flag provided but not defined: -store"},
+		{[]string{"upload", "--path", "x", "--key", "a:b"}, 2, "", "flag provided but not defined: -key"},
+		{[]string{"upload", "--help"}, 0, "", "ghr's artifact store settings file (default $GHR_ARTIFACT_SETTINGS)"},
 	} {
 		code, stdout, stderr := h.run(t, tc.args...)
 		if code != tc.wantCode || !strings.HasPrefix(stdout, tc.wantStdout) || !strings.Contains(stderr, tc.wantStderr) {
 			t.Errorf("%q: code %d stdout %q stderr %q", tc.args, code, stdout, stderr)
+		}
+	}
+	for _, want := range []string{"--settings <file>", "$GHR_ARTIFACT_SETTINGS"} {
+		if !strings.Contains(usage, want) {
+			t.Errorf("the usage text does not mention %s:\n%s", want, usage)
+		}
+	}
+	for _, gone := range []string{"--store", "--key", "GHR_ARTIFACT_STORE", "GHR_ARTIFACT_KEY"} {
+		if strings.Contains(usage, gone) {
+			t.Errorf("the usage text still mentions %s:\n%s", gone, usage)
 		}
 	}
 }

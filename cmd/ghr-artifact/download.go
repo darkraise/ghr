@@ -31,7 +31,7 @@ func objectMissing(err error) bool {
 type match struct{ name, key string }
 
 func download(ctx context.Context, args []string, env func(string) string, stdout, stderr io.Writer) error {
-	fs, storeFlag, keyFlag := newFlags("download", stderr)
+	fs, settingsFlag := newFlags("download", stderr)
 	name := fs.String("name", "", "the artifact to download; empty downloads every artifact of the run")
 	pattern := fs.String("pattern", "", "a glob matching the artifact names to download; ignored with --name")
 	dest := fs.String("path", "", "where to put the files (default $GITHUB_WORKSPACE)")
@@ -47,7 +47,7 @@ func download(ctx context.Context, args []string, env func(string) string, stdou
 	} else if _, err := path.Match(*pattern, ""); err != nil {
 		return usageError(fmt.Sprintf("--pattern %q is not a valid glob", *pattern))
 	}
-	j, err := loadJob(env, *storeFlag, *keyFlag)
+	j, err := loadJob(env, *settingsFlag)
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func download(ctx context.Context, args []string, env func(string) string, stdou
 	if err != nil {
 		return err
 	}
-	client, err := newClient(j.store, j.cred)
+	client, err := newClient(j.settings)
 	if err != nil {
 		return err
 	}
@@ -72,7 +72,7 @@ func download(ctx context.Context, args []string, env func(string) string, stdou
 	} else {
 		objs, err := client.List(ctx, artifact.RunPrefix(j.owner, j.repo, runID))
 		if err != nil {
-			return describe(err, j.store)
+			return describe(err, j.settings)
 		}
 		for _, o := range objs {
 			_, _, id, n, ok := artifact.ParseObjectKey(o.Key)
@@ -143,7 +143,7 @@ func fetch(ctx context.Context, client *s3.Client, j job, m match, dir string) (
 		if objectMissing(err) {
 			return 0, err
 		}
-		return 0, describe(err, j.store)
+		return 0, describe(err, j.settings)
 	}
 	defer body.Close()
 	zf, err := os.CreateTemp(j.temp, "ghr-artifact-*.zip")
@@ -155,7 +155,7 @@ func fetch(ctx context.Context, client *s3.Client, j job, m match, dir string) (
 	sum := sha256.New()
 	size, err := io.Copy(io.MultiWriter(zf, sum), body)
 	if err != nil {
-		return 0, describe(err, j.store)
+		return 0, describe(err, j.settings)
 	}
 	if "sha256:"+hex.EncodeToString(sum.Sum(nil)) != artifact.ParseMeta(head.Meta).Digest {
 		return 0, fmt.Errorf("%s.zip is damaged: its digest does not match; upload it again", m.name)

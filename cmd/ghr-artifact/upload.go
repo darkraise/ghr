@@ -16,7 +16,7 @@ import (
 )
 
 func upload(ctx context.Context, args []string, env func(string) string, stdout, stderr io.Writer) error {
-	fs, storeFlag, keyFlag := newFlags("upload", stderr)
+	fs, settingsFlag := newFlags("upload", stderr)
 	name := fs.String("name", "artifact", "the artifact name")
 	paths := fs.String("path", "", "files, directories or wildcard patterns, one per line; ! excludes")
 	retention := fs.Int("retention-days", 0, "days until ghr deletes the artifact, 1-90; 0 leaves it to ghr's cleanup age")
@@ -40,7 +40,7 @@ func upload(ctx context.Context, args []string, env func(string) string, stdout,
 	if err := artifact.ValidName(*name); err != nil {
 		return err
 	}
-	j, err := loadJob(env, *storeFlag, *keyFlag)
+	j, err := loadJob(env, *settingsFlag)
 	if err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func upload(ctx context.Context, args []string, env func(string) string, stdout,
 		return err
 	}
 
-	client, err := newClient(j.store, j.cred)
+	client, err := newClient(j.settings)
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func upload(ctx context.Context, args []string, env func(string) string, stdout,
 			return fmt.Errorf("an artifact named %s was already uploaded by this run attempt; set overwrite: true to replace it", *name)
 		}
 	case !s3.IsNotFound(err):
-		return describe(err, j.store)
+		return describe(err, j.settings)
 	}
 
 	zf, err := os.CreateTemp(j.temp, "ghr-artifact-*.zip")
@@ -114,7 +114,7 @@ func upload(ctx context.Context, args []string, env func(string) string, stdout,
 		Meta:               meta.Map(),
 	})
 	if err != nil {
-		return describe(err, j.store)
+		return describe(err, j.settings)
 	}
 	fmt.Fprintf(stdout, "Uploaded %s: %d files, %d bytes, %s\n", key, len(files), size, digest)
 	if err := writeOutputs(env("GITHUB_OUTPUT"), "object-key", key, "artifact-digest", digest); err != nil {

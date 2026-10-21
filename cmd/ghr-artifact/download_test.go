@@ -207,7 +207,7 @@ func TestDownloadStoreErrorsDoNotFallBack(t *testing.T) {
 }
 
 func TestDescribeA403(t *testing.T) {
-	store := artifact.Store{Endpoint: "https://s3.example.com", Bucket: "gha"}
+	st := artifact.Settings{Endpoint: "https://s3.example.com", Bucket: "gha"}
 	for _, tc := range []struct {
 		name string
 		err  *s3.Error
@@ -218,22 +218,22 @@ func TestDescribeA403(t *testing.T) {
 		{"the store's refusal", &s3.Error{Status: 403, Code: "AccessDenied", Message: "Access Denied."},
 			"https://s3.example.com refused the job key (AccessDenied: Access Denied.); check the job key's policy on the store"},
 	} {
-		if got := describe(tc.err, store).Error(); !strings.HasPrefix(got, tc.want) {
+		if got := describe(tc.err, st).Error(); !strings.HasPrefix(got, tc.want) {
 			t.Errorf("%s: %q, want it to start %q", tc.name, got, tc.want)
 		}
 	}
 }
 
 func TestDescribeAStop(t *testing.T) {
-	store := artifact.Store{Endpoint: "https://s3.example.com", Bucket: "gha"}
+	st := artifact.Settings{Endpoint: "https://s3.example.com", Bucket: "gha"}
 	for _, tc := range []struct {
 		err  error
 		want string
 	}{
-		{&url.Error{Op: "Get", URL: store.Endpoint, Err: context.Canceled}, "stopped by a signal, as when the job is cancelled"},
-		{&url.Error{Op: "Put", URL: store.Endpoint, Err: context.DeadlineExceeded}, "gave up after 6h0m0s"},
+		{&url.Error{Op: "Get", URL: st.Endpoint, Err: context.Canceled}, "stopped by a signal, as when the job is cancelled"},
+		{&url.Error{Op: "Put", URL: st.Endpoint, Err: context.DeadlineExceeded}, "gave up after 6h0m0s"},
 	} {
-		if got := describe(tc.err, store).Error(); got != tc.want {
+		if got := describe(tc.err, st).Error(); got != tc.want {
 			t.Errorf("%v: %q, want %q", tc.err, got, tc.want)
 		}
 	}
@@ -263,6 +263,10 @@ func TestDownloadUsage(t *testing.T) {
 		{[]string{"download", "--run-id", "x"}, 2, `ghr-artifact: --run-id "x" is not a run ID`},
 		{[]string{"download", "--pattern", "["}, 2, `ghr-artifact: --pattern "[" is not a valid glob`},
 		{[]string{"download", "--name", "a:b"}, 1, `ghr-artifact: the artifact name is not valid: "a:b".`},
+		{[]string{"download", "--store", "{}"}, 2, "flag provided but not defined: -store"},
+		{[]string{"download", "--key", "a:b"}, 2, "flag provided but not defined: -key"},
+		{[]string{"download", "--settings", "/nonexistent/artifact-store.json"}, 1,
+			"ghr-artifact: ghr's artifact store settings /nonexistent/artifact-store.json do not exist; this job did not run on a ghr runner switched on for self-hosted storage\n"},
 	} {
 		code, _, stderr := h.run(t, tc.args...)
 		if code != tc.wantCode || !strings.HasPrefix(stderr, tc.wantStderr) {

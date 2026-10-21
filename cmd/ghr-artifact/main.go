@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"os/signal"
@@ -24,8 +25,8 @@ var version = "dev"
 
 // newClient and now are replaced in tests.
 var (
-	newClient = func(store artifact.Store, cred s3.Credentials) (*s3.Client, error) {
-		return s3.New(store.Endpoint, store.Bucket, store.Region, cred)
+	newClient = func(st artifact.Settings) (*s3.Client, error) {
+		return s3.New(st.Endpoint, st.Bucket, st.Region, s3.Credentials{AccessKeyID: st.KeyID, SecretAccessKey: st.Secret})
 	}
 	now = time.Now
 )
@@ -83,12 +84,13 @@ func run(args []string, env func(string) string, stdout, stderr io.Writer) int {
 	return 1
 }
 
-func newFlags(name string, stderr io.Writer) (*flag.FlagSet, *string, *string) {
+const settingsEnv = "GHR_ARTIFACT_SETTINGS"
+
+func newFlags(name string, stderr io.Writer) (*flag.FlagSet, *string) {
 	fs := flag.NewFlagSet("ghr-artifact "+name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	store := fs.String("store", "", "the store JSON (default $GHR_ARTIFACT_STORE)")
-	key := fs.String("key", "", "the job key as <access key id>:<secret> (default $GHR_ARTIFACT_KEY)")
-	return fs, store, key
+	settings := fs.String("settings", "", "ghr's artifact store settings file (default $"+settingsEnv+")")
+	return fs, settings
 }
 
 func parseFlags(fs *flag.FlagSet, args []string) error {
@@ -106,8 +108,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 
 // job is what a command needs from the Actions environment.
 type job struct {
-	store     artifact.Store
-	cred      s3.Credentials
+	settings  artifact.Settings
 	owner     string
 	repo      string
 	runID     int64
@@ -116,31 +117,40 @@ type job struct {
 	temp      string
 }
 
-func loadJob(env func(string) string, storeFlag, keyFlag string) (job, error) {
-	var j job
-	raw := storeFlag
-	if raw == "" {
-		raw = env(artifact.VariableName)
+// loadSettings reads the settings file ghr wrote for its runner. Its errors
+// name the path but never quote the file, which holds the job key's secret.
+func loadSettings(path string) (artifact.Settings, error) {
+	if path == "" {
+		return artifact.Settings{}, errors.New("no settings file: pass --settings or set GHR_ARTIFACT_SETTINGS; ghr's upload and download actions pass the file ghr wrote for its runner")
 	}
-	store, err := artifact.ParseStore(raw)
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return artifact.Settings{}, fmt.Errorf("ghr's artifact store settings %s do not exist; this job did not run on a ghr runner switched on for self-hosted storage", path)
+	}
 	if err != nil {
-		return job{}, fmt.Errorf("%s: %w", artifact.VariableName, err)
+		var pe *fs.PathError
+		if errors.As(err, &pe) {
+			err = pe.Err
+		}
+		return artifact.Settings{}, fmt.Errorf("cannot read ghr's artifact store settings %s: %v", path, err)
 	}
-	key := keyFlag
-	if key == "" {
-		key = env(artifact.SecretName)
-	}
-	if strings.TrimSpace(key) == "" {
-		return job{}, errors.New("pass key: ${{ secrets.GHR_ARTIFACT_KEY }} to the action")
-	}
-	cred, err := artifact.ParseKey(key)
+	st, err := artifact.ParseSettings(b)
 	if err != nil {
-		return job{}, fmt.Errorf("%s: %w", artifact.SecretName, err)
+		return artifact.Settings{}, fmt.Errorf("ghr's artifact store settings %s: %w", path, err)
 	}
-	if cred.AccessKeyID != store.KeyID {
-		return job{}, errors.New("GHR_ARTIFACT_KEY is out of date; turn the repository off and on in ghr")
+	return st, nil
+}
+
+func loadJob(env func(string) string, settingsFlag string) (job, error) {
+	path := settingsFlag
+	if path == "" {
+		path = env(settingsEnv)
 	}
-	j.store, j.cred = store, cred
+	st, err := loadSettings(path)
+	if err != nil {
+		return job{}, err
+	}
+	j := job{settings: st}
 	owner, repo, ok := strings.Cut(env("GITHUB_REPOSITORY"), "/")
 	if !ok || owner == "" || repo == "" || strings.Contains(repo, "/") {
 		return job{}, fmt.Errorf("GITHUB_REPOSITORY %q is not owner/repo; run ghr-artifact in a GitHub Actions job", env("GITHUB_REPOSITORY"))
@@ -168,7 +178,7 @@ func loadJob(env func(string) string, storeFlag, keyFlag string) (job, error) {
 
 // describe words a store error for the person reading the job log. It never
 // includes the key: only the endpoint, the bucket and the store's own message.
-func describe(err error, store artifact.Store) error {
+func describe(err error, st artifact.Settings) error {
 	var se *s3.Error
 	if errors.As(err, &se) {
 		detail := se.Code
@@ -180,13 +190,13 @@ func describe(err error, store artifact.Store) error {
 		}
 		switch {
 		case se.Code == "NoSuchBucket":
-			return fmt.Errorf("bucket %s does not exist on %s; create it, or fix the bucket in ghr's Settings", store.Bucket, store.Endpoint)
+			return fmt.Errorf("bucket %s does not exist on %s; create it, or fix the bucket in ghr's Settings", st.Bucket, st.Endpoint)
 		case se.Status == 403 && se.Code == "":
-			return fmt.Errorf("%s answered HTTP 403 without an S3 error; a proxy in front of the store may have blocked the request, such as Cloudflare's challenge for runner addresses", store.Endpoint)
+			return fmt.Errorf("%s answered HTTP 403 without an S3 error; a proxy in front of the store may have blocked the request, such as Cloudflare's challenge for runner addresses", st.Endpoint)
 		case se.Status == 403 || se.Code == "AccessDenied" || se.Code == "InvalidAccessKeyId" || se.Code == "SignatureDoesNotMatch":
-			return fmt.Errorf("%s refused the job key (%s); check the job key's policy on the store, or replace the job key in ghr", store.Endpoint, detail)
+			return fmt.Errorf("%s refused the job key (%s); check the job key's policy on the store, or replace the job key in ghr", st.Endpoint, detail)
 		}
-		return fmt.Errorf("%s answered %s", store.Endpoint, detail)
+		return fmt.Errorf("%s answered %s", st.Endpoint, detail)
 	}
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -196,7 +206,7 @@ func describe(err error, store artifact.Store) error {
 	}
 	var ue *url.Error
 	if errors.As(err, &ue) {
-		return fmt.Errorf("cannot reach %s: %w", store.Endpoint, ue.Err)
+		return fmt.Errorf("cannot reach %s: %w", st.Endpoint, ue.Err)
 	}
 	return err
 }
@@ -236,5 +246,6 @@ const usage = `usage: ghr-artifact <command> [flags]
            exits 3 when nothing matched
   version
 
-Every command takes --store and --key, which default to $GHR_ARTIFACT_STORE and $GHR_ARTIFACT_KEY.
+upload and download take --settings <file>, the artifact store settings ghr writes for its
+runners, which defaults to $GHR_ARTIFACT_SETTINGS. ghr's upload and download actions pass it.
 `
