@@ -102,11 +102,7 @@ func printArtifactStore(out io.Writer, s model.ArtifactStore) {
 		if r.Enabled {
 			on = "on"
 		}
-		state := safe(r.State)
-		if r.StateError != "" {
-			state += ": " + safe(r.StateError)
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s (%s)\n", safe(r.Name), state, on, model.HumanBytes(r.Bytes), r.Count, r.Cleanup, r.CleanupSource)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s (%s)\n", safe(r.Name), safe(r.State), on, model.HumanBytes(r.Bytes), r.Count, r.Cleanup, r.CleanupSource)
 	}
 	w.Flush()
 }

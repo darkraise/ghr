@@ -74,13 +74,13 @@ func TestArtifactStoreRoutes(t *testing.T) {
 		Repos: []model.ArtifactStoreRepo{}, Deletions: []model.Deletion{},
 	}
 	b.as.test = model.ArtifactStoreTest{Checks: []model.ArtifactStoreCheck{{Name: "list", OK: true, Detail: "3 objects"}}}
-	b.as.row = model.ArtifactStoreRepo{Name: "darkmem", Private: true, Enabled: true, State: "set", Cleanup: "7d", CleanupSource: "default",
+	b.as.row = model.ArtifactStoreRepo{Name: "darkmem", Private: true, Enabled: true, State: "on", Cleanup: "7d", CleanupSource: "default",
 		Items: []model.ArtifactStoreItem{}}
 	b.as.link = model.ArtifactLink{URL: "https://s3.example.test/gha-artifacts/darkraise/darkmem/42/dist.zip", ExpiresAt: at.Add(time.Hour)}
 	item := model.ArtifactStoreItem{Key: "darkraise/darkmem/42/dist.zip", Name: "dist", RunID: 42, Attempt: 1, Bytes: 5, Files: 2, UploadedAt: at}
 	srv := httptest.NewServer(NewServer(b))
 	defer srv.Close()
-	const row = `{"name":"darkmem","private":true,"enabled":true,"state":"set","cleanup":"7d","cleanup_source":"default","bytes":0,"count":0,"items":[]}`
+	const row = `{"name":"darkmem","private":true,"enabled":true,"state":"on","cleanup":"7d","cleanup_source":"default","bytes":0,"count":0,"items":[]}`
 	for _, tc := range []struct {
 		method, path, body string
 		status             int

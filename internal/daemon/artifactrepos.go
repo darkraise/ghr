@@ -153,7 +153,7 @@ func (b *Backend) switchOffArtifacts(name, refused string) error {
 	if b.AS == nil {
 		return nil
 	}
-	if !b.Store.Config().ArtifactStore.Enabled(name) && !artifactRemovalFailed(b.AS.Snapshot(), name) {
+	if !b.Store.Config().ArtifactStore.Enabled(name) {
 		return nil
 	}
 	if err := b.githubErr(); err != nil {
@@ -183,17 +183,6 @@ func (b *Backend) switchOffArtifacts(name, refused string) error {
 		b.Events.Add("warn", name, "self-hosted storage stays off in config.yaml after a failed switch-off: %v", rerr)
 	}
 	return switchOffRefusal(b.asWriteErr(err, name), name, refused)
-}
-
-// artifactRemovalFailed reports whether an earlier switch-off of name left it
-// off in config.yaml but with ghr's variable or secret still at GitHub.
-func artifactRemovalFailed(snap model.ArtifactStore, name string) bool {
-	for _, r := range snap.Repos {
-		if strings.EqualFold(r.Name, name) && r.State == "off" && r.StateError != "" {
-			return true
-		}
-	}
-	return false
 }
 
 // switchOffRefusal words a failed switch-off, keeping GitHub's status; any

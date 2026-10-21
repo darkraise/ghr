@@ -29,14 +29,14 @@ type ArtifactStore struct {
 	Deletions     []Deletion          `json:"deletions"`
 }
 
-// ArtifactStoreRepo is one repository's row. State is "set", "missing",
-// "stale", "foreign", "public", "error" or "off".
+// ArtifactStoreRepo is one repository's row. State is "on", "off",
+// "not_served" (ghr runs no jobs for it) or "public". Private is false only
+// for a repository known to be public; Enabled is its switch as configured.
 type ArtifactStoreRepo struct {
 	Name          string              `json:"name"`
 	Private       bool                `json:"private"`
 	Enabled       bool                `json:"enabled"`
 	State         string              `json:"state"`
-	StateError    string              `json:"state_error,omitempty"`
 	Cleanup       string              `json:"cleanup"`
 	CleanupSource string              `json:"cleanup_source"`
 	Bytes         int64               `json:"bytes"`

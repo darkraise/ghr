@@ -400,9 +400,8 @@ func githubStorageFixture() model.GitHubStorage {
 	}
 }
 
-// artifactStoreFixture is a set-up store: one repository on and set, one on
-// whose secret the token could not write, one whose variable another daemon
-// owns, and one public repository.
+// artifactStoreFixture is a set-up store: two repositories on, one off, and
+// one public repository.
 func artifactStoreFixture() model.ArtifactStore {
 	const sha = "a1f9c3e0d4b5c6a7b8c9d0e1f2a3b4c5d6e7f8a9"
 	return model.ArtifactStore{
@@ -412,7 +411,7 @@ func artifactStoreFixture() model.ArtifactStore {
 		CheckedAt: ptr(at(-5 * time.Minute)),
 		UsedBytes: 423_751_200, Count: 5, CapacityBytes: 50_000_000_000,
 		Repos: []model.ArtifactStoreRepo{
-			{Name: "darkmem", Private: true, Enabled: true, State: "set", Cleanup: "3d", CleanupSource: "override",
+			{Name: "darkmem", Private: true, Enabled: true, State: "on", Cleanup: "3d", CleanupSource: "override",
 				Bytes: 13_751_200, Count: 4, Items: []model.ArtifactStoreItem{
 					{Key: "darkraise/darkmem/102/e2e-report.zip", Name: "e2e-report", RunID: 102, Attempt: 2, Workflow: "ci",
 						Job: "E2E (api)", Branch: "fix/cache-key", SHA: sha, Bytes: 8_900_000, Files: 12,
@@ -431,17 +430,14 @@ func artifactStoreFixture() model.ArtifactStore {
 						Digest:     "sha256:fdd326930fb1e10467979448ba7011e188ae89e4a4a65adf8fcb5c5957ce5f6d",
 						UploadedAt: at(-4 * 24 * time.Hour)},
 				}},
-			{Name: "darkcloud", Private: true, Enabled: true, State: "error",
-				StateError: "token lacks secrets=write on darkraise/darkcloud: grant it in the PAT settings",
-				Cleanup:    "7d", CleanupSource: "global", Bytes: 410_000_000, Count: 1, Items: []model.ArtifactStoreItem{
+			{Name: "darkcloud", Private: true, Enabled: true, State: "on",
+				Cleanup: "7d", CleanupSource: "global", Bytes: 410_000_000, Count: 1, Items: []model.ArtifactStoreItem{
 					{Key: "darkraise/darkcloud/77/image-cache.zip", Name: "image-cache", RunID: 77, Attempt: 1, Workflow: "build",
 						Job: "image", Branch: "main", SHA: sha, Bytes: 410_000_000, Files: 1,
 						Digest:     "sha256:fd05544f5a9f392ded6367befa21384bfe3036adbfc3d99471fc21d0759f7007",
 						UploadedAt: at(-54 * time.Hour), ExpiresAt: ptr(at(18 * time.Hour))},
 				}},
-			{Name: "docs", Private: true, State: "foreign",
-				StateError: "GHR_ARTIFACT_STORE points to https://s3.other.example, bucket ci-artifacts, which is not this ghr's storage; ghr leaves it alone",
-				Cleanup:    "7d", CleanupSource: "global", Items: []model.ArtifactStoreItem{}},
+			{Name: "docs", Private: true, State: "off", Cleanup: "7d", CleanupSource: "global", Items: []model.ArtifactStoreItem{}},
 			{Name: "old-docs", State: "public", Cleanup: "7d", CleanupSource: "global", Items: []model.ArtifactStoreItem{}},
 		},
 		Deletions: []model.Deletion{

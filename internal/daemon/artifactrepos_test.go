@@ -357,36 +357,6 @@ func TestRemovalRefusedWhenTheSwitchOffFails(t *testing.T) {
 	}
 }
 
-// A repository whose earlier switch-off failed reads off with a state error
-// while its entry is already off; leaving coverage must still retry the
-// switch-off, or no pass ever deletes the job key from its secret.
-func TestRemovalRetriesAFailedEarlierSwitchOff(t *testing.T) {
-	b, _, _, f := newASBackend(t)
-	withArtifactStore(t, b, map[string]config.ArtifactRepo{"darkcloud": {Cleanup: "3d"}})
-	f.snap.Repos = []model.ArtifactStoreRepo{
-		{Name: "DarkMem", State: "off", StateError: "GitHub refused the delete"},
-		{Name: "darkcloud", State: "off"},
-	}
-	f.offErr = errors.New("connection reset")
-	err := b.RemoveRepo("darkmem")
-	if want := "could not switch off self-hosted storage for darkmem, so it was not removed: connection reset"; apiStatus(err) != 502 || apiMsg(err) != want {
-		t.Fatalf("status %d message %q", apiStatus(err), apiMsg(err))
-	}
-	if b.Store.Config().Repo("darkmem").Removing {
-		t.Fatal("a refused removal ended coverage")
-	}
-	f.offErr = nil
-	if err := b.RemoveRepo("darkmem"); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.RemoveRepo("darkcloud"); err != nil {
-		t.Fatal(err)
-	}
-	if got := f.recorded(); !slices.Equal(got, []string{"switch-off darkmem", "switch-off darkmem"}) {
-		t.Fatalf("calls %q", got)
-	}
-}
-
 func TestArtifactStorePolicyAndTokenReachTheService(t *testing.T) {
 	b, _, _, f := newASBackend(t)
 	withArtifactStore(t, b, nil)

@@ -244,13 +244,12 @@ describe("artifact store fixtures", () => {
     expect(snap).not.toHaveProperty("other_bytes")
     expect(snap).not.toHaveProperty("operation")
     expect(snap.repos.map((r) => [r.name, r.private, r.enabled, r.state, r.cleanup, r.cleanup_source, r.bytes, r.count, r.items.length])).toEqual([
-      ["darkmem", true, true, "set", "3d", "override", 13751200, 4, 4],
-      ["darkcloud", true, true, "error", "7d", "global", 410000000, 1, 1],
-      ["docs", true, false, "foreign", "7d", "global", 0, 0, 0],
+      ["darkmem", true, true, "on", "3d", "override", 13751200, 4, 4],
+      ["darkcloud", true, true, "on", "7d", "global", 410000000, 1, 1],
+      ["docs", true, false, "off", "7d", "global", 0, 0, 0],
       ["old-docs", false, false, "public", "7d", "global", 0, 0, 0],
     ])
-    expect(snap.repos[0]).not.toHaveProperty("state_error")
-    expect(snap.repos[1]?.state_error).toBe("token lacks secrets=write on darkraise/darkcloud: grant it in the PAT settings")
+    for (const r of snap.repos) expect(r).not.toHaveProperty("state_error")
     expect(snap.repos[0]?.items[0]).toEqual({
       key: "darkraise/darkmem/102/e2e-report.zip",
       name: "e2e-report",

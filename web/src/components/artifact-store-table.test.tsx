@@ -7,7 +7,21 @@ import { fixtures } from "@/test/fixtures"
 import { renderRoutes } from "@/test/routes"
 import { ArtifactStoreTable } from "./artifact-store-table"
 
-async function draw(store: ArtifactStore = fixtures.artifactStore) {
+// The table still words the variable-and-secret states, so these rows carry them.
+const syncStates: Record<string, Partial<ArtifactStoreRepo>> = {
+  darkmem: { state: "set" },
+  darkcloud: { state: "error", state_error: "token lacks secrets=write on darkraise/darkcloud: grant it in the PAT settings" },
+  docs: {
+    state: "foreign",
+    state_error: "GHR_ARTIFACT_STORE points to https://s3.other.example, bucket ci-artifacts, which is not this ghr's storage; ghr leaves it alone",
+  },
+}
+const base: ArtifactStore = {
+  ...fixtures.artifactStore,
+  repos: fixtures.artifactStore.repos.map((r) => ({ ...r, ...syncStates[r.name] })),
+}
+
+async function draw(store: ArtifactStore = base) {
   const view = renderRoutes(
     { "/": () => <ArtifactStoreTable store={store} config={fixtures.config} offline={false} />, "/actions/$repo/runs/$id": () => <p>run page</p> },
     "/",
@@ -17,10 +31,10 @@ async function draw(store: ArtifactStore = fixtures.artifactStore) {
   return view
 }
 
-const repoOf = (name: string) => fixtures.artifactStore.repos.find((r) => r.name === name) as ArtifactStoreRepo
+const repoOf = (name: string) => base.repos.find((r) => r.name === name) as ArtifactStoreRepo
 const withRepo = (name: string, over: Partial<ArtifactStoreRepo>): ArtifactStore => ({
-  ...fixtures.artifactStore,
-  repos: fixtures.artifactStore.repos.map((r) => (r.name === name ? { ...r, ...over } : r)),
+  ...base,
+  repos: base.repos.map((r) => (r.name === name ? { ...r, ...over } : r)),
 })
 const docsOff = withRepo("docs", { state: "off", state_error: undefined })
 const row = (name: string) => screen.getByRole("row", { name: new RegExp(`^${name}\\b`) })
@@ -72,7 +86,7 @@ describe("ArtifactStoreTable", () => {
     ],
     [
       "turns a repository off and keeps its artifacts",
-      fixtures.artifactStore,
+      base,
       "darkmem",
       false,
       { enabled: false, state: "off" },

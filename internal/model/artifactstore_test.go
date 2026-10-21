@@ -14,7 +14,7 @@ func TestArtifactStoreJSON(t *testing.T) {
 		AdminKey:  &ArtifactKeyInfo{ID: "AKIA…WXYZ", SetAt: now},
 		JobKey:    &ArtifactKeyInfo{ID: "…YZ", SetAt: now},
 		CheckedAt: &now, Error: "e", UsedBytes: 30, Count: 1, CapacityBytes: 50_000_000_000, OtherBytes: 10,
-		Repos: []ArtifactStoreRepo{{Name: "darkmem", Private: true, Enabled: true, State: "error", StateError: "boom",
+		Repos: []ArtifactStoreRepo{{Name: "darkmem", Private: true, Enabled: true, State: "on",
 			Cleanup: "7d", CleanupSource: "default", Bytes: 20, Count: 1,
 			Items: []ArtifactStoreItem{{Key: "darkraise/darkmem/1932/dist.zip", Name: "dist", RunID: 1932, Attempt: 2,
 				Workflow: "ci", Job: "build", Branch: "master", SHA: "abc", Bytes: 20, Files: 3, Digest: "sha256:00",
@@ -29,7 +29,7 @@ func TestArtifactStoreJSON(t *testing.T) {
 	const want = `{"configured":true,"endpoint":"https://s3.example.sg","bucket":"gha-artifacts","region":"us-east-1",` +
 		`"admin_key":{"id":"AKIA…WXYZ","set_at":"2026-10-15T09:00:00Z"},"job_key":{"id":"…YZ","set_at":"2026-10-15T09:00:00Z"},` +
 		`"checked_at":"2026-10-15T09:00:00Z","error":"e","used_bytes":30,"count":1,"capacity_bytes":50000000000,"other_bytes":10,` +
-		`"repos":[{"name":"darkmem","private":true,"enabled":true,"state":"error","state_error":"boom",` +
+		`"repos":[{"name":"darkmem","private":true,"enabled":true,"state":"on",` +
 		`"cleanup":"7d","cleanup_source":"default","bytes":20,"count":1,` +
 		`"items":[{"key":"darkraise/darkmem/1932/dist.zip","name":"dist","run_id":1932,"attempt":2,` +
 		`"workflow":"ci","job":"build","branch":"master","sha":"abc","bytes":20,"files":3,"digest":"sha256:00",` +

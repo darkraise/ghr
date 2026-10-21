@@ -832,10 +832,9 @@ func sampleArtifactStore(now time.Time) model.ArtifactStore {
 		AdminKey:  &model.ArtifactKeyInfo{ID: "ADMI…1234", SetAt: now.Add(-time.Hour)},
 		CheckedAt: &checked, UsedBytes: 12_400_000_000, Count: 321, CapacityBytes: 50_000_000_000, OtherBytes: 1_200_000_000,
 		Repos: []model.ArtifactStoreRepo{
-			{Name: "darkmem", Private: true, Enabled: true, State: "set", Cleanup: "3d", CleanupSource: "override", Bytes: 1_200_000_000, Count: 34},
+			{Name: "darkmem", Private: true, Enabled: true, State: "on", Cleanup: "3d", CleanupSource: "override", Bytes: 1_200_000_000, Count: 34},
 			{Name: "darkcloud", Private: true, State: "off", Cleanup: "7d", CleanupSource: "default"},
-			{Name: "homelab", Private: true, Enabled: true, State: "error",
-				StateError: "token lacks secrets=write on darkraise/homelab: grant it in the PAT settings", Cleanup: "7d", CleanupSource: "global"},
+			{Name: "homelab", Private: true, Enabled: true, State: "not_served", Cleanup: "7d", CleanupSource: "global"},
 		},
 		Deletions: []model.Deletion{},
 	}
@@ -869,9 +868,9 @@ func TestArtifactStoreCommandPrintsTheStore(t *testing.T) {
 	}
 	for _, want := range []string{
 		"REPO STATE ON SIZE ARTIFACTS CLEANUP",
-		"darkmem set on 1.2 GB 34 3d (override)",
+		"darkmem on on 1.2 GB 34 3d (override)",
 		"darkcloud off off 0 B 0 7d (default)",
-		"homelab error: token lacks secrets=write on darkraise/homelab: grant it in the PAT settings on 0 B 0 7d (global)",
+		"homelab not_served on 0 B 0 7d (global)",
 	} {
 		if got := rows[strings.Fields(want)[0]]; got != want {
 			t.Errorf("row %q, want %q in:\n%s", got, want, out)
