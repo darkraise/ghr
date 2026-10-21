@@ -325,6 +325,7 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 			}
 		},
 	}
+	m.ArtifactSettings = b.artifactSettings
 	reg.Register(config.JobRunnerUpdateCheck, b.Wake)
 	reg.Register(config.JobPrune, b.Wake)
 	if o.ReleaseBase != "" {
