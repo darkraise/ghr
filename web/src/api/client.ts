@@ -243,7 +243,7 @@ export const api = {
   refreshArtifactStore: () => send("POST", "/api/artifact-store/refresh"),
   testArtifactStore: () => request<ArtifactStoreTest>("POST", "/api/artifact-store/test"),
   setArtifactKey: (which: ArtifactKeyWhich, id: string, secret: string) => send("PUT", "/api/artifact-store/keys", { which, id, secret }),
-  // Answers once the repository's variable and secret are applied, with its new state.
+  // Answers with the repository's row; it writes nothing to GitHub.
   setArtifactRepo: (repo: string, body: { enabled?: boolean; cleanup?: string }) =>
     request<ArtifactStoreRepo>("PUT", `/api/artifact-store/repos/${seg(repo)}`, body),
   enablePrivateArtifactRepos: () => request<ArtifactStoreRepo[]>("POST", "/api/artifact-store/repos/enable-private"),

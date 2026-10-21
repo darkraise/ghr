@@ -27,18 +27,14 @@ export const STATE_TONE: Record<StateTone, string> = {
 }
 
 export function stateLine(r: ArtifactStoreRepo): { text: string; tone: StateTone } {
-  if (!r.private || r.state === "public") return { text: "Public repositories stay on GitHub", tone: "off" }
   switch (r.state) {
-    case "set":
-      return { text: "Variable and secret set · uploads go to RustFS", tone: "ok" }
-    case "missing":
-      return { text: "Variable and secret not written yet · the next check writes them", tone: "warn" }
-    case "stale":
-      return { text: "The secret holds an old job key · the next check rewrites it", tone: "warn" }
-    case "foreign":
-      return { text: r.state_error || "Another ghr set this repository's variable; ghr leaves it alone", tone: "warn" }
-    case "error":
-      return { text: r.state_error || "Could not set the variable and secret", tone: "error" }
+    case "on":
+      return { text: "On · uploads from ghr's runners go to RustFS", tone: "ok" }
+    case "not_served":
+      // A config entry still on for a repository ghr no longer serves does nothing.
+      return { text: "Not served by ghr · only repositories ghr runs jobs for can use self-hosted storage", tone: r.enabled ? "warn" : "off" }
+    case "public":
+      return { text: "Public repositories stay on GitHub", tone: "off" }
     default:
       return { text: "Off · uploads go to GitHub", tone: "off" }
   }
@@ -82,6 +78,6 @@ export function selfHostedSummary(store: ArtifactStore | undefined, config: Conf
   const checked = store.checked_at ? `Checked ${shortWhen(store.checked_at, now)}` : "Not checked yet"
   const n = store.repos.filter((r) => r.cleanup_source === "override").length
   const overrides = n === 0 ? "" : ` (${n} repository override${n === 1 ? "" : "s"})`
-  const on = store.repos.filter((r) => r.enabled).length
+  const on = store.repos.filter((r) => r.enabled && r.state !== "not_served").length
   return `${checked} · cleanup ${globalCleanup(config)}${overrides} · ${repositories(on)} on`
 }

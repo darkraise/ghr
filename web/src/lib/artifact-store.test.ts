@@ -20,16 +20,11 @@ describe("parseArtifactsSearch", () => {
 
 describe("stateLine", () => {
   it.each<[string, Partial<ArtifactStoreRepo>, string, string]>([
-    ["set", { state: "set" }, "Variable and secret set · uploads go to RustFS", "ok"],
+    ["on", { state: "on", enabled: true }, "On · uploads from ghr's runners go to RustFS", "ok"],
     ["off", { state: "off", enabled: false }, "Off · uploads go to GitHub", "off"],
-    ["missing", { state: "missing" }, "Variable and secret not written yet · the next check writes them", "warn"],
-    ["stale", { state: "stale" }, "The secret holds an old job key · the next check rewrites it", "warn"],
-    ["error", { state: "error", state_error: "token lacks secrets=write on darkraise/darkmem: grant it in the PAT settings" }, "token lacks secrets=write on darkraise/darkmem: grant it in the PAT settings", "error"],
-    ["error without text", { state: "error" }, "Could not set the variable and secret", "error"],
-    ["foreign", { state: "foreign", state_error: "GHR_ARTIFACT_STORE names another server; ghr leaves it alone" }, "GHR_ARTIFACT_STORE names another server; ghr leaves it alone", "warn"],
-    ["foreign without text", { state: "foreign" }, "Another ghr set this repository's variable; ghr leaves it alone", "warn"],
+    ["not served", { state: "not_served", enabled: false }, "Not served by ghr · only repositories ghr runs jobs for can use self-hosted storage", "off"],
+    ["not served but still on", { state: "not_served", enabled: true }, "Not served by ghr · only repositories ghr runs jobs for can use self-hosted storage", "warn"],
     ["public", { state: "public", private: false, enabled: false }, "Public repositories stay on GitHub", "off"],
-    ["a public repository that is off", { state: "off", private: false, enabled: false }, "Public repositories stay on GitHub", "off"],
   ])("words %s", (_name, over, text, tone) => {
     expect(stateLine(repo(over))).toEqual({ text, tone })
   })
@@ -89,11 +84,16 @@ describe("selfHostedSummary", () => {
     expect(selfHostedSummary(fixtures.artifactStore, fixtures.config, now)).toBe("Checked 14:00 · cleanup 7d (1 repository override) · 2 repositories on")
   })
 
-  it("reads an empty global age as the 7-day default and counts one repository", () => {
+  it("reads an empty global age as the 7-day default and counts only served repositories that are on", () => {
     const store: ArtifactStore = {
       ...fixtures.artifactStore,
       checked_at: undefined,
-      repos: fixtures.artifactStore.repos.map((r) => ({ ...r, cleanup_source: "global", enabled: r.name === "darkmem" })),
+      repos: fixtures.artifactStore.repos.map((r) => ({
+        ...r,
+        cleanup_source: "global",
+        enabled: r.name !== "old-docs",
+        state: r.name === "darkmem" ? "on" : r.name === "old-docs" ? "public" : "not_served",
+      })),
     }
     const config = { ...fixtures.config, artifact_store: { endpoint: "https://s3.example.sg", bucket: "gha-artifacts" } }
     expect(selfHostedSummary(store, config, now)).toBe("Not checked yet · cleanup 7d · 1 repository on")

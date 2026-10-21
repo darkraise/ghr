@@ -7,19 +7,14 @@ import { fixtures } from "@/test/fixtures"
 import { renderRoutes } from "@/test/routes"
 import { ArtifactStoreTable } from "./artifact-store-table"
 
-// The table still words the variable-and-secret states, so these rows carry them.
-const syncStates: Record<string, Partial<ArtifactStoreRepo>> = {
-  darkmem: { state: "set" },
-  darkcloud: { state: "error", state_error: "token lacks secrets=write on darkraise/darkcloud: grant it in the PAT settings" },
-  docs: {
-    state: "foreign",
-    state_error: "GHR_ARTIFACT_STORE points to https://s3.other.example, bucket ci-artifacts, which is not this ghr's storage; ghr leaves it alone",
-  },
+// Each row's state set here, so the tests read the same whatever the fixture says.
+const STATES: Record<string, Partial<ArtifactStoreRepo>> = {
+  darkmem: { state: "on", enabled: true, private: true },
+  darkcloud: { state: "on", enabled: true, private: true },
+  docs: { state: "off", enabled: false, private: true },
+  "old-docs": { state: "public", enabled: false, private: false },
 }
-const base: ArtifactStore = {
-  ...fixtures.artifactStore,
-  repos: fixtures.artifactStore.repos.map((r) => ({ ...r, ...syncStates[r.name] })),
-}
+const base: ArtifactStore = { ...fixtures.artifactStore, repos: fixtures.artifactStore.repos.map((r) => ({ ...r, ...STATES[r.name] })) }
 
 async function draw(store: ArtifactStore = base) {
   const view = renderRoutes(
@@ -36,9 +31,9 @@ const withRepo = (name: string, over: Partial<ArtifactStoreRepo>): ArtifactStore
   ...base,
   repos: base.repos.map((r) => (r.name === name ? { ...r, ...over } : r)),
 })
-const docsOff = withRepo("docs", { state: "off", state_error: undefined })
 const row = (name: string) => screen.getByRole("row", { name: new RegExp(`^${name}\\b`) })
 const toggle = (name: string) => screen.getByRole("switch", { name: `Use RustFS for ${name}` })
+const noToggle = (name: string) => expect(screen.queryByRole("switch", { name: `Use RustFS for ${name}` })).toBeNull()
 const bodies = (calls: { method: string; path: string; body: unknown }[], method: string, path: string) =>
   calls.filter((c) => c.method === method && c.path === path).map((c) => c.body)
 // The body rows' repository names; the first row is the header, the last the totals.
@@ -47,6 +42,7 @@ const listed = () =>
     .getAllByRole("row")
     .slice(1, -1)
     .map((r) => within(r).getByRole("rowheader").textContent?.trim().split(" ")[0])
+const NOT_SERVED = "Not served by ghr · only repositories ghr runs jobs for can use self-hosted storage"
 
 describe("ArtifactStoreTable", () => {
   it("lists each repository's switch, state, size and cleanup, largest first", async () => {
@@ -55,95 +51,90 @@ describe("ArtifactStoreTable", () => {
     expect(listed()).toEqual(["darkcloud", "darkmem", "docs", "old-docs"])
     const darkmem = row("darkmem")
     expect(toggle("darkmem")).toBeChecked()
-    for (const text of ["On", "Variable and secret set · uploads go to RustFS", "13.8 MB", "4 artifacts", "3d (override)"]) {
+    for (const text of ["On", "13.8 MB", "4 artifacts", "3d (override)"]) {
       expect(within(darkmem).getByText(text)).toBeInTheDocument()
     }
-    const failed = within(row("darkcloud")).getByText("token lacks secrets=write on darkraise/darkcloud: grant it in the PAT settings")
-    expect(failed).toHaveClass("text-destructive")
+    expect(within(darkmem).getByText("On · uploads from ghr's runners go to RustFS")).toHaveClass("text-success")
     expect(within(row("darkcloud")).getByText("7d (global)")).toBeInTheDocument()
     expect(toggle("docs")).not.toBeChecked()
-    expect(within(row("docs")).getByText(/which is not this ghr's storage; ghr leaves it alone$/)).toHaveClass("text-warning")
+    expect(within(row("docs")).getByText("Off · uploads go to GitHub")).toHaveClass("text-muted-foreground")
     const oldDocs = row("old-docs")
-    expect(toggle("old-docs")).toBeDisabled()
+    noToggle("old-docs")
     expect(within(oldDocs).getByText("public")).toBeInTheDocument()
     expect(within(oldDocs).getByText("Public repositories stay on GitHub")).toBeInTheDocument()
     expect(within(oldDocs).queryByRole("button", { name: "Edit cleanup of old-docs" })).toBeNull()
     const totals = screen.getAllByRole("row").at(-1) as HTMLElement
     for (const text of ["All 4 repositories", "423.8 MB", "5 artifacts"]) expect(within(totals).getByText(text)).toBeInTheDocument()
-    expect(screen.getByText("Turning a repository on sets its GHR_ARTIFACT_STORE variable and GHR_ARTIFACT_KEY secret; its workflows then upload to RustFS.")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Only private repositories ghr serves can be turned on. Their jobs on ghr's runners then upload to RustFS; jobs on other runners, GitHub-hosted ones included, keep using GitHub and cannot download what ghr's runners stored.",
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/GHR_ARTIFACT_STORE|GHR_ARTIFACT_KEY|secret/)).toBeNull()
   })
 
-  it.each<[string, ArtifactStore, string, boolean, Partial<ArtifactStoreRepo>, string, "success" | "error"]>([
-    ["turns a repository on and says what ghr set", docsOff, "docs", true, { enabled: true, state: "set" }, "Turned on for docs: variable and secret set", "success"],
-    [
-      "turns a repository on whose writes wait for the next check",
-      docsOff,
-      "docs",
-      true,
-      { enabled: true, state: "missing" },
-      "Turned on for docs; the next check writes its variable and secret",
-      "success",
-    ],
-    [
-      "turns a repository off and keeps its artifacts",
-      base,
-      "darkmem",
-      false,
-      { enabled: false, state: "off" },
-      "Turned off for darkmem: variable and secret removed; its artifacts stay until they expire",
-      "success",
-    ],
-    [
-      "shows why the variable and secret could not be set",
-      docsOff,
-      "docs",
-      true,
-      { enabled: true, state: "error", state_error: "token lacks secrets=write on darkraise/docs: grant it in the PAT settings" },
-      "docs: token lacks secrets=write on darkraise/docs: grant it in the PAT settings",
-      "error",
-    ],
-  ])("%s", async (_name, store, name, enabled, answer, message) => {
-    const { calls } = mockApi({ [`PUT /api/artifact-store/repos/${name}`]: { ...repoOf(name), state_error: undefined, ...answer } })
+  it("offers no switch on a repository ghr does not serve", async () => {
+    mockApi({})
+    await draw(withRepo("docs", { state: "not_served", enabled: false }))
+    noToggle("docs")
+    expect(within(row("docs")).getByText(NOT_SERVED)).toHaveClass("text-muted-foreground")
+  })
+
+  it.each<[string, ArtifactStore, string]>([
+    ["a repository ghr no longer serves", withRepo("docs", { state: "not_served", enabled: true }), "docs"],
+    ["a public repository", withRepo("old-docs", { enabled: true }), "old-docs"],
+  ])("offers only a switch-off on %s that is still on", async (_name, store, name) => {
+    const { calls } = mockApi({ [`PUT /api/artifact-store/repos/${name}`]: { ...repoOf(name), enabled: false } })
     const { user } = await draw(store)
+    expect(toggle(name)).toBeChecked()
+    await user.click(toggle(name))
+    await waitFor(() => expect(bodies(calls, "PUT", `/api/artifact-store/repos/${name}`)).toEqual([{ enabled: false }]))
+    expect((await screen.findAllByText(`Turned off for ${name}: its artifacts stay until they expire`)).length).toBeGreaterThan(0)
+  })
+
+  it("warns on a repository ghr no longer serves whose entry is still on", async () => {
+    mockApi({})
+    await draw(withRepo("docs", { state: "not_served", enabled: true }))
+    expect(within(row("docs")).getByText(NOT_SERVED)).toHaveClass("text-warning")
+  })
+
+  it.each<[string, string, boolean, Partial<ArtifactStoreRepo>, string]>([
+    ["turns a repository on", "docs", true, { enabled: true, state: "on" }, "Turned on for docs: its next runners get the store settings"],
+    ["turns a repository off and keeps its artifacts", "darkmem", false, { enabled: false, state: "off" }, "Turned off for darkmem: its artifacts stay until they expire"],
+  ])("%s", async (_name, name, enabled, answer, message) => {
+    const { calls } = mockApi({ [`PUT /api/artifact-store/repos/${name}`]: { ...repoOf(name), ...answer } })
+    const { user } = await draw()
     await user.click(toggle(name))
     await waitFor(() => expect(bodies(calls, "PUT", `/api/artifact-store/repos/${name}`)).toEqual([{ enabled }]))
     expect((await screen.findAllByText(message)).length).toBeGreaterThan(0)
   })
 
   it("shows the daemon's refusal of a switch", async () => {
-    mockApi({ "PUT /api/artifact-store/repos/docs": () => json({ error: "set the job key first" }, 409) })
-    const { user } = await draw(docsOff)
+    const refusal = "docs is not served by ghr; self-hosted storage serves only repositories ghr runs jobs for"
+    mockApi({ "PUT /api/artifact-store/repos/docs": () => json({ error: refusal }, 409) })
+    const { user } = await draw()
     await user.click(toggle("docs"))
-    expect((await screen.findAllByText("set the job key first")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText(refusal)).length).toBeGreaterThan(0)
   })
 
-  it("turns every private repository on after naming them", async () => {
-    const answer = [repoOf("darkmem"), { ...repoOf("darkcloud"), state: "set", state_error: undefined }, { ...repoOf("docs"), enabled: true, state: "set", state_error: undefined }]
+  it("turns every served private repository on after naming them", async () => {
+    const answer = [repoOf("darkmem"), repoOf("darkcloud"), { ...repoOf("docs"), enabled: true, state: "on" }]
     const { calls } = mockApi({ "POST /api/artifact-store/repos/enable-private": answer })
-    const { user } = await draw(docsOff)
+    const { user } = await draw()
     await user.click(screen.getByRole("button", { name: "Turn on for all private repositories" }))
     const dialog = await screen.findByRole("alertdialog", { name: "Turn on RustFS for 1 repository?" })
-    expect(dialog).toHaveTextContent("ghr sets the GHR_ARTIFACT_STORE variable and GHR_ARTIFACT_KEY secret of docs. Its workflows then upload to RustFS.")
+    expect(dialog).toHaveTextContent("Jobs on ghr's runners for docs then upload to RustFS. Jobs on other runners keep using GitHub.")
     expect(bodies(calls, "POST", "/api/artifact-store/repos/enable-private")).toHaveLength(0)
     await user.click(within(dialog).getByRole("button", { name: "Turn on" }))
-    expect((await screen.findAllByText("Turned on for every private repository")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Turned on for every private repository ghr serves: their next runners get the store settings")).length).toBeGreaterThan(0)
     expect(bodies(calls, "POST", "/api/artifact-store/repos/enable-private")).toHaveLength(1)
   })
 
-  it("names the repositories the bulk turn-on could not set", async () => {
-    const answer = [repoOf("darkmem"), repoOf("darkcloud"), { ...repoOf("docs"), enabled: true, state: "set", state_error: undefined }]
-    mockApi({ "POST /api/artifact-store/repos/enable-private": answer })
-    const { user } = await draw(docsOff)
-    await user.click(screen.getByRole("button", { name: "Turn on for all private repositories" }))
-    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Turn on" }))
-    expect((await screen.findAllByText("Could not turn on darkcloud; its row says why")).length).toBeGreaterThan(0)
-  })
-
-  it("says when every private repository is already on, leaving another ghr's repository alone", async () => {
+  it("says when every served private repository is already on, leaving one ghr does not serve alone", async () => {
     const { calls } = mockApi({})
-    const { user } = await draw()
+    const { user } = await draw(withRepo("docs", { state: "not_served", enabled: false }))
     await user.click(screen.getByRole("button", { name: "Turn on for all private repositories" }))
-    expect((await screen.findAllByText("Every private repository ghr can change is already on")).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText("Every private repository ghr serves is already on")).length).toBeGreaterThan(0)
     expect(screen.queryByRole("alertdialog")).toBeNull()
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(0)
   })

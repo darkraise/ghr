@@ -29,31 +29,26 @@ function Sized({ bytes, count }: { bytes: number; count: number }) {
   )
 }
 
-const unset = (r: ArtifactStoreRepo) => r.state === "error" || r.state === "foreign"
+// Only a served private repository can be turned on, but any repository whose
+// config entry is on can be turned off.
+const switchable = (r: ArtifactStoreRepo) => r.state === "on" || r.state === "off" || r.enabled
 
 function RepoSwitch({ repo, offline }: { repo: ArtifactStoreRepo; offline: boolean }) {
   const queryClient = useQueryClient()
   const set = useMutation({
     mutationFn: (enabled: boolean) => api.setArtifactRepo(repo.name, { enabled }),
-    onSuccess: (row, enabled) => {
-      if (unset(row)) toast.error(`${repo.name}: ${stateLine(row).text}`)
-      else if (!enabled) toast.success(`Turned off for ${repo.name}: variable and secret removed; its artifacts stay until they expire`)
-      else if (row.state === "set") toast.success(`Turned on for ${repo.name}: variable and secret set`)
-      else toast.success(`Turned on for ${repo.name}; the next check writes its variable and secret`)
+    onSuccess: (_row, enabled) => {
+      if (enabled) toast.success(`Turned on for ${repo.name}: its next runners get the store settings`)
+      else toast.success(`Turned off for ${repo.name}: its artifacts stay until they expire`)
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.artifactStore }),
   })
-  const locked = !repo.private
+  if (!set.isPending && !switchable(repo)) return <span className="text-muted-foreground">-</span>
   const on = set.isPending ? (set.variables ?? repo.enabled) : repo.enabled
   return (
     <span className="flex items-center gap-2">
-      <Switch
-        checked={on}
-        disabled={offline || locked || set.isPending}
-        aria-label={`Use RustFS for ${repo.name}`}
-        onCheckedChange={(next) => set.mutate(next)}
-      />
-      <span className={`text-sm ${locked ? "text-muted-foreground" : ""}`}>{on ? "On" : "Off"}</span>
+      <Switch checked={on} disabled={offline || set.isPending} aria-label={`Use RustFS for ${repo.name}`} onCheckedChange={(next) => set.mutate(next)} />
+      <span className="text-sm">{on ? "On" : "Off"}</span>
     </span>
   )
 }
@@ -153,28 +148,23 @@ export function ArtifactStoreTable({ store, config, offline }: { store: Artifact
   const repos = store.repos
   const q = filter.trim().toLowerCase()
   const shown = repos.filter((r) => r.name.toLowerCase().includes(q)).sort(bySize)
-  // Another ghr's variable is never changed, so its repository is not offered.
-  const waiting = repos.filter((r) => r.private && !r.enabled && r.state !== "foreign")
+  const waiting = repos.filter((r) => r.state === "off")
   const sum = (pick: (r: ArtifactStoreRepo) => number) => repos.reduce((n, r) => n + pick(r), 0)
 
   const allOn = useMutation({
     mutationFn: () => api.enablePrivateArtifactRepos(),
-    onSuccess: (rows) => {
-      const failed = rows.filter(unset)
-      if (failed.length === 0) toast.success("Turned on for every private repository")
-      else toast.error(`Could not turn on ${failed.map((r) => r.name).join(", ")}; ${failed.length === 1 ? "its row says" : "their rows say"} why`)
-    },
+    onSuccess: () => toast.success("Turned on for every private repository ghr serves: their next runners get the store settings"),
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.artifactStore }),
   })
 
   function turnAllOn() {
     if (waiting.length === 0) {
-      toast("Every private repository ghr can change is already on")
+      toast("Every private repository ghr serves is already on")
       return
     }
     setConfirm({
       title: `Turn on RustFS for ${repositories(waiting.length)}?`,
-      body: `ghr sets the GHR_ARTIFACT_STORE variable and GHR_ARTIFACT_KEY secret of ${waiting.map((r) => r.name).join(", ")}. ${waiting.length === 1 ? "Its" : "Their"} workflows then upload to RustFS.`,
+      body: `Jobs on ghr's runners for ${waiting.map((r) => r.name).join(", ")} then upload to RustFS. Jobs on other runners keep using GitHub.`,
       action: "Turn on",
       run: () => allOn.mutate(),
     })
@@ -194,7 +184,8 @@ export function ArtifactStoreTable({ store, config, offline }: { store: Artifact
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Turning a repository on sets its GHR_ARTIFACT_STORE variable and GHR_ARTIFACT_KEY secret; its workflows then upload to RustFS.
+              Only private repositories ghr serves can be turned on. Their jobs on ghr's runners then upload to RustFS; jobs on other runners, GitHub-hosted
+              ones included, keep using GitHub and cannot download what ghr's runners stored.
             </p>
           </div>
           <div className="overflow-x-auto [&_.dr-table-wrapper]:border-0">
