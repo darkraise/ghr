@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/darkraise/ghr/internal/endpoint"
 	"github.com/darkraise/ghr/internal/s3"
 )
 
@@ -65,6 +66,53 @@ func (s Store) JSON() string {
 		panic(err)
 	}
 	return string(b)
+}
+
+const SettingsVersion = 1
+
+// Settings is ghr's artifact store settings file, which the daemon writes
+// into an eligible runner's work folder and ghr-artifact reads.
+type Settings struct {
+	V        int    `json:"v"`
+	Endpoint string `json:"endpoint"`
+	Bucket   string `json:"bucket"`
+	Region   string `json:"region"`
+	KeyID    string `json:"key_id"`
+	Secret   string `json:"secret"`
+}
+
+func (s Settings) JSON() []byte {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+// ParseSettings never puts any part of b in its error: b holds a secret.
+func ParseSettings(b []byte) (Settings, error) {
+	var s Settings
+	// json.Unmarshal's errors can quote the input, so its text is dropped.
+	if err := json.Unmarshal(b, &s); err != nil {
+		return Settings{}, errors.New("the settings are not valid JSON")
+	}
+	if s.V != SettingsVersion {
+		return Settings{}, fmt.Errorf("settings version %d is not supported; use a newer ghr-artifact", s.V)
+	}
+	if err := endpoint.Check(s.Endpoint); err != nil {
+		return Settings{}, errors.New("the endpoint is refused: " + err.Error())
+	}
+	switch {
+	case s.Bucket == "":
+		return Settings{}, errors.New("the settings name no bucket")
+	case s.Region == "":
+		return Settings{}, errors.New("the settings name no region")
+	case s.KeyID == "":
+		return Settings{}, errors.New("the settings name no key_id")
+	case s.Secret == "":
+		return Settings{}, errors.New("the settings name no secret")
+	}
+	return s, nil
 }
 
 func FormatKey(id, secret string) string { return id + ":" + secret }

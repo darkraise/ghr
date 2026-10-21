@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/darkraise/ghr/internal/endpoint"
 )
 
 func TestParseStore(t *testing.T) {
@@ -41,6 +43,66 @@ func TestStoreJSONRoundTrip(t *testing.T) {
 		t.Fatalf("JSON %s, want %s", got, want)
 	}
 	back, err := ParseStore(s.JSON())
+	if err != nil || back != s {
+		t.Fatalf("round trip %+v %v", back, err)
+	}
+}
+
+func TestParseSettings(t *testing.T) {
+	const (
+		secret = "Sup3r-S3cret/value"
+		good   = `{"v":1,"endpoint":"https://s3.example.sg:9000","bucket":"gha-artifacts","region":"ap-southeast-1","key_id":"JOBKEY1","secret":"` + secret + `"}`
+	)
+	want := Settings{V: 1, Endpoint: "https://s3.example.sg:9000", Bucket: "gha-artifacts", Region: "ap-southeast-1", KeyID: "JOBKEY1", Secret: secret}
+	got, err := ParseSettings([]byte(good))
+	if err != nil || got != want {
+		t.Fatalf("ParseSettings(good) = %+v, %v", got, err)
+	}
+	if _, err := ParseSettings([]byte(`{"v":1,"endpoint":"http://192.168.0.105:9000","bucket":"b","region":"r","key_id":"K","secret":"S","extra":true}`)); err != nil {
+		t.Fatalf("an http private endpoint with an unknown field: %v", err)
+	}
+	for _, tc := range []struct{ name, in, want string }{
+		{"empty", "", "the settings are not valid JSON"},
+		{"cut short", `{"v":1,"endpoint":"https://s3.example.sg:9000","secret":"` + secret + `"`, "the settings are not valid JSON"},
+		{"control character in the secret", `{"v":1,"secret":"` + secret + "\x01" + `"}`, "the settings are not valid JSON"},
+		{"secret of the wrong type", `{"v":1,"bucket":"gha-artifacts","secret":12345}`, "the settings are not valid JSON"},
+		{"version 2", `{"v":2,"endpoint":"https://s3.example.sg:9000","bucket":"gha-artifacts","region":"ap-southeast-1","key_id":"JOBKEY1","secret":"` + secret + `"}`,
+			"settings version 2 is not supported; use a newer ghr-artifact"},
+		{"no version", `{"endpoint":"https://s3.example.sg:9000","bucket":"gha-artifacts","region":"ap-southeast-1","key_id":"JOBKEY1","secret":"` + secret + `"}`,
+			"settings version 0 is not supported; use a newer ghr-artifact"},
+		{"http host name", `{"v":1,"endpoint":"http://s3.example.sg:9000","bucket":"gha-artifacts","region":"ap-southeast-1","key_id":"JOBKEY1","secret":"` + secret + `"}`,
+			"the endpoint is refused: " + endpoint.MsgHTTPName},
+		{"no endpoint", `{"v":1,"bucket":"gha-artifacts","region":"ap-southeast-1","key_id":"JOBKEY1","secret":"` + secret + `"}`,
+			"the endpoint is refused: " + endpoint.MsgForm},
+		{"no bucket", `{"v":1,"endpoint":"https://s3.example.sg:9000","region":"ap-southeast-1","key_id":"JOBKEY1","secret":"` + secret + `"}`,
+			"the settings name no bucket"},
+		{"no region", `{"v":1,"endpoint":"https://s3.example.sg:9000","bucket":"gha-artifacts","key_id":"JOBKEY1","secret":"` + secret + `"}`,
+			"the settings name no region"},
+		{"no key id", `{"v":1,"endpoint":"https://s3.example.sg:9000","bucket":"gha-artifacts","region":"ap-southeast-1","secret":"` + secret + `"}`,
+			"the settings name no key_id"},
+		{"no secret", `{"v":1,"endpoint":"https://s3.example.sg:9000","bucket":"gha-artifacts","region":"ap-southeast-1","key_id":"JOBKEY1"}`,
+			"the settings name no secret"},
+	} {
+		_, err := ParseSettings([]byte(tc.in))
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("%s: error %v, want %q", tc.name, err, tc.want)
+			continue
+		}
+		for _, value := range []string{secret, "Sup3r", "s3.example.sg", "gha-artifacts", "ap-southeast-1", "JOBKEY1", "12345"} {
+			if strings.Contains(err.Error(), value) {
+				t.Errorf("%s: error %q contains %q from the settings", tc.name, err, value)
+			}
+		}
+	}
+}
+
+func TestSettingsJSONRoundTrip(t *testing.T) {
+	s := Settings{V: SettingsVersion, Endpoint: "http://192.168.0.105:9000", Bucket: "gha-artifacts", Region: "us-east-1", KeyID: "JOBKEY1", Secret: "pa:ss/word"}
+	want := `{"v":1,"endpoint":"http://192.168.0.105:9000","bucket":"gha-artifacts","region":"us-east-1","key_id":"JOBKEY1","secret":"pa:ss/word"}`
+	if got := string(s.JSON()); got != want {
+		t.Fatalf("JSON %s, want %s", got, want)
+	}
+	back, err := ParseSettings(s.JSON())
 	if err != nil || back != s {
 		t.Fatalf("round trip %+v %v", back, err)
 	}
