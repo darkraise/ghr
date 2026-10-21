@@ -158,6 +158,7 @@ type instance struct {
 	startFailed  bool      // its failed start is already recorded in the repo's spawn backoff
 	cleaned      int       // containers removed by earlier finish attempts of a runner that ran no job
 	answered     bool      // the runners API answered for it in the current tick
+	settingsErr  string    // the warning of the last failed settings file sync, so it is added once
 }
 
 // registration names a runner registration for a delete retried later.

@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/darkraise/ghr/internal/sched"
 )
 
 const testSettings = `{"v":1,"endpoint":"https://s3.example.test","bucket":"ci","region":"us-east-1","key_id":"GHRKEY1","secret":"s3cr3t-job-key"}`
@@ -300,5 +302,244 @@ func TestSpawnStartsTheRunnerWhenTheSettingsWriteFails(t *testing.T) {
 				t.Fatalf("events:\n%s\nwant %q and no secret", ev, want)
 			}
 		})
+	}
+}
+
+const newSettings = `{"v":1,"endpoint":"https://s3.example.test","bucket":"ci","region":"us-east-1","key_id":"GHRKEY2","secret":"n3w-job-key"}`
+
+// settingsRunner spawns runner aaaaaa of the private darkmem with the
+// settings file and puts it in state. It returns the settings function, for
+// the test to change, and the file's path.
+func settingsRunner(t *testing.T, h *harness, state sched.State) (*fakeSettings, string) {
+	t.Helper()
+	f := &fakeSettings{b: []byte(testSettings), ok: true}
+	h.m.ArtifactSettings = f.get
+	h.m.RecordVisibility("darkmem", false)
+	if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	h.m.mu.Lock()
+	h.m.insts["aaaaaa"].State = state
+	h.m.mu.Unlock()
+	return f, filepath.Join(h.m.instanceDir("aaaaaa"), ArtifactSettingsFile)
+}
+
+const removedEvent = "info darkmem artifact store settings removed from aaaaaa: its repository no longer uses self-hosted storage\n"
+
+func TestSyncArtifactSettingsRemovesAFileNoLongerWanted(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		state  sched.State
+		change func(h *harness, f *fakeSettings)
+	}{
+		{"idle, the function says no", sched.Idle, func(_ *harness, f *fakeSettings) { f.ok = false }},
+		{"idle, the repository turned public", sched.Idle, func(h *harness, _ *fakeSettings) { h.m.RecordVisibility("darkmem", true) }},
+		{"starting, the function says no", sched.Starting, func(_ *harness, f *fakeSettings) { f.ok = false }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			f, path := settingsRunner(t, h, tc.state)
+			tc.change(h, f)
+			h.m.syncArtifactSettings()
+			if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("settings file: %v; want none", err)
+			}
+			if !strings.Contains(h.eventText(), removedEvent) {
+				t.Fatalf("events:\n%s", h.eventText())
+			}
+		})
+	}
+}
+
+// After a restart the manager has not read the repository's visibility
+// yet; the file stays until it has, whatever the daemon answers.
+func TestSyncArtifactSettingsKeepsAFileWhileVisibilityIsUnread(t *testing.T) {
+	h := newHarness(t)
+	f, path := settingsRunner(t, h, sched.Idle)
+	f.ok = false
+	h.m.mu.Lock()
+	delete(h.m.vis, "darkmem")
+	h.m.mu.Unlock()
+	h.m.syncArtifactSettings()
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("settings file removed while visibility is unread: %v", err)
+	}
+	if strings.Contains(h.eventText(), "artifact store settings") {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+}
+
+// New settings, such as a replaced job key, are written over the old ones
+// once; the same settings are left alone.
+func TestSyncArtifactSettingsRewritesChangedSettings(t *testing.T) {
+	h := newHarness(t)
+	f, path := settingsRunner(t, h, sched.Idle)
+	f.b = []byte(newSettings)
+	h.m.syncArtifactSettings()
+	checkSettingsFile(t, h.m.instanceDir("aaaaaa"), newSettings)
+	const updated = "info darkmem artifact store settings of aaaaaa updated\n"
+	if strings.Count(h.eventText(), updated) != 1 {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+	before, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.m.syncArtifactSettings()
+	after, err := os.Lstat(path)
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatalf("equal settings were written again: %v", err)
+	}
+	if strings.Count(h.eventText(), updated) != 1 {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+	if strings.Contains(h.eventText(), "n3w-job-key") {
+		t.Fatal("an event holds the secret")
+	}
+}
+
+// The rewrite keeps the file the runner user's, as the spawn's chown left it.
+func TestWriteArtifactSettingsKeepsTheOwnerOfTheFileItReplaces(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("giving the file another owner needs root")
+	}
+	h := newHarness(t)
+	dir := t.TempDir()
+	if err := h.m.writeArtifactSettings(dir, []byte(testSettings)); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ArtifactSettingsFile)
+	if err := os.Lchown(path, 65534, 65534); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.m.writeArtifactSettings(dir, []byte(newSettings)); err != nil {
+		t.Fatal(err)
+	}
+	checkSettingsFile(t, dir, newSettings)
+	fi, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uid, gid, ok := fileOwner(fi); !ok || uid != 65534 || gid != 65534 {
+		t.Fatalf("owner %d:%d (%v), want 65534:65534", uid, gid, ok)
+	}
+}
+
+func TestSyncArtifactSettingsLeavesSomeRunnersAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state sched.State
+		set   func(i *instance)
+		file  bool // the runner has a settings file
+		want  string
+	}{
+		{name: "busy", state: sched.Busy, file: true, want: testSettings},
+		{name: "finishing", state: sched.Idle, set: func(i *instance) { i.finishing = true }, file: true, want: testSettings},
+		{name: "stopping", state: sched.Idle, set: func(i *instance) { i.stopping = true }, file: true, want: testSettings},
+		{name: "idle without a file", state: sched.Idle},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			f, path := settingsRunner(t, h, tc.state)
+			if tc.set != nil {
+				h.m.mu.Lock()
+				tc.set(h.m.insts["aaaaaa"])
+				h.m.mu.Unlock()
+			}
+			if tc.file {
+				f.ok = false
+			} else {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				f.b = []byte(newSettings)
+			}
+			h.m.syncArtifactSettings()
+			got, err := os.ReadFile(path)
+			if tc.want == "" && !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("settings file %q, %v; want none", got, err)
+			}
+			if tc.want != "" && string(got) != tc.want {
+				t.Fatalf("settings file %q, %v; want %q", got, err, tc.want)
+			}
+			if strings.Contains(h.eventText(), "artifact store settings") {
+				t.Fatalf("events:\n%s", h.eventText())
+			}
+		})
+	}
+}
+
+func TestSyncArtifactSettingsHandlesAnAdoptedRunner(t *testing.T) {
+	h := newHarness(t)
+	makeInstance(t, h, "aaaaaa", "darkmem", 1, false)
+	h.sd.active["ghr-runner-aaaaaa"] = true
+	if err := h.m.Adopt(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.m.mu.Lock()
+	adopted := h.m.insts["aaaaaa"] != nil && h.m.insts["aaaaaa"].adopted
+	h.m.mu.Unlock()
+	if !adopted {
+		t.Fatal("aaaaaa was not adopted")
+	}
+	dir := h.m.instanceDir("aaaaaa")
+	if err := h.m.writeArtifactSettings(dir, []byte(testSettings)); err != nil {
+		t.Fatal(err)
+	}
+	h.m.ArtifactSettings = (&fakeSettings{}).get
+	h.m.RecordVisibility("darkmem", false)
+	h.m.syncArtifactSettings()
+	if _, err := os.Lstat(filepath.Join(dir, ArtifactSettingsFile)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("settings file: %v; want none", err)
+	}
+	if !strings.Contains(h.eventText(), removedEvent) {
+		t.Fatalf("events:\n%s", h.eventText())
+	}
+}
+
+func TestSyncArtifactSettingsWarnsOncePerFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(t *testing.T, h *harness, f *fakeSettings, path string)
+		want   string
+	}{
+		{"update", func(_ *testing.T, h *harness, f *fakeSettings, _ string) {
+			f.b = []byte(newSettings)
+			h.m.openSettingsTemp = failSettingsAt("create")
+		}, "warn darkmem cannot update the artifact store settings of aaaaaa: disk on fire at create\n"},
+		// A directory that is not empty cannot be removed.
+		{"remove", func(t *testing.T, _ *harness, f *fakeSettings, path string) {
+			f.ok = false
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(path, "x"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}, "warn darkmem cannot remove the artifact store settings from aaaaaa: "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			f, path := settingsRunner(t, h, sched.Idle)
+			tc.change(t, h, f, path)
+			h.m.syncArtifactSettings()
+			h.m.syncArtifactSettings()
+			if n := strings.Count(h.eventText(), tc.want); n != 1 {
+				t.Fatalf("%d warnings, want 1; events:\n%s", n, h.eventText())
+			}
+		})
+	}
+}
+
+func TestTickKeepsArtifactSettingsInStep(t *testing.T) {
+	h := newHarness(t)
+	f, path := settingsRunner(t, h, sched.Starting)
+	f.ok = false
+	h.m.Tick(context.Background())
+	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("settings file: %v; want none", err)
+	}
+	if !strings.Contains(h.eventText(), removedEvent) {
+		t.Fatalf("events:\n%s", h.eventText())
 	}
 }

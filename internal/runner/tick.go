@@ -46,6 +46,7 @@ func (m *Manager) Tick(ctx context.Context) {
 		demandOK, unanswered = m.gatherDemand(ctx, cfg, now)
 	}
 	m.noteBlocked(cfg)
+	m.syncArtifactSettings()
 	if m.apiAllowed(now) && !m.isDegraded() && m.Jobs.Due(config.JobRunnerUpdateCheck, now) {
 		m.checkRelease(ctx)
 	}

@@ -1,10 +1,17 @@
 package runner
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"slices"
+	"strings"
+	"syscall"
+
+	"github.com/darkraise/ghr/internal/sched"
 )
 
 // ArtifactSettingsFile is where a runner finds ghr's artifact store settings,
@@ -84,9 +91,114 @@ func (m *Manager) placeSettings(root *os.Root, b []byte) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
+	// A rewrite keeps the owner of the file it replaces, the runner user: a
+	// file of root's would be unreadable to the job.
+	if fi, err := root.Lstat(ArtifactSettingsFile); err == nil {
+		if uid, gid, ok := fileOwner(fi); ok {
+			if err := root.Lchown(artifactSettingsTemp, uid, gid); err != nil {
+				return err
+			}
+		}
+	}
 	return root.Rename(artifactSettingsTemp, ArtifactSettingsFile)
 }
 
 func openSettingsTemp(root *os.Root, name string) (io.WriteCloser, error) {
 	return root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+}
+
+// syncArtifactSettings keeps the settings files of runners that have no job
+// yet in step with what their repositories get now: a file is removed when
+// its repository no longer gets one and rewritten when the settings changed,
+// such as for a new job key. A runner without a file gets none here, and a
+// busy runner keeps its file, which its job already started with.
+func (m *Manager) syncArtifactSettings() {
+	type runner struct{ id, repo string }
+	var rs []runner
+	m.mu.Lock()
+	for _, i := range m.insts {
+		if (i.State == sched.Starting || i.State == sched.Idle) && !i.finishing && !i.stopping {
+			rs = append(rs, runner{i.ID, i.Repo})
+		}
+	}
+	m.mu.Unlock()
+	slices.SortFunc(rs, func(a, b runner) int { return strings.Compare(a.id, b.id) })
+	for _, r := range rs {
+		done, failed := m.syncArtifactSettingsOf(r.id, r.repo)
+		if done != "" {
+			m.Events.Add("info", r.repo, "%s", done)
+		}
+		m.mu.Lock()
+		i, ok := m.insts[r.id]
+		report := ok && failed != "" && failed != i.settingsErr
+		if ok {
+			i.settingsErr = failed
+		}
+		m.mu.Unlock()
+		if report {
+			m.Events.Add("warn", r.repo, "%s", failed)
+		}
+	}
+}
+
+// syncArtifactSettingsOf removes or rewrites runner id's settings file and
+// returns the event text for what it did or for what failed; both are empty
+// when there is no file or it is already right.
+func (m *Manager) syncArtifactSettingsOf(id, repo string) (done, failed string) {
+	dir := m.instanceDir(id)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return "", ""
+	}
+	defer root.Close()
+	// Any answer but an entry's, such as a link out of the directory, means
+	// there is no file of ghr's to keep in step.
+	if _, err := root.Lstat(ArtifactSettingsFile); err != nil {
+		return "", ""
+	}
+	m.mu.Lock()
+	_, known := m.visibilityLocked(repo)
+	m.mu.Unlock()
+	// The manager keeps visibility in memory only, so after a restart it is
+	// unread until the repository's first poll; an adopted runner's file
+	// waits for that answer rather than being removed.
+	if !known {
+		return "", ""
+	}
+	b, ok := m.artifactSettingsFor(repo)
+	if !ok {
+		if err := root.Remove(ArtifactSettingsFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Sprintf("cannot remove the artifact store settings from %s: %v; its next job may still use self-hosted storage", id, err)
+		}
+		return fmt.Sprintf("artifact store settings removed from %s: its repository no longer uses self-hosted storage", id), ""
+	}
+	if have, err := readArtifactSettings(root); err == nil && bytes.Equal(have, b) {
+		return "", ""
+	}
+	if err := m.writeArtifactSettings(dir, b); err != nil {
+		return "", fmt.Sprintf("cannot update the artifact store settings of %s: %v", id, err)
+	}
+	return fmt.Sprintf("artifact store settings of %s updated", id), ""
+}
+
+// readArtifactSettings reads the settings file through root with the checks
+// readJobFile makes: the job can put a link, a FIFO or a device in its place,
+// and a FIFO would block the tick.
+func readArtifactSettings(root *os.Root) ([]byte, error) {
+	fi, err := root.Lstat(ArtifactSettingsFile)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fs.ErrInvalid
+	}
+	f, err := root.OpenFile(ArtifactSettingsFile, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return nil, fs.ErrInvalid
+	}
+	return io.ReadAll(io.LimitReader(f, maxJobFile))
 }
