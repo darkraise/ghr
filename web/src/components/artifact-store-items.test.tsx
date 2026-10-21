@@ -12,18 +12,18 @@ import { ArtifactStoreItems } from "./artifact-store-items"
 const darkmem = fixtures.artifactStore.repos[0] as ArtifactStoreRepo
 const URL_1H = "https://s3.example.sg/gha-artifacts/darkraise/darkmem/102/e2e-report.zip?X-Amz-Expires=3600&X-Amz-Signature=a1"
 
-function Items({ repo }: { repo: ArtifactStoreRepo }) {
+function Items({ repo, endpoint }: { repo: ArtifactStoreRepo; endpoint: string }) {
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   return (
     <>
-      <ArtifactStoreItems repo={repo} offline={false} busy={false} ask={setConfirm} />
+      <ArtifactStoreItems repo={repo} endpoint={endpoint} offline={false} busy={false} ask={setConfirm} />
       <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
     </>
   )
 }
 
-async function draw(repo: ArtifactStoreRepo = darkmem) {
-  const view = renderRoutes({ "/": () => <Items repo={repo} />, "/actions/$repo/runs/$id": () => <p>run page</p> }, "/")
+async function draw(repo: ArtifactStoreRepo = darkmem, endpoint = "https://s3.example.sg") {
+  const view = renderRoutes({ "/": () => <Items repo={repo} endpoint={endpoint} />, "/actions/$repo/runs/$id": () => <p>run page</p> }, "/")
   // useNow reads the daemon's clock from the status, here 2026-10-03 14:05.
   view.queryClient.setQueryData(keys.status, fixtures.status)
   await screen.findByRole("region", { name: `Artifacts of ${repo.name}` })
@@ -73,11 +73,21 @@ describe("ArtifactStoreItems", () => {
     await user.click(within(items()).getByRole("button", { name: "Copy a link to e2e-report from run 102" }))
     expect(await screen.findByText("Link valid for")).toBeInTheDocument()
     expect(screen.getByText("Anyone with the link can download it until it expires. The link goes straight to RustFS.")).toBeInTheDocument()
+    expect(screen.queryByText(/Works only on the store's network/)).toBeNull()
     expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["1 hour", "24 hours", "7 days"])
     await user.click(screen.getByRole("menuitem", { name: "24 hours" }))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(url))
     expect(posts(calls, "/api/artifact-store/link")).toEqual([{ key: "darkraise/darkmem/102/e2e-report.zip", ttl: "24h" }])
     expect((await screen.findAllByText("Link copied · valid for 24 hours")).length).toBeGreaterThan(0)
+  })
+
+  it("says a link to an http:// store works only on the store's network", async () => {
+    mockApi({})
+    const { user } = await draw(darkmem, "http://192.168.0.105:9000")
+    await user.hover(within(items()).getByRole("button", { name: "Download e2e-report from run 102" }))
+    expect(await screen.findByRole("tooltip", {}, { timeout: 3000 })).toHaveTextContent("Works only on the store's network")
+    await user.click(within(items()).getByRole("button", { name: "Copy a link to e2e-report from run 102" }))
+    expect(await screen.findByText("Works only on the store's network.")).toBeInTheDocument()
   })
 
   it("deletes one artifact after asking", async () => {

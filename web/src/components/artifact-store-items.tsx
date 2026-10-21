@@ -5,6 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Input } from "darkraise-ui/components/input"
 import { toast } from "darkraise-ui/components/sonner"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "darkraise-ui/components/table"
+import { Tooltip, TooltipContent, TooltipTrigger } from "darkraise-ui/components/tooltip"
 import { ChevronDown, Trash2 } from "lucide-react"
 import { useState } from "react"
 import { api } from "@/api/client"
@@ -19,21 +20,34 @@ import { useNow } from "@/lib/use-now"
 const NUM = "text-right font-mono whitespace-nowrap"
 const WIDE = "hidden sm:table-cell"
 
+const LAN_ONLY = "Works only on the store's network"
+
+// ghr accepts http:// only for a private, loopback or link-local address, so
+// its links reach the store only from that network.
+const lanOnly = (endpoint: string | undefined) => /^http:\/\//i.test(endpoint ?? "")
+
 // The link is signed for one hour and asked for on each click, so a page left
 // open never hands the browser an expired one.
-export function DownloadObject({ item, label }: { item: ArtifactStoreItem; label: string }) {
+export function DownloadObject({ item, label, lan = false }: { item: ArtifactStoreItem; label: string; lan?: boolean }) {
   const download = useMutation({
     mutationFn: () => api.artifactLink(item.key, "1h"),
     onSuccess: (link) => window.location.assign(link.url),
   })
-  return (
+  const button = (
     <Button size="sm" variant="outline" loading={download.isPending} aria-label={`Download ${label}`} onClick={() => download.mutate()}>
       Download
     </Button>
   )
+  if (!lan) return button
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent>{LAN_ONLY}</TooltipContent>
+    </Tooltip>
+  )
 }
 
-export function CopyLinkMenu({ item, label }: { item: ArtifactStoreItem; label: string }) {
+export function CopyLinkMenu({ item, label, lan = false }: { item: ArtifactStoreItem; label: string; lan?: boolean }) {
   const copy = useMutation({
     mutationFn: async (ttl: ArtifactLinkTTL) => {
       const link = await api.artifactLink(item.key, ttl)
@@ -57,6 +71,7 @@ export function CopyLinkMenu({ item, label }: { item: ArtifactStoreItem; label: 
           </DropdownMenuItem>
         ))}
         <p className="px-2 py-1.5 text-xs text-muted-foreground">Anyone with the link can download it until it expires. The link goes straight to RustFS.</p>
+        {lan && <p className="px-2 pb-1.5 text-xs text-muted-foreground">{`${LAN_ONLY}.`}</p>}
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -64,11 +79,13 @@ export function CopyLinkMenu({ item, label }: { item: ArtifactStoreItem; label: 
 
 export function ArtifactStoreItems({
   repo,
+  endpoint,
   offline,
   busy,
   ask,
 }: {
   repo: ArtifactStoreRepo
+  endpoint: string | undefined
   offline: boolean
   busy: boolean
   ask: (c: Confirm) => void
@@ -85,6 +102,7 @@ export function ArtifactStoreItems({
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.artifactStore }),
   })
   const held = offline || busy || remove.isPending
+  const lan = lanOnly(endpoint)
 
   function askOlder() {
     const age = older.trim()
@@ -165,8 +183,8 @@ export function ArtifactStoreItems({
                   <TableCell className={`font-mono whitespace-nowrap ${WIDE}`}>{expiryText(i, repo.cleanup)}</TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
-                      <DownloadObject item={i} label={label} />
-                      <CopyLinkMenu item={i} label={label} />
+                      <DownloadObject item={i} label={label} lan={lan} />
+                      <CopyLinkMenu item={i} label={label} lan={lan} />
                       <Button
                         size="icon"
                         variant="ghost"

@@ -240,7 +240,7 @@ export function ArtifactStoreTable({ store, config, offline }: { store: Artifact
                       {expanded && (
                         <TableRow>
                           <TableCell colSpan={4} className="bg-background p-0 whitespace-normal">
-                            <ArtifactStoreItems repo={r} offline={offline} busy={busy} ask={setConfirm} />
+                            <ArtifactStoreItems repo={r} endpoint={store.endpoint} offline={offline} busy={busy} ask={setConfirm} />
                           </TableCell>
                         </TableRow>
                       )}
