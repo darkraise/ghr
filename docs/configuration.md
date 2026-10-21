@@ -27,7 +27,7 @@ web:
 github_storage:             # see artifact-storage.md
   included_mb: 500
 artifact_store:             # self-hosted artifact storage; see self-hosted-artifacts.md
-  endpoint: https://s3.example.com
+  endpoint: https://s3.example.com   # or http://192.168.1.20:9000 for a private, loopback or link-local IP; no path
   bucket: gha-artifacts
   cleanup_max_age: 7d       # empty is 7d; off, or at least 24h
 jobs:                       # background tasks; see Background tasks below
@@ -46,6 +46,8 @@ watch_repos: [other-repo]   # shown on the Actions page; ghr runs no runners for
 ```
 
 Durations take `s`, `m`, `h` and `d` suffixes.
+
+`artifact_store.endpoint` takes `https://host[:port]` for any host, or `http://ip[:port]` when the IP address is private, loopback or link-local, such as `http://192.168.1.20:9000`. It refuses a path (a trailing `/` included), `http://` with a host name, `localhost` included, and `http://` with any other address, carrier-grade NAT addresses in `100.64.0.0/10` among them. A refused endpoint fails with `artifact_store.endpoint:` followed by the reason; [Self-hosted artifacts](self-hosted-artifacts.md#the-endpoint) gives the rule in full.
 
 A ghr release from before [self-hosted artifacts](self-hosted-artifacts.md) refuses a config with an `artifact_store` block, because config loading rejects fields it does not know. Remove the block before downgrading.
 

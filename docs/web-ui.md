@@ -59,3 +59,14 @@ The Jobs page lists the [background tasks](configuration.md#background-tasks). I
 ## Self-hosted artifacts
 
 The Artifacts page has two tabs, **GitHub** and **Self-hosted**, and the address keeps the one shown (`/artifacts?store=self-hosted`). **Policy** and **Check now** act on the tab's store. Before setup, the Self-hosted tab explains the feature and leads to Settings › Self-hosted storage, which holds the connection, the admin and job keys, a connection test, the cleanup age and capacity, and a workflow snippet to copy. A run's Artifacts card lists the artifacts of both stores. [Self-hosted artifacts](self-hosted-artifacts.md) describes the setup.
+
+Each repository row on the Self-hosted tab is in one of four states:
+
+| State | Meaning |
+|---|---|
+| `on` | switched on: jobs on ghr's runners store their artifacts in the bucket |
+| `off` | served and private but not switched on: artifacts go to GitHub |
+| `not_served` | shown as "not served by ghr": a watched repository, or an `artifact_store.repos` entry for a repository no longer under `repos`; it counts as off |
+| `public` | a public repository; its artifacts stay on GitHub |
+
+Only a served repository that is not public has a switch to turn it on; any row that is on can be switched off, a not-served one included. **Turn on for all private repositories** switches on the served private repositories. A repository whose visibility ghr has not read yet counts as private on its row; ghr checks again before it gives a runner the store's settings. With an `http://` endpoint, the Copy link menu and the Download button say "Works only on the store's network".

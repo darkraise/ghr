@@ -22,12 +22,12 @@ web:                          # browser UI; set its password with ghr web set-pa
 #   repos:
 #     my-repo: { cleanup: 6h }  # at least 1h, or off
 # artifact_store:             # self-hosted artifact storage on an S3 server; Settings → Self-hosted storage edits it
-#   endpoint: https://s3.example.com  # https only, no path
+#   endpoint: https://s3.example.com  # or http://ip:port for a private, loopback or link-local IP; no path
 #   bucket: gha-artifacts
 #   region: us-east-1         # the default when absent
 #   cleanup_max_age: 7d       # absent is 7d; off, or at least 24h
 #   capacity_gb: 50           # optional, decimal GB, shown on the usage card
-#   repos:                    # switched on from the Artifacts page; entries for repositories not in repos or watch_repos are ignored
+#   repos:                    # switched on from the Artifacts page; an entry for a repository not in repos counts as off
 #     my-repo: { enabled: true, cleanup: 3d }  # cleanup at least 1h, or off
 # jobs:                       # ghr's background tasks; the web UI's Jobs page edits them
 #   ghr_update_check: { enabled: true, every: 24h }     # at least 1h

@@ -24,14 +24,14 @@ The Artifacts page also covers every other repository of the owner the token can
 
 For an organization, reading storage use needs an organization admin's token with **Administration: read** on the organization. The quota can only be read when the token belongs to the owner. Without these permissions ghr runs jobs as usual, and the Artifacts page says which permission is missing.
 
-[Self-hosted artifacts](self-hosted-artifacts.md) also needs, on each repository you switch on:
+[Self-hosted artifacts](self-hosted-artifacts.md) needs no further permission: ghr hands the store's settings to its own runners and writes nothing about the store to GitHub. Earlier releases wrote a `GHR_ARTIFACT_STORE` variable and a `GHR_ARTIFACT_KEY` secret into each switched-on repository, and ghr deletes its own once per repository after it starts when the token allows it:
 
 | Permission | Needed for |
 |---|---|
-| Variables: read and write | writing the `GHR_ARTIFACT_STORE` variable |
-| Secrets: read and write | writing the `GHR_ARTIFACT_KEY` secret |
+| Variables: read and write | reading and deleting ghr's old `GHR_ARTIFACT_STORE` variable |
+| Secrets: read and write | deleting ghr's old `GHR_ARTIFACT_KEY` secret |
 
-Without them a switched-on repository's row on the Artifacts page shows which permission is missing; switched-off repositories stay off.
+Without them the old variable and secret stay behind. They are harmless, since the current actions ignore them; the guide's [upgrade note](self-hosted-artifacts.md#upgrading-from-an-earlier-release) gives the two `gh` commands that remove them.
 
 ## Install
 
