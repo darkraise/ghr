@@ -543,3 +543,29 @@ func TestTickKeepsArtifactSettingsInStep(t *testing.T) {
 		t.Fatalf("events:\n%s", h.eventText())
 	}
 }
+
+func TestSyncArtifactSettingsLeavesARunnerWithAJobFileAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(f *fakeSettings)
+	}{
+		{"remove", func(f *fakeSettings) { f.ok = false }},
+		{"rewrite", func(f *fakeSettings) { f.b = []byte(newSettings) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			f, path := settingsRunner(t, h, sched.Idle)
+			if err := os.WriteFile(filepath.Join(h.m.instanceDir("aaaaaa"), JobFile), []byte("{}"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			tc.change(f)
+			h.m.syncArtifactSettings()
+			if got, err := os.ReadFile(path); err != nil || string(got) != testSettings {
+				t.Fatalf("settings file %q, %v; want %q", got, err, testSettings)
+			}
+			if strings.Contains(h.eventText(), "artifact store settings") {
+				t.Fatalf("events:\n%s", h.eventText())
+			}
+		})
+	}
+}

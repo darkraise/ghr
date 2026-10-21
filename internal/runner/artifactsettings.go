@@ -166,6 +166,10 @@ func (m *Manager) syncArtifactSettingsOf(id, repo string) (done, failed string) 
 		return "", ""
 	}
 	b, ok := m.artifactSettingsFor(repo)
+	// A job that started since this tick's readJobFiles keeps the file it may already be using.
+	if _, err := root.Lstat(JobFile); !errors.Is(err, fs.ErrNotExist) {
+		return "", ""
+	}
 	if !ok {
 		if err := root.Remove(ArtifactSettingsFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return "", fmt.Sprintf("cannot remove the artifact store settings from %s: %v; its next job may still use self-hosted storage", id, err)
