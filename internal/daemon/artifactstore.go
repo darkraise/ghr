@@ -27,6 +27,8 @@ type ArtifactStoreService interface {
 	PolicyChanged()
 	SyncRepo(ctx context.Context, repo string) (model.ArtifactStoreRepo, error)
 	SwitchOff(ctx context.Context, repo string) error
+	Row(repo string) (model.ArtifactStoreRepo, bool)
+	Retire(ctx context.Context, repo string) error
 	Test(ctx context.Context) (model.ArtifactStoreTest, error)
 	RunObjects(ctx context.Context, repo string, runID int64) ([]model.ArtifactStoreItem, error)
 	Delete(repo string, keys []string) (string, error)

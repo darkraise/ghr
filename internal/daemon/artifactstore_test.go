@@ -19,19 +19,23 @@ import (
 )
 
 // fakeAS records every call as "<method> <args>". SyncRepo answers with
-// syncErr, SwitchOff with offErr and every other method that can fail with err.
+// syncErr, SwitchOff with offErr, Retire with retireErr and every other
+// method that can fail with err. Row answers a row named after the
+// repository, or none when noRow is set.
 type fakeAS struct {
-	mu      sync.Mutex
-	calls   []string
-	snap    model.ArtifactStore
-	summary *model.ArtifactStoreSummary
-	test    model.ArtifactStoreTest
-	items   []model.ArtifactStoreItem
-	link    model.ArtifactLink
-	err     error
-	syncErr error
-	offErr  error
-	version atomic.Int64
+	mu        sync.Mutex
+	calls     []string
+	snap      model.ArtifactStore
+	summary   *model.ArtifactStoreSummary
+	test      model.ArtifactStoreTest
+	items     []model.ArtifactStoreItem
+	link      model.ArtifactLink
+	err       error
+	syncErr   error
+	offErr    error
+	retireErr error
+	noRow     bool
+	version   atomic.Int64
 }
 
 func (f *fakeAS) record(format string, args ...any) {
@@ -64,6 +68,14 @@ func (f *fakeAS) SyncRepo(_ context.Context, repo string) (model.ArtifactStoreRe
 func (f *fakeAS) SwitchOff(_ context.Context, repo string) error {
 	f.record("switch-off %s", repo)
 	return f.offErr
+}
+func (f *fakeAS) Row(repo string) (model.ArtifactStoreRepo, bool) {
+	f.record("row %s", repo)
+	return model.ArtifactStoreRepo{Name: repo, State: "row"}, !f.noRow
+}
+func (f *fakeAS) Retire(_ context.Context, repo string) error {
+	f.record("retire %s", repo)
+	return f.retireErr
 }
 func (f *fakeAS) Test(context.Context) (model.ArtifactStoreTest, error) {
 	f.record("test")
