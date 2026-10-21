@@ -327,18 +327,3 @@ func TestRetirePrunesRepositoriesNoLongerCovered(t *testing.T) {
 		t.Fatalf("GetVariable darkmem called %d times, want twice: a repository covered again is read again", n)
 	}
 }
-
-func TestSyncRepoAnswersTheRow(t *testing.T) {
-	e := newTestEnv(t)
-	e.enable("darkmem")
-	r, err := e.s.SyncRepo(context.Background(), "DarkMem")
-	if err != nil || r.Name != "darkmem" || r.State != "on" {
-		t.Fatalf("row %+v, %v", r, err)
-	}
-	if _, err := e.s.SyncRepo(context.Background(), "elsewhere"); !errors.Is(err, ErrUnknownRepo) {
-		t.Fatalf("an unknown repository: %v, want ErrUnknownRepo", err)
-	}
-	if got := e.gh.callsLike(""); len(got) != 0 {
-		t.Fatalf("GitHub calls %v, want none", got)
-	}
-}

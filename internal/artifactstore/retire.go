@@ -9,7 +9,6 @@ import (
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/ghstorage"
 	"github.com/darkraise/ghr/internal/github"
-	"github.com/darkraise/ghr/internal/model"
 )
 
 var errRateLow = errors.New("waiting for GitHub's rate limit to recover; ghr retries on a later pass")
@@ -220,14 +219,3 @@ func (s *Service) getVariable(ctx context.Context, repo string) (string, bool, e
 	defer cancel()
 	return s.GH.GetVariable(ctx, repo, artifact.VariableName)
 }
-
-// SyncRepo returns repo's row.
-func (s *Service) SyncRepo(_ context.Context, repo string) (model.ArtifactStoreRepo, error) {
-	if r, ok := s.Row(repo); ok {
-		return r, nil
-	}
-	return model.ArtifactStoreRepo{}, ErrUnknownRepo
-}
-
-// SwitchOff retires repo.
-func (s *Service) SwitchOff(ctx context.Context, repo string) error { return s.Retire(ctx, repo) }
