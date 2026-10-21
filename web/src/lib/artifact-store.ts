@@ -78,6 +78,6 @@ export function selfHostedSummary(store: ArtifactStore | undefined, config: Conf
   const checked = store.checked_at ? `Checked ${shortWhen(store.checked_at, now)}` : "Not checked yet"
   const n = store.repos.filter((r) => r.cleanup_source === "override").length
   const overrides = n === 0 ? "" : ` (${n} repository override${n === 1 ? "" : "s"})`
-  const on = store.repos.filter((r) => r.enabled && r.state !== "not_served").length
+  const on = store.repos.filter((r) => r.state === "on").length
   return `${checked} · cleanup ${globalCleanup(config)}${overrides} · ${repositories(on)} on`
 }

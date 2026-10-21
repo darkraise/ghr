@@ -40,6 +40,13 @@ describe("ArtifactStoreUsage", () => {
     expect(within(within(card).getByRole("region", { name: "Used" })).queryByText(/^of /)).toBeNull()
     expect(within(card).getByText("Set a capacity in Settings to see use against it; ghr does not read the VPS disk.")).toBeInTheDocument()
   })
+
+  it("counts only the repositories whose state is on", async () => {
+    const repos = fixtures.artifactStore.repos.map((r) => (r.name === "old-docs" ? { ...r, enabled: true } : r))
+    draw(() => <ArtifactStoreUsage store={{ ...fixtures.artifactStore, repos }} />)
+    const card = await screen.findByRole("region", { name: "RustFS storage" })
+    expect(within(within(card).getByRole("region", { name: "Repositories on" })).getByText("2")).toBeInTheDocument()
+  })
 })
 
 describe("ArtifactStoreEmpty", () => {

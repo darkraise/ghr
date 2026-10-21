@@ -460,8 +460,8 @@ func TestRowStates(t *testing.T) {
 	if n := len(st.Repos); n != 6 {
 		t.Errorf("%d rows, want 6", n)
 	}
-	if sum := e.s.Summary(); sum == nil || sum.ReposOn != 3 {
-		t.Errorf("summary %+v, want 3 repositories on: the served ones switched on", sum)
+	if sum := e.s.Summary(); sum == nil || sum.ReposOn != 2 {
+		t.Errorf("summary %+v, want 2 repositories on: the rows whose state is on", sum)
 	}
 	if r, ok := e.s.Row("OLD-repo"); !ok || r.Name != "Old-Repo" || r.State != "not_served" {
 		t.Errorf("Row(OLD-repo) = %+v, %v; want the Old-Repo row", r, ok)

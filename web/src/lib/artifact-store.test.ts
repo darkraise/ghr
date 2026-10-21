@@ -91,7 +91,7 @@ describe("selfHostedSummary", () => {
       repos: fixtures.artifactStore.repos.map((r) => ({
         ...r,
         cleanup_source: "global",
-        enabled: r.name !== "old-docs",
+        enabled: true,
         state: r.name === "darkmem" ? "on" : r.name === "old-docs" ? "public" : "not_served",
       })),
     }

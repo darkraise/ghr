@@ -31,7 +31,7 @@ export function ArtifactStoreUsage({ store }: { store: ArtifactStore }) {
   const capacity = store.capacity_bytes ?? 0
   const share = capacity > 0 ? store.used_bytes / capacity : 0
   const used = humanBytes(store.used_bytes)
-  const on = store.repos.filter((r) => r.enabled).length
+  const on = store.repos.filter((r) => r.state === "on").length
   const privateRepos = store.repos.filter((r) => r.private).length
   const aside = store.checked_at && <span className="ml-auto font-mono text-sm text-muted-foreground">{`Listed ${shortWhen(store.checked_at, now)}`}</span>
   return (

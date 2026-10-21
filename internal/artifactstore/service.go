@@ -768,7 +768,8 @@ func (s *Service) Summary() *model.ArtifactStoreSummary {
 		}
 	}
 	for _, r := range cfg.Repos {
-		if a.Enabled(r.Name) {
+		private, known := s.private[strings.ToLower(r.Name)]
+		if rowState(cfg, r.Name, private || !known) == "on" {
 			out.ReposOn++
 		}
 	}
