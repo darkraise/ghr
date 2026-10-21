@@ -811,15 +811,14 @@ export interface ArtifactStoreItem {
   expires_at?: string
 }
 
-// set, missing, stale, foreign, public, error or off
-export type ArtifactRepoState = string
+// not_served: not listed under repos in config.yaml, so it cannot be turned on.
+export type ArtifactRepoState = "on" | "off" | "not_served" | "public"
 
 export interface ArtifactStoreRepo {
   name: string
   private: boolean
   enabled: boolean
   state: ArtifactRepoState
-  state_error?: string
   // "off" or an age such as "7d"
   cleanup: string
   // override, global or default

@@ -68,7 +68,8 @@ const runAnnotations: RunAnnotations = runAnnotationsJson
 const jobLog: JobLog = jobLogJson
 const githubStorage: GitHubStorage = githubStorageJson
 const storageAlert: StorageAlert = storageAlertJson
-const artifactStore: ArtifactStore = artifactStoreJson
+// The JSON import types state as a plain string.
+const artifactStore = artifactStoreJson as ArtifactStore
 
 export const fixtures = {
   status,

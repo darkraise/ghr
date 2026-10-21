@@ -233,7 +233,7 @@ describe("GitHub storage fixtures", () => {
 })
 
 describe("artifact store fixtures", () => {
-  const snap: ArtifactStore = artifactStoreJson
+  const snap = artifactStoreJson as ArtifactStore
 
   it("the snapshot carries the keys, the totals, the rows and the deletions", () => {
     expect([snap.configured, snap.endpoint, snap.bucket, snap.region]).toEqual([true, "https://s3.example.sg", "gha-artifacts", "us-east-1"])
