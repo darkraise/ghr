@@ -28,9 +28,9 @@ const KEYS: Record<ArtifactKeyWhich, { name: string; help: string; about: string
   },
   job: {
     name: "Job key",
-    help: "Written as the GHR_ARTIFACT_KEY secret of each repository you turn on. It can list, read and write the bucket but not delete. Replacing it rewrites every secret. Needs the token's Variables and Secrets: read and write.",
+    help: "ghr hands it to its own runners for the private repositories you turn on and never writes it to GitHub. It can list, read and write the bucket but not delete. A replaced key reaches idle runners at the next check.",
     about:
-      "An access key that can list, read and write the bucket but not delete. ghr writes it as the GHR_ARTIFACT_KEY secret of each repository you turn on, and rewrites those secrets at its next check.",
+      "An access key that can list, read and write the bucket but not delete. ghr writes it into the work folder of each runner it starts for a private repository you turn on. All of ghr's runners run as one user, so any job on this host can read it while such a runner is up.",
   },
 }
 
@@ -171,19 +171,14 @@ const RELEASE = /^v\d+\.\d+\.\d+$/
 
 function workflowSnippet(tag: string): string {
   return [
-    "env:",
-    "  GHR_ARTIFACT_STORE: ${{ vars.GHR_ARTIFACT_STORE }}   # empty: GitHub storage",
-    "",
     `      - uses: darkraise/ghr/actions/upload@${tag}`,
     "        with:",
     "          name: dist",
     "          path: dist/",
-    "          key: ${{ secrets.GHR_ARTIFACT_KEY }}",
     "",
     `      - uses: darkraise/ghr/actions/download@${tag}`,
     "        with:",
     "          name: dist",
-    "          key: ${{ secrets.GHR_ARTIFACT_KEY }}",
   ].join("\n")
 }
 
@@ -211,8 +206,9 @@ export function WorkflowsCard() {
     >
       <div className="flex flex-col gap-3">
         <p className="text-sm text-muted-foreground">
-          Use ghr's actions in place of actions/upload-artifact and download-artifact. Repositories that are off keep storing on GitHub, so this is safe to add
-          everywhere.
+          Use ghr's actions in place of actions/upload-artifact and download-artifact. ghr hands the store settings to its own runners, so only jobs on ghr's
+          Linux runners for the private repositories you turn on use RustFS. Every other job keeps storing on GitHub, so this is safe to add everywhere, but a
+          job on another runner cannot download what a job on ghr's runners stored.
         </p>
         <pre className="overflow-x-auto rounded-md border border-border bg-background p-3 font-mono text-xs">{text}</pre>
         <a href={SETUP_GUIDE} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">

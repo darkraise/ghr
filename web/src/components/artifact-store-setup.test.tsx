@@ -28,7 +28,8 @@ describe("Self-hosted storage keys", () => {
     expect(within(connection()).getByText("JOBK…M4TA")).toBeInTheDocument()
     expect(within(connection()).getAllByText("set Oct 1")).toHaveLength(2)
     expect(within(connection()).getByRole("button", { name: "Replace the admin key" })).toBeEnabled()
-    expect(within(connection()).getByText(/Needs the token's Variables and Secrets: read and write\./)).toBeInTheDocument()
+    expect(within(connection()).getByText(/^ghr hands it to its own runners for the private repositories you turn on and never writes it to GitHub\./)).toBeInTheDocument()
+    expect(within(connection()).queryByText(/Variables and Secrets|GHR_ARTIFACT_KEY/)).toBeNull()
   })
 
   it("offers to set a key that is missing", async () => {
@@ -100,10 +101,10 @@ describe("Self-hosted storage workflows", () => {
   it("shows the snippet for the running release and copies it", async () => {
     const { user } = await draw()
     const workflows = screen.getByRole("region", { name: "Workflows" })
-    expect(snippet()).toContain("GHR_ARTIFACT_STORE: ${{ vars.GHR_ARTIFACT_STORE }}   # empty: GitHub storage")
     expect(snippet()).toContain("- uses: darkraise/ghr/actions/upload@v0.1.26")
     expect(snippet()).toContain("- uses: darkraise/ghr/actions/download@v0.1.26")
-    expect(snippet().match(/key: \$\{\{ secrets\.GHR_ARTIFACT_KEY \}\}/g)).toHaveLength(2)
+    expect(snippet()).not.toMatch(/GHR_ARTIFACT|key:|secrets\.|env:/)
+    expect(within(workflows).getByText(/only jobs on ghr's Linux runners for the private repositories you turn on use RustFS\./)).toBeInTheDocument()
     expect(within(workflows).getByRole("link", { name: "RustFS setup guide: bucket, admin and job key policies" })).toHaveAttribute("href", SETUP_GUIDE)
     Object.defineProperty(window, "isSecureContext", { value: true, configurable: true })
     const writeText = vi.fn(async () => {})

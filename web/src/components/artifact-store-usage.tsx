@@ -65,8 +65,8 @@ export function ArtifactStoreEmpty() {
         Keep artifacts on your own S3 storage
       </h2>
       <p className="text-sm text-muted-foreground">
-        Repositories you switch on upload their artifacts to an S3-compatible server such as RustFS instead of GitHub, so they stop using your GitHub
-        storage allowance. Jobs on GitHub-hosted runners use it too. Everything else stays on GitHub.
+        Private repositories ghr serves that you switch on upload their artifacts from ghr's runners to an S3-compatible server such as RustFS instead of
+        GitHub, so they stop using your GitHub storage allowance. Jobs on other runners, GitHub-hosted ones included, keep storing on GitHub.
       </p>
       <p className="text-xs text-muted-foreground">
         Artifacts are deleted after 7 days unless a run sets retention-days or you change the cleanup age. GitHub keeps them 90 days by default, so check
@@ -77,7 +77,7 @@ export function ArtifactStoreEmpty() {
         <li>Enter the connection and both keys under Settings → Self-hosted storage.</li>
         <li>
           Switch workflows to <span className="font-mono">darkraise/ghr/actions/upload</span> and <span className="font-mono">/download</span>, then turn
-          repositories on here; ghr writes each one's variable and secret.
+          repositories on here; ghr hands the store settings to the runners it starts for them.
         </li>
       </ol>
       <div className="flex flex-wrap gap-2">
