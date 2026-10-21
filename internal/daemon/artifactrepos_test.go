@@ -120,6 +120,14 @@ func TestSetArtifactRepoRefusals(t *testing.T) {
 			update(t, b, func(c *config.Config) { r := c.Repo("darkmem"); r.Paused, r.Removing = true, true })
 		}, "darkmem", model.ArtifactRepoRequest{Enabled: &on}, 404,
 			"darkmem is not a covered repository; add it as a runner or watched repository first"},
+		{"a repository being removed that keeps an entry", func(t *testing.T, b *Backend, _ *fakeManager, _ *fakeGH, _ *fakeAS) {
+			update(t, b, func(c *config.Config) {
+				r := c.Repo("darkmem")
+				r.Paused, r.Removing = true, true
+				c.ArtifactStore.Repos = map[string]config.ArtifactRepo{"darkmem": {Cleanup: "3d"}}
+			})
+		}, "darkmem", model.ArtifactRepoRequest{Enabled: &on}, 409,
+			"darkmem is not served by ghr; self-hosted storage serves only repositories ghr runs jobs for"},
 		{"nothing to change", nil, "darkmem", model.ArtifactRepoRequest{}, 400, "give enabled or cleanup"},
 		{"a cleanup under an hour", nil, "darkmem", model.ArtifactRepoRequest{Cleanup: &tenMinutes}, 400, "cleanup must be at least 1h, or off"},
 		{"a cleanup that is not a duration", nil, "darkmem", model.ArtifactRepoRequest{Cleanup: &soon}, 400, `cleanup: invalid duration "soon"`},
@@ -219,7 +227,7 @@ func TestSetArtifactRepoOffNeedsNoGitHub(t *testing.T) {
 	}
 	f.noRow = true
 	row, err := b.SetArtifactRepo(ctx, "oldrepo", model.ArtifactRepoRequest{Enabled: &off})
-	if err != nil || row.Name != "oldrepo" || row.State != "not_served" || row.Items == nil {
+	if err != nil || row.Name != "oldrepo" || row.State != "not_served" || row.Items == nil || !row.Private {
 		t.Fatalf("leftover entry: row %+v, %v", row, err)
 	}
 	want := map[string]config.ArtifactRepo{"homelab": {Cleanup: "3d"}}

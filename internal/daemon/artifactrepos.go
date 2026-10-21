@@ -15,9 +15,9 @@ import (
 // SetArtifactRepo switches self-hosted storage on or off for one repository,
 // or changes its cleanup age, and answers its row. The repository is looked
 // up among the covered ones and then the artifact_store.repos entries, so a
-// leftover entry can still be switched off. Only a private repository ghr
-// serves can be switched on, and only that check reads GitHub; nothing is
-// written there.
+// leftover entry can still be switched off. Only a private repository that
+// ghr serves and is not removing can be switched on, and only that check
+// reads GitHub; nothing is written there.
 func (b *Backend) SetArtifactRepo(ctx context.Context, repo string, req model.ArtifactRepoRequest) (model.ArtifactStoreRepo, error) {
 	if req.Enabled == nil && req.Cleanup == nil {
 		return model.ArtifactStoreRepo{}, api.BadRequest("give enabled or cleanup")
@@ -37,7 +37,7 @@ func (b *Backend) SetArtifactRepo(ctx context.Context, repo string, req model.Ar
 	}
 	on := req.Enabled != nil && *req.Enabled
 	if on {
-		if cfg.Repo(name) == nil {
+		if r := cfg.Repo(name); r == nil || r.Removing {
 			return model.ArtifactStoreRepo{}, notServedErr(name)
 		}
 		if err := b.githubErr(); err != nil {
@@ -58,7 +58,7 @@ func (b *Backend) SetArtifactRepo(ctx context.Context, repo string, req model.Ar
 		if _, ok := artifactSwitchable(c, name); !ok {
 			return uncoveredErr(name)
 		}
-		if on && c.Repo(name) == nil {
+		if r := c.Repo(name); on && (r == nil || r.Removing) {
 			return notServedErr(name)
 		}
 		r := dropArtifactRepo(&c.ArtifactStore, name)
@@ -79,7 +79,7 @@ func (b *Backend) SetArtifactRepo(ctx context.Context, repo string, req model.Ar
 	}
 	// Switching off a leftover entry that set nothing else drops it, and a
 	// repository ghr does not cover has no row without an entry or objects.
-	return model.ArtifactStoreRepo{Name: name, State: "not_served", Items: []model.ArtifactStoreItem{}}, nil
+	return model.ArtifactStoreRepo{Name: name, Private: true, State: "not_served", Items: []model.ArtifactStoreItem{}}, nil
 }
 
 // EnablePrivateArtifactRepos switches self-hosted storage on for every
