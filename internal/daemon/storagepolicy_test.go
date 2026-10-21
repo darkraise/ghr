@@ -167,8 +167,8 @@ func TestPatchArtifactStore(t *testing.T) {
 	for _, tc := range []struct {
 		body, want string
 	}{
-		{`{"endpoint":"http://s3.example.sg"}`, "artifact_store.endpoint must be an https URL without a path, query or user info"},
-		{`{"endpoint":"https://s3.example.sg/minio"}`, "artifact_store.endpoint must be an https URL without a path, query or user info"},
+		{`{"endpoint":"http://s3.example.sg"}`, "artifact_store.endpoint: use https:// for a host name; http:// is accepted only for a private, loopback or link-local IP address"},
+		{`{"endpoint":"https://s3.example.sg/minio"}`, "artifact_store.endpoint: the endpoint must be only https://host[:port] or http://ip[:port], without a path, query or user info"},
 		{`{"bucket":"GHA"}`, "artifact_store.bucket must be 3 to 63 lower-case letters"},
 		{`{"capacity_gb":-1}`, "artifact_store.capacity_gb must not be negative"},
 		{`{"cleanup_max_age":"soon"}`, `artifact_store.cleanup_max_age: invalid duration "soon"`},

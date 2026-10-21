@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/darkraise/ghr/internal/endpoint"
 )
 
 const artifactBlock = `watch_repos: [docs]
@@ -135,22 +138,20 @@ func TestArtifactStoreGlobalCleanup(t *testing.T) {
 }
 
 func TestArtifactStoreValidation(t *testing.T) {
-	const (
-		endpointErr = "artifact_store.endpoint must be an https URL without a path, query or user info, such as https://s3.example.com"
-		bucketErr   = "artifact_store.bucket must be 3 to 63 lower-case letters, digits, '.' or '-', starting and ending with a letter or digit, such as gha-artifacts"
-	)
+	const bucketErr = "artifact_store.bucket must be 3 to 63 lower-case letters, digits, '.' or '-', starting and ending with a letter or digit, such as gha-artifacts"
 	for _, tc := range []struct {
 		block string
 		want  string
 	}{
-		{"  endpoint: http://s3.example.sg\n", endpointErr},
-		{"  endpoint: s3.example.sg\n", endpointErr},
-		{"  endpoint: https://\n", endpointErr},
-		{"  endpoint: https://s3.example.sg/\n", endpointErr},
-		{"  endpoint: https://s3.example.sg/minio\n", endpointErr},
-		{"  endpoint: https://s3.example.sg?x=1\n", endpointErr},
-		{"  endpoint: https://key:secret@s3.example.sg\n", endpointErr},
-		{"  endpoint: https://s3.example.sg#top\n", endpointErr},
+		{"  endpoint: http://s3.example.sg\n", "artifact_store.endpoint: " + endpoint.MsgHTTPName},
+		{"  endpoint: http://100.64.0.1:9000\n", "artifact_store.endpoint: " + endpoint.MsgHTTPAddr},
+		{"  endpoint: s3.example.sg\n", "artifact_store.endpoint: " + endpoint.MsgForm},
+		{"  endpoint: https://\n", "artifact_store.endpoint: " + endpoint.MsgForm},
+		{"  endpoint: https://s3.example.sg/\n", "artifact_store.endpoint: " + endpoint.MsgExtra},
+		{"  endpoint: https://s3.example.sg/minio\n", "artifact_store.endpoint: " + endpoint.MsgExtra},
+		{"  endpoint: https://s3.example.sg?x=1\n", "artifact_store.endpoint: " + endpoint.MsgExtra},
+		{"  endpoint: https://key:secret@s3.example.sg\n", "artifact_store.endpoint: " + endpoint.MsgExtra},
+		{"  endpoint: https://s3.example.sg#top\n", "artifact_store.endpoint: " + endpoint.MsgExtra},
 		{"  bucket: ab\n", bucketErr},
 		{"  bucket: GHA-Artifacts\n", bucketErr},
 		{"  bucket: gha_artifacts\n", bucketErr},
@@ -175,6 +176,7 @@ func TestArtifactStoreValidation(t *testing.T) {
 	for _, block := range []string{
 		"  endpoint: https://s3.example.sg\n  bucket: gha-artifacts\n",
 		"  endpoint: https://[2001:db8::1]:9000\n  bucket: a.b-c\n",
+		"  endpoint: http://192.168.0.105:9000\n  bucket: gha-artifacts\n",
 		"  bucket: " + strings.Repeat("a", 63) + "\n  capacity_gb: 0\n",
 		"  cleanup_max_age: off\n",
 		"  cleanup_max_age: 24h\n",
@@ -183,6 +185,33 @@ func TestArtifactStoreValidation(t *testing.T) {
 	} {
 		if _, _, err := Parse([]byte(sample + "artifact_store:\n" + block)); err != nil {
 			t.Errorf("%q rejected: %v", block, err)
+		}
+	}
+}
+
+func TestArtifactStoreEndpointVectors(t *testing.T) {
+	b, err := os.ReadFile("../endpoint/testdata/vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors []struct {
+		Endpoint string `json:"endpoint"`
+		Error    string `json:"error"`
+	}
+	if err := json.Unmarshal(b, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vectors {
+		// An empty endpoint means the store is not set up, which is not an error here.
+		if v.Endpoint == "" {
+			continue
+		}
+		var want []string
+		if v.Error != "" {
+			want = []string{"artifact_store.endpoint: " + v.Error}
+		}
+		if got := (ArtifactStore{Endpoint: v.Endpoint}).validate(); !slices.Equal(got, want) {
+			t.Errorf("endpoint %q: got %q, want %q", v.Endpoint, got, want)
 		}
 	}
 }

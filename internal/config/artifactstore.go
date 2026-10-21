@@ -3,11 +3,12 @@ package config
 import (
 	"maps"
 	"net"
-	"net/url"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/darkraise/ghr/internal/endpoint"
 )
 
 const (
@@ -83,12 +84,6 @@ func (a ArtifactStore) CleanupFor(repo string) (age time.Duration, source string
 	return DefaultArtifactCleanup, "default"
 }
 
-func validEndpoint(s string) bool {
-	u, err := url.Parse(s)
-	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.Opaque == "" &&
-		u.Path == "" && u.RawQuery == "" && !u.ForceQuery && u.Fragment == ""
-}
-
 func validBucket(s string) bool {
 	return bucketRe.MatchString(s) && !strings.Contains(s, "..") && net.ParseIP(s) == nil
 }
@@ -104,8 +99,10 @@ func validCleanup(s string, min time.Duration) bool {
 
 func (a ArtifactStore) validate() []string {
 	var errs []string
-	if a.Endpoint != "" && !validEndpoint(a.Endpoint) {
-		errs = append(errs, "artifact_store.endpoint must be an https URL without a path, query or user info, such as https://s3.example.com")
+	if a.Endpoint != "" {
+		if err := endpoint.Check(a.Endpoint); err != nil {
+			errs = append(errs, "artifact_store.endpoint: "+err.Error())
+		}
 	}
 	if a.Bucket != "" && !validBucket(a.Bucket) {
 		errs = append(errs, "artifact_store.bucket must be 3 to 63 lower-case letters, digits, '.' or '-', starting and ending with a letter or digit, such as gha-artifacts")
