@@ -5,6 +5,7 @@ import { ApiError, api } from "@/api/client"
 import { keys, readConfig, useConfig, useStatus } from "@/api/hooks"
 import type { ArtifactStorePatch, Config } from "@/api/types"
 import { changedKeys, settle, type Equal } from "@/lib/draft"
+import { endpointError } from "@/lib/endpoint"
 import { errorText } from "@/query"
 
 export type StoreKey = "endpoint" | "bucket" | "region" | "age" | "capacity"
@@ -22,13 +23,16 @@ function loadedValues(c: Config): StoreValues {
   }
 }
 
+// A reason that starts with "http://" keeps the scheme in lower case.
+const sentence = (s: string) => (s.startsWith("http://") ? s : s.charAt(0).toUpperCase() + s.slice(1))
+
 const equal: Equal = (_key, a, b) => String(a).trim() === String(b).trim()
 
 function storeErrors(v: StoreValues): Partial<Record<StoreKey, string>> {
   const out: Partial<Record<StoreKey, string>> = {}
   const endpoint = v.endpoint.trim()
-  if (endpoint.startsWith("http://")) out.endpoint = "Enter an https:// address; ghr refuses plain http"
-  else if (endpoint !== "" && !endpoint.startsWith("https://")) out.endpoint = "Start the address with https://"
+  const refused = endpoint === "" ? null : endpointError(endpoint)
+  if (refused) out.endpoint = sentence(refused)
   if (endpoint !== "" && v.bucket.trim() === "") out.bucket = "Enter the bucket the endpoint holds"
   return out
 }

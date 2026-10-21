@@ -62,8 +62,10 @@ describe("Self-hosted storage section", () => {
   })
 
   it.each<[string, string, string]>([
-    ["Endpoint", "http://s3.example.sg", "Enter an https:// address; ghr refuses plain http"],
-    ["Endpoint", "s3.example.sg", "Start the address with https://"],
+    ["Endpoint", "http://s3.example.sg", "Use https:// for a host name; http:// is accepted only for a private, loopback or link-local IP address"],
+    ["Endpoint", "http://8.8.8.8:9000", "http:// is accepted only for a private, loopback or link-local IP address; use https:// for this address"],
+    ["Endpoint", "s3.example.sg", "The endpoint must be https://host[:port], or http://ip[:port] for a private, loopback or link-local IP address"],
+    ["Endpoint", "https://s3.example.sg/gha-artifacts", "The endpoint must be only https://host[:port] or http://ip[:port], without a path, query or user info"],
   ])("refuses %s %s before sending", async (name, value, error) => {
     const { user, calls } = await draw()
     await user.clear(box(name))
@@ -72,6 +74,15 @@ describe("Self-hosted storage section", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }))
     expect((await screen.findAllByText("Fix the highlighted settings first")).length).toBeGreaterThan(0)
     expect(patches(calls)).toHaveLength(0)
+  })
+
+  it("sends an http:// endpoint on a private address", async () => {
+    const { user, calls } = await draw()
+    await user.clear(box("Endpoint"))
+    await user.type(box("Endpoint"), "http://192.168.0.105:9000")
+    expect(screen.getByText("The S3 address ghr and its runners reach: https:// for any host, or http:// for a private, loopback or link-local IP address.")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(patches(calls).map((c) => c.body)).toEqual([{ artifact_store: { endpoint: "http://192.168.0.105:9000" } }]))
   })
 
   it("asks for the bucket once an endpoint is typed", async () => {

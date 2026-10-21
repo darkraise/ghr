@@ -31,7 +31,7 @@ export function ArtifactStoreSection() {
               <Field
                 label="Endpoint"
                 htmlFor="artifact_endpoint"
-                help="The S3 address every runner reaches, including GitHub-hosted ones. HTTPS only."
+                help="The S3 address ghr and its runners reach: https:// for any host, or http:// for a private, loopback or link-local IP address."
                 error={errors.endpoint}
                 changed={changed("endpoint")}
               >
