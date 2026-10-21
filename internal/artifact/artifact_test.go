@@ -16,6 +16,7 @@ func TestParseStore(t *testing.T) {
 	}{
 		{"valid", good, ""},
 		{"unknown fields are ignored", `{"v":1,"endpoint":"https://s3.example.sg:9000","bucket":"gha","region":"r","key_id":"K","extra":true}`, ""},
+		{"an older ghr's key_set_at is ignored", `{"v":1,"endpoint":"https://s3.example.sg","bucket":"gha","region":"r","key_id":"K","key_set_at":"2026-10-15T12:00:00Z"}`, ""},
 		{"empty", "  ", "the store is empty"},
 		{"not JSON", "{", "the store is not valid JSON"},
 		{"version", `{"v":2,"endpoint":"https://s3.example.sg","bucket":"gha","region":"r","key_id":"K"}`, "store version 2 is not supported"},
@@ -105,27 +106,6 @@ func TestSettingsJSONRoundTrip(t *testing.T) {
 	back, err := ParseSettings(s.JSON())
 	if err != nil || back != s {
 		t.Fatalf("round trip %+v %v", back, err)
-	}
-}
-
-func TestParseKey(t *testing.T) {
-	const secret = "pa:ss/word"
-	if got := FormatKey("JOB1", secret); got != "JOB1:pa:ss/word" {
-		t.Fatalf("FormatKey %q", got)
-	}
-	cred, err := ParseKey(" JOB1:" + secret + "\n")
-	if err != nil || cred.AccessKeyID != "JOB1" || cred.SecretAccessKey != secret {
-		t.Fatalf("ParseKey %+v %v", cred, err)
-	}
-	for _, in := range []string{"", "JOB1", ":" + secret, "JOB1:", "nocolon-secret"} {
-		_, err := ParseKey(in)
-		if err == nil {
-			t.Errorf("%q: accepted", in)
-			continue
-		}
-		if strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "nocolon") {
-			t.Errorf("%q: error repeats the input: %v", in, err)
-		}
 	}
 }
 

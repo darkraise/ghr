@@ -95,7 +95,7 @@ func TestCheckKeyInput(t *testing.T) {
 		{"id with NUL", "AKIA\x0001", "secret", "", "", "the key ID must not contain control characters"},
 		{"secret over 64 KB", "AKIA01", long + "s", "", "", "the secret is longer than 64 KB"},
 		{"id over 64 KB", long + "s", "secret", "", "", "the key ID is longer than 64 KB"},
-		{"id with a colon", "AKIA:01", "secret", "", "", "the key ID must not contain a colon"},
+		{"id with a colon", "AKIA:01", "secret", "AKIA:01", "secret", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			id, secret, err := CheckKeyInput(tc.id, tc.secret)

@@ -282,7 +282,8 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 	go func() { sampler.Run(ctx, time.Minute); close(sampled) }()
 
 	// One budget for both services, so GitHub storage cleanup and the
-	// artifact variable and secret writes together stay under GitHub's limit.
+	// removal of old artifact variables and secrets together stay under
+	// GitHub's limit.
 	budget := &ghstorage.Budget{}
 	ghs := &ghstorage.Service{GH: gh, Config: store.Config, Events: ev, Wake: hub.Wake, Describe: storageErrText(owner), Budget: budget}
 	ghs.Start()

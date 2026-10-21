@@ -1,6 +1,6 @@
 // Package artifactstore keeps the self-hosted artifact store: its access
-// keys, its bucket inventory and cleanup, and the repository variables and
-// secrets that point workflows at it.
+// keys, its bucket inventory and cleanup, and the removal of the repository
+// variables and secrets older ghr releases wrote.
 package artifactstore
 
 import (
@@ -27,7 +27,7 @@ type Key struct {
 }
 
 // Keys are the admin key, which the daemon lists, reads and deletes with,
-// and the job key, which ghr writes into repository secrets.
+// and the job key, which ghr hands to its own runners in their settings file.
 type Keys struct {
 	Admin *Key `json:"admin,omitempty"`
 	Job   *Key `json:"job,omitempty"`
@@ -60,9 +60,8 @@ func SaveKeys(path string, k Keys) error {
 }
 
 // CheckKeyInput trims a key ID and secret as typed or piped and refuses
-// one that is empty, spans lines or is longer than 64 KB. An ID may not
-// hold a colon, which separates it from the secret in GHR_ARTIFACT_KEY.
-// No message quotes either value.
+// one that is empty, spans lines or is longer than 64 KB. No message
+// quotes either value.
 func CheckKeyInput(id, secret string) (string, string, error) {
 	id, secret = strings.TrimSpace(id), strings.TrimSpace(secret)
 	for _, f := range []struct{ what, v string }{{"the key ID", id}, {"the secret", secret}} {
@@ -76,9 +75,6 @@ func CheckKeyInput(id, secret string) (string, string, error) {
 		case len(f.v) > maxKeyInput:
 			return "", "", errors.New(f.what + " is longer than 64 KB")
 		}
-	}
-	if strings.Contains(id, ":") {
-		return "", "", errors.New("the key ID must not contain a colon")
 	}
 	return id, secret, nil
 }

@@ -37,7 +37,7 @@ type ArtifactStoreService interface {
 func (b *Backend) ArtifactStore() model.ArtifactStore { return b.AS.Snapshot() }
 
 // RefreshArtifactStore does not wait for GitHub: the pass lists RustFS, and
-// it skips the variable and secret writes itself while GitHub cannot take them.
+// it skips removing old variables and secrets while GitHub cannot take them.
 func (b *Backend) RefreshArtifactStore() error { return asErr(b.AS.Refresh()) }
 
 func (b *Backend) TestArtifactStore(ctx context.Context) (model.ArtifactStoreTest, error) {

@@ -1,6 +1,8 @@
 // Package artifact holds the rules ghr and ghr-artifact share for artifacts
-// kept on an S3 store: the store and key formats, names, object keys and the
-// metadata written on each object.
+// kept on an S3 store: the settings file ghr hands its runners, names, object
+// keys and the metadata written on each object. It also reads the
+// GHR_ARTIFACT_STORE variable older ghr releases wrote, so ghr can tell its
+// own from another's and remove it.
 package artifact
 
 import (
@@ -14,7 +16,6 @@ import (
 	"time"
 
 	"github.com/darkraise/ghr/internal/endpoint"
-	"github.com/darkraise/ghr/internal/s3"
 )
 
 const (
@@ -23,16 +24,14 @@ const (
 	MaxRetentionDays = 90
 )
 
-// Store is the JSON value of the GHR_ARTIFACT_STORE repository variable.
+// Store is the JSON value of the GHR_ARTIFACT_STORE repository variable that
+// older ghr releases wrote. Their key_set_at field is ignored.
 type Store struct {
 	V        int    `json:"v"`
 	Endpoint string `json:"endpoint"`
 	Bucket   string `json:"bucket"`
 	Region   string `json:"region"`
 	KeyID    string `json:"key_id"`
-	// KeySetAt is when the job key in GHR_ARTIFACT_KEY was set, so a key
-	// replaced under the same ID shows in the variable.
-	KeySetAt time.Time `json:"key_set_at,omitzero"`
 }
 
 func ParseStore(s string) (Store, error) {
@@ -113,17 +112,6 @@ func ParseSettings(b []byte) (Settings, error) {
 		return Settings{}, errors.New("the settings name no secret")
 	}
 	return s, nil
-}
-
-func FormatKey(id, secret string) string { return id + ":" + secret }
-
-// ParseKey never puts any part of s in its error: s holds a secret.
-func ParseKey(s string) (s3.Credentials, error) {
-	id, secret, ok := strings.Cut(strings.TrimSpace(s), ":")
-	if !ok || id == "" || secret == "" {
-		return s3.Credentials{}, errors.New("the key is not in the form <access key id>:<secret>")
-	}
-	return s3.Credentials{AccessKeyID: id, SecretAccessKey: secret}, nil
 }
 
 type invalidChar struct{ char, label string }
