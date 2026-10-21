@@ -1,5 +1,5 @@
 name: Download a build artifact (ghr)
-description: Download a build artifact from the store ghr set up for this repository, falling back to GitHub's artifact storage
+description: Download a build artifact from ghr's artifact store when the job runs on a ghr runner that ghr gave the store's settings, falling back to GitHub's artifact storage
 author: darkraise
 inputs:
   name:
@@ -33,12 +33,10 @@ inputs:
     required: false
     default: ${{ github.run_id }}
   store:
-    description: >
-      The GHR_ARTIFACT_STORE repository variable ghr writes. Empty reads the GHR_ARTIFACT_STORE
-      environment variable; when both are empty the artifact comes from GitHub.
+    description: Deprecated and ignored. ghr hands the artifact store settings to its own runners.
     default: ''
   key:
-    description: The job key from the GHR_ARTIFACT_KEY repository secret. Needed when the store is set.
+    description: Deprecated and ignored. ghr hands the artifact store settings to its own runners.
     default: ''
   version:
     description: >
@@ -52,9 +50,14 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Find ghr's artifact store settings
+      id: detect
+      if: runner.os == 'Linux'
+      shell: sh
+      run: sh "$GITHUB_ACTION_PATH/../lib/detect.sh"
     - name: Download from GitHub
       id: github
-      if: (inputs.store == '' && env.GHR_ARTIFACT_STORE == '') || inputs.artifact-ids != ''
+      if: steps.detect.outputs.on != 'true' || inputs.artifact-ids != ''
       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         name: ${{ inputs.name }}
@@ -66,7 +69,7 @@ runs:
         run-id: ${{ inputs.run-id }}
     - name: Fetch ghr-artifact
       id: fetch
-      if: (inputs.store != '' || env.GHR_ARTIFACT_STORE != '') && inputs.artifact-ids == ''
+      if: steps.detect.outputs.on == 'true' && inputs.artifact-ids == ''
       shell: bash
       env:
         GHR_VERSION: ${{ inputs.version }}
@@ -76,12 +79,11 @@ runs:
         echo "path=$tool" >> "$GITHUB_OUTPUT"
     - name: Download from the artifact store
       id: ghr
-      if: (inputs.store != '' || env.GHR_ARTIFACT_STORE != '') && inputs.artifact-ids == ''
+      if: steps.detect.outputs.on == 'true' && inputs.artifact-ids == ''
       shell: bash
       env:
         GHR_TOOL: ${{ steps.fetch.outputs.path }}
-        GHR_ARTIFACT_STORE: ${{ inputs.store || env.GHR_ARTIFACT_STORE }}
-        GHR_ARTIFACT_KEY: ${{ inputs.key }}
+        GHR_ARTIFACT_SETTINGS: ${{ steps.detect.outputs.settings }}
         IN_NAME: ${{ inputs.name }}
         IN_PATH: ${{ inputs.path }}
         IN_PATTERN: ${{ inputs.pattern }}

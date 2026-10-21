@@ -27,6 +27,8 @@ jobs:
         run: bash deploy/tests/setup_test.sh
       - name: fetch.sh tests
         run: bash actions/lib/fetch_test.sh
+      - name: detect.sh tests
+        run: bash actions/lib/detect_test.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: web/.nvmrc

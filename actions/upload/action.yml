@@ -1,5 +1,5 @@
 name: Upload a build artifact (ghr)
-description: Upload a build artifact to the store ghr set up for this repository, or to GitHub's artifact storage when the repository is not switched on in ghr
+description: Upload a build artifact to ghr's artifact store when the job runs on a ghr runner that ghr gave the store's settings, or to GitHub's artifact storage otherwise
 author: darkraise
 inputs:
   name:
@@ -33,12 +33,10 @@ inputs:
     description: If true, hidden files will be included in the artifact.
     default: 'false'
   store:
-    description: >
-      The GHR_ARTIFACT_STORE repository variable ghr writes. Empty reads the GHR_ARTIFACT_STORE
-      environment variable; when both are empty the artifact goes to GitHub.
+    description: Deprecated and ignored. ghr hands the artifact store settings to its own runners.
     default: ''
   key:
-    description: The job key from the GHR_ARTIFACT_KEY repository secret. Needed when the store is set.
+    description: Deprecated and ignored. ghr hands the artifact store settings to its own runners.
     default: ''
   version:
     description: >
@@ -61,9 +59,14 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Find ghr's artifact store settings
+      id: detect
+      if: runner.os == 'Linux'
+      shell: sh
+      run: sh "$GITHUB_ACTION_PATH/../lib/detect.sh"
     - name: Upload to GitHub
       id: github
-      if: inputs.store == '' && env.GHR_ARTIFACT_STORE == ''
+      if: steps.detect.outputs.on != 'true'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: ${{ inputs.name }}
@@ -75,7 +78,7 @@ runs:
         include-hidden-files: ${{ inputs.include-hidden-files }}
     - name: Fetch ghr-artifact
       id: fetch
-      if: inputs.store != '' || env.GHR_ARTIFACT_STORE != ''
+      if: steps.detect.outputs.on == 'true'
       shell: bash
       env:
         GHR_VERSION: ${{ inputs.version }}
@@ -85,12 +88,11 @@ runs:
         echo "path=$tool" >> "$GITHUB_OUTPUT"
     - name: Upload to the artifact store
       id: ghr
-      if: inputs.store != '' || env.GHR_ARTIFACT_STORE != ''
+      if: steps.detect.outputs.on == 'true'
       shell: bash
       env:
         GHR_TOOL: ${{ steps.fetch.outputs.path }}
-        GHR_ARTIFACT_STORE: ${{ inputs.store || env.GHR_ARTIFACT_STORE }}
-        GHR_ARTIFACT_KEY: ${{ inputs.key }}
+        GHR_ARTIFACT_SETTINGS: ${{ steps.detect.outputs.settings }}
         IN_NAME: ${{ inputs.name }}
         IN_PATH: ${{ inputs.path }}
         IN_IF_NO_FILES_FOUND: ${{ inputs.if-no-files-found }}
