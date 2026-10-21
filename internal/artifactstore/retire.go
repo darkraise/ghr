@@ -36,8 +36,12 @@ func (s *Service) retireRepos(cfg *config.Config) {
 		if s.ctx.Err() != nil || s.rateLow() {
 			return
 		}
+		cur := s.Config()
+		if !cur.ArtifactStore.Configured() {
+			return
+		}
 		if !s.isRetired(repo) {
-			_ = s.retireOne(s.ctx, s.Config(), repo, true)
+			_ = s.retireOne(s.ctx, cur, repo, true)
 		}
 	}
 }
@@ -63,7 +67,7 @@ func (s *Service) Retire(ctx context.Context, repo string) error {
 func (s *Service) retireOne(ctx context.Context, cfg *config.Config, repo string, background bool) error {
 	val, found, err := s.getVariable(ctx, repo)
 	switch {
-	case github.IsKind(err, github.ErrAuth):
+	case refused(err):
 		s.setRetired(repo)
 		return nil
 	case err != nil:
@@ -98,6 +102,13 @@ func (s *Service) retireOne(ctx context.Context, cfg *config.Config, repo string
 	s.Events.Add("info", repo, "artifact store: removed %s from %s", what, repo)
 	s.setRetired(repo)
 	return nil
+}
+
+// refused reports whether GitHub refused the token access. A 401 means the
+// token itself failed, which a later pass retries.
+func refused(err error) bool {
+	var e *github.APIError
+	return errors.As(err, &e) && e.Kind == github.ErrAuth && e.Status == 403
 }
 
 // retireFailed writes a warning only when repo's failure text changes, so a

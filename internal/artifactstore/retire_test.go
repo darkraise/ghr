@@ -16,6 +16,8 @@ import (
 
 var forbidden = &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible by personal access token"}
 
+var badCreds = &github.APIError{Status: 401, Kind: github.ErrAuth, Message: "Bad credentials"}
+
 // ours is the GHR_ARTIFACT_STORE value an older ghr on this environment's
 // store wrote.
 func (e *testEnv) ours() string {
@@ -143,6 +145,9 @@ func TestRetireRetriesAFailedDelete(t *testing.T) {
 		{"the rate reserve reached after the read", func(e *testEnv) {
 			e.gh.onGetVar = func(string) { e.gh.remaining = ghstorage.MinRateLeft - 1 }
 		}, func(e *testEnv) { e.gh.onGetVar, e.gh.remaining = nil, -1 }, []string{}, errRateLow.Error()},
+		{"a variable read with bad credentials", func(e *testEnv) { e.gh.readErr["darkmem"] = badCreds },
+			func(e *testEnv) { delete(e.gh.readErr, "darkmem") }, []string{},
+			"described: github: 401 Bad credentials"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newTestEnv(t)
@@ -178,6 +183,39 @@ func TestRetireRetriesAFailedDelete(t *testing.T) {
 				t.Fatalf("GetVariable called again after the retry succeeded")
 			}
 		})
+	}
+}
+
+func TestRetireStopsWhenStorageIsUnconfigured(t *testing.T) {
+	e := newTestEnv(t)
+	e.cfg.Repos = append(e.cfg.Repos, config.Repo{Name: "darkdocs"})
+	e.gh.addRepo("darkdocs", true)
+	e.gh.vars["darkmem"], e.gh.vars["darkdocs"] = e.ours(), e.ours()
+	unconf := *e.cfg
+	unconf.ArtifactStore = config.ArtifactStore{}
+	e.gh.onGetVar = func(repo string) {
+		if repo == "darkmem" {
+			e.s.Config = func() *config.Config { return &unconf }
+		}
+	}
+	e.s.pass()
+	if got := e.gh.callsLike("GetVariable darkdocs"); len(got) != 0 {
+		t.Fatalf("calls %v after storage became unconfigured, want none", got)
+	}
+	if e.s.retired["darkdocs"] {
+		t.Fatal("darkdocs retired after storage became unconfigured")
+	}
+	if _, ok := e.gh.vars["darkdocs"]; !ok {
+		t.Fatal("darkdocs's variable is gone")
+	}
+	e.s.Config = func() *config.Config { return e.cfg }
+	e.gh.onGetVar = nil
+	e.s.pass()
+	if _, ok := e.gh.vars["darkdocs"]; ok {
+		t.Fatal("darkdocs's variable is still there once storage is configured again")
+	}
+	if !e.s.retired["darkdocs"] {
+		t.Fatal("darkdocs not retired once storage is configured again")
 	}
 }
 
