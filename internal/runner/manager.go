@@ -195,6 +195,11 @@ type Manager struct {
 	// Epoch, when set, is the status epoch Init uses instead of minting one,
 	// so a daemon that served before the manager started keeps one epoch.
 	Epoch string
+	// ArtifactSettings, when set, returns the artifact store settings file
+	// for a runner of repo, or false when repo's runners get none. The
+	// daemon sets it; it is called only for a repository the manager's
+	// own visibility answer says is private.
+	ArtifactSettings func(repo string) ([]byte, bool)
 
 	mu             sync.Mutex
 	insts          map[string]*instance
@@ -234,6 +239,9 @@ type Manager struct {
 	// a cancel, a warning and an update start never overwrite one another;
 	// take it before mu.
 	fileMu sync.Mutex
+	// openSettingsTemp creates the temporary settings file; nil opens it
+	// with the real flags and mode.
+	openSettingsTemp func(root *os.Root, name string) (io.WriteCloser, error)
 }
 
 // Init prepares internal state and loads the last finished job per repo from history.
