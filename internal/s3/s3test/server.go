@@ -1,5 +1,6 @@
 // Package s3test is an in-memory S3 server for tests. It speaks the subset of
-// the S3 REST API the s3 package uses, over TLS, with path-style addressing.
+// the S3 REST API the s3 package uses, over TLS (or plain http from
+// NewPlainServer), with path-style addressing.
 package s3test
 
 import (
@@ -70,13 +71,22 @@ type Server struct {
 // NewServer starts a fake holding one bucket. Listings return two entries a
 // page.
 func NewServer(t testing.TB, bucket string) *Server {
+	return start(t, bucket, httptest.NewTLSServer)
+}
+
+// NewPlainServer is NewServer over plain http.
+func NewPlainServer(t testing.TB, bucket string) *Server {
+	return start(t, bucket, httptest.NewServer)
+}
+
+func start(t testing.TB, bucket string, serve func(http.Handler) *httptest.Server) *Server {
 	s := &Server{
 		bucket:  bucket,
 		objects: map[string]Object{},
 		uploads: map[string]*upload{},
 		fail:    map[string]failure{},
 	}
-	s.srv = httptest.NewTLSServer(http.HandlerFunc(s.serve))
+	s.srv = serve(http.HandlerFunc(s.serve))
 	t.Cleanup(s.srv.Close)
 	return s
 }

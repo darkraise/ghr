@@ -6,17 +6,20 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/darkraise/ghr/internal/endpoint"
 	"github.com/darkraise/ghr/internal/s3"
 	"github.com/darkraise/ghr/internal/s3/s3test"
 )
@@ -57,13 +60,15 @@ func TestNew(t *testing.T) {
 		ok                       bool
 	}{
 		{"https://s3.example.sg", "artifacts", "us-east-1", testCred, "https://s3.example.sg", true},
-		{"https://s3.example.sg:9000/", "artifacts", "us-east-1", testCred, "https://s3.example.sg:9000", true},
-		{"http://s3.example.sg", "artifacts", "us-east-1", testCred, "must be an https:// address", false},
-		{"s3.example.sg", "artifacts", "us-east-1", testCred, "must be an https:// address", false},
-		{"https://s3.example.sg/artifacts", "artifacts", "us-east-1", testCred, "without a path, query or user info", false},
-		{"https://s3.example.sg?x=1", "artifacts", "us-east-1", testCred, "without a path, query or user info", false},
-		{"https://me:hunter2@s3.example.sg", "artifacts", "us-east-1", testCred, "without a path, query or user info", false},
-		{"https://s3 example.sg", "artifacts", "us-east-1", testCred, "not a valid URL", false},
+		{"https://s3.example.sg:9000", "artifacts", "us-east-1", testCred, "https://s3.example.sg:9000", true},
+		{"HTTP://192.168.0.105:9000", "artifacts", "us-east-1", testCred, "http://192.168.0.105:9000", true},
+		{"https://s3.example.sg:9000/", "artifacts", "us-east-1", testCred, "s3: " + endpoint.MsgExtra, false},
+		{"http://s3.example.sg", "artifacts", "us-east-1", testCred, "s3: " + endpoint.MsgHTTPName, false},
+		{"s3.example.sg", "artifacts", "us-east-1", testCred, "s3: " + endpoint.MsgForm, false},
+		{"https://s3.example.sg/artifacts", "artifacts", "us-east-1", testCred, "s3: " + endpoint.MsgExtra, false},
+		{"https://s3.example.sg?x=1", "artifacts", "us-east-1", testCred, "s3: " + endpoint.MsgExtra, false},
+		{"https://me:hunter2@s3.example.sg", "artifacts", "us-east-1", testCred, "s3: " + endpoint.MsgExtra, false},
+		{"https://s3 example.sg", "artifacts", "us-east-1", testCred, "s3: " + endpoint.MsgForm, false},
 		{"https://s3.example.sg", "", "us-east-1", testCred, "bucket name is empty", false},
 		{"https://s3.example.sg", "artifacts", "", testCred, "region is empty", false},
 		{"https://s3.example.sg", "artifacts", "us-east-1", s3.Credentials{AccessKeyID: "AKID"}, "access key ID or secret is empty", false},
@@ -81,6 +86,85 @@ func TestNew(t *testing.T) {
 		if err != nil && strings.Contains(err.Error(), "hunter2") {
 			t.Errorf("error shows the endpoint password: %v", err)
 		}
+	}
+}
+
+func TestNewFollowsTheEndpointRule(t *testing.T) {
+	b, err := os.ReadFile("../endpoint/testdata/vectors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors []struct {
+		Endpoint string `json:"endpoint"`
+		Error    string `json:"error"`
+	}
+	if err := json.Unmarshal(b, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vectors {
+		c, err := s3.New(v.Endpoint, "artifacts", "us-east-1", testCred)
+		if v.Error != "" {
+			if err == nil || err.Error() != "s3: "+v.Error {
+				t.Errorf("New(%q) error %v, want %q", v.Endpoint, err, "s3: "+v.Error)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("New(%q): %v", v.Endpoint, err)
+			continue
+		}
+		// An accepted endpoint has no path, so only the scheme's case may change.
+		if !strings.EqualFold(c.Endpoint, v.Endpoint) || !(strings.HasPrefix(c.Endpoint, "https://") || strings.HasPrefix(c.Endpoint, "http://")) {
+			t.Errorf("New(%q).Endpoint = %q", v.Endpoint, c.Endpoint)
+		}
+	}
+}
+
+func TestPlainHTTPEndpoint(t *testing.T) {
+	ctx := context.Background()
+	srv := s3test.NewPlainServer(t, "artifacts")
+	srv.CheckAuth(testCred, "us-east-1")
+	if !strings.HasPrefix(srv.URL(), "http://") {
+		t.Fatalf("plain server URL %s", srv.URL())
+	}
+	c, err := s3.New(srv.URL(), "artifacts", "us-east-1", testCred)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Endpoint != srv.URL() {
+		t.Fatalf("Endpoint %s, want %s", c.Endpoint, srv.URL())
+	}
+	var schemes []string
+	next := srv.HTTPClient().Transport
+	c.HTTP = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		schemes = append(schemes, r.URL.Scheme)
+		return next.RoundTrip(r)
+	})}
+	body := []byte("zip bytes")
+	if err := c.Put(ctx, "o/r/1/dist.zip", bytes.NewReader(body), int64(len(body)), s3.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Head(ctx, "o/r/1/dist.zip"); err != nil {
+		t.Fatal(err)
+	}
+	if len(schemes) != 2 || schemes[0] != "http" || schemes[1] != "http" {
+		t.Fatalf("request schemes %q, want two http requests", schemes)
+	}
+	link, _, err := c.PresignGet("o/r/1/dist.zip", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(link, "http://") {
+		t.Fatalf("presigned link %s does not start with http://", link)
+	}
+	resp, err := srv.HTTPClient().Get(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	got, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(got) != "zip bytes" {
+		t.Fatalf("download %d %q", resp.StatusCode, got)
 	}
 }
 

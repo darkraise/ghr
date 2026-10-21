@@ -15,10 +15,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/darkraise/ghr/internal/endpoint"
 )
 
 type Client struct {
-	Endpoint string // "https://host[:port]", no path
+	Endpoint string // "https://host[:port]" or "http://ip[:port]", no path
 	Bucket   string
 	Region   string
 	Cred     Credentials
@@ -26,17 +28,11 @@ type Client struct {
 	Now      func() time.Time // nil means time.Now
 }
 
-func New(endpoint, bucket, region string, cred Credentials) (*Client, error) {
-	u, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, errors.New("s3: the endpoint is not a valid URL; use https://host[:port]")
+func New(rawURL, bucket, region string, cred Credentials) (*Client, error) {
+	if err := endpoint.Check(rawURL); err != nil {
+		return nil, errors.New("s3: " + err.Error())
 	}
-	if u.Scheme != "https" || u.Host == "" {
-		return nil, fmt.Errorf("s3: the endpoint %q must be an https:// address", u.Redacted())
-	}
-	if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.User != nil {
-		return nil, fmt.Errorf("s3: the endpoint %q must be only https://host[:port], without a path, query or user info", u.Redacted())
-	}
+	u, _ := url.Parse(rawURL) // Check has parsed it
 	if bucket == "" {
 		return nil, errors.New("s3: the bucket name is empty")
 	}
@@ -46,7 +42,7 @@ func New(endpoint, bucket, region string, cred Credentials) (*Client, error) {
 	if cred.AccessKeyID == "" || cred.SecretAccessKey == "" {
 		return nil, errors.New("s3: the access key ID or secret is empty")
 	}
-	return &Client{Endpoint: "https://" + u.Host, Bucket: bucket, Region: region, Cred: cred}, nil
+	return &Client{Endpoint: u.Scheme + "://" + u.Host, Bucket: bucket, Region: region, Cred: cred}, nil
 }
 
 type Object struct {
