@@ -20,7 +20,8 @@ import (
 
 // fakeAS records every call as "<method> <args>". Retire answers with
 // retireErr and every other method that can fail with err. Row answers a
-// row named after the repository, or none when noRow is set.
+// row named after the repository, or none when noRow is set; JobKey answers
+// jobKey.
 type fakeAS struct {
 	mu        sync.Mutex
 	calls     []string
@@ -32,6 +33,7 @@ type fakeAS struct {
 	err       error
 	retireErr error
 	noRow     bool
+	jobKey    *artifactstore.Key
 	version   atomic.Int64
 }
 
@@ -66,6 +68,8 @@ func (f *fakeAS) Retire(_ context.Context, repo string) error {
 	f.record("retire %s", repo)
 	return f.retireErr
 }
+
+func (f *fakeAS) JobKey() *artifactstore.Key { return f.jobKey }
 func (f *fakeAS) Test(context.Context) (model.ArtifactStoreTest, error) {
 	f.record("test")
 	return f.test, f.err

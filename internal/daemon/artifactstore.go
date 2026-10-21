@@ -27,6 +27,7 @@ type ArtifactStoreService interface {
 	PolicyChanged()
 	Row(repo string) (model.ArtifactStoreRepo, bool)
 	Retire(ctx context.Context, repo string) error
+	JobKey() *artifactstore.Key
 	Test(ctx context.Context) (model.ArtifactStoreTest, error)
 	RunObjects(ctx context.Context, repo string, runID int64) ([]model.ArtifactStoreItem, error)
 	Delete(repo string, keys []string) (string, error)
