@@ -5,7 +5,6 @@ import (
 	"errors"
 	"maps"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -41,7 +40,9 @@ func withJobKey() model.ArtifactStore {
 	return model.ArtifactStore{Configured: true, JobKey: &model.ArtifactKeyInfo{ID: "JOBK…5678"}}
 }
 
-func TestSetArtifactRepoSavesTheSwitchAndSyncs(t *testing.T) {
+// A saved switch or cleanup reaches the service as a policy change, and the
+// answer is the service's row; nothing goes to GitHub.
+func TestSetArtifactRepoSavesTheSwitch(t *testing.T) {
 	on, off := true, false
 	threeDays, none := "3d", ""
 	for _, tc := range []struct {
@@ -50,20 +51,24 @@ func TestSetArtifactRepoSavesTheSwitchAndSyncs(t *testing.T) {
 		repo  string
 		req   model.ArtifactRepoRequest
 		want  map[string]config.ArtifactRepo
-		sync  string
+		row   string
 	}{
 		{"on, named in another case", nil, "DarkMem", model.ArtifactRepoRequest{Enabled: &on},
 			map[string]config.ArtifactRepo{"darkmem": {Enabled: true}}, "darkmem"},
-		{"on for a watched repository", nil, "homelab", model.ArtifactRepoRequest{Enabled: &on},
-			map[string]config.ArtifactRepo{"homelab": {Enabled: true}}, "homelab"},
 		{"on keeps the cleanup", map[string]config.ArtifactRepo{"darkmem": {Cleanup: "3d"}}, "darkmem", model.ArtifactRepoRequest{Enabled: &on},
 			map[string]config.ArtifactRepo{"darkmem": {Enabled: true, Cleanup: "3d"}}, "darkmem"},
 		{"a cleanup override", nil, "darkmem", model.ArtifactRepoRequest{Cleanup: &threeDays},
 			map[string]config.ArtifactRepo{"darkmem": {Cleanup: "3d"}}, "darkmem"},
+		{"a cleanup override for a watched repository", nil, "homelab", model.ArtifactRepoRequest{Cleanup: &threeDays},
+			map[string]config.ArtifactRepo{"homelab": {Cleanup: "3d"}}, "homelab"},
 		{"off keeps the cleanup", map[string]config.ArtifactRepo{"darkmem": {Enabled: true, Cleanup: "3d"}}, "darkmem", model.ArtifactRepoRequest{Enabled: &off},
 			map[string]config.ArtifactRepo{"darkmem": {Cleanup: "3d"}}, "darkmem"},
 		{"off with no override drops the entry", map[string]config.ArtifactRepo{"darkmem": {Enabled: true, Cleanup: "3d"}}, "darkmem",
 			model.ArtifactRepoRequest{Enabled: &off, Cleanup: &none}, nil, "darkmem"},
+		{"off for a watched repository", map[string]config.ArtifactRepo{"homelab": {Enabled: true, Cleanup: "3d"}}, "homelab", model.ArtifactRepoRequest{Enabled: &off},
+			map[string]config.ArtifactRepo{"homelab": {Cleanup: "3d"}}, "homelab"},
+		{"off for a leftover entry of a repository ghr does not cover", map[string]config.ArtifactRepo{"oldrepo": {Enabled: true, Cleanup: "3d"}}, "OldRepo",
+			model.ArtifactRepoRequest{Enabled: &off}, map[string]config.ArtifactRepo{"oldrepo": {Cleanup: "3d"}}, "oldrepo"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b, _, gh, f := newASBackend(t)
@@ -71,14 +76,17 @@ func TestSetArtifactRepoSavesTheSwitchAndSyncs(t *testing.T) {
 			f.snap = withJobKey()
 			gh.userRepos = darkraiseRepos(map[string]bool{"darkmem": true, "homelab": true})
 			row, err := b.SetArtifactRepo(context.Background(), tc.repo, tc.req)
-			if err != nil || row.Name != tc.sync || row.State != "set" {
+			if err != nil || row.Name != tc.row || row.State != "row" {
 				t.Fatalf("row %+v, %v", row, err)
 			}
 			if got := b.Store.Config().ArtifactStore.Repos; !maps.Equal(got, tc.want) {
 				t.Fatalf("repos %v, want %v", got, tc.want)
 			}
-			if got := f.recorded(); !slices.Equal(got, []string{"policy", "sync " + tc.sync}) {
+			if got := f.recorded(); !slices.Equal(got, []string{"policy", "row " + tc.row}) {
 				t.Fatalf("calls %q", got)
+			}
+			if len(gh.deleted) != 0 {
+				t.Fatalf("runner registrations deleted: %v", gh.deleted)
 			}
 		})
 	}
@@ -110,17 +118,32 @@ func TestSetArtifactRepoRefusals(t *testing.T) {
 			"nope is not a covered repository; add it as a runner or watched repository first"},
 		{"a repository being removed", func(t *testing.T, b *Backend, _ *fakeManager, _ *fakeGH, _ *fakeAS) {
 			update(t, b, func(c *config.Config) { r := c.Repo("darkmem"); r.Paused, r.Removing = true, true })
-		}, "darkmem", model.ArtifactRepoRequest{Enabled: &on}, 404, "darkmem is not a covered repository"},
+		}, "darkmem", model.ArtifactRepoRequest{Enabled: &on}, 404,
+			"darkmem is not a covered repository; add it as a runner or watched repository first"},
 		{"nothing to change", nil, "darkmem", model.ArtifactRepoRequest{}, 400, "give enabled or cleanup"},
 		{"a cleanup under an hour", nil, "darkmem", model.ArtifactRepoRequest{Cleanup: &tenMinutes}, 400, "cleanup must be at least 1h, or off"},
-		{"a cleanup that is not a duration", nil, "darkmem", model.ArtifactRepoRequest{Cleanup: &soon}, 400, "cleanup: "},
+		{"a cleanup that is not a duration", nil, "darkmem", model.ArtifactRepoRequest{Cleanup: &soon}, 400, `cleanup: invalid duration "soon"`},
+		{"a watched repository", nil, "homelab", model.ArtifactRepoRequest{Enabled: &on}, 409,
+			"homelab is not served by ghr; self-hosted storage serves only repositories ghr runs jobs for"},
+		{"a watched repository while GitHub rejects the token", func(_ *testing.T, _ *Backend, m *fakeManager, _ *fakeGH, _ *fakeAS) {
+			m.degraded = "Bad credentials"
+		}, "homelab", model.ArtifactRepoRequest{Enabled: &on}, 409,
+			"homelab is not served by ghr; self-hosted storage serves only repositories ghr runs jobs for"},
+		{"a leftover entry of a repository ghr does not cover", func(t *testing.T, b *Backend, _ *fakeManager, _ *fakeGH, _ *fakeAS) {
+			update(t, b, func(c *config.Config) {
+				c.ArtifactStore.Repos = map[string]config.ArtifactRepo{"oldrepo": {Cleanup: "3d"}}
+			})
+		}, "oldrepo", model.ArtifactRepoRequest{Enabled: &on}, 409,
+			"oldrepo is not served by ghr; self-hosted storage serves only repositories ghr runs jobs for"},
 		{"no job key", func(_ *testing.T, _ *Backend, _ *fakeManager, _ *fakeGH, f *fakeAS) {
 			f.snap.JobKey = nil
 		}, "darkmem", model.ArtifactRepoRequest{Enabled: &on}, 409, "set the job key first"},
 		{"a public repository", nil, "darkcloud", model.ArtifactRepoRequest{Enabled: &on}, 409,
 			"darkcloud is public; self-hosted storage serves only private repositories"},
-		{"a repository the token cannot see", nil, "homelab", model.ArtifactRepoRequest{Enabled: &on}, 400,
-			"token cannot see darkraise/homelab: add it to the PAT's repository access first"},
+		{"a repository the token cannot see", func(_ *testing.T, _ *Backend, _ *fakeManager, gh *fakeGH, _ *fakeAS) {
+			gh.userRepos = darkraiseRepos(map[string]bool{"darkmem": true})
+		}, "darkcloud", model.ArtifactRepoRequest{Enabled: &on}, 400,
+			"token cannot see darkraise/darkcloud: add it to the PAT's repository access first"},
 		{"GitHub rejecting the token", func(_ *testing.T, _ *Backend, m *fakeManager, _ *fakeGH, _ *fakeAS) {
 			m.degraded = "Bad credentials"
 		}, "darkmem", model.ArtifactRepoRequest{Enabled: &on}, 503, "GitHub is rejecting the token: Bad credentials"},
@@ -135,7 +158,7 @@ func TestSetArtifactRepoRefusals(t *testing.T) {
 			}
 			before := b.Store.Config().ArtifactStore.Repos
 			_, err := b.SetArtifactRepo(context.Background(), tc.repo, tc.req)
-			if apiStatus(err) != tc.status || !strings.HasPrefix(apiMsg(err), tc.msg) {
+			if apiStatus(err) != tc.status || apiMsg(err) != tc.msg {
 				t.Fatalf("status %d message %q, want %d %q", apiStatus(err), apiMsg(err), tc.status, tc.msg)
 			}
 			if got := b.Store.Config().ArtifactStore.Repos; !maps.Equal(got, before) {
@@ -143,6 +166,9 @@ func TestSetArtifactRepoRefusals(t *testing.T) {
 			}
 			if got := f.recorded(); len(got) != 0 {
 				t.Fatalf("calls %q", got)
+			}
+			if len(gh.deleted) != 0 {
+				t.Fatalf("runner registrations deleted: %v", gh.deleted)
 			}
 		})
 	}
@@ -156,39 +182,57 @@ func TestSetArtifactRepoReadsTheVisibilityAtGitHub(t *testing.T) {
 	ctx := context.Background()
 	on := true
 	f.snap = withJobKey()
-	f.snap.Repos = []model.ArtifactStoreRepo{{Name: "darkmem", Private: true}, {Name: "homelab", Private: true}}
+	f.snap.Repos = []model.ArtifactStoreRepo{{Name: "darkmem", Private: true}, {Name: "darkcloud", Private: true}}
 	gh.userRepos = darkraiseRepos(map[string]bool{"darkmem": false})
 	_, err := b.SetArtifactRepo(ctx, "darkmem", model.ArtifactRepoRequest{Enabled: &on})
 	if apiStatus(err) != 409 || apiMsg(err) != "darkmem is public; self-hosted storage serves only private repositories" {
 		t.Fatalf("a public repository on a private row: status %d message %q", apiStatus(err), apiMsg(err))
 	}
-	_, err = b.SetArtifactRepo(ctx, "homelab", model.ArtifactRepoRequest{Enabled: &on})
-	if apiStatus(err) != 400 || apiMsg(err) != "token cannot see darkraise/homelab: add it to the PAT's repository access first" {
+	_, err = b.SetArtifactRepo(ctx, "darkcloud", model.ArtifactRepoRequest{Enabled: &on})
+	if apiStatus(err) != 400 || apiMsg(err) != "token cannot see darkraise/darkcloud: add it to the PAT's repository access first" {
 		t.Fatalf("a repository the token cannot see: status %d message %q", apiStatus(err), apiMsg(err))
 	}
-	if a := b.Store.Config().ArtifactStore; a.Enabled("darkmem") || a.Enabled("homelab") {
+	gh.userRepos, gh.repoErr = nil, errors.New("connection reset")
+	if _, err := b.SetArtifactRepo(ctx, "darkcloud", model.ArtifactRepoRequest{Enabled: &on}); err == nil || err.Error() != "connection reset" {
+		t.Fatalf("a failed visibility read: %v", err)
+	}
+	if a := b.Store.Config().ArtifactStore; a.Repos != nil {
 		t.Fatalf("repos %v, want neither switched on", a.Repos)
 	}
 }
 
-// GitHub refusing the sync names the missing permission; the switch stays
-// saved, and each pass retries it.
-func TestSetArtifactRepoKeepsTheSwitchWhenTheSyncFails(t *testing.T) {
-	b, _, gh, f := newASBackend(t)
-	withArtifactStore(t, b, nil)
-	f.snap = withJobKey()
-	gh.userRepos = darkraiseRepos(map[string]bool{"darkmem": true})
-	f.syncErr = &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible by personal access token", Permissions: "secrets=write"}
-	on := true
-	_, err := b.SetArtifactRepo(context.Background(), "darkmem", model.ArtifactRepoRequest{Enabled: &on})
-	if apiStatus(err) != 403 || apiMsg(err) != "token lacks secrets=write on darkraise/darkmem: grant it in the PAT settings" {
-		t.Fatalf("status %d message %q", apiStatus(err), apiMsg(err))
+// Switching off and cleanup changes need no GitHub: they work while GitHub
+// rejects the token and never read the visibility. A leftover entry that
+// switching off drops answers a not_served row.
+func TestSetArtifactRepoOffNeedsNoGitHub(t *testing.T) {
+	b, m, gh, f := newASBackend(t)
+	withArtifactStore(t, b, map[string]config.ArtifactRepo{"darkmem": {Enabled: true}, "oldrepo": {Enabled: true}})
+	m.degraded = "Bad credentials"
+	gh.repoErr = errors.New("ListUserRepos must not be called")
+	ctx := context.Background()
+	off, threeDays := false, "3d"
+	if _, err := b.SetArtifactRepo(ctx, "darkmem", model.ArtifactRepoRequest{Enabled: &off}); err != nil {
+		t.Fatalf("switch-off: %v", err)
 	}
-	if !b.Store.Config().ArtifactStore.Enabled("darkmem") {
-		t.Fatal("the switch was not saved")
+	if _, err := b.SetArtifactRepo(ctx, "homelab", model.ArtifactRepoRequest{Cleanup: &threeDays}); err != nil {
+		t.Fatalf("cleanup change: %v", err)
+	}
+	f.noRow = true
+	row, err := b.SetArtifactRepo(ctx, "oldrepo", model.ArtifactRepoRequest{Enabled: &off})
+	if err != nil || row.Name != "oldrepo" || row.State != "not_served" || row.Items == nil {
+		t.Fatalf("leftover entry: row %+v, %v", row, err)
+	}
+	want := map[string]config.ArtifactRepo{"homelab": {Cleanup: "3d"}}
+	if got := b.Store.Config().ArtifactStore.Repos; !maps.Equal(got, want) {
+		t.Fatalf("repos %v, want %v", got, want)
+	}
+	if got := f.recorded(); !slices.Equal(got, []string{"policy", "row darkmem", "policy", "row homelab", "policy", "row oldrepo"}) {
+		t.Fatalf("calls %q", got)
 	}
 }
 
+// The bulk switch turns on the private repositories ghr serves and leaves
+// watched-only, public and departing ones alone.
 func TestEnablePrivateArtifactRepos(t *testing.T) {
 	b, _, gh, f := newASBackend(t)
 	withArtifactStore(t, b, map[string]config.ArtifactRepo{"darkmem": {Cleanup: "3d"}})
@@ -196,19 +240,22 @@ func TestEnablePrivateArtifactRepos(t *testing.T) {
 	gh.userRepos = append(darkraiseRepos(map[string]bool{"darkmem": true, "darkcloud": false, "homelab": true}),
 		github.UserRepo{Name: "darkcloud", Private: true, Owner: github.Account{Login: "someone"}})
 	rows, err := b.EnablePrivateArtifactRepos(context.Background())
-	if err != nil || len(rows) != 2 || rows[0].Name != "darkmem" || rows[1].Name != "homelab" {
+	if err != nil || len(rows) != 1 || rows[0].Name != "darkmem" || rows[0].State != "row" {
 		t.Fatalf("rows %+v, %v", rows, err)
 	}
-	want := map[string]config.ArtifactRepo{"darkmem": {Enabled: true, Cleanup: "3d"}, "homelab": {Enabled: true}}
+	want := map[string]config.ArtifactRepo{"darkmem": {Enabled: true, Cleanup: "3d"}}
 	if got := b.Store.Config().ArtifactStore.Repos; !maps.Equal(got, want) {
 		t.Fatalf("repos %v", got)
 	}
-	if got := f.recorded(); !slices.Equal(got, []string{"policy", "sync darkmem", "sync homelab"}) {
+	if got := f.recorded(); !slices.Equal(got, []string{"policy", "row darkmem"}) {
 		t.Fatalf("calls %q", got)
+	}
+	if len(gh.deleted) != 0 {
+		t.Fatalf("runner registrations deleted: %v", gh.deleted)
 	}
 }
 
-func TestEnablePrivateArtifactReposRefusalsAndFailures(t *testing.T) {
+func TestEnablePrivateArtifactReposRefusals(t *testing.T) {
 	ctx := context.Background()
 	t.Run("not set up", func(t *testing.T) {
 		b, _, _, f := newASBackend(t)
@@ -227,11 +274,11 @@ func TestEnablePrivateArtifactReposRefusalsAndFailures(t *testing.T) {
 			t.Fatalf("calls %q", got)
 		}
 	})
-	t.Run("no private repository", func(t *testing.T) {
+	t.Run("no private repository ghr serves", func(t *testing.T) {
 		b, _, gh, f := newASBackend(t)
 		withArtifactStore(t, b, nil)
 		f.snap = withJobKey()
-		gh.userRepos = darkraiseRepos(map[string]bool{"darkmem": false})
+		gh.userRepos = darkraiseRepos(map[string]bool{"darkmem": false, "homelab": true})
 		rows, err := b.EnablePrivateArtifactRepos(ctx)
 		if err != nil || rows == nil || len(rows) != 0 {
 			t.Fatalf("rows %v, %v", rows, err)
@@ -240,36 +287,35 @@ func TestEnablePrivateArtifactReposRefusalsAndFailures(t *testing.T) {
 			t.Fatalf("calls %q", got)
 		}
 	})
-	t.Run("a repository another daemon stores for", func(t *testing.T) {
+	t.Run("a repository being removed", func(t *testing.T) {
 		b, _, gh, f := newASBackend(t)
 		withArtifactStore(t, b, nil)
+		if _, err := b.Store.Update(func(c *config.Config) error {
+			r := c.Repo("darkcloud")
+			r.Paused, r.Removing = true, true
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 		f.snap = withJobKey()
-		f.snap.Repos = []model.ArtifactStoreRepo{{Name: "homelab", Private: true, State: "foreign"}}
-		gh.userRepos = darkraiseRepos(map[string]bool{"darkmem": true, "homelab": true})
+		gh.userRepos = darkraiseRepos(map[string]bool{"darkmem": true, "darkcloud": true})
 		rows, err := b.EnablePrivateArtifactRepos(ctx)
 		if err != nil || len(rows) != 1 || rows[0].Name != "darkmem" {
 			t.Fatalf("rows %+v, %v", rows, err)
 		}
-		if a := b.Store.Config().ArtifactStore; !a.Enabled("darkmem") || a.Enabled("homelab") {
+		if a := b.Store.Config().ArtifactStore; !a.Enabled("darkmem") || a.Enabled("darkcloud") {
 			t.Fatalf("repos %v", a.Repos)
-		}
-		if got := f.recorded(); !slices.Equal(got, []string{"policy", "sync darkmem"}) {
-			t.Fatalf("calls %q", got)
 		}
 	})
-	t.Run("a failed sync", func(t *testing.T) {
-		b, _, gh, f := newASBackend(t)
+	t.Run("GitHub rejecting the token", func(t *testing.T) {
+		b, m, _, f := newASBackend(t)
 		withArtifactStore(t, b, nil)
 		f.snap = withJobKey()
-		gh.userRepos = darkraiseRepos(map[string]bool{"darkmem": true, "homelab": true})
-		f.syncErr = errors.New("connection reset")
-		if _, err := b.EnablePrivateArtifactRepos(ctx); err == nil || err.Error() != "connection reset" {
+		m.degraded = "Bad credentials"
+		if _, err := b.EnablePrivateArtifactRepos(ctx); apiStatus(err) != 503 {
 			t.Fatalf("%v", err)
 		}
-		if a := b.Store.Config().ArtifactStore; !a.Enabled("darkmem") || !a.Enabled("homelab") {
-			t.Fatalf("repos %v", a.Repos)
-		}
-		if got := f.recorded(); !slices.Equal(got, []string{"policy", "sync darkmem", "kick"}) {
+		if got := f.recorded(); len(got) != 0 {
 			t.Fatalf("calls %q", got)
 		}
 	})

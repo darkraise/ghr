@@ -3,21 +3,21 @@ package daemon
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/darkraise/ghr/internal/api"
 	"github.com/darkraise/ghr/internal/artifactstore"
 	"github.com/darkraise/ghr/internal/config"
-	"github.com/darkraise/ghr/internal/github"
 	"github.com/darkraise/ghr/internal/model"
 )
 
-// SetArtifactRepo switches self-hosted storage on or off for one covered
-// repository, or changes its cleanup age, and applies the repository's
-// variable and secret before it answers. A public repository cannot be
-// switched on.
+// SetArtifactRepo switches self-hosted storage on or off for one repository,
+// or changes its cleanup age, and answers its row. The repository is looked
+// up among the covered ones and then the artifact_store.repos entries, so a
+// leftover entry can still be switched off. Only a private repository ghr
+// serves can be switched on, and only that check reads GitHub; nothing is
+// written there.
 func (b *Backend) SetArtifactRepo(ctx context.Context, repo string, req model.ArtifactRepoRequest) (model.ArtifactStoreRepo, error) {
 	if req.Enabled == nil && req.Cleanup == nil {
 		return model.ArtifactStoreRepo{}, api.BadRequest("give enabled or cleanup")
@@ -26,7 +26,7 @@ func (b *Backend) SetArtifactRepo(ctx context.Context, repo string, req model.Ar
 	if !cfg.ArtifactStore.Configured() {
 		return model.ArtifactStoreRepo{}, asErr(artifactstore.ErrNotConfigured)
 	}
-	name, ok := artifactCovered(cfg, repo)
+	name, ok := artifactSwitchable(cfg, repo)
 	if !ok {
 		return model.ArtifactStoreRepo{}, uncoveredErr(repo)
 	}
@@ -35,10 +35,14 @@ func (b *Backend) SetArtifactRepo(ctx context.Context, repo string, req model.Ar
 			return model.ArtifactStoreRepo{}, err
 		}
 	}
-	if err := b.githubErr(); err != nil {
-		return model.ArtifactStoreRepo{}, err
-	}
-	if req.Enabled != nil && *req.Enabled {
+	on := req.Enabled != nil && *req.Enabled
+	if on {
+		if cfg.Repo(name) == nil {
+			return model.ArtifactStoreRepo{}, notServedErr(name)
+		}
+		if err := b.githubErr(); err != nil {
+			return model.ArtifactStoreRepo{}, err
+		}
 		if b.AS.Snapshot().JobKey == nil {
 			return model.ArtifactStoreRepo{}, asErr(artifactstore.ErrNoJobKey)
 		}
@@ -51,8 +55,11 @@ func (b *Backend) SetArtifactRepo(ctx context.Context, repo string, req model.Ar
 		}
 	}
 	if err := b.update(func(c *config.Config) error {
-		if _, ok := artifactCovered(c, name); !ok {
+		if _, ok := artifactSwitchable(c, name); !ok {
 			return uncoveredErr(name)
+		}
+		if on && c.Repo(name) == nil {
+			return notServedErr(name)
 		}
 		r := dropArtifactRepo(&c.ArtifactStore, name)
 		if req.Enabled != nil {
@@ -67,19 +74,18 @@ func (b *Backend) SetArtifactRepo(ctx context.Context, repo string, req model.Ar
 		return model.ArtifactStoreRepo{}, err
 	}
 	b.AS.PolicyChanged()
-	// The saved switch stands when GitHub refuses the sync: each pass retries it.
-	row, err := b.AS.SyncRepo(ctx, name)
-	if err != nil {
-		return model.ArtifactStoreRepo{}, b.asWriteErr(err, name)
+	if row, ok := b.AS.Row(name); ok {
+		return row, nil
 	}
-	return row, nil
+	// Switching off a leftover entry that set nothing else drops it, and a
+	// repository ghr does not cover has no row without an entry or objects.
+	return model.ArtifactStoreRepo{Name: name, State: "not_served", Items: []model.ArtifactStoreItem{}}, nil
 }
 
 // EnablePrivateArtifactRepos switches self-hosted storage on for every
-// covered private repository the token can see, except those whose variable
-// another daemon wrote, then applies each one's variable and secret. When a
-// sync fails the switches stay saved and a pass is asked for, which syncs
-// the rest.
+// repository ghr serves that the token sees as private, and answers their
+// rows. Watched-only, public and departing repositories are left as they
+// are, and nothing is written to GitHub.
 func (b *Backend) EnablePrivateArtifactRepos(ctx context.Context) ([]model.ArtifactStoreRepo, error) {
 	cfg := b.Store.Config()
 	if !cfg.ArtifactStore.Configured() {
@@ -88,25 +94,17 @@ func (b *Backend) EnablePrivateArtifactRepos(ctx context.Context) ([]model.Artif
 	if err := b.githubErr(); err != nil {
 		return nil, err
 	}
-	snap := b.AS.Snapshot()
-	if snap.JobKey == nil {
+	if b.AS.Snapshot().JobKey == nil {
 		return nil, asErr(artifactstore.ErrNoJobKey)
-	}
-	// The Artifacts page's bulk button leaves these out and names them.
-	foreign := map[string]bool{}
-	for _, r := range snap.Repos {
-		if r.State == "foreign" {
-			foreign[strings.ToLower(r.Name)] = true
-		}
 	}
 	vis, err := b.ownerVisibility(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var names []string
-	for _, name := range artifactCoveredRepos(cfg) {
-		if vis[strings.ToLower(name)] && !foreign[strings.ToLower(name)] {
-			names = append(names, name)
+	for _, r := range cfg.Repos {
+		if !r.Removing && vis[strings.ToLower(r.Name)] {
+			names = append(names, r.Name)
 		}
 	}
 	rows := []model.ArtifactStoreRepo{}
@@ -115,12 +113,12 @@ func (b *Backend) EnablePrivateArtifactRepos(ctx context.Context) ([]model.Artif
 	}
 	if err := b.update(func(c *config.Config) error {
 		for _, name := range names {
-			if _, ok := artifactCovered(c, name); !ok {
+			if r := c.Repo(name); r == nil || r.Removing {
 				continue
 			}
-			r := dropArtifactRepo(&c.ArtifactStore, name)
-			r.Enabled = true
-			setArtifactRepo(&c.ArtifactStore, name, r)
+			e := dropArtifactRepo(&c.ArtifactStore, name)
+			e.Enabled = true
+			setArtifactRepo(&c.ArtifactStore, name, e)
 		}
 		return nil
 	}); err != nil {
@@ -128,12 +126,9 @@ func (b *Backend) EnablePrivateArtifactRepos(ctx context.Context) ([]model.Artif
 	}
 	b.AS.PolicyChanged()
 	for _, name := range names {
-		row, err := b.AS.SyncRepo(ctx, name)
-		if err != nil {
-			b.AS.Kick()
-			return nil, b.asWriteErr(err, name)
+		if row, ok := b.AS.Row(name); ok {
+			rows = append(rows, row)
 		}
-		rows = append(rows, row)
 	}
 	return rows, nil
 }
@@ -155,16 +150,6 @@ func (b *Backend) retireArtifacts(name string) {
 	ctx, cancel := context.WithTimeout(context.Background(), artifactRetireTimeout)
 	defer cancel()
 	_ = b.AS.Retire(ctx, name)
-}
-
-// asWriteErr is asErr for a GitHub write: a refused token gets the
-// repository rows' wording, which names the missing PAT permission.
-func (b *Backend) asWriteErr(err error, repo string) error {
-	if !github.IsKind(err, github.ErrAuth) {
-		return asErr(err)
-	}
-	msg, _ := actionsErr(err, b.Store.Config().Owner, repo)
-	return &api.Error{Status: http.StatusForbidden, Msg: msg}
 }
 
 // artifactRepoPrivate reports whether name is private, read fresh from
@@ -213,16 +198,22 @@ func artifactCovered(c *config.Config, name string) (string, bool) {
 	return "", false
 }
 
-// artifactCoveredRepos lists the repositories self-hosted storage can serve:
-// runner repositories that are not being removed, then watched ones.
-func artifactCoveredRepos(c *config.Config) []string {
-	var out []string
-	for _, r := range c.Repos {
-		if !r.Removing {
-			out = append(out, r.Name)
+// artifactSwitchable resolves name to its spelling among the covered
+// repositories, then among the artifact_store.repos entries.
+func artifactSwitchable(c *config.Config, name string) (string, bool) {
+	if spelled, ok := artifactCovered(c, name); ok {
+		return spelled, true
+	}
+	for k := range c.ArtifactStore.Repos {
+		if strings.EqualFold(k, name) {
+			return k, true
 		}
 	}
-	return append(out, c.WatchRepos...)
+	return "", false
+}
+
+func notServedErr(name string) error {
+	return api.Conflict(name + " is not served by ghr; self-hosted storage serves only repositories ghr runs jobs for")
 }
 
 func uncoveredErr(name string) error {
