@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/github"
@@ -274,87 +275,96 @@ func TestEnablePrivateArtifactReposRefusalsAndFailures(t *testing.T) {
 	})
 }
 
-// offProbe records, for each SwitchOff, whether config.yaml still had the
-// repository switched on when it ran.
-type offProbe struct {
+// retireProbe records, for each Retire, whether config.yaml still covered
+// the repository and whether the call had a deadline of at most
+// artifactRetireTimeout.
+type retireProbe struct {
 	*fakeAS
-	b       *Backend
-	onAtOff []bool
+	b         *Backend
+	coveredAt []bool
+	bounded   []bool
 }
 
-func (p *offProbe) SwitchOff(ctx context.Context, repo string) error {
-	p.onAtOff = append(p.onAtOff, p.b.Store.Config().ArtifactStore.Enabled(repo))
-	return p.fakeAS.SwitchOff(ctx, repo)
+func (p *retireProbe) Retire(ctx context.Context, repo string) error {
+	_, covered := artifactCovered(p.b.Store.Config(), repo)
+	p.coveredAt = append(p.coveredAt, covered)
+	dl, ok := ctx.Deadline()
+	p.bounded = append(p.bounded, ok && time.Until(dl) <= artifactRetireTimeout)
+	return p.fakeAS.Retire(ctx, repo)
 }
 
-func probeSwitchOff(b *Backend, f *fakeAS) *offProbe {
-	p := &offProbe{fakeAS: f, b: b}
+func probeRetire(b *Backend, f *fakeAS) *retireProbe {
+	p := &retireProbe{fakeAS: f, b: b}
 	b.AS = p
 	return p
 }
 
-// Removing or unwatching a repository whose storage is on switches it off
-// first, after saving the switch off, so a pass cannot write the variable
-// and secret back; every way out of coverage drops its artifact_store entry.
-func TestRemovingCoverageSwitchesArtifactsOff(t *testing.T) {
+// Removing or unwatching a repository retires its old variable and secret
+// once, while it is still covered, whatever its switch says; every way out
+// of coverage drops its artifact_store entry.
+func TestLeavingCoverageRetiresTheOldVariable(t *testing.T) {
 	b, _, _, f := newASBackend(t)
-	p := probeSwitchOff(b, f)
+	p := probeRetire(b, f)
 	withArtifactStore(t, b, map[string]config.ArtifactRepo{
 		"darkmem": {Enabled: true}, "darkcloud": {Cleanup: "3d"}, "homelab": {Enabled: true},
 	})
 	if err := b.UnwatchRepo("darkmem"); apiStatus(err) != 404 {
 		t.Fatalf("unwatching a runner repository: %v", err)
 	}
-	if err := b.RemoveRepo("darkmem"); err != nil {
-		t.Fatal(err)
+	if err := b.RemoveRepo("nope"); apiStatus(err) != 404 {
+		t.Fatalf("removing an unknown repository: %v", err)
 	}
-	if err := b.RemoveRepo("darkcloud"); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"darkmem", "darkcloud"} {
+		if err := b.RemoveRepo(name); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := b.UnwatchRepo("homelab"); err != nil {
 		t.Fatal(err)
 	}
 	cfg := b.Store.Config()
-	if cfg.ArtifactStore.Repos != nil || !cfg.Repo("darkmem").Removing || cfg.Watched("homelab") {
-		t.Fatalf("repos %v, darkmem %+v, watched %v", cfg.ArtifactStore.Repos, cfg.Repo("darkmem"), cfg.WatchRepos)
+	if cfg.ArtifactStore.Repos != nil || !cfg.Repo("darkmem").Removing || !cfg.Repo("darkcloud").Removing || cfg.Watched("homelab") {
+		t.Fatalf("repos %v, darkmem %+v, darkcloud %+v, watched %v", cfg.ArtifactStore.Repos, cfg.Repo("darkmem"), cfg.Repo("darkcloud"), cfg.WatchRepos)
 	}
-	if got := f.recorded(); !slices.Equal(got, []string{"switch-off darkmem", "switch-off homelab"}) {
+	if got := f.recorded(); !slices.Equal(got, []string{"retire darkmem", "retire darkcloud", "retire homelab"}) {
 		t.Fatalf("calls %q", got)
 	}
-	if !slices.Equal(p.onAtOff, []bool{false, false}) {
-		t.Fatalf("switched on in config.yaml during SwitchOff: %v", p.onAtOff)
+	if !slices.Equal(p.coveredAt, []bool{true, true, true}) {
+		t.Fatalf("covered in config.yaml during Retire: %v", p.coveredAt)
+	}
+	if !slices.Equal(p.bounded, []bool{true, true, true}) {
+		t.Fatalf("Retire deadlines within %s: %v", artifactRetireTimeout, p.bounded)
 	}
 }
 
-// A failed switch-off restores the saved switch and refuses the removal.
-func TestRemovalRefusedWhenTheSwitchOffFails(t *testing.T) {
+// A retire GitHub refuses, Variables or Secrets alike, never stops a
+// removal or keeps a repository watched, nor does GitHub rejecting the
+// token; the backend writes no event of its own about it.
+func TestLeavingCoverageIgnoresAFailedRetire(t *testing.T) {
 	b, m, _, f := newASBackend(t)
-	p := probeSwitchOff(b, f)
 	withArtifactStore(t, b, map[string]config.ArtifactRepo{"darkmem": {Enabled: true}, "homelab": {Enabled: true}})
-	f.offErr = &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible by personal access token", Permissions: "variables=write"}
-	err := b.RemoveRepo("darkmem")
-	if want := "could not switch off self-hosted storage for darkmem, so it was not removed: token lacks variables=write on darkraise/darkmem: grant it in the PAT settings"; apiStatus(err) != 403 || apiMsg(err) != want {
-		t.Fatalf("status %d message %q", apiStatus(err), apiMsg(err))
+	f.retireErr = &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible by personal access token", Permissions: "variables=read"}
+	if err := b.RemoveRepo("darkmem"); err != nil {
+		t.Fatalf("a refused variable read stopped the removal: %v", err)
 	}
-	f.offErr = errors.New("connection reset")
-	err = b.UnwatchRepo("homelab")
-	if want := "could not switch off self-hosted storage for homelab, so it is still watched: connection reset"; apiStatus(err) != 502 || apiMsg(err) != want {
-		t.Fatalf("status %d message %q", apiStatus(err), apiMsg(err))
-	}
-	f.offErr = nil
+	f.retireErr = &github.APIError{Status: 403, Kind: github.ErrAuth, Message: "Resource not accessible by personal access token", Permissions: "secrets=write"}
 	m.degraded = "Bad credentials"
-	if err := b.RemoveRepo("darkmem"); apiStatus(err) != 503 {
-		t.Fatalf("while GitHub rejects the token: %v", err)
+	if err := b.UnwatchRepo("homelab"); err != nil {
+		t.Fatalf("a refused secret delete kept the repository watched: %v", err)
 	}
 	cfg := b.Store.Config()
-	if cfg.Repo("darkmem").Removing || !cfg.Watched("homelab") || !cfg.ArtifactStore.Enabled("darkmem") || !cfg.ArtifactStore.Enabled("homelab") {
-		t.Fatalf("a refused removal changed the config: %+v %v %v", cfg.Repo("darkmem"), cfg.WatchRepos, cfg.ArtifactStore.Repos)
+	if cfg.ArtifactStore.Repos != nil || !cfg.Repo("darkmem").Removing || cfg.Watched("homelab") {
+		t.Fatalf("repos %v, darkmem %+v, watched %v", cfg.ArtifactStore.Repos, cfg.Repo("darkmem"), cfg.WatchRepos)
 	}
-	if got := f.recorded(); !slices.Equal(got, []string{"switch-off darkmem", "switch-off homelab"}) {
+	if got := f.recorded(); !slices.Equal(got, []string{"retire darkmem", "retire homelab"}) {
 		t.Fatalf("calls %q", got)
 	}
-	if !slices.Equal(p.onAtOff, []bool{false, false}) {
-		t.Fatalf("switched on in config.yaml during SwitchOff: %v", p.onAtOff)
+	var msgs []string
+	for _, e := range b.Events.After(0) {
+		msgs = append(msgs, e.Msg)
+	}
+	if want := []string{"repo removal requested; waiting for its runners to finish", "stopped watching"}; !slices.Equal(msgs, want) {
+		t.Fatalf("events %q, want %q", msgs, want)
 	}
 }
 

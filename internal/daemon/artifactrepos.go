@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -139,62 +138,23 @@ func (b *Backend) EnablePrivateArtifactRepos(ctx context.Context) ([]model.Artif
 	return rows, nil
 }
 
-// artifactSwitchOffTimeout bounds the GitHub calls that switch a repository's
-// self-hosted storage off before the repository stops being covered.
-const artifactSwitchOffTimeout = 30 * time.Second
+// artifactRetireTimeout bounds the GitHub calls that remove ghr's old
+// variable and secret from a repository leaving coverage.
+const artifactRetireTimeout = 30 * time.Second
 
-// switchOffArtifacts deletes ghr's variable and secret of a repository whose
-// self-hosted storage is on, before the repository stops being covered: once
-// it is not covered, no pass would ever delete them. The repository's
-// artifact_store entry is saved away first, so a pass running meanwhile
-// cannot write them back; when the switch-off fails, the entry is restored.
-// refused finishes the error's sentence, saying what did not happen.
-func (b *Backend) switchOffArtifacts(name, refused string) error {
+// retireArtifacts removes ghr's old GHR_ARTIFACT_STORE variable and
+// GHR_ARTIFACT_KEY secret from a repository about to leave coverage, while
+// it is still covered: no pass reads it once it is not. Its error is
+// ignored because the service has already written the warning, which names
+// the gh commands that delete them by hand; a failure never stops or undoes
+// leaving coverage.
+func (b *Backend) retireArtifacts(name string) {
 	if b.AS == nil {
-		return nil
+		return
 	}
-	if !b.Store.Config().ArtifactStore.Enabled(name) {
-		return nil
-	}
-	if err := b.githubErr(); err != nil {
-		return switchOffRefusal(b.asWriteErr(err, name), name, refused)
-	}
-	var prev config.ArtifactRepo
-	if err := b.update(func(c *config.Config) error {
-		prev = dropArtifactRepo(&c.ArtifactStore, name)
-		return nil
-	}); err != nil {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), artifactSwitchOffTimeout)
-	err := b.AS.SwitchOff(ctx, name)
-	cancel()
-	if err == nil {
-		return nil
-	}
-	if rerr := b.update(func(c *config.Config) error {
-		if spelled, ok := artifactCovered(c, name); ok {
-			if _, set := c.ArtifactStore.Repo(name); !set {
-				setArtifactRepo(&c.ArtifactStore, spelled, prev)
-			}
-		}
-		return nil
-	}); rerr != nil {
-		b.Events.Add("warn", name, "self-hosted storage stays off in config.yaml after a failed switch-off: %v", rerr)
-	}
-	return switchOffRefusal(b.asWriteErr(err, name), name, refused)
-}
-
-// switchOffRefusal words a failed switch-off, keeping GitHub's status; any
-// other error is a 502.
-func switchOffRefusal(err error, name, refused string) error {
-	err = api.FromGitHub(err)
-	status, retry := http.StatusBadGateway, time.Time{}
-	var ae *api.Error
-	if errors.As(err, &ae) {
-		status, retry = ae.Status, ae.RetryAt
-	}
-	return &api.Error{Status: status, Msg: fmt.Sprintf("could not switch off self-hosted storage for %s, so %s: %s", name, refused, err), RetryAt: retry}
+	ctx, cancel := context.WithTimeout(context.Background(), artifactRetireTimeout)
+	defer cancel()
+	_ = b.AS.Retire(ctx, name)
 }
 
 // asWriteErr is asErr for a GitHub write: a refused token gets the
@@ -239,8 +199,8 @@ func (b *Backend) ownerVisibility(ctx context.Context) (map[string]bool, error) 
 }
 
 // artifactCovered resolves name to its spelling in repos or watch_repos. A
-// repository being removed is not covered: it could not be switched off
-// before it goes.
+// repository being removed is not covered: its artifact_store entry went
+// with the removal.
 func artifactCovered(c *config.Config, name string) (string, bool) {
 	if r := c.Repo(name); r != nil {
 		return r.Name, !r.Removing

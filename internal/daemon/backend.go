@@ -785,17 +785,16 @@ func (b *Backend) WatchRepo(ctx context.Context, name string) error {
 	return nil
 }
 
-// UnwatchRepo calls GitHub only to switch off the repository's self-hosted
-// storage, so a repository whose storage is off can always be unwatched, even
-// one GitHub no longer shows. The check runs again inside the update so two
-// concurrent removals cannot both succeed.
+// UnwatchRepo first removes ghr's old artifact store variable and secret
+// from the repository, best effort: a failure adds a warning event and the
+// repository is unwatched all the same, so neither a repository GitHub no
+// longer shows nor a token GitHub refuses keeps it watched. The check runs
+// again inside the update so two concurrent removals cannot both succeed.
 func (b *Backend) UnwatchRepo(name string) error {
 	if !b.Store.Config().Watched(name) {
 		return api.NotFound("repo " + name + " is not watched")
 	}
-	if err := b.switchOffArtifacts(name, "it is still watched"); err != nil {
-		return err
-	}
+	b.retireArtifacts(name)
 	if err := b.update(func(c *config.Config) error {
 		if !c.Watched(name) {
 			return api.NotFound("repo " + name + " is not watched")
@@ -812,15 +811,16 @@ func (b *Backend) UnwatchRepo(name string) error {
 
 // RemoveRepo pauses the repo and records the removal in config.yaml (paused +
 // removing in one write), so it survives a restart; FinalizeRemovals deletes the
-// repo once its runners are gone. A per-repo resume cancels it. Self-hosted
-// storage is switched off first and stays off when the removal is cancelled.
+// repo once its runners are gone. A per-repo resume cancels it. ghr's old
+// artifact store variable and secret are removed first, best effort: a
+// failure adds a warning event and never stops the removal. The
+// repository's artifact_store entry goes with the removal and does not come
+// back when the removal is cancelled.
 func (b *Backend) RemoveRepo(name string) error {
 	if b.Store.Config().Repo(name) == nil {
 		return api.NotFound("unknown repo " + name)
 	}
-	if err := b.switchOffArtifacts(name, "it was not removed"); err != nil {
-		return err
-	}
+	b.retireArtifacts(name)
 	if err := b.update(func(c *config.Config) error {
 		r := c.Repo(name)
 		if r == nil {
