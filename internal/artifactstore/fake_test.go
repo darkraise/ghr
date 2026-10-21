@@ -28,9 +28,8 @@ type fakeGH struct {
 	reposErr  error
 	vars      map[string]string                  // repo → GHR_ARTIFACT_STORE value
 	secrets   map[string]string                  // repo → GHR_ARTIFACT_KEY value
-	readErr   map[string]error                   // repo → the answer of every read of its variable and secret
-	writeErr  map[string]error                   // repo → the answer of every write to its variable and secret
-	setVarErr map[string]error                   // repo → the answer of every SetVariable, after writeErr
+	readErr   map[string]error                   // repo → the answer of every read of its variable
+	writeErr  map[string]error                   // repo → the answer of every delete of its variable and secret
 	runs      map[string]map[string][]github.Run // repo → status → runs
 	runsErr   map[string]error
 	remaining int
@@ -42,7 +41,7 @@ func newFakeGH() *fakeGH {
 	return &fakeGH{
 		remaining: -1,
 		vars:      map[string]string{}, secrets: map[string]string{},
-		readErr: map[string]error{}, writeErr: map[string]error{}, setVarErr: map[string]error{},
+		readErr: map[string]error{}, writeErr: map[string]error{},
 		runs: map[string]map[string][]github.Run{}, runsErr: map[string]error{},
 	}
 }
@@ -105,21 +104,6 @@ func (f *fakeGH) GetVariable(_ context.Context, repo, name string) (string, bool
 	return v, ok, nil
 }
 
-func (f *fakeGH) SetVariable(_ context.Context, repo, name, value string) error {
-	f.call("SetVariable %s %s", repo, name)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	key := strings.ToLower(repo)
-	if err := f.writeErr[key]; err != nil {
-		return err
-	}
-	if err := f.setVarErr[key]; err != nil {
-		return err
-	}
-	f.vars[key] = value
-	return nil
-}
-
 func (f *fakeGH) DeleteVariable(_ context.Context, repo, name string) (bool, error) {
 	f.call("DeleteVariable %s %s", repo, name)
 	f.mu.Lock()
@@ -131,30 +115,6 @@ func (f *fakeGH) DeleteVariable(_ context.Context, repo, name string) (bool, err
 	_, ok := f.vars[key]
 	delete(f.vars, key)
 	return ok, nil
-}
-
-func (f *fakeGH) SecretExists(_ context.Context, repo, name string) (bool, error) {
-	f.call("SecretExists %s %s", repo, name)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	key := strings.ToLower(repo)
-	if err := f.readErr[key]; err != nil {
-		return false, err
-	}
-	_, ok := f.secrets[key]
-	return ok, nil
-}
-
-func (f *fakeGH) SetSecret(_ context.Context, repo, name, value string) error {
-	f.call("SetSecret %s %s", repo, name)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	key := strings.ToLower(repo)
-	if err := f.writeErr[key]; err != nil {
-		return err
-	}
-	f.secrets[key] = value
-	return nil
 }
 
 func (f *fakeGH) DeleteSecret(_ context.Context, repo, name string) (bool, error) {

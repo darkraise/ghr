@@ -31,10 +31,7 @@ type GitHub interface {
 	ListUserRepos(ctx context.Context) ([]github.UserRepo, error)
 	ListRuns(ctx context.Context, repo, status string) ([]github.Run, error)
 	GetVariable(ctx context.Context, repo, name string) (string, bool, error)
-	SetVariable(ctx context.Context, repo, name, value string) error
 	DeleteVariable(ctx context.Context, repo, name string) (bool, error)
-	SecretExists(ctx context.Context, repo, name string) (bool, error)
-	SetSecret(ctx context.Context, repo, name, value string) error
 	DeleteSecret(ctx context.Context, repo, name string) (bool, error)
 	RateRemaining() int
 }
