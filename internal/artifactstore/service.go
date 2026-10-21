@@ -341,6 +341,18 @@ func (s *Service) loadKeys() Keys {
 	return k
 }
 
+// JobKey is a copy of the job key the service last read from the key file,
+// or nil when it holds none.
+func (s *Service) JobKey() *Key {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.keys.Job == nil {
+		return nil
+	}
+	k := *s.keys.Job
+	return &k
+}
+
 func sameKey(a, b *Key) bool {
 	if a == nil || b == nil {
 		return a == b

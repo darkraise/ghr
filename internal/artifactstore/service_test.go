@@ -470,3 +470,37 @@ func TestRowStates(t *testing.T) {
 		t.Errorf("Row(elsewhere) = %+v, want none", r)
 	}
 }
+
+// JobKey answers a copy of the key the service last read, so a caller
+// cannot change the service's, and nil once the key file holds no job key.
+func TestJobKey(t *testing.T) {
+	e := newTestEnv(t)
+	if k := e.s.JobKey(); k != nil {
+		t.Fatalf("job key %+v before the key file was read", k)
+	}
+	e.s.loadKeys()
+	k := e.s.JobKey()
+	if k == nil || k.ID != jobID || k.Secret != jobSecret || !k.SetAt.Equal(testStart) {
+		t.Fatalf("job key %+v", k)
+	}
+	k.Secret = "changed"
+	if again := e.s.JobKey(); again == nil || again.Secret != jobSecret {
+		t.Fatalf("changing the answer changed the service's key: %+v", again)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 100 {
+			e.s.JobKey()
+		}
+	}()
+	for range 100 {
+		e.s.loadKeys()
+	}
+	<-done
+	e.setKeys(Keys{Admin: &Key{ID: adminID, Secret: adminSecret, SetAt: testStart}})
+	e.s.KeysChanged()
+	if k := e.s.JobKey(); k != nil {
+		t.Fatalf("job key %+v after the key file lost it", k)
+	}
+}
