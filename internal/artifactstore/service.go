@@ -631,10 +631,6 @@ func displayName(cfg *config.Config, repo string) string {
 	return repo
 }
 
-func isCovered(cfg *config.Config, repo string) bool {
-	return slices.ContainsFunc(covered(cfg), func(name string) bool { return strings.EqualFold(name, repo) })
-}
-
 func itemOf(o object) model.ArtifactStoreItem {
 	return model.ArtifactStoreItem{Key: o.Key, Name: o.Name, RunID: o.RunID, Attempt: o.Meta.Attempt,
 		Workflow: o.Meta.Workflow, Job: o.Meta.Job, Branch: o.Meta.Ref, SHA: o.Meta.SHA, Bytes: o.Size,
@@ -648,9 +644,9 @@ func newestFirst(a, b model.ArtifactStoreItem) int {
 	return strings.Compare(a.Key, b.Key)
 }
 
-// Snapshot is the last listing with the repositories' sync states, the
-// operation and the deletions. The covered repositories and any repository
-// with objects get a row; each row's switch and cleanup come from the
+// Snapshot is the last listing with the operation and the deletions. The
+// covered repositories, every artifact_store repos entry and any repository
+// with objects get a row; each row's state, switch and cleanup come from the
 // current config, so a saved policy shows at once.
 func (s *Service) Snapshot() model.ArtifactStore {
 	cfg := s.Config()
@@ -684,6 +680,9 @@ func (s *Service) Snapshot() model.ArtifactStore {
 	for _, name := range covered(cfg) {
 		add(name)
 	}
+	for _, name := range slices.Sorted(maps.Keys(a.Repos)) {
+		add(name)
+	}
 	if s.listingFor(a) {
 		at := s.checkedAt
 		out.CheckedAt = &at
@@ -702,16 +701,10 @@ func (s *Service) Snapshot() model.ArtifactStore {
 	}
 	for _, key := range order {
 		r := rows[key]
-		r.Private = s.private[key]
-		r.Enabled = a.Enabled(r.Name) && isCovered(cfg, r.Name)
-		st := s.syncs[key]
-		r.State, r.StateError = st.state, st.err
-		if r.State == "" {
-			r.State = "off"
-			if r.Enabled {
-				r.State = "missing"
-			}
-		}
+		private, known := s.private[key]
+		r.Private = private || !known
+		r.Enabled = a.Enabled(r.Name)
+		r.State = rowState(cfg, r.Name, r.Private)
 		age, src := a.CleanupFor(r.Name)
 		r.Cleanup, r.CleanupSource = config.CleanupText(age), src
 		slices.SortStableFunc(r.Items, newestFirst)
@@ -727,6 +720,31 @@ func (s *Service) Snapshot() model.ArtifactStore {
 		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
 	return out
+}
+
+// rowState is a row's state: "not_served" for a repository ghr runs no jobs
+// for, "public" for one known to be public, then "on" or "off" by its switch.
+// private is false only for a repository known to be public.
+func rowState(cfg *config.Config, name string, private bool) string {
+	switch {
+	case cfg.Repo(name) == nil:
+		return "not_served"
+	case !private:
+		return "public"
+	case cfg.ArtifactStore.Enabled(name):
+		return "on"
+	}
+	return "off"
+}
+
+// Row is the snapshot's row for repo, matched ignoring case.
+func (s *Service) Row(repo string) (model.ArtifactStoreRepo, bool) {
+	for _, r := range s.Snapshot().Repos {
+		if strings.EqualFold(r.Name, repo) {
+			return r, true
+		}
+	}
+	return model.ArtifactStoreRepo{}, false
 }
 
 // Summary is the status line's numbers, nil while self-hosted storage is not
@@ -745,8 +763,8 @@ func (s *Service) Summary() *model.ArtifactStoreSummary {
 			out.UsedBytes += o.Size
 		}
 	}
-	for _, name := range covered(cfg) {
-		if a.Enabled(name) {
+	for _, r := range cfg.Repos {
+		if a.Enabled(r.Name) {
 			out.ReposOn++
 		}
 	}

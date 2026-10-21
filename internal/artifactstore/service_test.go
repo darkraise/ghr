@@ -143,14 +143,14 @@ func TestInventoryBuildsTheRows(t *testing.T) {
 		t.Errorf("item %+v", it)
 	}
 	hl := row(t, st, "homelab")
-	if hl.Enabled || hl.State != "off" || hl.Cleanup != "off" || hl.CleanupSource != "override" || hl.Count != 1 {
+	if hl.Enabled || hl.State != "not_served" || hl.Cleanup != "off" || hl.CleanupSource != "override" || hl.Count != 1 {
 		t.Errorf("homelab row %+v", hl)
 	}
-	if q := row(t, st, "quiet"); q.Count != 0 || q.Items == nil || q.State != "off" {
+	if q := row(t, st, "quiet"); q.Count != 0 || q.Items == nil || q.State != "not_served" {
 		t.Errorf("quiet row %+v", q)
 	}
-	if o := row(t, st, "old-repo"); o.Enabled || o.State != "off" {
-		t.Errorf("old-repo row %+v: an entry for an uncovered repository is ignored", o)
+	if o := row(t, st, "old-repo"); !o.Enabled || o.State != "not_served" {
+		t.Errorf("old-repo row %+v: an entry for an uncovered repository reads not served", o)
 	}
 	if n := e.heads(); n != 4 {
 		t.Errorf("%d heads, want one per artifact of the owner", n)
@@ -424,5 +424,49 @@ func TestOnlyTheOwnersArtifactsAreHeaded(t *testing.T) {
 	}
 	if !slices.Equal(cacheKeys(t, e.s.CachePath), []string{}) {
 		t.Fatalf("cache %v, want empty", cacheKeys(t, e.s.CachePath))
+	}
+}
+
+func TestRowStates(t *testing.T) {
+	e := newTestEnv(t)
+	e.cfg.Repos = []config.Repo{{Name: "darkmem"}, {Name: "Site"}, {Name: "notes"}, {Name: "hidden"}}
+	e.cfg.WatchRepos = []string{"homelab"}
+	e.gh.addRepo("site", false)
+	e.gh.addRepo("notes", true)
+	e.gh.addRepo("homelab", false)
+	e.cfg.ArtifactStore.Repos = map[string]config.ArtifactRepo{"darkmem": {Enabled: true}, "site": {Enabled: true},
+		"hidden": {Enabled: true}, "homelab": {Enabled: true}, "Old-Repo": {Enabled: true}}
+	if err := e.s.readVisibility(context.Background(), "darkraise"); err != nil {
+		t.Fatal(err)
+	}
+	st := e.s.Snapshot()
+	for _, tc := range []struct {
+		name, why, state string
+		private, enabled bool
+	}{
+		{"homelab", "not served, though public and on", "not_served", false, true},
+		{"Old-Repo", "a leftover entry for an uncovered repository", "not_served", true, true},
+		{"Site", "served, public and on", "public", false, true},
+		{"darkmem", "served, private and on", "on", true, true},
+		{"notes", "served and private, off", "off", true, false},
+		{"hidden", "served and on, visibility unknown", "on", true, true},
+	} {
+		r := row(t, st, tc.name)
+		if r.State != tc.state || r.Private != tc.private || r.Enabled != tc.enabled {
+			t.Errorf("%s (%s): state %q, private %v, enabled %v; want %q, %v, %v",
+				tc.name, tc.why, r.State, r.Private, r.Enabled, tc.state, tc.private, tc.enabled)
+		}
+	}
+	if n := len(st.Repos); n != 6 {
+		t.Errorf("%d rows, want 6", n)
+	}
+	if sum := e.s.Summary(); sum == nil || sum.ReposOn != 3 {
+		t.Errorf("summary %+v, want 3 repositories on: the served ones switched on", sum)
+	}
+	if r, ok := e.s.Row("OLD-repo"); !ok || r.Name != "Old-Repo" || r.State != "not_served" {
+		t.Errorf("Row(OLD-repo) = %+v, %v; want the Old-Repo row", r, ok)
+	}
+	if r, ok := e.s.Row("elsewhere"); ok {
+		t.Errorf("Row(elsewhere) = %+v, want none", r)
 	}
 }

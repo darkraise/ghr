@@ -56,6 +56,13 @@ func current(e *testEnv) string { return e.storeJSON(jobID) }
 
 func fixed(v string) func(*testEnv) string { return func(*testEnv) string { return v } }
 
+// sync is repo's recorded variable and secret state.
+func (e *testEnv) sync(repo string) repoSync {
+	e.s.mu.Lock()
+	defer e.s.mu.Unlock()
+	return e.s.syncs[strings.ToLower(repo)]
+}
+
 func TestSyncStates(t *testing.T) {
 	jobKey := artifact.FormatKey(jobID, jobSecret)
 	foreign := artifact.Store{V: 1, Endpoint: "https://other.example", Bucket: "theirs", Region: "us-east-1", KeyID: "X"}.JSON()
@@ -139,9 +146,9 @@ func TestSyncStates(t *testing.T) {
 			e.s.Describe = func(err error, repo string) string { return "described: " + err.Error() }
 			tc.set(e)
 			e.s.pass()
-			r := row(t, e.s.Snapshot(), "darkmem")
-			if r.State != tc.state || !strings.HasPrefix(r.StateError, tc.stateErr) || (tc.stateErr == "" && r.StateError != "") {
-				t.Fatalf("state %q, error %q; want %q, %q", r.State, r.StateError, tc.state, tc.stateErr)
+			st := e.sync("darkmem")
+			if st.state != tc.state || !strings.HasPrefix(st.err, tc.stateErr) || (tc.stateErr == "" && st.err != "") {
+				t.Fatalf("state %q, error %q; want %q, %q", st.state, st.err, tc.state, tc.stateErr)
 			}
 			if got := e.writes(); !reflect.DeepEqual(got, tc.writes) {
 				t.Fatalf("writes %v, want %v", got, tc.writes)
@@ -187,8 +194,8 @@ func TestSyncReadsAnOffRepositoryOnce(t *testing.T) {
 	if n := len(e.gh.callsLike("GetVariable darkmem")); n != 2 {
 		t.Fatalf("GetVariable called %d times after switching on, want twice", n)
 	}
-	if r := row(t, e.s.Snapshot(), "darkmem"); r.State != "set" {
-		t.Fatalf("state %q after switching on, want set", r.State)
+	if st := e.sync("darkmem"); st.state != "set" {
+		t.Fatalf("state %q after switching on, want set", st.state)
 	}
 }
 
@@ -200,8 +207,8 @@ func TestSyncWaitsForTheRateReserve(t *testing.T) {
 	if calls := e.gh.callsLike(""); len(calls) != 0 {
 		t.Fatalf("GitHub calls %v below the rate reserve, want none", calls)
 	}
-	if r := row(t, e.s.Snapshot(), "darkmem"); r.State != "missing" {
-		t.Fatalf("state %q, want missing until a pass writes it", r.State)
+	if st := e.sync("darkmem"); st != (repoSync{}) {
+		t.Fatalf("state %+v, want none until a pass syncs it", st)
 	}
 }
 
@@ -215,9 +222,9 @@ func TestSyncWritesCountAgainstTheSharedBudget(t *testing.T) {
 		}
 	}
 	e.s.pass()
-	r := row(t, e.s.Snapshot(), "darkmem")
-	if r.State != "error" || !strings.HasPrefix(r.StateError, "GitHub write budget used up") || len(e.writes()) != 0 {
-		t.Fatalf("state %q, error %q, writes %v; want the budget's refusal and no write", r.State, r.StateError, e.writes())
+	st := e.sync("darkmem")
+	if st.state != "error" || !strings.HasPrefix(st.err, "GitHub write budget used up") || len(e.writes()) != 0 {
+		t.Fatalf("state %q, error %q, writes %v; want the budget's refusal and no write", st.state, st.err, e.writes())
 	}
 }
 
@@ -242,8 +249,8 @@ func TestAJobKeyReplacementRewritesEverySwitchedOnRepository(t *testing.T) {
 		if got := e.gh.vars[repo]; got != e.storeJSON("NEWJOBKEY0002") {
 			t.Errorf("%s variable %q, want the new key id", repo, got)
 		}
-		if r := row(t, e.s.Snapshot(), repo); r.State != "set" {
-			t.Errorf("%s state %q", repo, r.State)
+		if st := e.sync(repo); st.state != "set" {
+			t.Errorf("%s state %q", repo, st.state)
 		}
 	}
 }
@@ -294,8 +301,8 @@ func TestSyncRewritesTheSecretWhenTheJobKeyIsReplacedUnderTheSameID(t *testing.T
 	if got, want := e.gh.vars["darkmem"], e.storeJSONAt(jobID, testStart.Add(time.Minute)); got != want {
 		t.Fatalf("variable %q, want %q", got, want)
 	}
-	if r := row(t, e.s.Snapshot(), "darkmem"); r.State != "set" || r.StateError != "" {
-		t.Fatalf("state %q, error %q; want set", r.State, r.StateError)
+	if st := e.sync("darkmem"); st.state != "set" || st.err != "" {
+		t.Fatalf("state %q, error %q; want set", st.state, st.err)
 	}
 	if n := len(eventsLike(e.s.Events, "artifact store: wrote the GHR_ARTIFACT_KEY secret and the GHR_ARTIFACT_STORE variable")); n != 1 {
 		t.Fatalf("events %q, want one secret write", eventsLike(e.s.Events, ""))
@@ -334,8 +341,8 @@ func TestSyncRetriesAFailedSecretWrite(t *testing.T) {
 	}
 	e.gh.writeErr["darkmem"] = forbidden
 	e.s.pass()
-	if r := row(t, e.s.Snapshot(), "darkmem"); r.State != "error" {
-		t.Fatalf("state %q after a failed write, want error", r.State)
+	if st := e.sync("darkmem"); st.state != "error" {
+		t.Fatalf("state %q after a failed write, want error", st.state)
 	}
 	delete(e.gh.writeErr, "darkmem")
 	e.s.pass()
@@ -406,8 +413,8 @@ func TestSyncWritesTheSecretOnceWhileTheVariableWriteFails(t *testing.T) {
 	if got, want := e.writes(), []string{setSecret, setVar, setVar}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("writes %v over two passes, want %v", got, want)
 	}
-	if r := row(t, e.s.Snapshot(), "darkmem"); r.State != "error" {
-		t.Fatalf("state %q, want error", r.State)
+	if st := e.sync("darkmem"); st.state != "error" {
+		t.Fatalf("state %q, want error", st.state)
 	}
 }
 
@@ -421,15 +428,16 @@ func TestSyncShowsNoSecret(t *testing.T) {
 	e.gh.writeErr["darkmem"] = forbidden
 	delete(e.gh.secrets, "darkmem")
 	e.s.pass()
-	r, err := e.s.SyncRepo(context.Background(), "darkmem")
-	if err == nil && r.StateError == "" {
-		t.Fatal("a failing write left no row error")
+	_, err := e.s.SyncRepo(context.Background(), "darkmem")
+	st := e.sync("darkmem")
+	if err == nil && st.err == "" {
+		t.Fatal("a failing write left no error")
 	}
 	b, jerr := json.Marshal(e.s.Snapshot())
 	if jerr != nil {
 		t.Fatal(jerr)
 	}
-	for _, text := range append(eventsLike(e.s.Events, ""), string(b), r.StateError) {
+	for _, text := range append(eventsLike(e.s.Events, ""), string(b), st.err) {
 		if strings.Contains(text, jobSecret) {
 			t.Fatalf("%q shows the job secret", text)
 		}
@@ -456,12 +464,12 @@ func TestSyncRepo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Name != "darkmem" || r.State != "set" || !r.Private || !r.Enabled || e.gh.vars["darkmem"] != e.storeJSONAt(jobID, time.Time{}) {
+	if r.Name != "darkmem" || r.State != "on" || !r.Private || !r.Enabled || e.gh.vars["darkmem"] != e.storeJSONAt(jobID, time.Time{}) {
 		t.Fatalf("row %+v, variable %q", r, e.gh.vars["darkmem"])
 	}
 	e.enable("homelab")
-	if r, err := e.s.SyncRepo(context.Background(), "homelab"); err != nil || r.State != "public" || r.Private {
-		t.Fatalf("a public repository: %+v, %v; want state public", r, err)
+	if r, err := e.s.SyncRepo(context.Background(), "homelab"); err != nil || r.State != "not_served" || r.Private {
+		t.Fatalf("a public watched repository: %+v, %v; want state not_served", r, err)
 	}
 	e.cfg.ArtifactStore = config.ArtifactStore{}
 	if _, err := e.s.SyncRepo(context.Background(), "darkmem"); !errors.Is(err, ErrNotConfigured) {
@@ -473,8 +481,8 @@ func TestSyncRepoWritesBelowTheRateReserve(t *testing.T) {
 	e := newTestEnv(t)
 	e.enable("darkmem")
 	e.gh.remaining = ghstorage.MinRateLeft - 1
-	if r, err := e.s.SyncRepo(context.Background(), "darkmem"); err != nil || r.State != "set" {
-		t.Fatalf("row %+v, %v; a switch the owner made is applied at once", r, err)
+	if _, err := e.s.SyncRepo(context.Background(), "darkmem"); err != nil || e.sync("darkmem").state != "set" {
+		t.Fatalf("state %+v, %v; a switch the owner made is applied at once", e.sync("darkmem"), err)
 	}
 }
 
