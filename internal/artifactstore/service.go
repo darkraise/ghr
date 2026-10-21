@@ -90,8 +90,9 @@ const (
 	cacheVersion = 1
 )
 
-// Service keeps the self-hosted artifact storage snapshot and each switched-on
-// repository's variable and secret. Start it once; Close stops it.
+// Service keeps the self-hosted artifact storage snapshot and removes ghr's
+// old variable and secret from the covered repositories. Start it once; Close
+// stops it.
 type Service struct {
 	GH        GitHub
 	Config    func() *config.Config
@@ -117,8 +118,8 @@ type Service struct {
 	objects   []object              // the last good listing
 	cache     map[string]cacheEntry // object key → its details; nil until the first inventory loads it
 	private   map[string]bool       // lower-case repo → private, from the last visibility read
-	syncs     map[string]repoSync   // lower-case repo → its variable and secret state
-	secretKey map[string]keyMark    // lower-case repo → the job key ghr last wrote to, or found current in, its secret
+	retired   map[string]bool       // lower-case repo → ghr's old variable and secret are gone or not ghr's to remove
+	retireErr map[string]string     // lower-case repo → the failure the last retire warning was written for
 	deleted   map[string]time.Time  // object key → when deleted
 	deletions []model.Deletion      // newest first
 	op        *model.GitHubOperation
@@ -127,7 +128,6 @@ type Service struct {
 	cleanupErr map[string]string // lower-case repo, or "" for the bucket → the failure the last cleanup event was written for; only the pass touches it
 
 	keysMu sync.Mutex // one key file change at a time
-	syncMu sync.Mutex // one caller writes a repository's variable and secret at a time
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -164,11 +164,6 @@ type cacheFile struct {
 	Entries []cacheEntry `json:"entries"`
 }
 
-type repoSync struct {
-	state string
-	err   string
-}
-
 func (s *Service) now() time.Time {
 	if s.Now != nil {
 		return s.Now()
@@ -195,8 +190,8 @@ func (s *Service) init() {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.kick = make(chan struct{}, 1)
 	s.private = map[string]bool{}
-	s.syncs = map[string]repoSync{}
-	s.secretKey = map[string]keyMark{}
+	s.retired = map[string]bool{}
+	s.retireErr = map[string]string{}
 	s.deleted = map[string]time.Time{}
 	s.cleanupErr = map[string]string{}
 	if s.Budget == nil {
@@ -370,9 +365,9 @@ func (s *Service) bucket(a config.ArtifactStore, k *Key) (Bucket, error) {
 	return c, nil
 }
 
-// pass syncs the repositories' variables and secrets, then lists the bucket
-// and runs the cleanup. Sync runs without the admin key, since jobs do not
-// need it; the cleanup runs only after a listing that succeeded.
+// pass retires ghr's old repository variables and secrets, then lists the
+// bucket and runs the cleanup. The retire runs without the admin key; the
+// cleanup runs only after a listing that succeeded.
 func (s *Service) pass() {
 	cfg := s.Config()
 	s.mu.Lock()
@@ -391,7 +386,7 @@ func (s *Service) pass() {
 		return
 	}
 	keys := s.loadKeys()
-	s.syncRepos(cfg)
+	s.retireRepos(cfg)
 	if keys.Admin == nil {
 		return
 	}
