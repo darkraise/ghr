@@ -207,16 +207,9 @@ func (b *Backend) asWriteErr(err error, repo string) error {
 	return &api.Error{Status: http.StatusForbidden, Msg: msg}
 }
 
-// artifactRepoPrivate reports whether name is private. A snapshot row that
-// says private is trusted; anything else is read fresh from GitHub, so a
-// repository is never refused as public on a row from before its visibility
-// was known.
+// artifactRepoPrivate reports whether name is private, read fresh from
+// GitHub: a snapshot row also reads private while its visibility is unknown.
 func (b *Backend) artifactRepoPrivate(ctx context.Context, name string) (bool, error) {
-	for _, r := range b.AS.Snapshot().Repos {
-		if strings.EqualFold(r.Name, name) && r.Private {
-			return true, nil
-		}
-	}
 	vis, err := b.ownerVisibility(ctx)
 	if err != nil {
 		return false, err

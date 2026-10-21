@@ -147,25 +147,26 @@ func TestSetArtifactRepoRefusals(t *testing.T) {
 	}
 }
 
-// Only a snapshot row that says private is trusted; a row from before the
-// visibility was known is checked again at GitHub.
-func TestSetArtifactRepoTrustsOnlyAPrivateRow(t *testing.T) {
+// A row reads private while its visibility is unknown, so the switch reads
+// the visibility at GitHub whatever the row says.
+func TestSetArtifactRepoReadsTheVisibilityAtGitHub(t *testing.T) {
 	b, _, gh, f := newASBackend(t)
 	withArtifactStore(t, b, nil)
 	ctx := context.Background()
 	on := true
 	f.snap = withJobKey()
-	f.snap.Repos = []model.ArtifactStoreRepo{{Name: "darkmem"}, {Name: "homelab", Private: true}}
-	gh.userRepos = darkraiseRepos(map[string]bool{"darkmem": true})
-	if _, err := b.SetArtifactRepo(ctx, "darkmem", model.ArtifactRepoRequest{Enabled: &on}); err != nil {
-		t.Fatal(err)
+	f.snap.Repos = []model.ArtifactStoreRepo{{Name: "darkmem", Private: true}, {Name: "homelab", Private: true}}
+	gh.userRepos = darkraiseRepos(map[string]bool{"darkmem": false})
+	_, err := b.SetArtifactRepo(ctx, "darkmem", model.ArtifactRepoRequest{Enabled: &on})
+	if apiStatus(err) != 409 || apiMsg(err) != "darkmem is public; self-hosted storage serves only private repositories" {
+		t.Fatalf("a public repository on a private row: status %d message %q", apiStatus(err), apiMsg(err))
 	}
-	gh.userRepos, gh.repoErr = nil, errors.New("ListUserRepos must not be called")
-	if _, err := b.SetArtifactRepo(ctx, "homelab", model.ArtifactRepoRequest{Enabled: &on}); err != nil {
-		t.Fatal(err)
+	_, err = b.SetArtifactRepo(ctx, "homelab", model.ArtifactRepoRequest{Enabled: &on})
+	if apiStatus(err) != 400 || apiMsg(err) != "token cannot see darkraise/homelab: add it to the PAT's repository access first" {
+		t.Fatalf("a repository the token cannot see: status %d message %q", apiStatus(err), apiMsg(err))
 	}
-	if a := b.Store.Config().ArtifactStore; !a.Enabled("darkmem") || !a.Enabled("homelab") {
-		t.Fatalf("repos %v", a.Repos)
+	if a := b.Store.Config().ArtifactStore; a.Enabled("darkmem") || a.Enabled("homelab") {
+		t.Fatalf("repos %v, want neither switched on", a.Repos)
 	}
 }
 
