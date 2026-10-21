@@ -23,7 +23,11 @@ if [ -n "${RUNNER_WORKSPACE:-}" ]; then
   # Without search permission on _ghr the job cannot even see whether the file
   # exists; an empty _ghr is what ghr leaves after it removes the file.
   elif [ -e "$f" ] || { [ -d "$dir" ] && ! [ -x "$dir" ]; }; then
-    echo "::warning::ghr's artifact store settings exist but this job's user cannot read them, so this job uses GitHub's artifact storage; run the job as root in its container or on the host"
+    echo "::warning::ghr's artifact store settings may exist but this job's user cannot read them, so this job uses GitHub's artifact storage; run the job as root in its container or on the host"
   fi
 fi
-printf 'on=%s\nsettings=%s\n' "$on" "$settings" >> "$GITHUB_OUTPUT"
+# A container job's non-root user cannot write the runner's output file. Empty
+# outputs make the actions take GitHub's path, so the step must not fail here.
+if ! { printf 'on=%s\nsettings=%s\n' "$on" "$settings" >> "$GITHUB_OUTPUT"; } 2>/dev/null; then
+  echo "::warning::this job's user cannot write the step's outputs to GITHUB_OUTPUT, so this job uses GitHub's artifact storage; run the job as root in its container or on the host"
+fi

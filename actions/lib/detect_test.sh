@@ -26,7 +26,8 @@ check() {
 }
 contains() { [[ "$1" == *"$2"* ]]; }
 
-WARNING="::warning::ghr's artifact store settings exist but this job's user cannot read them, so this job uses GitHub's artifact storage; run the job as root in its container or on the host"
+WARNING="::warning::ghr's artifact store settings may exist but this job's user cannot read them, so this job uses GitHub's artifact storage; run the job as root in its container or on the host"
+WRITE_WARNING="::warning::this job's user cannot write the step's outputs to GITHUB_OUTPUT, so this job uses GitHub's artifact storage; run the job as root in its container or on the host"
 
 # instance <name> makes a runner instance whose job workspace is
 # <name>/_work/repo, and prints that workspace.
@@ -91,6 +92,16 @@ detect RUNNER_WORKSPACE="$ws"
 check "f: an unreachable _ghr succeeds" [ "$rc" -eq 0 ]
 check "f: an unreachable _ghr is off" [ "$outputs" = "$(printf 'earlier=kept\non=false\nsettings=')" ]
 check "f: an unreachable _ghr warns" [ "$out" = "$WARNING" ]
+
+ws=$(instance g)
+settings g
+printf 'earlier=kept\n' > "$T/readonly-output"
+chmod 0444 "$T/readonly-output"
+detect RUNNER_WORKSPACE="$ws" GITHUB_OUTPUT="$T/readonly-output"
+check "g: an unwritable GITHUB_OUTPUT succeeds" [ "$rc" -eq 0 ]
+check "g: an unwritable GITHUB_OUTPUT warns" [ "$out" = "$WRITE_WARNING" ]
+check "g: an unwritable GITHUB_OUTPUT prints no shell error" [ -z "$err" ]
+check "g: an unwritable GITHUB_OUTPUT is left unchanged" [ "$(cat "$T/readonly-output")" = "earlier=kept" ]
 
 ws=$(instance h)
 settings h
