@@ -1,13 +1,16 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -203,5 +206,99 @@ func TestWriteArtifactSettingsFollowsNoLinkOutOfTheInstance(t *testing.T) {
 	}
 	if ents, err := os.ReadDir(elsewhere); err != nil || len(ents) != 0 {
 		t.Fatalf("outside the instance: %v, %v", ents, err)
+	}
+}
+
+// The settings file is in place when the spawn hands the instance directory
+// to the runner user, so the chown gives it to that user with the rest.
+func TestSpawnWritesTheArtifactSettingsBeforeTheChown(t *testing.T) {
+	h := newHarness(t)
+	f := &fakeSettings{b: []byte(testSettings), ok: true}
+	h.m.ArtifactSettings = f.get
+	h.m.RecordVisibility("darkmem", false)
+	dir := h.m.instanceDir("aaaaaa")
+	var atChown []byte
+	h.host.onChown = func(path string) {
+		atChown, _ = os.ReadFile(filepath.Join(path, ArtifactSettingsFile))
+	}
+	if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+		t.Fatal(err)
+	}
+	if f.calls != 1 || string(atChown) != testSettings {
+		t.Fatalf("%d calls; settings file at the chown %q", f.calls, atChown)
+	}
+	if !reflect.DeepEqual(h.host.chowned, []string{dir + ":" + RunnerUser}) {
+		t.Fatalf("chown %v", h.host.chowned)
+	}
+	checkSettingsFile(t, dir, testSettings)
+	if len(h.sd.started) != 1 {
+		t.Fatalf("started %d units", len(h.sd.started))
+	}
+}
+
+func TestSpawnWritesNoArtifactSettingsUnlessThePrivateRepositoryGetsSome(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		set       bool // the function is set
+		ok        bool // what it answers
+		vis       func(h *harness)
+		wantCalls int
+	}{
+		{name: "no function", vis: func(h *harness) { h.m.RecordVisibility("darkmem", false) }},
+		{name: "the function says no", set: true, vis: func(h *harness) { h.m.RecordVisibility("darkmem", false) }, wantCalls: 1},
+		{name: "public with allow_public", set: true, ok: true, vis: func(h *harness) {
+			allowPublic(h, "darkmem")
+			h.m.RecordVisibility("darkmem", true)
+		}},
+		{name: "visibility unread", set: true, ok: true, vis: func(*harness) {}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			f := &fakeSettings{b: []byte(testSettings), ok: tc.ok}
+			if tc.set {
+				h.m.ArtifactSettings = f.get
+			}
+			tc.vis(h)
+			if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+				t.Fatal(err)
+			}
+			if f.calls != tc.wantCalls {
+				t.Fatalf("%d calls, want %d", f.calls, tc.wantCalls)
+			}
+			if _, err := os.Lstat(filepath.Join(h.m.instanceDir("aaaaaa"), "_work")); !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("_work: %v; want none", err)
+			}
+			if len(h.sd.started) != 1 {
+				t.Fatalf("started %d units", len(h.sd.started))
+			}
+		})
+	}
+}
+
+func TestSpawnStartsTheRunnerWhenTheSettingsWriteFails(t *testing.T) {
+	for _, at := range []string{"create", "write", "close"} {
+		t.Run(at, func(t *testing.T) {
+			h := newHarness(t)
+			h.m.ArtifactSettings = (&fakeSettings{b: []byte(testSettings), ok: true}).get
+			h.m.RecordVisibility("darkmem", false)
+			h.m.openSettingsTemp = failSettingsAt(at)
+			if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
+				t.Fatal(err)
+			}
+			if len(h.sd.started) != 1 || h.state("aaaaaa") != "starting" {
+				t.Fatalf("started %d units, state %s", len(h.sd.started), h.state("aaaaaa"))
+			}
+			dir := h.m.instanceDir("aaaaaa")
+			for _, name := range []string{ArtifactSettingsFile, artifactSettingsTemp} {
+				if _, err := os.Lstat(filepath.Join(dir, name)); !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("%s: %v; want none", name, err)
+				}
+			}
+			ev := h.eventText()
+			want := "warn darkmem spawn aaaaaa: cannot write the artifact store settings: disk on fire at " + at + "; its job uses GitHub's storage\n"
+			if !strings.Contains(ev, want) || strings.Contains(ev, "s3cr3t-job-key") {
+				t.Fatalf("events:\n%s\nwant %q and no secret", ev, want)
+			}
+		})
 	}
 }

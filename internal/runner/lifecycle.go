@@ -135,6 +135,11 @@ func (m *Manager) spawn(ctx context.Context, cfg *config.Config, repo string) er
 	if err := writeJSON(filepath.Join(dir, MetaFile), meta); err != nil {
 		return fail(err)
 	}
+	if b, ok := m.artifactSettingsFor(r.Name); ok {
+		if err := m.writeArtifactSettings(dir, b); err != nil {
+			m.Events.Add("warn", r.Name, "spawn %s: cannot write the artifact store settings: %v; its job uses GitHub's storage", id, err)
+		}
+	}
 	if err := m.Host.ChownR(ctx, dir, RunnerUser); err != nil {
 		return fail(err)
 	}
