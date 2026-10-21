@@ -25,8 +25,6 @@ type ArtifactStoreService interface {
 	SetKey(which, id, secret string) error
 	KeysChanged()
 	PolicyChanged()
-	SyncRepo(ctx context.Context, repo string) (model.ArtifactStoreRepo, error)
-	SwitchOff(ctx context.Context, repo string) error
 	Row(repo string) (model.ArtifactStoreRepo, bool)
 	Retire(ctx context.Context, repo string) error
 	Test(ctx context.Context) (model.ArtifactStoreTest, error)

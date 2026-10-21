@@ -18,10 +18,9 @@ import (
 	"github.com/darkraise/ghr/internal/s3"
 )
 
-// fakeAS records every call as "<method> <args>". SyncRepo answers with
-// syncErr, SwitchOff with offErr, Retire with retireErr and every other
-// method that can fail with err. Row answers a row named after the
-// repository, or none when noRow is set.
+// fakeAS records every call as "<method> <args>". Retire answers with
+// retireErr and every other method that can fail with err. Row answers a
+// row named after the repository, or none when noRow is set.
 type fakeAS struct {
 	mu        sync.Mutex
 	calls     []string
@@ -31,8 +30,6 @@ type fakeAS struct {
 	items     []model.ArtifactStoreItem
 	link      model.ArtifactLink
 	err       error
-	syncErr   error
-	offErr    error
 	retireErr error
 	noRow     bool
 	version   atomic.Int64
@@ -60,14 +57,6 @@ func (f *fakeAS) PolicyChanged()                       { f.record("policy") }
 func (f *fakeAS) SetKey(which, id, secret string) error {
 	f.record("set-key %s %s %s", which, id, secret)
 	return f.err
-}
-func (f *fakeAS) SyncRepo(_ context.Context, repo string) (model.ArtifactStoreRepo, error) {
-	f.record("sync %s", repo)
-	return model.ArtifactStoreRepo{Name: repo, State: "set"}, f.syncErr
-}
-func (f *fakeAS) SwitchOff(_ context.Context, repo string) error {
-	f.record("switch-off %s", repo)
-	return f.offErr
 }
 func (f *fakeAS) Row(repo string) (model.ArtifactStoreRepo, bool) {
 	f.record("row %s", repo)
