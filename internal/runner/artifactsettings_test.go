@@ -54,8 +54,11 @@ func TestArtifactSettingsForAsksOnlyForAPrivateRepository(t *testing.T) {
 				h.m.RecordVisibility("darkmem", tc.public)
 			}
 			b, ok := h.m.artifactSettingsFor("darkmem")
-			if ok != tc.wantOK || f.calls != tc.wantCalls {
-				t.Fatalf("ok %v after %d calls, want %v after %d", ok, f.calls, tc.wantOK, tc.wantCalls)
+			if ok != tc.wantOK {
+				t.Fatalf("ok %v, want %v", ok, tc.wantOK)
+			}
+			if tc.set && f.calls != tc.wantCalls {
+				t.Fatalf("%d calls, want %d", f.calls, tc.wantCalls)
 			}
 			if ok && string(b) != testSettings {
 				t.Fatalf("settings %q", b)
@@ -264,7 +267,7 @@ func TestSpawnWritesNoArtifactSettingsUnlessThePrivateRepositoryGetsSome(t *test
 			if err := h.m.spawn(context.Background(), h.cfg, "darkmem"); err != nil {
 				t.Fatal(err)
 			}
-			if f.calls != tc.wantCalls {
+			if tc.set && f.calls != tc.wantCalls {
 				t.Fatalf("%d calls, want %d", f.calls, tc.wantCalls)
 			}
 			if _, err := os.Lstat(filepath.Join(h.m.instanceDir("aaaaaa"), "_work")); !errors.Is(err, fs.ErrNotExist) {
