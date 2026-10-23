@@ -8,6 +8,8 @@ import (
 )
 
 // managedList is the storage service's view of config.yaml's packages list.
+// Its methods must never call into the storage service: ForgetPackage calls
+// Drop with the service's lock held.
 type managedList struct{ store *Store }
 
 // errUnchanged aborts a Store.Update that would save an unchanged config.
