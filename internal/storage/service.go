@@ -5,12 +5,14 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/darkraise/ghr/internal/config"
 	"github.com/darkraise/ghr/internal/events"
 	"github.com/darkraise/ghr/internal/jobs"
 	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/packages"
 )
 
 var (
@@ -37,6 +39,14 @@ type Service struct {
 	// Jobs schedules the periodic measurement; Start makes one with the
 	// default schedule when the daemon sets none.
 	Jobs *jobs.Registry
+	// Apt runs the apt package operations; nil, or a host without apt,
+	// makes every package request fail with packages.ErrUnavailable.
+	Apt     packages.Manager
+	Managed Managed
+	// Base is what setup.sh installs on this host; ghr never changes it.
+	Base       []string
+	AptLists   string // apt's index directory, whose *_InRelease files date an index ghr did not refresh
+	IndexStamp string // touched after each refresh ghr runs; "" keeps no stamp
 
 	mu        sync.Mutex
 	snap      measured
@@ -45,6 +55,9 @@ type Service struct {
 	queue     []*op
 	current   *model.Operation
 	recent    []model.Operation // newest first
+	pkgErrs   map[string]string // the last install error of each package name
+
+	pkgVersion atomic.Int64
 
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -80,6 +93,7 @@ func (s *Service) now() time.Time {
 func (s *Service) Start() {
 	s.snap = emptyMeasured()
 	s.recent = []model.Operation{}
+	s.pkgErrs = map[string]string{}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.trigger = make(chan struct{}, 1)
 	s.wake = make(chan struct{}, 1)
