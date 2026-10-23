@@ -61,7 +61,7 @@ func TestCommandLines(t *testing.T) {
 		want []string
 	}{
 		{"refresh", func(a *apt) error { return a.Refresh(context.Background()) },
-			cmdline(envPrefix, []string{"apt-get", "update", "-o", "DPkg::Lock::Timeout=120"})},
+			cmdline(envPrefix, []string{"apt-get", "update", "-o", "DPkg::Lock::Timeout=120", "-o", "APT::Update::Error-Mode=any"})},
 		{"install", func(a *apt) error { return a.Install(context.Background(), []string{"ripgrep", "g++"}) },
 			cmdline(envPrefix, []string{"apt-get", "install", "-y", "--no-install-recommends", "--no-remove"}, changeFlags, []string{"--", "ripgrep", "g++"})},
 		{"upgrade", func(a *apt) error { return a.Upgrade(context.Background(), []string{"ripgrep"}) },
@@ -392,6 +392,8 @@ func TestMessage(t *testing.T) {
 			"E: Unable to acquire the dpkg frontend lock (/var/lib/dpkg/lock-frontend), is another process using it?"},
 		{"apt warning after error", "E: Unable to locate package nosuchpkg\nW: Some index files failed to download. They have been ignored, or old ones used instead.",
 			"E: Unable to locate package nosuchpkg"},
+		{"failed source", "E: Failed to fetch http://nonexistent.invalid/debian/dists/stable/InRelease  Could not resolve 'nonexistent.invalid'\nE: Some index files failed to download. They have been ignored, or old ones used instead.",
+			"E: Failed to fetch http://nonexistent.invalid/debian/dists/stable/InRelease  Could not resolve 'nonexistent.invalid'"},
 		{"dpkg dependents", "dpkg: dependency problems prevent removal of libjq1:amd64:\n jq depends on libjq1 (= 1.7.1-3ubuntu0.24.04.2).\n\ndpkg: error processing package libjq1:amd64 (--remove):\n dependency problems - not removing\nErrors were encountered while processing:\n libjq1:amd64",
 			"dependency problems - not removing"},
 		{"dpkg lock", "dpkg: error: dpkg frontend lock was locked by another process with pid 247\nNote: removing the lock file is always wrong, can damage the locked area\nand the entire system. See <https://wiki.debian.org/Teams/Dpkg/FAQ#db-lock>.",
@@ -409,6 +411,17 @@ func TestMessage(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestRefreshFailsWhenASourceFails(t *testing.T) {
+	f := &fakeRun{reply: func([]string) ([]byte, error) {
+		return []byte("Err:1 http://nonexistent.invalid/debian stable InRelease\n"), fail(t, 100,
+			"E: Failed to fetch http://nonexistent.invalid/debian/dists/stable/InRelease  Could not resolve 'nonexistent.invalid'\nE: Some index files failed to download. They have been ignored, or old ones used instead.")
+	}}
+	err := newTestApt(f).Refresh(context.Background())
+	if err == nil || err.Error() != "E: Failed to fetch http://nonexistent.invalid/debian/dists/stable/InRelease  Could not resolve 'nonexistent.invalid'" {
+		t.Fatalf("err %v", err)
 	}
 }
 

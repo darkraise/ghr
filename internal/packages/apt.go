@@ -60,6 +60,10 @@ func (a *apt) call(ctx context.Context, name string, args ...string) ([]byte, er
 
 var exitPrefix = regexp.MustCompile(`^exit status \d+: `)
 
+// indexSummary is the line apt-get update ends with after the failed
+// fetches it follows, which name the source.
+const indexSummary = "E: Some index files failed to download"
+
 // message is the line of a failed command's error that says what went
 // wrong. system.Runner puts the command's stderr after
 // "env LC_ALL=C: exit status N: ".
@@ -69,7 +73,7 @@ func message(err error) string {
 	lines := strings.Split(s, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
 		l := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(l, "E: ") || strings.HasPrefix(l, "dpkg: error") || strings.Contains(l, "dependency problems") {
+		if (strings.HasPrefix(l, "E: ") && !strings.HasPrefix(l, indexSummary)) || strings.HasPrefix(l, "dpkg: error") || strings.Contains(l, "dependency problems") {
 			return l
 		}
 	}
@@ -239,8 +243,10 @@ func (a *apt) Detected(ctx context.Context, exclude []string) ([]Info, error) {
 	return slices.DeleteFunc(infos, func(i Info) bool { return !Adoptable(i) }), nil
 }
 
+// Refresh fails when any source fails to download; without
+// APT::Update::Error-Mode=any, apt-get update exits 0 with only warnings.
 func (a *apt) Refresh(ctx context.Context) error {
-	_, err := a.call(ctx, "apt-get", "update", "-o", "DPkg::Lock::Timeout=120")
+	_, err := a.call(ctx, "apt-get", "update", "-o", "DPkg::Lock::Timeout=120", "-o", "APT::Update::Error-Mode=any")
 	return err
 }
 

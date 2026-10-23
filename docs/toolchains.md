@@ -32,7 +32,7 @@ ghr also manages command-line tools that jobs need and that come as apt packages
 | `ghr package upgrade <name>...` or `--all` | refreshes the apt index, then upgrades the named managed packages, or all of them, that have a newer version |
 | `ghr package uninstall <name>` | removes the package with `dpkg --remove`, then drops it from the list |
 | `ghr package forget <name>` | drops the package from the list and leaves it installed |
-| `ghr package refresh` | refreshes the apt index (`apt-get update`) |
+| `ghr package refresh` | refreshes the apt index (`apt-get update`); fails, naming the source, when any apt source cannot be downloaded |
 
 Package work joins the toolchain queue and runs one operation at a time; follow it with `ghr storage`. The web UI has the same actions in the System packages section of Settings → Toolchains. On a host without apt, every package command answers `apt is not available on this host`.
 
