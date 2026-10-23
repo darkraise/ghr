@@ -136,6 +136,13 @@ const usage = `usage: ghr [command]
   toolchain rm <tool> <version>   refused while a runner has a job or starts;
                                   idle runners stop meanwhile (needs GitHub)
   cache list | clear <name>       clear is held the same way as toolchain rm
+  package list | search <term>    apt packages: managed, setup.sh's base set, others installed
+  package install <name>...       install from the host's apt sources, or adopt an installed one
+  package upgrade <name>... | --all
+                                  held the same way as toolchain rm
+  package uninstall <name>        dpkg --remove; held the same way as toolchain rm
+  package forget <name>           stop managing a package; it stays installed
+  package refresh                 refresh the apt package index
   prune [--scope <scope>]         standard (default), build-cache-keep,
                                   build-cache-all, dangling-images, unused-volumes
   artifact-store                  self-hosted artifact storage: keys, usage, repositories

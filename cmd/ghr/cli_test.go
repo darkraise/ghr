@@ -85,6 +85,23 @@ func fakeDaemon(t *testing.T) *[]recorded {
 			json.NewEncoder(w).Encode([]model.ToolchainChoice{{Spec: "21", Version: "21.0.8+9", LTS: true}, {Spec: "24", Version: "24.0.2+12"}})
 		case r.URL.Path == "/artifact-store":
 			json.NewEncoder(w).Encode(sampleArtifactStore(now))
+		case r.URL.Path == "/packages" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(samplePackages(now))
+		case r.URL.Path == "/packages" && r.Method == http.MethodPost:
+			var req model.AddPackagesRequest
+			json.Unmarshal(b, &req)
+			res := model.AddPackagesResult{Adopt: []string{}, Install: []string{}}
+			for _, n := range req.Names {
+				if n == "vim" {
+					res.Adopt = append(res.Adopt, n)
+				} else {
+					res.Install = append(res.Install, n)
+				}
+			}
+			w.WriteHeader(http.StatusAccepted)
+			json.NewEncoder(w).Encode(res)
+		case r.URL.Path == "/packages/search":
+			json.NewEncoder(w).Encode(sampleSearch())
 		default:
 			w.WriteHeader(http.StatusNoContent)
 		}
