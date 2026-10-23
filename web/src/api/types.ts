@@ -90,7 +90,7 @@ export interface GhrUpdate {
   last_error?: string
 }
 
-export type JobName = "ghr_update_check" | "runner_update_check" | "prune" | "storage_measure"
+export type JobName = "ghr_update_check" | "runner_update_check" | "prune" | "storage_measure" | "package_index"
 
 // A background task. name is typed string: a JSON fixture's strings do not
 // narrow to JobName.

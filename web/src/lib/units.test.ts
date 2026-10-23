@@ -21,6 +21,7 @@ describe("readSetting", () => {
     ["jobs.ghr_update_check.every", "1h30m0s", 1.5],
     ["jobs.storage_measure.every", "30m0s", 30],
     ["jobs.storage_measure.every", "1h0m0s", 60],
+    ["jobs.package_index.every", "1d", 24],
   ])("reads %s %s as %d", (key, raw, n) => {
     expect(readSetting(key, raw)).toBe(n)
   })
@@ -45,6 +46,7 @@ describe("writeSetting", () => {
     ["history_retention", 1.5, "129600s"],
     ["jobs.prune.every", 12, "12h"],
     ["jobs.storage_measure.every", 30, "30m"],
+    ["jobs.package_index.every", 12, "12h"],
     ["build_cache_keep", 20, "20GB"],
     ["memory_max", 8192, "8192M"],
     ["memory_max", Number.NaN, "infinity"],
@@ -87,6 +89,8 @@ describe("job intervals", () => {
     ["jobs.storage_measure.every", 4, "Enter at least 5 minutes"],
     ["jobs.storage_measure.every", 5, ""],
     ["jobs.storage_measure.every", Number.NaN, "Enter a number of minutes"],
+    ["jobs.package_index.every", 0.5, "Enter at least 1 hour"],
+    ["jobs.package_index.every", 1, ""],
   ])("checks %s %d", (key, n, want) => {
     expect(UNIT_SETTINGS[key]?.error(n)).toBe(want)
   })

@@ -123,6 +123,7 @@ export const UNIT_SETTINGS: Record<string, UnitSetting> = {
   "jobs.runner_update_check.every": hours(1),
   "jobs.prune.every": hours(1),
   "jobs.storage_measure.every": minutes(5),
+  "jobs.package_index.every": hours(1),
 }
 
 // The form holds the number, or the daemon's text when read gave null; that

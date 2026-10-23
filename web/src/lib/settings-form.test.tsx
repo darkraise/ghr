@@ -32,6 +32,8 @@ describe("useSettingsForm with the jobs keys", () => {
       "jobs.prune.every",
       "jobs.storage_measure.enabled",
       "jobs.storage_measure.every",
+      "jobs.package_index.enabled",
+      "jobs.package_index.every",
     ])
   })
 

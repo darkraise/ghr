@@ -12,7 +12,7 @@ import { errorText } from "@/query"
 // The daemon's cap on global_max (config.MaxRunners); it refuses a larger value.
 const MAX_RUNNERS = 99
 
-export const JOB_NAMES: readonly JobName[] = ["ghr_update_check", "runner_update_check", "prune", "storage_measure"]
+export const JOB_NAMES: readonly JobName[] = ["ghr_update_check", "runner_update_check", "prune", "storage_measure", "package_index"]
 
 // The keys Settings › General and the setup wizard edit; the Jobs page edits
 // JOB_KEYS. Each form counts and saves only its own.
