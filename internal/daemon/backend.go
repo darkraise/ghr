@@ -99,6 +99,9 @@ type Backend struct {
 	// AS is the self-hosted artifact storage service; nil in tests that do
 	// not use it.
 	AS ArtifactStoreService
+	// Pkgs is the apt package service; nil answers every package route with
+	// 503, as a host without apt does.
+	Pkgs PackagesService
 	// CheckToken validates a candidate token by reading repo, its runners and its runs with it.
 	CheckToken func(ctx context.Context, token, repo string) error
 	// CheckTokenOwner validates a candidate token when there is no runner
