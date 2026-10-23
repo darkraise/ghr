@@ -23,6 +23,16 @@ describe("queueText", () => {
     expect(queueText({ current: null, queued: 2, recent: [] })).toBe("2 queued")
     expect(queueText({ current: null, queued: 0, recent: [] })).toBe("")
   })
+
+  it.each([
+    ["install", "apt ripgrep", "Installing apt ripgrep"],
+    ["adopt", "apt vim", "Adopting apt vim"],
+    ["upgrade", "apt all managed packages", "Upgrading apt all managed packages"],
+    ["remove", "apt ripgrep", "Removing apt ripgrep"],
+    ["refresh", "apt index", "Refreshing apt index"],
+  ])("names a running %s of a package", (kind, target, want) => {
+    expect(queueText({ current: { id: "x", kind, target, started_at: "" }, queued: 0, recent: [] })).toBe(want)
+  })
 })
 
 describe("groupByTool", () => {

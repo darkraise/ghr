@@ -27,7 +27,14 @@ export const POPULAR = [
   { tool: "java", spec: "25" },
 ] as const
 
-const VERBS: Record<string, string> = { install: "Installing", remove: "Removing", clear: "Clearing" }
+const VERBS: Record<string, string> = {
+  install: "Installing",
+  remove: "Removing",
+  clear: "Clearing",
+  adopt: "Adopting",
+  upgrade: "Upgrading",
+  refresh: "Refreshing",
+}
 
 const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
