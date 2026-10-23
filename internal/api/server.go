@@ -468,14 +468,18 @@ func NewServer(b Backend) http.Handler {
 		accepted(func(*http.Request) error { return b.UpgradePackages(req) })(w, r)
 	})
 	mux.HandleFunc("POST /packages/refresh", accepted(func(*http.Request) error { return b.RefreshPackageIndex() }))
-	// Without ?uninstall=1 the package is forgotten: it stays installed and
+	// Without ?uninstall the package is forgotten: it stays installed and
 	// nothing is queued, so the answer is 204, not 202.
 	mux.HandleFunc("DELETE /packages/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("uninstall") == "1" {
+		q := r.URL.Query()
+		switch {
+		case !q.Has("uninstall"):
+			respond(w, nil, b.ForgetPackage(r.PathValue("name")))
+		case q.Get("uninstall") == "1":
 			accepted(func(r *http.Request) error { return b.UninstallPackage(r.PathValue("name")) })(w, r)
-			return
+		default:
+			respond(w, nil, BadRequest("uninstall must be 1"))
 		}
-		respond(w, nil, b.ForgetPackage(r.PathValue("name")))
 	})
 	mux.HandleFunc("GET /github-storage", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.GitHubStorage()) })
 	mux.HandleFunc("POST /github-storage/refresh", accepted(func(*http.Request) error { return b.RefreshGitHubStorage() }))

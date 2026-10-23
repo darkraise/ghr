@@ -130,6 +130,29 @@ func TestPackageRoutesAnswer(t *testing.T) {
 	}
 }
 
+func TestAnUnknownUninstallValueIsRefused(t *testing.T) {
+	b := &fakeBackend{}
+	srv := httptest.NewServer(NewServer(b))
+	defer srv.Close()
+	for _, v := range []string{"true", "0", ""} {
+		req, err := http.NewRequest(http.MethodDelete, srv.URL+"/packages/ripgrep?uninstall="+v, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("uninstall=%q: %d", v, resp.StatusCode)
+		}
+	}
+	if len(b.pkgs.calls) != 0 {
+		t.Fatalf("calls %q: neither uninstall nor forget may run", b.pkgs.calls)
+	}
+}
+
 func TestPackageErrorsReachTheClient(t *testing.T) {
 	c, b := setup(t)
 	ctx := context.Background()
