@@ -54,23 +54,31 @@ func (o *op) workKey() string {
 func sameWork(a, b *op) bool { return a.Kind == b.Kind && a.workKey() == b.workKey() }
 
 // enqueue queues ops after the waiting ones, leaving out any whose kind and
-// key, or target without a key, already wait. It queues none of them when
-// they would not all fit.
+// key, or target without a key, already wait; a waiting quiet operation
+// that one which is not quiet joins stops being quiet. It queues none of
+// them when they would not all fit.
 func (s *Service) enqueue(ops ...*op) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return ErrClosed
 	}
-	var add []*op
+	var add, shown []*op
 	for _, o := range ops {
 		queued := func(q *op) bool { return sameWork(q, o) }
-		if !slices.ContainsFunc(s.queue, queued) && !slices.ContainsFunc(add, queued) {
+		if i := slices.IndexFunc(s.queue, queued); i >= 0 {
+			if !o.quiet {
+				shown = append(shown, s.queue[i])
+			}
+		} else if !slices.ContainsFunc(add, queued) {
 			add = append(add, o)
 		}
 	}
 	if len(s.queue)+len(add) > maxQueued {
 		return ErrQueueFull
+	}
+	for _, q := range shown {
+		q.quiet = false
 	}
 	s.queue = append(s.queue, add...)
 	s.wakeWorker()

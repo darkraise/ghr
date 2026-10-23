@@ -316,6 +316,30 @@ func TestPackageIndexTaskWaitsOnARefreshAlreadyQueued(t *testing.T) {
 	}
 }
 
+func TestARefreshJoiningTheTasksRefreshShowsInRecent(t *testing.T) {
+	apt := newFakeApt()
+	s, _, _ := pkgService(t, apt)
+	startService(t, s)
+	gate := gateWorker(t, s)
+	task, err := s.enqueueWaiting(s.refreshOp(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RefreshPackageIndex(); err != nil {
+		t.Fatal(err)
+	}
+	if q := s.Snapshot().Operations.Queued; q != 1 {
+		t.Fatalf("%d queued, want the one refresh", q)
+	}
+	close(gate)
+	if r := recvFinished(t, task); r.Outcome != "ok" {
+		t.Fatalf("refresh %+v", r)
+	}
+	if got := recentOutcomes(s); !slices.Equal(got, []string{"refresh apt index ok", "clear nuget ok"}) {
+		t.Fatalf("recent %q: the refresh the API asked for shows", got)
+	}
+}
+
 func TestPackageIndexTaskWithAFullQueue(t *testing.T) {
 	apt := newFakeApt()
 	s, _, _ := pkgService(t, apt)
