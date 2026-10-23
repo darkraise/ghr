@@ -256,6 +256,27 @@ func fixtureValues() map[string]any {
 		"run-detail":        runDetailFixture(),
 		"run-annotations":   runAnnotationsFixture(),
 		"job-log":           jobLogFixture(),
+		"packages": model.Packages{IndexUpdatedAt: ptr(at(-3 * time.Hour)),
+			Managed: []model.PackageInfo{
+				{Name: "ripgrep", Version: "14.1.0-1", Candidate: "14.1.1-1", Description: "Recursively searches directories for a regex pattern",
+					Installed: true, Upgradable: true, Bytes: 5_120_000},
+				{Name: "shellcheck", Version: "0.10.0-1", Candidate: "0.10.0-1", Description: "lint tool for shell scripts",
+					Installed: true, Bytes: 21_000_000},
+				{Name: "yq", Error: "no installation candidate in the configured apt sources"},
+			},
+			Base: []model.PackageInfo{
+				{Name: "curl", Version: "8.14.1-2", Description: "command line tool for transferring data with URL syntax", Installed: true, Bytes: 500_000},
+				{Name: "jq", Version: "1.7.1-6", Description: "lightweight and flexible command-line JSON processor", Installed: true, Bytes: 120_000},
+			},
+			Detected: []model.PackageInfo{
+				{Name: "vim", Version: "2:9.1.1230-2", Description: "Vi IMproved - enhanced vi editor", Installed: true, Bytes: 4_100_000},
+			},
+		},
+		"package-search": []model.PackageInfo{
+			{Name: "ripgrep", Version: "14.1.0-1", Description: "Recursively searches directories for a regex pattern",
+				Installed: true, Bytes: 5_120_000, Managed: true},
+			{Name: "ripgrep-all", Description: "ripgrep, but also search in PDFs, E-Books, Office documents, zip, tar.gz, etc."},
+		},
 	}
 }
 
