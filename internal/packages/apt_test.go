@@ -189,6 +189,28 @@ func TestInfo(t *testing.T) {
 	}
 }
 
+func TestInfoMatchesCandidatesToTheExactName(t *testing.T) {
+	// apt-cache policy reads a name no package has as a regular expression
+	// and prints the blocks of the packages it matches.
+	f := &fakeRun{reply: func(cmd []string) ([]byte, error) {
+		switch cmd[0] {
+		case "dpkg-query":
+			return nil, fail(t, 1, "dpkg-query: no packages found matching ripgre.\ndpkg-query: no packages found matching ripgrep-")
+		case "apt-cache":
+			return []byte("ripgrep:\n  Installed: (none)\n  Candidate: 14.1.0-1\n  Version table:\n     14.1.0-1 500\n"), nil
+		}
+		return nil, fmt.Errorf("unexpected %q", cmd)
+	}}
+	got, err := newTestApt(f).Info(context.Background(), []string{"ripgre.", "ripgrep-"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Info{{Name: "ripgre."}, {Name: "ripgrep-"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %+v\nwant %+v", got, want)
+	}
+}
+
 func TestInfoWithoutCandidates(t *testing.T) {
 	f := &fakeRun{reply: infoReply(t)}
 	got, err := newTestApt(f).Info(context.Background(), []string{"jq"}, false)
