@@ -153,6 +153,41 @@ func TestReconcileSkipsNamesWithAnOperationQueuedOrRunning(t *testing.T) {
 	close(gate)
 }
 
+func TestAReconcileInstallOfANameDroppedWhileItWaitedIsSkipped(t *testing.T) {
+	apt := newFakeApt(notInstalled("yq", "4.44.3-1"))
+	apt.off = true
+	s, m, _ := pkgService(t, apt, "yq")
+	startService(t, s)
+	waitFor(t, "the start reconcile", func() bool {
+		return eventCount(s, "packages: apt is not available on this host; not checking yq") == 1
+	})
+	gate := gateWorker(t, s)
+	apt.set(func(f *fakeApt) { f.off = false })
+	s.ReconcilePackages(t.Context())
+	if q := s.Snapshot().Operations.Queued; q != 1 {
+		t.Fatalf("%d queued, want the reinstall", q)
+	}
+	// An edit of config.yaml, not a Forget, which would drop the reinstall.
+	if err := m.Drop("yq"); err != nil {
+		t.Fatal(err)
+	}
+	before := s.PackagesVersion()
+	close(gate)
+	r := waitRecent(t, s, 2)[0]
+	if r.Kind != "install" || r.Target != "apt yq" || r.Outcome != "skipped" || r.Message != "yq is no longer managed" {
+		t.Fatalf("operation %+v", r)
+	}
+	if got := apt.callList(); len(got) != 0 {
+		t.Fatalf("apt calls %q", got)
+	}
+	if s.PackagesVersion() <= before {
+		t.Fatal("the skipped reinstall did not move the packages topic")
+	}
+	if got := m.List(); len(got) != 0 {
+		t.Fatalf("managed %q", got)
+	}
+}
+
 func TestReconcileWithoutAptOnlyWarns(t *testing.T) {
 	apt := newFakeApt(notInstalled("ripgrep", "14.1.0-1"))
 	apt.off = true
@@ -268,6 +303,29 @@ func TestPackageIndexTaskWithAFullQueue(t *testing.T) {
 	}
 	if got := apt.callList(); len(got) != 0 {
 		t.Fatalf("apt calls %q", got)
+	}
+}
+
+func TestAPackageIndexRunRefusedByAFullQueueSkipsTheReconcile(t *testing.T) {
+	apt := newFakeApt(notInstalled("yq", ""))
+	s, _, _ := pkgService(t, apt, "yq")
+	reg, _ := jobsRig()
+	s.Jobs = reg
+	startService(t, s)
+	waitFor(t, "the reconcile at start", func() bool { return s.pkgErr("yq") == noCandidate })
+	gate := gateWorker(t, s)
+	defer close(gate)
+	for i := range maxQueued {
+		if err := s.enqueue(testOp(strconv.Itoa(i), "install", "apt p"+strconv.Itoa(i), "ok", nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if j := runIndexNow(t, reg); j.LastError != ErrQueueFull.Error() {
+		t.Fatalf("task %+v", j)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := apt.infoList(); len(got) != 1 {
+		t.Fatalf("info calls %q: only the reconcile at start reads the managed names", got)
 	}
 }
 

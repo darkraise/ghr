@@ -128,6 +128,7 @@ func (s *Service) ReconcilePackages(ctx context.Context) {
 			// while it waited.
 			o.run = func(ctx context.Context, progress func(string)) (string, string) {
 				if !s.isManaged(n) {
+					s.pkgVersion.Add(1)
 					return "skipped", n + " is no longer managed"
 				}
 				return install(ctx, progress)
