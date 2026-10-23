@@ -57,6 +57,29 @@ describe("System packages section", () => {
     expect(s.getByRole("button", { name: "Try again" })).toBeInTheDocument()
   })
 
+  it("reads only apt's own 503 as apt not available", async () => {
+    mockApi(routes({ "GET /api/packages": () => json({ error: "ghr is shutting down" }, 503) }))
+    renderApp("/toolchains")
+    const s = await section()
+    expect(await s.findByText("ghr is shutting down")).toBeInTheDocument()
+    expect(s.getByRole("button", { name: "Try again" })).toBeInTheDocument()
+    expect(s.queryByText("apt is not available on this host")).toBeNull()
+  })
+
+  it("keeps the loaded list when a refetch fails", async () => {
+    let reads = 0
+    const { calls } = mockApi(
+      routes({ "GET /api/packages": () => (++reads === 1 ? fixtures.packages : json({ error: "dpkg-query failed" }, 500)) }),
+    )
+    const { queryClient } = renderApp("/toolchains")
+    await managedRow("ripgrep")
+    act(() => invalidateTopics(queryClient, ["packages"]))
+    await waitFor(() => expect(packageCalls(calls)).toBe(2))
+    const s = await section()
+    expect(await s.findByText("dpkg-query failed")).toBeInTheDocument()
+    expect((await managedRow("ripgrep")).getByText("14.1.0-1")).toBeInTheDocument()
+  })
+
   it("says when no package is managed, and offers Upgrade all only when one is upgradable", async () => {
     mockApi(routes({ "GET /api/packages": { ...fixtures.packages, managed: null } }))
     renderApp("/toolchains")

@@ -24,6 +24,8 @@ import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
 const TITLE = "System packages"
+// The daemon also answers 503 while it shuts down.
+const UNAVAILABLE = "apt is not available on this host"
 
 interface PackageAction {
   call: () => Promise<unknown>
@@ -51,27 +53,17 @@ export function PackageSection({ status, offline }: { status: Status | undefined
   const [adding, setAdding] = useState(false)
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   const run = (a: PackageAction) => action.mutate(a)
+  const failed = packages.isError && <ErrorLine onRetry={() => void packages.refetch()}>{errorText(packages.error)}</ErrorLine>
 
-  if (packages.error instanceof ApiError && packages.error.status === 503) {
-    return (
-      <Section title={TITLE}>
-        <p className="text-sm text-muted-foreground">apt is not available on this host</p>
-      </Section>
-    )
-  }
-  if (packages.isError) {
-    return (
-      <Section title={TITLE}>
-        <ErrorLine onRetry={() => void packages.refetch()}>{errorText(packages.error)}</ErrorLine>
-      </Section>
-    )
-  }
   if (!packages.data) {
-    return (
-      <Section title={TITLE}>
-        <Spinner label="Loading packages" />
-      </Section>
-    )
+    if (packages.error instanceof ApiError && packages.error.status === 503 && packages.error.message === UNAVAILABLE) {
+      return (
+        <Section title={TITLE}>
+          <p className="text-sm text-muted-foreground">{UNAVAILABLE}</p>
+        </Section>
+      )
+    }
+    return <Section title={TITLE}>{failed || <Spinner label="Loading packages" />}</Section>
   }
 
   const data = packages.data
@@ -123,6 +115,7 @@ export function PackageSection({ status, offline }: { status: Status | undefined
 
   return (
     <Section title={TITLE} aside={aside} flush>
+      {failed && <div className="p-4">{failed}</div>}
       {managed.length === 0 ? (
         <p className="p-4 text-sm text-muted-foreground">ghr manages no apt packages yet</p>
       ) : (
