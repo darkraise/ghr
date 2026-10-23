@@ -111,6 +111,13 @@ type Backend interface {
 	RemoveToolchain(tool, version string) error
 	ClearCache(name string) error
 	PruneScope(scope string) error
+	Packages(ctx context.Context) (model.Packages, error)
+	SearchPackages(ctx context.Context, term string) ([]model.PackageInfo, error)
+	AddPackages(ctx context.Context, req model.AddPackagesRequest) (model.AddPackagesResult, error)
+	UpgradePackages(req model.UpgradePackagesRequest) error
+	UninstallPackage(name string) error
+	ForgetPackage(name string) error
+	RefreshPackageIndex() error
 	Subscribe() (*changes.Sub, error)
 	GitHubStorage() model.GitHubStorage
 	RefreshGitHubStorage() error
@@ -420,6 +427,56 @@ func NewServer(b Backend) http.Handler {
 	// A route of its own, so a daemon older than the scopes answers a
 	// plain-text 404 instead of running a standard prune.
 	mux.HandleFunc("POST /prune/{scope}", accepted(func(r *http.Request) error { return b.PruneScope(r.PathValue("scope")) }))
+	mux.HandleFunc("GET /packages", func(w http.ResponseWriter, r *http.Request) {
+		p, err := b.Packages(r.Context())
+		respond(w, p, err)
+	})
+	mux.HandleFunc("GET /packages/search", func(w http.ResponseWriter, r *http.Request) {
+		ps, err := b.SearchPackages(r.Context(), r.URL.Query().Get("q"))
+		if ps == nil {
+			ps = []model.PackageInfo{}
+		}
+		respond(w, ps, err)
+	})
+	mux.HandleFunc("POST /packages", func(w http.ResponseWriter, r *http.Request) {
+		var req model.AddPackagesRequest
+		if err := decode(w, r, &req); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		res, err := b.AddPackages(r.Context(), req)
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		if res.Adopt == nil {
+			res.Adopt = []string{}
+		}
+		if res.Install == nil {
+			res.Install = []string{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(res)
+	})
+	mux.HandleFunc("POST /packages/upgrade", func(w http.ResponseWriter, r *http.Request) {
+		var req model.UpgradePackagesRequest
+		if err := decode(w, r, &req); err != nil {
+			respond(w, nil, err)
+			return
+		}
+		accepted(func(*http.Request) error { return b.UpgradePackages(req) })(w, r)
+	})
+	mux.HandleFunc("POST /packages/refresh", accepted(func(*http.Request) error { return b.RefreshPackageIndex() }))
+	// Without ?uninstall=1 the package is forgotten: it stays installed and
+	// nothing is queued, so the answer is 204, not 202.
+	mux.HandleFunc("DELETE /packages/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("uninstall") == "1" {
+			accepted(func(r *http.Request) error { return b.UninstallPackage(r.PathValue("name")) })(w, r)
+			return
+		}
+		respond(w, nil, b.ForgetPackage(r.PathValue("name")))
+	})
 	mux.HandleFunc("GET /github-storage", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, b.GitHubStorage()) })
 	mux.HandleFunc("POST /github-storage/refresh", accepted(func(*http.Request) error { return b.RefreshGitHubStorage() }))
 	mux.HandleFunc("GET /github-storage/preview", func(w http.ResponseWriter, r *http.Request) {

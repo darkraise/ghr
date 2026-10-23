@@ -334,6 +334,50 @@ func (c *Client) PruneScope(ctx context.Context, scope string) error {
 	return c.call(ctx, http.MethodPost, "/prune/"+url.PathEscape(scope), nil, nil)
 }
 
+// Packages lists the managed apt packages, setup.sh's base packages and the
+// installed packages ghr can adopt.
+func (c *Client) Packages(ctx context.Context) (model.Packages, error) {
+	var p model.Packages
+	err := c.call(ctx, http.MethodGet, "/packages", nil, &p)
+	return p, err
+}
+
+// SearchPackages searches the host's apt sources by package name.
+func (c *Client) SearchPackages(ctx context.Context, term string) ([]model.PackageInfo, error) {
+	var ps []model.PackageInfo
+	err := c.call(ctx, http.MethodGet, "/packages/search?q="+url.QueryEscape(term), nil, &ps)
+	return ps, err
+}
+
+// AddPackages queues an adopt for each installed name and an install for
+// each other one.
+func (c *Client) AddPackages(ctx context.Context, names []string) (model.AddPackagesResult, error) {
+	var r model.AddPackagesResult
+	err := c.call(ctx, http.MethodPost, "/packages", jsonBody(model.AddPackagesRequest{Names: names}), &r)
+	return r, err
+}
+
+// UpgradePackages queues an upgrade of names, or of every managed package
+// when all is set.
+func (c *Client) UpgradePackages(ctx context.Context, names []string, all bool) error {
+	return c.call(ctx, http.MethodPost, "/packages/upgrade", jsonBody(model.UpgradePackagesRequest{Names: names, All: all}), nil)
+}
+
+// UninstallPackage queues the removal of a managed package from the host.
+func (c *Client) UninstallPackage(ctx context.Context, name string) error {
+	return c.call(ctx, http.MethodDelete, "/packages/"+url.PathEscape(name)+"?uninstall=1", nil, nil)
+}
+
+// ForgetPackage drops a package from the managed list and leaves it installed.
+func (c *Client) ForgetPackage(ctx context.Context, name string) error {
+	return c.call(ctx, http.MethodDelete, "/packages/"+url.PathEscape(name), nil, nil)
+}
+
+// RefreshPackageIndex queues an apt index refresh.
+func (c *Client) RefreshPackageIndex(ctx context.Context) error {
+	return c.call(ctx, http.MethodPost, "/packages/refresh", nil, nil)
+}
+
 // ArtifactStore returns the self-hosted artifact storage snapshot.
 func (c *Client) ArtifactStore(ctx context.Context) (model.ArtifactStore, error) {
 	var s model.ArtifactStore
