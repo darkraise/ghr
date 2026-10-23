@@ -40,6 +40,10 @@ describe("api for the later pages", () => {
     ["installPreset", () => api.installPreset("popular"), "POST", "/api/toolchains", { preset: "popular" }],
     ["removeToolchain", () => api.removeToolchain("node", "22.11.0"), "DELETE", "/api/toolchains/node/22.11.0", undefined],
     ["clearCache", () => api.clearCache("nuget"), "POST", "/api/caches/nuget/clear", undefined],
+    ["upgradePackages by name", () => api.upgradePackages({ names: ["ripgrep"] }), "POST", "/api/packages/upgrade", { names: ["ripgrep"] }],
+    ["upgradePackages all", () => api.upgradePackages({ all: true }), "POST", "/api/packages/upgrade", { all: true }],
+    ["forgetPackage", () => api.forgetPackage("g++"), "DELETE", "/api/packages/g%2B%2B", undefined],
+    ["refreshPackageIndex", () => api.refreshPackageIndex(), "POST", "/api/packages/refresh", undefined],
     ["prune standard", () => api.prune("standard"), "POST", "/api/prune", undefined],
     ["prune a scope", () => api.prune("unused-volumes"), "POST", "/api/prune/unused-volumes", undefined],
     ["refreshGitHubStorage", () => api.refreshGitHubStorage(), "POST", "/api/github-storage/refresh", undefined],
@@ -95,6 +99,27 @@ describe("api for the later pages", () => {
     expect((await api.artifactStore()).repos).toHaveLength(4)
     expect((await api.artifactRunObjects("darkmem", 102)).map((i) => i.name)).toEqual(["e2e-report", "coverage-report"])
     expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(["GET /api/artifact-store", "GET /api/artifact-store/darkmem/runs/102"])
+  })
+
+  it("reads the package list and a search, and adds packages", async () => {
+    const ripgrep = { name: "ripgrep", version: "14.1.0-1", installed: true, bytes: 5120000, managed: true }
+    const { calls } = mockApi({
+      "GET /api/packages": { managed: [ripgrep], base: [], detected: null },
+      "GET /api/packages/search": [ripgrep],
+      "POST /api/packages": { adopt: ["vim"], install: ["ripgrep-all"] },
+    })
+    expect((await api.packages()).managed).toEqual([ripgrep])
+    expect(await api.searchPackages("rip")).toEqual([ripgrep])
+    expect(await api.addPackages(["vim", "ripgrep-all"])).toEqual({ adopt: ["vim"], install: ["ripgrep-all"] })
+    expect(calls.map((c) => `${c.method} ${c.path}${c.search}`)).toEqual(["GET /api/packages", "GET /api/packages/search?q=rip", "POST /api/packages"])
+    expect(calls[2]?.body).toEqual({ names: ["vim", "ripgrep-all"] })
+  })
+
+  it("asks to uninstall a package with the uninstall flag, and to forget one without it", async () => {
+    const { calls } = mockApi({ "DELETE /api/packages/ripgrep": ok })
+    await api.uninstallPackage("ripgrep")
+    await api.forgetPackage("ripgrep")
+    expect(calls.map((c) => `${c.method} ${c.path}${c.search}`)).toEqual(["DELETE /api/packages/ripgrep?uninstall=1", "DELETE /api/packages/ripgrep"])
   })
 
   it("sends a replacement token as plain text, unchanged", async () => {

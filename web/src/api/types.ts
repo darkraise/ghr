@@ -396,6 +396,32 @@ export interface ToolchainChoice {
   lts?: boolean
 }
 
+// An apt package. version is set only while it is installed; candidate is
+// read only for managed packages.
+export interface PackageInfo {
+  name: string
+  version?: string
+  candidate?: string
+  description?: string
+  installed: boolean
+  upgradable?: boolean
+  bytes: number
+  managed?: boolean
+  error?: string
+}
+
+export interface Packages {
+  index_updated_at?: string
+  managed: PackageInfo[] | null
+  base: PackageInfo[] | null
+  detected: PackageInfo[] | null
+}
+
+export interface AddPackagesResult {
+  adopt: string[]
+  install: string[]
+}
+
 export interface RunnerLimitsPatch {
   memory_max?: string
   cpu_quota?: string

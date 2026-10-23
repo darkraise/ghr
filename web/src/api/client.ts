@@ -1,5 +1,6 @@
 import type {
   Actions,
+  AddPackagesResult,
   Activity,
   ActivityWindow,
   AddRepoRequest,
@@ -23,6 +24,8 @@ import type {
   LabelCheck,
   LogChunk,
   Metrics,
+  PackageInfo,
+  Packages,
   PruneScope,
   Registration,
   RunAnnotations,
@@ -224,6 +227,15 @@ export const api = {
   installToolchain: (tool: string, version: string) => send("POST", "/api/toolchains", { tool, version }),
   installPreset: (preset: string) => send("POST", "/api/toolchains", { preset }),
   removeToolchain: (tool: string, version: string) => send("DELETE", `/api/toolchains/${seg(tool)}/${seg(version)}`),
+  packages: (signal?: AbortSignal) => request<Packages>("GET", "/api/packages", undefined, signal),
+  searchPackages: (term: string, signal?: AbortSignal) =>
+    request<PackageInfo[]>("GET", `/api/packages/search?${query({ q: term })}`, undefined, signal),
+  // Answers 202; the queued work shows in the storage snapshot's operations.
+  addPackages: (names: string[]) => request<AddPackagesResult>("POST", "/api/packages", { names }),
+  upgradePackages: (body: { names: string[] } | { all: true }) => send("POST", "/api/packages/upgrade", body),
+  uninstallPackage: (name: string) => send("DELETE", `/api/packages/${seg(name)}?${query({ uninstall: 1 })}`),
+  forgetPackage: (name: string) => send("DELETE", `/api/packages/${seg(name)}`),
+  refreshPackageIndex: () => send("POST", "/api/packages/refresh"),
   clearCache: (name: string) => send("POST", `/api/caches/${seg(name)}/clear`),
   prune: (scope: PruneScope) => send("POST", scope === "standard" ? "/api/prune" : `/api/prune/${seg(scope)}`),
   githubStorage: (signal?: AbortSignal) => request<GitHubStorage>("GET", "/api/github-storage", undefined, signal),
