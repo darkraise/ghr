@@ -876,6 +876,29 @@ func TestForgetDropsQueuedOperationsAndRunsNoCommand(t *testing.T) {
 	}
 }
 
+func TestForgetEndsAndLogsTheOperationsItDrops(t *testing.T) {
+	apt := newFakeApt(installed("ripgrep", "14.1.0-1", "14.1.0-1"))
+	s, _, _ := pkgService(t, apt, "ripgrep")
+	startService(t, s)
+	gate := gateWorker(t, s)
+	defer close(gate)
+	if err := s.UninstallPackage("ripgrep"); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	removal := s.queue[0]
+	s.mu.Unlock()
+	if err := s.ForgetPackage("ripgrep"); err != nil {
+		t.Fatal(err)
+	}
+	if r := recvFinished(t, removal); r.Kind != "remove" || r.Outcome != "skipped" || r.Message != "ripgrep was forgotten" {
+		t.Fatalf("dropped operation %+v", r)
+	}
+	if n := eventCount(s, "remove apt ripgrep skipped: ripgrep was forgotten"); n != 1 {
+		t.Fatalf("%d events for the dropped removal", n)
+	}
+}
+
 func TestAForgetWhoseSaveFailsKeepsTheQueuedWork(t *testing.T) {
 	apt := newFakeApt(installed("ripgrep", "14.1.0-1", "14.1.0-1"))
 	s, m, _ := pkgService(t, apt, "ripgrep")

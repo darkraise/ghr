@@ -472,6 +472,7 @@ func (s *Service) ForgetPackage(name string) error {
 		d := o.Operation
 		d.Outcome, d.Message = "skipped", name+" was forgotten"
 		o.end(d)
+		s.Events.Add("info", "", "%s %s %s: %s", o.Kind, o.Target, d.Outcome, d.Message)
 	}
 	s.pkgVersion.Add(1)
 	return nil
