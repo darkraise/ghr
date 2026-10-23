@@ -64,6 +64,7 @@ type Service struct {
 	trigger chan struct{}
 	wake    chan struct{}
 	jobWake chan struct{}
+	pkgWake chan struct{}
 	wg      sync.WaitGroup
 }
 
@@ -87,8 +88,9 @@ func (s *Service) now() time.Time {
 	return time.Now()
 }
 
-// Start starts the measurer, which measures at once, and the queue worker,
-// which first deletes what an interrupted install or clear left behind. Call
+// Start starts the measurer, which measures at once, the queue worker,
+// which first deletes what an interrupted install or clear left behind, and
+// the package_index loop, which first reconciles the managed packages. Call
 // it once, before any other method.
 func (s *Service) Start() {
 	s.snap = emptyMeasured()
@@ -107,11 +109,22 @@ func (s *Service) Start() {
 		default:
 		}
 	})
+	s.pkgWake = make(chan struct{}, 1)
+	s.Jobs.Register(config.JobPackageIndex, func() {
+		select {
+		case s.pkgWake <- struct{}{}:
+		default:
+		}
+	})
 	s.trigger <- struct{}{}
-	s.wg.Add(2)
+	s.wg.Add(3)
 	go func() {
 		defer s.wg.Done()
 		s.measureLoop()
+	}()
+	go func() {
+		defer s.wg.Done()
+		s.indexLoop()
 	}()
 	go func() {
 		defer s.wg.Done()
