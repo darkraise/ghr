@@ -116,6 +116,8 @@ func (s *Service) ReconcilePackages(ctx context.Context) {
 		i := infos[n]
 		switch {
 		case i.Installed:
+			// Installed by hand since an install failed.
+			s.clearPkgErr(n)
 		case i.Candidate == "":
 			s.setPkgErr(n, noCandidate)
 			missing = append(missing, n)

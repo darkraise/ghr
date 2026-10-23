@@ -115,6 +115,18 @@ func TestAFailedReconcileInstallKeepsTheNameWithItsError(t *testing.T) {
 	}
 }
 
+func TestReconcileClearsTheErrorOfANameInstalledByHand(t *testing.T) {
+	apt := newFakeApt(notInstalled("yq", ""))
+	s, _, _ := pkgService(t, apt, "yq")
+	startService(t, s)
+	waitFor(t, "the reconcile at start", func() bool { return s.pkgErr("yq") == noCandidate })
+	apt.set(func(f *fakeApt) { f.pkgs["yq"] = installed("yq", "4.44.3-1", "4.44.3-1") })
+	s.ReconcilePackages(t.Context())
+	if got := s.pkgErr("yq"); got != "" {
+		t.Fatalf("error %q for a name that is installed now", got)
+	}
+}
+
 func TestReconcileSkipsNamesWithAnOperationQueuedOrRunning(t *testing.T) {
 	apt := newFakeApt(notInstalled("shellcheck", "0.10.0-1"), notInstalled("yq", "4.44.3-1"))
 	apt.off = true

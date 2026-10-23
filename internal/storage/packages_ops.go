@@ -322,6 +322,7 @@ func (s *Service) adoptOp(name string) *op {
 		if err := s.Apt.MarkManual(ctx, name); err != nil {
 			return interruptedOr(ctx, "failed"), err.Error()
 		}
+		s.clearPkgErr(name)
 		if err := s.Managed.Add(name); err != nil {
 			return "failed", "could not add " + name + " to config.yaml: " + err.Error()
 		}

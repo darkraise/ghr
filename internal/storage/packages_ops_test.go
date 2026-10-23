@@ -368,6 +368,30 @@ func TestAFailedInstallLeavesConfigUnchanged(t *testing.T) {
 	}
 }
 
+func TestAnAdoptClearsTheErrorOfAFailedInstall(t *testing.T) {
+	apt := newFakeApt(notInstalled("chrony", "4.6-1"))
+	apt.errs["install"] = errors.New("E: Unable to fetch some archives")
+	s, _, _ := pkgService(t, apt)
+	startService(t, s)
+	if _, err := s.AddPackages(t.Context(), []string{"chrony"}); err != nil {
+		t.Fatal(err)
+	}
+	waitRecent(t, s, 1)
+	if s.pkgErr("chrony") == "" {
+		t.Fatal("the failed install recorded no error")
+	}
+	apt.set(func(f *fakeApt) { f.pkgs["chrony"] = installed("chrony", "4.6-1", "4.6-1") })
+	if _, err := s.AddPackages(t.Context(), []string{"chrony"}); err != nil {
+		t.Fatal(err)
+	}
+	if r := waitRecent(t, s, 2)[0]; r.Kind != "adopt" || r.Outcome != "ok" {
+		t.Fatalf("operation %+v", r)
+	}
+	if got := s.pkgErr("chrony"); got != "" {
+		t.Fatalf("error %q after the adopt", got)
+	}
+}
+
 func TestAnInstallOfANameWithoutAnExactPackageRunsNothing(t *testing.T) {
 	// apt-get would read "ripgre." as a regular expression and "ripgrep-" as
 	// a request to remove ripgrep.
