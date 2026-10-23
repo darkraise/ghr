@@ -111,7 +111,8 @@ func (s *Service) ReconcilePackages(ctx context.Context) {
 		}
 		return
 	}
-	var missing []string
+	var missing, unqueued []string
+	var queueErr error
 	for _, n := range want {
 		i := infos[n]
 		switch {
@@ -121,6 +122,8 @@ func (s *Service) ReconcilePackages(ctx context.Context) {
 		case i.Candidate == "":
 			s.setPkgErr(n, noCandidate)
 			missing = append(missing, n)
+		case queueErr != nil:
+			unqueued = append(unqueued, n)
 		default:
 			o := s.installPkgOp(n)
 			install := o.run
@@ -134,10 +137,13 @@ func (s *Service) ReconcilePackages(ctx context.Context) {
 				return install(ctx, progress)
 			}
 			if err := s.enqueue(o); err != nil {
-				s.Events.Add("warn", "", "packages: reinstalling %s: %v", n, err)
-				return
+				queueErr = err
+				unqueued = append(unqueued, n)
 			}
 		}
+	}
+	if len(unqueued) > 0 {
+		s.Events.Add("warn", "", "packages: reinstalling %s: %v", strings.Join(unqueued, ", "), queueErr)
 	}
 	if len(missing) > 0 {
 		slices.Sort(missing)

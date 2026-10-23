@@ -188,6 +188,37 @@ func TestAReconcileInstallOfANameDroppedWhileItWaitedIsSkipped(t *testing.T) {
 	}
 }
 
+func TestAReconcileRefusedByAFullQueueStillChecksEveryName(t *testing.T) {
+	apt := newFakeApt(notInstalled("shellcheck", "0.10.0-1"), notInstalled("yq", "4.44.3-1"), notInstalled("zz-gone", ""))
+	apt.off = true
+	s, _, _ := pkgService(t, apt, "shellcheck", "yq", "zz-gone")
+	startService(t, s)
+	waitFor(t, "the start reconcile", func() bool {
+		return eventCount(s, "packages: apt is not available on this host; not checking shellcheck, yq, zz-gone") == 1
+	})
+	gate := gateWorker(t, s)
+	defer close(gate)
+	for i := range maxQueued {
+		if err := s.enqueue(testOp(strconv.Itoa(i), "install", "apt p"+strconv.Itoa(i), "ok", nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	apt.set(func(f *fakeApt) { f.off = false })
+	s.ReconcilePackages(t.Context())
+	if n := eventCount(s, "packages: reinstalling shellcheck, yq: "+ErrQueueFull.Error()); n != 1 {
+		t.Fatalf("%d warnings naming the refused reinstalls", n)
+	}
+	if got := s.pkgErr("zz-gone"); got != noCandidate {
+		t.Fatalf("error %q for the name after the refusal", got)
+	}
+	if n := eventCount(s, "packages: no installation candidate in the configured apt sources for zz-gone"); n != 1 {
+		t.Fatalf("%d warnings for the name without a candidate", n)
+	}
+	if q := s.Snapshot().Operations.Queued; q != maxQueued {
+		t.Fatalf("%d queued", q)
+	}
+}
+
 func TestReconcileWithoutAptOnlyWarns(t *testing.T) {
 	apt := newFakeApt(notInstalled("ripgrep", "14.1.0-1"))
 	apt.off = true
