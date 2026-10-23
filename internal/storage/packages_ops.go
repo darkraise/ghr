@@ -433,7 +433,8 @@ func (s *Service) UninstallPackage(name string) error {
 
 // ForgetPackage drops a managed name from the list and every operation on
 // it still queued, and leaves the package installed. It is refused while an
-// operation on the name runs.
+// operation on the name runs. A failed save leaves the queue and the name's
+// error untouched.
 func (s *Service) ForgetPackage(name string) error {
 	if !s.aptOn() {
 		return packages.ErrUnavailable
@@ -447,14 +448,20 @@ func (s *Service) ForgetPackage(name string) error {
 		s.mu.Unlock()
 		return packages.ErrBusy
 	}
+	onName := func(o *op) bool { return o.Target == target }
 	var dropped []*op
-	s.queue = slices.DeleteFunc(s.queue, func(o *op) bool {
-		if o.Target == target {
+	for _, o := range s.queue {
+		if onName(o) {
 			dropped = append(dropped, o)
-			return true
 		}
-		return false
-	})
+	}
+	// The save runs under s.mu so the worker cannot start a queued install
+	// or adopt of the name, whose Managed.Add would put it back.
+	if err := s.Managed.Drop(name); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	s.queue = slices.DeleteFunc(s.queue, onName)
 	delete(s.pkgErrs, name)
 	s.mu.Unlock()
 	for _, o := range dropped {
@@ -462,8 +469,8 @@ func (s *Service) ForgetPackage(name string) error {
 		d.Outcome, d.Message = "skipped", name+" was forgotten"
 		o.end(d)
 	}
-	defer s.pkgVersion.Add(1)
-	return s.Managed.Drop(name)
+	s.pkgVersion.Add(1)
+	return nil
 }
 
 // RefreshPackageIndex queues an apt-get update.

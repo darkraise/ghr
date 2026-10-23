@@ -799,6 +799,45 @@ func TestForgetDropsQueuedOperationsAndRunsNoCommand(t *testing.T) {
 	}
 }
 
+func TestAForgetWhoseSaveFailsKeepsTheQueuedWork(t *testing.T) {
+	apt := newFakeApt(installed("ripgrep", "14.1.0-1", "14.1.0-1"))
+	s, m, _ := pkgService(t, apt, "ripgrep")
+	startService(t, s)
+	gate := make(chan struct{})
+	if err := s.enqueue(testOp("run", "clear", "nuget", "ok", gate)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the gated operation to run", func() bool { return s.Snapshot().Operations.Current != nil })
+	if err := s.UninstallPackage("ripgrep"); err != nil {
+		t.Fatal(err)
+	}
+	s.setPkgErr("ripgrep", "E: x")
+	saveErr := errors.New("config.yaml: permission denied")
+	m.mu.Lock()
+	m.dropErr = saveErr
+	m.mu.Unlock()
+	if err := s.ForgetPackage("ripgrep"); !errors.Is(err, saveErr) {
+		t.Fatalf("ForgetPackage: %v, want %v", err, saveErr)
+	}
+	if q := s.Snapshot().Operations.Queued; q != 1 {
+		t.Fatalf("%d queued: a failed save must keep the removal", q)
+	}
+	if got := s.pkgErr("ripgrep"); got != "E: x" {
+		t.Fatalf("error %q: a failed save must keep it", got)
+	}
+	if got := m.List(); !slices.Equal(got, []string{"ripgrep"}) {
+		t.Fatalf("managed %q", got)
+	}
+	m.mu.Lock()
+	m.dropErr = nil
+	m.mu.Unlock()
+	close(gate)
+	r := waitRecent(t, s, 2)[0]
+	if r.Kind != "remove" || r.Outcome != "ok" || r.Message != "uninstalled ripgrep" {
+		t.Fatalf("operation %+v", r)
+	}
+}
+
 func TestForgetIsRefusedWhileAnOperationOnTheNameRuns(t *testing.T) {
 	apt := newFakeApt(installed("ripgrep", "14.1.0-1", "14.1.0-1"))
 	apt.block["remove"] = make(chan struct{})
