@@ -29,6 +29,7 @@ import (
 	"github.com/darkraise/ghr/internal/jobs"
 	"github.com/darkraise/ghr/internal/metrics"
 	"github.com/darkraise/ghr/internal/model"
+	"github.com/darkraise/ghr/internal/packages"
 	"github.com/darkraise/ghr/internal/runner"
 	"github.com/darkraise/ghr/internal/selfupdate"
 	"github.com/darkraise/ghr/internal/storage"
@@ -89,6 +90,13 @@ type Options struct {
 	// across restarts.
 	ArtifactKeysPath  string
 	ArtifactCachePath string
+	// OSReleasePath is read once at start to pick setup.sh's base packages
+	// for the host's release. AptListsPath is apt's index folder, whose
+	// newest InRelease file dates an index ghr did not refresh itself.
+	// PackagesIndexPath is touched after each apt index refresh ghr runs.
+	OSReleasePath     string
+	AptListsPath      string
+	PackagesIndexPath string
 
 	// Test seams: zero values use GitHub, systemd, Docker, the host, an HTTP
 	// download and SIGHUP.
@@ -125,6 +133,9 @@ func DefaultOptions() Options {
 		UpdateRecordPath:      "/var/lib/ghr/ghr-update.json",
 		ArtifactKeysPath:      "/etc/ghr/artifact-store-keys",
 		ArtifactCachePath:     "/var/lib/ghr/artifact-store-meta.json",
+		OSReleasePath:         "/etc/os-release",
+		AptListsPath:          "/var/lib/apt/lists",
+		PackagesIndexPath:     "/var/lib/ghr/packages-index",
 		Paths: runner.Paths{
 			Dist:        "/opt/ghr/dist/current",
 			Instances:   "/var/lib/ghr/instances",
@@ -258,8 +269,14 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 
 	tools := toolchain.New(toolchain.NewEnv(o.Paths.ToolCache, o.Paths.Home, runner.RunnerUser,
 		system.ExecGroupFor(InstallTimeout), system.ExecGroupIOFor(InstallTimeout), system.DownloadFor(InstallTimeout)))
+	// Without os-release the base set is the one setup.sh installs on any
+	// release other than Ubuntu 22.04.
+	osRelease, _ := os.ReadFile(o.OSReleasePath)
 	space := &storage.Service{Tools: tools, Docker: m.Disk, Home: o.Paths.Home, User: runner.RunnerUser,
-		Hold: m.HoldForMaintenance, Events: ev, Jobs: reg}
+		Hold: m.HoldForMaintenance, Events: ev, Jobs: reg,
+		Apt: packages.New(system.ExecGroupFor(packages.CommandTimeout)), Managed: managedList{store: store},
+		Base:     packages.Base(packages.ParseOSRelease(string(osRelease))),
+		AptLists: o.AptListsPath, IndexStamp: o.PackagesIndexPath}
 	space.Start()
 	m.PruneDone = space.Trigger
 
@@ -295,7 +312,7 @@ func start(ctx context.Context, o Options, store *Store, ev *events.Ring, hub *c
 
 	wake := make(chan struct{}, 1)
 	b := &Backend{
-		Store: store, M: m, GH: gh, Events: ev, Hist: hist, Space: space, GHS: ghs, AS: as,
+		Store: store, M: m, GH: gh, Events: ev, Hist: hist, Space: space, GHS: ghs, AS: as, Pkgs: space,
 		CheckToken: func(ctx context.Context, token, repo string) error {
 			c := github.New(owner, func() string { return token })
 			c.BaseURL = gh.BaseURL

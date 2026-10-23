@@ -109,5 +109,8 @@ func (b *Backend) fingerprints() map[string]uint64 {
 	if b.AS != nil {
 		count("artifact-store", b.AS.Version)
 	}
+	if b.Pkgs != nil {
+		count("packages", b.Pkgs.PackagesVersion)
+	}
 	return out
 }

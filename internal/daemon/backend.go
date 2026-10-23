@@ -1049,6 +1049,15 @@ func (b *Backend) Reload() ([]string, error) {
 	if b.Jobs != nil {
 		b.Jobs.Changed()
 	}
+	if b.Pkgs != nil {
+		// Reconcile reads dpkg and apt-cache, so the reload answers first.
+		ctx := b.background()
+		b.bg.Add(1)
+		go func() {
+			defer b.bg.Done()
+			b.Pkgs.ReconcilePackages(ctx)
+		}()
+	}
 	b.Events.Add("info", "", "config and token reloaded")
 	if b.GHS != nil {
 		if tokenChanged {

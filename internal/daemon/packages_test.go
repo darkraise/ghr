@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/darkraise/ghr/internal/model"
 	"github.com/darkraise/ghr/internal/packages"
@@ -166,4 +167,34 @@ func TestPackageErrorsMapToStatuses(t *testing.T) {
 	if _, err := b.Packages(context.Background()); err == nil || apiStatus(err) != 0 {
 		t.Fatalf("an unexpected error must pass through unchanged: %v", err)
 	}
+}
+
+func TestFingerprintsCountPackages(t *testing.T) {
+	b, _, _ := newBackend(t)
+	f := &fakePkgs{}
+	b.Pkgs = f
+	prev := b.fingerprints()
+	if _, ok := prev["packages"]; !ok {
+		t.Fatalf("no packages topic in %v", prev)
+	}
+	f.version.Add(1)
+	if got := changed(prev, b.fingerprints()); !slices.Equal(got, []string{"packages"}) {
+		t.Fatalf("a package operation changed %v", got)
+	}
+}
+
+func TestReloadReconcilesPackages(t *testing.T) {
+	b, _, _ := newBackend(t)
+	f := &fakePkgs{reconciled: make(chan struct{}, 1)}
+	b.Pkgs = f
+	if _, err := b.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-f.reconciled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a reload did not reconcile the managed packages")
+	}
+	b.StopBackground()
+	b.Wait()
 }
