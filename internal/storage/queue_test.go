@@ -407,3 +407,122 @@ func TestAvailableConvertsChoices(t *testing.T) {
 		t.Fatalf("unknown tool: %v", err)
 	}
 }
+
+// testOp is an operation that ends with outcome; with gate set, it first
+// waits for a send on gate or the end of its context.
+func testOp(id, kind, target, outcome string, gate chan struct{}) *op {
+	return &op{
+		Operation: model.Operation{ID: id, Kind: kind, Target: target},
+		finished:  make(chan struct{}),
+		run: func(ctx context.Context, progress func(string)) (string, string) {
+			if gate != nil {
+				select {
+				case <-gate:
+				case <-ctx.Done():
+					return "interrupted", ctx.Err().Error()
+				}
+			}
+			return outcome, kind + " " + target + " " + outcome
+		},
+	}
+}
+
+func recvFinished(t *testing.T, o *op) model.Operation {
+	t.Helper()
+	recvOrFail(t, o.finished, o.Kind+" "+o.Target+" to finish")
+	return o.result
+}
+
+func TestAQuietOperationStaysOutOfRecentOnlyWhenItSucceeds(t *testing.T) {
+	s, _ := queueService(t, &fakeTools{})
+	quietOK := testOp("1", "refresh", "apt index", "ok", nil)
+	quietOK.quiet = true
+	quietFailed := testOp("2", "refresh", "apt index 2", "failed", nil)
+	quietFailed.quiet = true
+	loud := testOp("3", "install", "apt jq", "ok", nil)
+	if err := s.enqueue(quietOK, quietFailed, loud); err != nil {
+		t.Fatal(err)
+	}
+	if r := recvFinished(t, quietOK); r.Outcome != "ok" || r.Message != "refresh apt index ok" || r.FinishedAt == nil || r.ID != "1" {
+		t.Fatalf("quiet result %+v", r)
+	}
+	recvFinished(t, quietFailed)
+	recvFinished(t, loud)
+	waitFor(t, "two recent operations", func() bool { return len(s.Snapshot().Operations.Recent) == 2 })
+	if got := recentOutcomes(s); !slices.Equal(got, []string{"install apt jq ok", "refresh apt index 2 failed"}) {
+		t.Fatalf("recent %q", got)
+	}
+}
+
+func TestEnqueueWaitingReturnsTheOperationAlreadyWaiting(t *testing.T) {
+	s, _ := queueService(t, &fakeTools{})
+	gate := make(chan struct{})
+	running := testOp("run", "install", "apt jq", "ok", gate)
+	if err := s.enqueue(running); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the gated operation to run", func() bool { return s.Snapshot().Operations.Current != nil })
+	first := testOp("a", "refresh", "apt index", "ok", nil)
+	got, err := s.enqueueWaiting(first)
+	if err != nil || got != first {
+		t.Fatalf("first enqueueWaiting %v, %v", got, err)
+	}
+	second := testOp("b", "refresh", "apt index", "ok", nil)
+	if got, err := s.enqueueWaiting(second); err != nil || got != first {
+		t.Fatalf("second enqueueWaiting returned %v, %v; want the first", got, err)
+	}
+	if q := s.Snapshot().Operations.Queued; q != 1 {
+		t.Fatalf("%d queued, want 1", q)
+	}
+	close(gate)
+	if r := recvFinished(t, first); r.Outcome != "ok" || r.ID != "a" {
+		t.Fatalf("result %+v", r)
+	}
+}
+
+func TestEnqueueWaitingRefusesAFullQueueAndAfterClose(t *testing.T) {
+	s := newService(t, &fakeTools{}, &fakeDisk{})
+	s.Start()
+	gate := make(chan struct{})
+	if err := s.enqueue(testOp("run", "install", "apt jq", "ok", gate)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the gated operation to run", func() bool { return s.Snapshot().Operations.Current != nil })
+	for i := range maxQueued {
+		if err := s.enqueue(testOp(strconv.Itoa(i), "install", "apt p"+strconv.Itoa(i), "ok", nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.enqueueWaiting(testOp("x", "refresh", "apt index", "ok", nil)); !errors.Is(err, ErrQueueFull) {
+		t.Fatalf("a full queue: %v, want ErrQueueFull", err)
+	}
+	queued := testOp("p0", "install", "apt p0", "ok", nil)
+	if got, err := s.enqueueWaiting(queued); err != nil || got.ID != "0" {
+		t.Fatalf("a full queue still returns the waiting operation: %v, %v", got, err)
+	}
+	s.Close()
+	s.Wait()
+	if _, err := s.enqueueWaiting(testOp("y", "refresh", "apt index", "ok", nil)); !errors.Is(err, ErrClosed) {
+		t.Fatalf("after Close: %v, want ErrClosed", err)
+	}
+}
+
+func TestCloseEndsTheOperationsItDrops(t *testing.T) {
+	s := newService(t, &fakeTools{}, &fakeDisk{})
+	s.Start()
+	gate := make(chan struct{})
+	running := testOp("run", "install", "apt jq", "ok", gate)
+	waiting := testOp("w", "refresh", "apt index", "ok", nil)
+	if err := s.enqueue(running, waiting); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the gated operation to run", func() bool { return s.Snapshot().Operations.Current != nil })
+	s.Close()
+	s.Wait()
+	if r := recvFinished(t, running); r.Outcome != "interrupted" {
+		t.Fatalf("running %+v", r)
+	}
+	if r := recvFinished(t, waiting); r.Outcome != "interrupted" || r.Message != "dropped: ghr is shutting down" {
+		t.Fatalf("dropped %+v", r)
+	}
+}

@@ -58,6 +58,13 @@ type Service struct {
 type op struct {
 	model.Operation
 	run func(ctx context.Context, progress func(step string)) (outcome, message string)
+	// quiet leaves a successful run out of recent, so a periodic task does
+	// not push the other operations out.
+	quiet bool
+	// finished, when set, is closed once result holds the ended operation,
+	// including one dropped at shutdown.
+	finished chan struct{}
+	result   model.Operation
 }
 
 func (s *Service) now() time.Time {
