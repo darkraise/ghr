@@ -21,6 +21,7 @@ import { SideLayout } from "@/components/page/side-layout"
 import { StatusPill } from "@/components/page/status-pill"
 import { RegistrationsGroup } from "@/components/registrations-group"
 import { RepoActivity } from "@/components/repo-activity"
+import { RepoRuns } from "@/components/repo-runs"
 import { RejectedAlert, SaveBar } from "@/components/save-bar"
 import { TagField } from "@/components/tag-field"
 import { UnsavedGuard } from "@/components/unsaved-guard"
@@ -321,6 +322,7 @@ function RepositoryForm({ name: urlName, section }: { name: string; section: str
         )}
       >
         {section === "" && <RepoActivity name={name} repo={repoStatus} now={now} />}
+        {section === "" && <RepoRuns name={name} now={now} />}
         {section === "settings" && (
           <div className="flex min-w-0 flex-col gap-6">
             <FieldGroup id="capacity" title="Capacity">

@@ -465,6 +465,64 @@ describe("repository page", () => {
   })
 })
 
+describe("repository workflow runs", () => {
+  const runs = () => within(screen.getByRole("region", { name: "Workflow runs" }))
+
+  it("lists the repository's own runs on the overview, in progress first", async () => {
+    mockApi(routes())
+    renderApp("/repositories/darkmem")
+    expect(await screen.findByRole("link", { name: /^Fix the cache key/ })).toBeInTheDocument()
+    const box = runs()
+    const heads = box.getAllByRole("rowheader").map((h) => h.textContent)
+    expect(heads[0]).toBe("In progress")
+    expect(box.getByRole("link", { name: /^Bump the runner/ })).toBeInTheDocument()
+    expect(box.queryByRole("link", { name: /^deploy/ })).not.toBeInTheDocument()
+    expect(box.queryByRole("link", { name: /^Publish the guide/ })).not.toBeInTheDocument()
+    expect(box.getByRole("link", { name: "All runs in Actions" })).toHaveAttribute("href", "/actions?repo=darkmem")
+  })
+
+  it("says when nothing of the repository is running", async () => {
+    mockApi(routes())
+    renderApp("/repositories/darkcloud")
+    expect(await screen.findByRole("link", { name: /^deploy/ })).toBeInTheDocument()
+    expect(runs().getByText("Nothing is running or queued.")).toBeInTheDocument()
+  })
+
+  it("shows the newest 10 finished runs", async () => {
+    const [, done] = fixtures.actions.runs
+    if (!done) throw new Error("fixture has too few runs")
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      ...done,
+      repo: "darkmem",
+      status: "completed",
+      conclusion: "success",
+      id: 500 + i,
+      title: `Run ${i}`,
+      started_at: `2026-10-03T13:${String(10 + i).padStart(2, "0")}:00Z`,
+      updated_at: `2026-10-03T13:${String(11 + i).padStart(2, "0")}:00Z`,
+    }))
+    mockApi(routes({ "GET /api/actions": { ...fixtures.actions, runs: many.reverse() } }))
+    renderApp("/repositories/darkmem")
+    expect(await screen.findByRole("link", { name: /^Run 11/ })).toBeInTheDocument()
+    expect(runs().getAllByRole("link", { name: /^Run \d+/ })).toHaveLength(10)
+    expect(runs().queryByRole("link", { name: /^Run 1,/ })).not.toBeInTheDocument()
+  })
+
+  it("reports a failed read with a retry", async () => {
+    mockApi(routes({ "GET /api/actions": () => json({ error: "bad gateway" }, 502) }))
+    renderApp("/repositories/darkmem")
+    expect(await screen.findByText("bad gateway")).toBeInTheDocument()
+    expect(runs().getByRole("button", { name: "Try again" })).toBeInTheDocument()
+  })
+
+  it("says when GitHub could not be read for the repository", async () => {
+    const repos = fixtures.actions.repos.map((r) => (r.repo === "darkmem" ? { ...r, error: "GitHub rate limit; API calls are paused" } : r))
+    mockApi(routes({ "GET /api/actions": { ...fixtures.actions, repos } }))
+    renderApp("/repositories/darkmem")
+    expect(await screen.findByText(/^darkmem: GitHub rate limit; API calls are paused/)).toBeInTheDocument()
+  })
+})
+
 const PUBLIC_HELP = "Jobs started from a fork, such as a fork's pull request, are refused. A workflow that runs untrusted code on another event, such as an issue comment or a merge queue, still runs it on this host."
 
 const publicConfig: Config = {

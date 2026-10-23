@@ -5,71 +5,25 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "d
 import { Spinner } from "darkraise-ui/components/spinner"
 import { ToggleGroup, ToggleGroupItem } from "darkraise-ui/components/toggle-group"
 import { PageHeader } from "darkraise-ui/layout"
-import { BookMarked } from "lucide-react"
 import { useEffect } from "react"
 import { useActions, useConfig } from "@/api/hooks"
-import type { ActionsRun } from "@/api/types"
+import { ActionsRunTable } from "@/components/actions-run-table"
 import { ErrorLine } from "@/components/page/error-line"
-import { RunGroup, RunRow, RunValue } from "@/components/page/run-row"
 import { Section } from "@/components/page/section"
-import { RunStatusIcon } from "@/components/run-status-icon"
 import {
   actionsSummary,
   repoErrorText,
-  runMs,
   splitRuns,
-  startText,
   STATUS_FILTERS,
   type ActionsSearch,
   type ActionsStatus,
 } from "@/lib/actions"
-import { dur } from "@/lib/format"
-import { groupByDayOf } from "@/lib/history"
 import { ALL_REPOS } from "@/lib/repos"
-import { runCols } from "@/lib/run-cols"
 import { useMediaQuery } from "@/lib/use-media-query"
 import { useNow } from "@/lib/use-now"
 import { errorText } from "@/query"
 
 const ALL = "__all__"
-
-const REPO = "inline-flex items-center gap-1 font-semibold text-foreground"
-const BRANCH = "rounded-full bg-branch px-2 py-0.5 font-mono text-xs text-primary"
-const GHR = "rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-foreground"
-
-function ActionRow({ run, now, wide }: { run: ActionsRun; now: number; wide: boolean }) {
-  const by = [run.event, run.actor && `by ${run.actor}`].filter(Boolean).join(" ")
-  return (
-    <RunRow
-      wide={wide}
-      icon={<RunStatusIcon status={run.status} conclusion={run.conclusion} />}
-      title={
-        <Link to="/actions/$repo/runs/$id" params={{ repo: run.repo, id: String(run.id) }} className="hover:text-primary hover:underline">
-          {run.title}
-          <span className="sr-only">{`, ${run.repo} #${run.run_number}`}</span>
-        </Link>
-      }
-      facts={
-        <>
-          <span className={REPO}>
-            <BookMarked size={13} aria-hidden="true" className="shrink-0" />
-            {run.repo}
-          </span>
-          <span>{`${run.workflow} #${run.run_number}`}</span>
-          {by && <span>{by}</span>}
-          {run.branch && <span className={BRANCH}>{run.branch}</span>}
-          {run.ghr && <span className={GHR}>ghr</span>}
-        </>
-      }
-      values={
-        <>
-          <RunValue kind="time">{startText(run.started_at, now)}</RunValue>
-          <RunValue kind="duration">{dur(runMs(run, now))}</RunValue>
-        </>
-      }
-    />
-  )
-}
 
 export function ActionsPage() {
   const search = useSearch({ from: "/app/actions" })
@@ -191,37 +145,9 @@ export function ActionsPage() {
     )
   } else {
     const shown = active.length + recent.length
-    const cols = runCols(wide, false)
     title = `${shown} workflow ${shown === 1 ? "run" : "runs"}`
     flush = true
-    body = (
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse">
-          {(active.length > 0 || status === "active") && (
-            <tbody>
-              <RunGroup label="In progress" cols={cols} />
-              {active.length === 0 ? (
-                <tr>
-                  <td colSpan={cols} className="px-4 py-3 text-sm text-muted-foreground">
-                    Nothing is running or queued.
-                  </td>
-                </tr>
-              ) : (
-                active.map((r) => <ActionRow key={`${r.repo}#${r.id}`} run={r} now={now} wide={wide} />)
-              )}
-            </tbody>
-          )}
-          {groupByDayOf(recent, (r) => r.started_at, now).map((g) => (
-            <tbody key={g.key}>
-              <RunGroup label={g.label} cols={cols} />
-              {g.rows.map((r) => (
-                <ActionRow key={`${r.repo}#${r.id}`} run={r} now={now} wide={wide} />
-              ))}
-            </tbody>
-          ))}
-        </table>
-      </div>
-    )
+    body = <ActionsRunTable active={active} recent={recent} now={now} wide={wide} showActive={status === "active"} />
   }
 
   const watchLink = (
