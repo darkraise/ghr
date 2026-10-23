@@ -1,0 +1,53 @@
+{
+  "index_updated_at": "2026-10-03T11:05:00Z",
+  "managed": [
+    {
+      "name": "ripgrep",
+      "version": "14.1.0-1",
+      "candidate": "14.1.1-1",
+      "description": "Recursively searches directories for a regex pattern",
+      "installed": true,
+      "upgradable": true,
+      "bytes": 5120000
+    },
+    {
+      "name": "shellcheck",
+      "version": "0.10.0-1",
+      "candidate": "0.10.0-1",
+      "description": "lint tool for shell scripts",
+      "installed": true,
+      "bytes": 21000000
+    },
+    {
+      "name": "yq",
+      "installed": false,
+      "bytes": 0,
+      "error": "no installation candidate in the configured apt sources"
+    }
+  ],
+  "base": [
+    {
+      "name": "curl",
+      "version": "8.14.1-2",
+      "description": "command line tool for transferring data with URL syntax",
+      "installed": true,
+      "bytes": 500000
+    },
+    {
+      "name": "jq",
+      "version": "1.7.1-6",
+      "description": "lightweight and flexible command-line JSON processor",
+      "installed": true,
+      "bytes": 120000
+    }
+  ],
+  "detected": [
+    {
+      "name": "vim",
+      "version": "2:9.1.1230-2",
+      "description": "Vi IMproved - enhanced vi editor",
+      "installed": true,
+      "bytes": 4100000
+    }
+  ]
+}
