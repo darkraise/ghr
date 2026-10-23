@@ -45,6 +45,8 @@ export const keys = {
   labelCheck: (name: string) => ["label-check", name] as const,
   registrations: (name: string) => ["registrations", name] as const,
   toolchainChoices: (tool: string) => ["toolchain-choices", tool] as const,
+  packages: ["packages"] as const,
+  packageSearch: (term: string) => ["packages", "search", term] as const,
 }
 
 export function useStatus() {
@@ -393,5 +395,21 @@ export function useToolchainChoices(tool: string, enabled: boolean) {
     queryKey: keys.toolchainChoices(tool),
     queryFn: ({ signal }) => api.toolchainChoices(tool, signal),
     enabled: enabled && tool !== "",
+  })
+}
+
+export function usePackages() {
+  const live = useLive()
+  return useQuery({ queryKey: keys.packages, queryFn: ({ signal }) => api.packages(signal), refetchInterval: livePoll(live, POLL_SLOW) })
+}
+
+// The daemon refuses any other term with 400, so the dialog asks only once
+// the term is valid. A search runs apt-cache, so its answer is kept a minute.
+export function usePackageSearch(term: string) {
+  return useQuery({
+    queryKey: keys.packageSearch(term),
+    queryFn: ({ signal }) => api.searchPackages(term, signal),
+    enabled: /^[a-z0-9+.-]{2,64}$/.test(term),
+    staleTime: 60_000,
   })
 }

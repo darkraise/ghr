@@ -7,7 +7,7 @@ import { json, mockApi } from "@/test/api"
 import { authedRoutes, fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
 import { trackQueryClient } from "@/test/query-clients"
-import { keys, POLL_SLOW, useActivity, useConfig, useEvents, useHistory, useMetrics, useStatus, useStorage, useToken } from "./hooks"
+import { keys, POLL_SLOW, useActivity, useConfig, useEvents, useHistory, useMetrics, usePackages, useStatus, useStorage, useToken } from "./hooks"
 import { liveConfig, RETRY_MIN, setLive, useLive } from "./live"
 import { invalidateTopics, TOPIC_QUERIES, useChangeStream } from "./use-change-stream"
 
@@ -21,6 +21,8 @@ const seeded = [
   keys.githubStorage,
   keys.artifactStore,
   keys.artifactRunObjects("darkmem", 102),
+  keys.packages,
+  keys.packageSearch("rip"),
   keys.activity("1h", "UTC", ""),
   keys.history("", "", ""),
   keys.events("e1"),
@@ -40,18 +42,33 @@ function invalidated(qc: QueryClient): string[] {
     .sort()
 }
 
-const ALL = ["activity", "artifact-store", "artifact-store", "config", "events", "github-storage", "history", "metrics", "status", "storage", "token"]
+const ALL = [
+  "activity",
+  "artifact-store",
+  "artifact-store",
+  "config",
+  "events",
+  "github-storage",
+  "history",
+  "metrics",
+  "packages",
+  "packages",
+  "status",
+  "storage",
+  "token",
+]
 
 describe("invalidateTopics", () => {
   it.each<[string, string[]]>([
     ["status", ["activity", "status"]],
     ["gauges", ["status", "token"]],
     ["events", ["events"]],
-    ["config", ["activity", "artifact-store", "artifact-store", "config", "github-storage"]],
+    ["config", ["activity", "artifact-store", "artifact-store", "config", "github-storage", "packages", "packages"]],
     ["token", ["token"]],
     ["storage", ["storage"]],
     ["github-storage", ["github-storage"]],
     ["artifact-store", ["artifact-store", "artifact-store"]],
+    ["packages", ["packages", "packages"]],
     ["history", ["activity", "history"]],
     ["metrics", ["activity", "metrics"]],
   ])("%s invalidates exactly its queries", (topic, want) => {
@@ -77,6 +94,7 @@ describe("invalidateTopics", () => {
       "github-storage",
       "history",
       "metrics",
+      "packages",
       "status",
       "storage",
       "token",
@@ -202,7 +220,7 @@ describe("useChangeStream", () => {
   })
 
   describe("with the app's query client", () => {
-    const PATHS = ["/api/status", "/api/config", "/api/metrics", "/api/token", "/api/storage", "/api/activity", "/api/history", "/api/events"]
+    const PATHS = ["/api/status", "/api/config", "/api/metrics", "/api/token", "/api/storage", "/api/activity", "/api/history", "/api/events", "/api/packages"]
     const each = (n: number) => PATHS.map(() => n)
     const HELLO = "event: hello\ndata: {}\n\n"
 
@@ -216,6 +234,7 @@ describe("useChangeStream", () => {
       useActivity("1h")
       useHistory("", "", "2026-10-01T00:00:00Z")
       useEvents("e1")
+      usePackages()
     }
 
     function draw(changes: () => Response) {

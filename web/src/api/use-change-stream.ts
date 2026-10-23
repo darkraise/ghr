@@ -9,13 +9,16 @@ export const TOPIC_QUERIES: Record<string, readonly QueryKey[]> = {
   status: [keys.status, ["activity"]],
   gauges: [keys.status, keys.token],
   events: [["events"]],
-  // The snapshots' cleanup and covered columns follow the config.
-  config: [keys.config, ["activity"], keys.githubStorage, keys.artifactStore],
+  // The snapshots' cleanup and covered columns follow the config, and so
+  // does the managed package list.
+  config: [keys.config, ["activity"], keys.githubStorage, keys.artifactStore, keys.packages],
   token: [keys.token],
   storage: [keys.storage],
   "github-storage": [keys.githubStorage],
   // Also a prefix of every run page's RustFS rows.
   "artifact-store": [keys.artifactStore],
+  // A prefix: it also matches every package search.
+  packages: [keys.packages],
   history: [["history"], ["activity"]],
   metrics: [keys.metrics, ["activity"]],
 }

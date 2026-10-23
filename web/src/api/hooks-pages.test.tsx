@@ -4,7 +4,7 @@ import type { JobLog, LabelCheck, Status, Storage } from "@/api/types"
 import { mockApi } from "@/test/api"
 import { fixtures } from "@/test/fixtures"
 import { withQuery } from "@/test/query"
-import { storageBusy, useAvailableRepos, useJobLog, useLabelCheck } from "./hooks"
+import { keys, storageBusy, useAvailableRepos, useJobLog, useLabelCheck, usePackages, usePackageSearch } from "./hooks"
 
 const idle: Storage = {
   ...fixtures.storage,
@@ -93,5 +93,34 @@ describe("useAvailableRepos", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe("usePackages", () => {
+  it("reads the package list under its key", async () => {
+    mockApi({ "GET /api/packages": fixtures.packages })
+    const { wrapper, queryClient } = withQuery()
+    const { result } = renderHook(() => usePackages(), { wrapper })
+    await waitFor(() => expect(result.current.data?.managed?.map((p) => p.name)).toEqual(["ripgrep", "shellcheck", "yq"]))
+    expect(queryClient.getQueryData(keys.packages)).toEqual(fixtures.packages)
+  })
+})
+
+describe("usePackageSearch", () => {
+  it.each([[""], ["r"], ["Rip"], ["rip grep"], ["a".repeat(65)]])("asks nothing for the term %j", async (term) => {
+    const { calls } = mockApi({ "GET /api/packages/search": fixtures.packageSearch })
+    const { wrapper } = withQuery()
+    renderHook(() => usePackageSearch(term), { wrapper })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(calls).toHaveLength(0)
+  })
+
+  it("searches a valid term, under a key the packages topic covers", async () => {
+    const { calls } = mockApi({ "GET /api/packages/search": fixtures.packageSearch })
+    const { wrapper } = withQuery()
+    const { result } = renderHook(() => usePackageSearch("rip"), { wrapper })
+    await waitFor(() => expect(result.current.data).toHaveLength(2))
+    expect(calls.map((c) => c.search)).toEqual(["?q=rip"])
+    expect(keys.packageSearch("rip").slice(0, 1)).toEqual(keys.packages)
   })
 })

@@ -12,6 +12,8 @@ import jobLogJson from "@/api/fixtures/job-log.json"
 import labelCheckJson from "@/api/fixtures/label-check.json"
 import logJson from "@/api/fixtures/log.json"
 import metricsJson from "@/api/fixtures/metrics.json"
+import packageSearchJson from "@/api/fixtures/package-search.json"
+import packagesJson from "@/api/fixtures/packages.json"
 import registrationsJson from "@/api/fixtures/registrations.json"
 import runAnnotationsJson from "@/api/fixtures/run-annotations.json"
 import runDetailJson from "@/api/fixtures/run-detail.json"
@@ -35,6 +37,8 @@ import type {
   LabelCheck,
   LogChunk,
   Metrics,
+  PackageInfo,
+  Packages,
   Registration,
   RunAnnotations,
   RunDetail,
@@ -70,6 +74,8 @@ const githubStorage: GitHubStorage = githubStorageJson
 const storageAlert: StorageAlert = storageAlertJson
 // The JSON import types state as a plain string.
 const artifactStore = artifactStoreJson as ArtifactStore
+const packages: Packages = packagesJson
+const packageSearch: PackageInfo[] = packageSearchJson
 
 export const fixtures = {
   status,
@@ -95,6 +101,8 @@ export const fixtures = {
   githubStorage,
   storageAlert,
   artifactStore,
+  packages,
+  packageSearch,
 }
 
 export function authedRoutes(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -110,6 +118,7 @@ export function authedRoutes(over: Record<string, unknown> = {}): Record<string,
     "GET /api/actions": fixtures.actions,
     "GET /api/github-storage": fixtures.githubStorage,
     "GET /api/artifact-store": fixtures.artifactStore,
+    "GET /api/packages": fixtures.packages,
     ...over,
   }
 }
