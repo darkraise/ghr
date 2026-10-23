@@ -150,6 +150,20 @@ describe("Toolchains accessibility", () => {
       renderApp("/settings/toolchains")
       await screen.findByRole("img", { name: /^Tool cache: / })
       await screen.findByText("Installing node 24, extracting, 1 more queued")
+      await screen.findByRole("table", { name: "Managed packages" })
+      expect(await violations()).toEqual([])
+    },
+    30_000,
+  )
+
+  it(
+    "has no axe violations with the package folds open",
+    async () => {
+      mockApi(authedRoutes())
+      const { user } = renderApp("/settings/toolchains")
+      await user.click(await screen.findByRole("button", { name: "Base packages (2)" }))
+      await user.click(screen.getByRole("button", { name: "Installed, not managed (1)" }))
+      await screen.findByRole("list", { name: "Installed, not managed" })
       expect(await violations()).toEqual([])
     },
     30_000,

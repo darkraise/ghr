@@ -2,6 +2,7 @@ import { Spinner } from "darkraise-ui/components/spinner"
 import { PageHeader } from "darkraise-ui/layout"
 import { useStatus, useStorage } from "@/api/hooks"
 import { ErrorLine } from "@/components/page/error-line"
+import { PackageSection } from "@/components/package-section"
 import { ToolchainActions } from "@/components/toolchain-actions"
 import { InstalledSection } from "@/components/toolchain-sections"
 import { toolchainsSummary } from "@/lib/toolchains"
@@ -22,6 +23,7 @@ export function ToolchainsPage() {
       ) : (
         !storage.isError && <Spinner label="Loading" />
       )}
+      <PackageSection status={status.data} offline={offline} />
     </div>
   )
 }
