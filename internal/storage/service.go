@@ -75,6 +75,9 @@ type op struct {
 	// quiet leaves a successful run out of recent, so a periodic task does
 	// not push the other operations out.
 	quiet bool
+	// key, when set, names the work in place of Target, which may be cut
+	// short, when enqueue looks for the same operation already waiting.
+	key string
 	// finished, when set, is closed once result holds the ended operation,
 	// including one dropped at shutdown.
 	finished chan struct{}

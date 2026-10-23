@@ -336,7 +336,7 @@ func (s *Service) UpgradePackages(names []string, all bool) error {
 	if !s.aptOn() {
 		return packages.ErrUnavailable
 	}
-	target := upgradeAllTarget
+	target, key := upgradeAllTarget, ""
 	if !all {
 		if len(names) == 0 {
 			return packages.ErrNoNames
@@ -350,13 +350,14 @@ func (s *Service) UpgradePackages(names []string, all bool) error {
 				return fmt.Errorf("%w: %s", packages.ErrBase, n)
 			}
 		}
-		target = "apt " + strings.Join(names, ", ")
+		key = "apt " + strings.Join(names, ", ")
+		target = key
 		if len(target) > 80 {
 			target = target[:77] + "..."
 		}
 	}
 	names = slices.Clone(names)
-	return s.enqueue(s.pkgOp("upgrade", target, func(ctx context.Context, progress func(string)) (string, string) {
+	o := s.pkgOp("upgrade", target, func(ctx context.Context, progress func(string)) (string, string) {
 		// The list may have changed since the request was queued.
 		var keep []string
 		for _, n := range s.Managed.List() {
@@ -393,7 +394,9 @@ func (s *Service) UpgradePackages(names []string, all bool) error {
 			return interruptedOr(ctx, "failed"), err.Error()
 		}
 		return "ok", "upgraded " + strings.Join(up, ", ")
-	}))
+	})
+	o.key = key
+	return s.enqueue(o)
 }
 
 // UninstallPackage queues the removal of a managed package. dpkg refuses it

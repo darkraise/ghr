@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -705,6 +706,58 @@ func TestAnUpgradeSkipsNamesForgottenWhileItWaited(t *testing.T) {
 	}
 	if got := apt.callList(); len(got) != 0 {
 		t.Fatalf("apt calls %q: no name left means no refresh", got)
+	}
+}
+
+func TestANamedUpgradeTargetIsCutAt80Characters(t *testing.T) {
+	a, b := "p"+strings.Repeat("a", 30), "p"+strings.Repeat("b", 30)
+	for _, c := range []struct {
+		third, target string
+	}{
+		{"qqqqq11111", "apt " + a + ", " + b + ", qqqqq11111"},
+		{"qqqqq111111", "apt " + a + ", " + b + ", qqqqq11..."},
+	} {
+		t.Run(strconv.Itoa(len("apt "+a+", "+b+", "+c.third)), func(t *testing.T) {
+			names := []string{a, b, c.third}
+			apt := newFakeApt(installed(a, "1.0", "1.1"), installed(b, "1.0", "1.1"), installed(c.third, "1.0", "1.1"))
+			s, _, _ := pkgService(t, apt, names...)
+			startService(t, s)
+			if err := s.UpgradePackages(names, false); err != nil {
+				t.Fatal(err)
+			}
+			r := waitRecent(t, s, 1)[0]
+			if r.Target != c.target || len(r.Target) != 80 || r.Message != "upgraded "+strings.Join(names, ", ") {
+				t.Fatalf("operation %+v", r)
+			}
+		})
+	}
+}
+
+func TestTwoNamedUpgradesWithTheSameCutTargetBothRun(t *testing.T) {
+	a, b := "p"+strings.Repeat("a", 30), "p"+strings.Repeat("b", 30)
+	c, d := "qqqqqqq1111", "qqqqqqq2222"
+	apt := newFakeApt(installed(a, "1.0", "1.1"), installed(b, "1.0", "1.1"), installed(c, "1.0", "1.1"), installed(d, "1.0", "1.1"))
+	s, _, _ := pkgService(t, apt, a, b, c, d)
+	startService(t, s)
+	gate := gateWorker(t, s)
+	for _, third := range []string{c, d} {
+		if err := s.UpgradePackages([]string{a, b, third}, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if q := s.Snapshot().Operations.Queued; q != 2 {
+		t.Fatalf("%d queued, want both upgrades", q)
+	}
+	if err := s.UpgradePackages([]string{a, b, d}, false); err != nil {
+		t.Fatal(err)
+	}
+	if q := s.Snapshot().Operations.Queued; q != 2 {
+		t.Fatalf("%d queued: the same upgrade again waits once", q)
+	}
+	close(gate)
+	rs := waitRecent(t, s, 3)
+	if rs[0].Target != rs[1].Target || rs[0].Message != "upgraded "+d || rs[1].Message != "upgraded "+strings.Join([]string{a, b, c}, ", ") {
+		t.Fatalf("recent %+v", rs[:2])
 	}
 }
 

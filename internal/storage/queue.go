@@ -44,8 +44,18 @@ func (s *Service) hold(ctx context.Context) (func(), error) {
 	return s.Hold(ctx)
 }
 
+func (o *op) workKey() string {
+	if o.key != "" {
+		return o.key
+	}
+	return o.Target
+}
+
+func sameWork(a, b *op) bool { return a.Kind == b.Kind && a.workKey() == b.workKey() }
+
 // enqueue queues ops after the waiting ones, leaving out any whose kind and
-// target already wait. It queues none of them when they would not all fit.
+// key, or target without a key, already wait. It queues none of them when
+// they would not all fit.
 func (s *Service) enqueue(ops ...*op) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -54,7 +64,7 @@ func (s *Service) enqueue(ops ...*op) error {
 	}
 	var add []*op
 	for _, o := range ops {
-		queued := func(q *op) bool { return q.Kind == o.Kind && q.Target == o.Target }
+		queued := func(q *op) bool { return sameWork(q, o) }
 		if !slices.ContainsFunc(s.queue, queued) && !slices.ContainsFunc(add, queued) {
 			add = append(add, o)
 		}
@@ -76,7 +86,7 @@ func (s *Service) enqueueWaiting(o *op) (*op, error) {
 		return nil, ErrClosed
 	}
 	for _, q := range s.queue {
-		if q.Kind == o.Kind && q.Target == o.Target {
+		if sameWork(q, o) {
 			return q, nil
 		}
 	}
