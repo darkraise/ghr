@@ -35,6 +35,7 @@ web:                          # browser UI; set its password with ghr web set-pa
 #   prune: { enabled: true, every: 24h }                # at least 1h; off, old history and logs are kept and a full disk is not pruned
 #   storage_measure: { enabled: true, every: 30m }      # at least 5m
 #   package_index: { enabled: true, every: 24h }        # at least 1h; refreshes the apt index, then reinstalls missing managed packages
+# packages: [ripgrep, shellcheck]  # apt packages from the host's apt sources; ghr installs them and reinstalls any that go missing; Settings → Toolchains edits it
 repos: []
 # A repository entry, as `ghr repo add` and the web UI write it:
 #   - name: my-repo

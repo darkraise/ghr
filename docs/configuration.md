@@ -35,6 +35,7 @@ jobs:                       # background tasks; see Background tasks below
   runner_update_check: { enabled: true, every: 24h }
   prune: { enabled: true, every: 24h }
   storage_measure: { enabled: true, every: 30m }
+  package_index: { enabled: true, every: 24h }
 repos:
   - name: my-repo
     max: 1                  # jobs at once; 0 = unlimited
@@ -43,6 +44,7 @@ repos:
     cleanup_name_prefixes: [my-repo-]   # when a runner ends, also remove containers whose names start with these; with max above 1 this can hit a concurrent job's containers, including another repository's whose names share the prefix
     allow_public: true      # required to serve a public repository; jobs whose event comes from a fork are refused even then, by ending the runner's worker process (see SECURITY.md)
 watch_repos: [other-repo]   # shown on the Actions page; ghr runs no runners for them
+packages: [ripgrep, shellcheck]   # apt packages ghr installs and reinstalls when missing; see toolchains.md
 ```
 
 Durations take `s`, `m`, `h` and `d` suffixes.
@@ -50,6 +52,8 @@ Durations take `s`, `m`, `h` and `d` suffixes.
 `artifact_store.endpoint` takes `https://host[:port]` for any host, or `http://ip[:port]` when the IP address is private, loopback or link-local, such as `http://192.168.1.20:9000`. It refuses a path (a trailing `/` included), `http://` with a host name, `localhost` included, and `http://` with any other address, carrier-grade NAT addresses in `100.64.0.0/10` among them. A refused endpoint fails with `artifact_store.endpoint:` followed by the reason; [Self-hosted artifacts](self-hosted-artifacts.md#the-endpoint) gives the rule in full.
 
 A ghr release from before [self-hosted artifacts](self-hosted-artifacts.md) refuses a config with an `artifact_store` block, because config loading rejects fields it does not know. Remove the block before downgrading.
+
+`packages` lists the apt packages ghr manages; [System packages](toolchains.md#system-packages) describes them. A name that is not a valid package name, or that is listed twice, is dropped with a warning when the config loads. A ghr release from before system packages refuses a config with `packages` or `jobs.package_index`; remove both before downgrading.
 
 When a runner ends, ghr archives its diagnostic logs, the `Runner_*.log` and `Worker_*.log` files that `ghr logs` shows, each cut to its first 16 MiB, and removes them `history_retention` after the job ended. Step output is not kept; GitHub has it.
 
@@ -68,6 +72,7 @@ The `jobs` block schedules the work ghr does on its own. Each task has `enabled`
 | `runner_update_check` | asks GitHub for the newest runner release and its forced-update deadline; runs at start, then on its interval | 1h |
 | `prune` | removes history and logs older than `history_retention`; while on, a disk above `disk_high_water` also prunes Docker | 1h |
 | `storage_measure` | measures the disk use of Docker, toolchains and package caches for the Storage page | 5m |
+| `package_index` | refreshes the apt package index, then installs managed packages that are missing | 1h |
 
 ghr refuses a shorter interval. Turning two of the tasks off writes a warning to Events:
 
@@ -115,4 +120,4 @@ ghr version
 journalctl -u ghr -f          # the daemon's log
 ```
 
-The toolchain, cache, storage and prune commands are described in [Toolchains and caches](toolchains.md).
+The toolchain, cache, storage, prune and package commands are described in [Toolchains and caches](toolchains.md).
