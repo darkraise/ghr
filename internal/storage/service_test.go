@@ -31,6 +31,9 @@ func startService(t *testing.T, s *Service) {
 		s.Close()
 		s.Wait()
 	})
+	// Until the start-up reconcile returns it may clear an error a test sets
+	// or queue an install of a name a test lists.
+	recvOrFail(t, s.Reconciled(), "the start-up reconcile")
 }
 
 func recvOrFail(t *testing.T, ch <-chan struct{}, what string) {
