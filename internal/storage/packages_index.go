@@ -16,6 +16,7 @@ import (
 // reconcile.
 func (s *Service) indexLoop() {
 	s.ReconcilePackages(s.ctx)
+	close(s.reconciled)
 	until := func() time.Duration { return s.Jobs.Until(config.JobPackageIndex, s.now()) }
 	timer := time.NewTimer(until())
 	defer timer.Stop()
@@ -43,6 +44,11 @@ func (s *Service) indexLoop() {
 		timer.Reset(until())
 	}
 }
+
+// Reconciled is closed once the start-up reconcile has queued its installs
+// and read the managed list, so a later change to the list is left to the
+// next reload or package_index run.
+func (s *Service) Reconciled() <-chan struct{} { return s.reconciled }
 
 // runIndexTask refreshes the index through the queue and returns the
 // refresh's outcome. A refresh already queued, by the API say, is waited on

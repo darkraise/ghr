@@ -65,7 +65,9 @@ type Service struct {
 	wake    chan struct{}
 	jobWake chan struct{}
 	pkgWake chan struct{}
-	wg      sync.WaitGroup
+	// reconciled is closed once the start-up reconcile has returned.
+	reconciled chan struct{}
+	wg         sync.WaitGroup
 }
 
 // op is one queued operation; run returns its outcome and message.
@@ -113,6 +115,7 @@ func (s *Service) Start() {
 		}
 	})
 	s.pkgWake = make(chan struct{}, 1)
+	s.reconciled = make(chan struct{})
 	s.Jobs.Register(config.JobPackageIndex, func() {
 		select {
 		case s.pkgWake <- struct{}{}:

@@ -720,6 +720,13 @@ func (s *accStack) start() {
 		s.b.StopBackground()
 		s.b.Wait()
 	})
+	// The start-up reconcile runs in the background; until it returns it may
+	// pick up a name a test lists after start, or bump the packages topic.
+	select {
+	case <-s.svc.Reconciled():
+	case <-time.After(10 * time.Second):
+		s.t.Fatal("the start-up reconcile did not return")
+	}
 }
 
 func (s *accStack) do(method, path, body string) (int, string) {
