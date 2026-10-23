@@ -63,11 +63,45 @@ func (s *Service) enqueue(ops ...*op) error {
 		return ErrQueueFull
 	}
 	s.queue = append(s.queue, add...)
+	s.wakeWorker()
+	return nil
+}
+
+// enqueueWaiting queues o unless an operation of its kind and target already
+// waits, and returns the operation that waits: o, or the one queued before.
+func (s *Service) enqueueWaiting(o *op) (*op, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, ErrClosed
+	}
+	for _, q := range s.queue {
+		if q.Kind == o.Kind && q.Target == o.Target {
+			return q, nil
+		}
+	}
+	if len(s.queue) >= maxQueued {
+		return nil, ErrQueueFull
+	}
+	s.queue = append(s.queue, o)
+	s.wakeWorker()
+	return o, nil
+}
+
+// wakeWorker wakes the worker after a queue change; s.mu must be held.
+func (s *Service) wakeWorker() {
 	select {
 	case s.wake <- struct{}{}:
 	default:
 	}
-	return nil
+}
+
+// end hands a finished or dropped operation's result to whoever waits on it.
+func (o *op) end(result model.Operation) {
+	if o.finished != nil {
+		o.result = result
+		close(o.finished)
+	}
 }
 
 // work runs queued operations one at a time until Close, then drops the
@@ -82,6 +116,9 @@ func (s *Service) work() {
 			s.mu.Unlock()
 			for _, o := range dropped {
 				s.Events.Add("warn", "", "%s %s dropped: ghr is shutting down", o.Kind, o.Target)
+				d := o.Operation
+				d.Outcome, d.Message = "interrupted", "dropped: ghr is shutting down"
+				o.end(d)
 			}
 			return
 		}
@@ -112,11 +149,14 @@ func (s *Service) work() {
 		done.FinishedAt, done.Outcome, done.Message = &finished, outcome, msg
 		s.mu.Lock()
 		s.current = nil
-		s.recent = append([]model.Operation{done}, s.recent...)
-		if len(s.recent) > recentOps {
-			s.recent = s.recent[:recentOps]
+		if !o.quiet || outcome != "ok" {
+			s.recent = append([]model.Operation{done}, s.recent...)
+			if len(s.recent) > recentOps {
+				s.recent = s.recent[:recentOps]
+			}
 		}
 		s.mu.Unlock()
+		o.end(done)
 		level := "info"
 		if outcome != "ok" && outcome != "skipped" {
 			level = "warn"
