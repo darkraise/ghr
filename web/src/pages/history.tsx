@@ -11,7 +11,7 @@ import { HISTORY_LIMIT, useActivity, useConfig, useHistory } from "@/api/hooks"
 import type { ActivityBucket, HistoryEntry } from "@/api/types"
 import { BucketsChart } from "@/components/buckets-chart"
 import { ErrorLine } from "@/components/page/error-line"
-import { RunGroup, RunRow, RunValue } from "@/components/page/run-row"
+import { RepoFact, RunGroup, RunRow, RunValue } from "@/components/page/run-row"
 import { Section } from "@/components/page/section"
 import { ResultIcon } from "@/components/result-icon"
 import { WindowControl } from "@/components/window-control"
@@ -83,8 +83,8 @@ function HistoryRow({ entry, longest, wide }: { entry: HistoryEntry; longest: nu
       }
       facts={
         <>
+          <RepoFact name={entry.repo} />
           <span>{entry.workflow}</span>
-          <span>{entry.repo}</span>
           <span className="font-mono">#{entry.run_number}</span>
         </>
       }

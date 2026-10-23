@@ -48,7 +48,9 @@ describe("History page", () => {
     expect(link).toHaveAttribute("href", `/actions/${entry.repo}/runs/${entry.run_id}`)
     const row = link.closest("tr") as HTMLElement
     expect(within(row).getByText(entry.workflow)).toBeInTheDocument()
-    expect(within(row).getByText(entry.repo)).toBeInTheDocument()
+    const repo = within(row).getByText(entry.repo)
+    expect(repo).toHaveClass("font-semibold", "text-foreground")
+    expect(repo.parentElement?.firstElementChild).toBe(repo)
     expect(within(row).getByText(`#${entry.run_number}`)).toBeInTheDocument()
     expect(within(row).getByRole("img", { name: resultWord(entry.conclusion) })).toBeInTheDocument()
   })

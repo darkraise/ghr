@@ -1,4 +1,4 @@
-import { Calendar, Clock } from "lucide-react"
+import { BookMarked, Calendar, Clock } from "lucide-react"
 import type { ReactNode } from "react"
 
 export function RunValue({ kind, children }: { kind: "time" | "duration"; children: ReactNode }) {
@@ -7,6 +7,15 @@ export function RunValue({ kind, children }: { kind: "time" | "duration"; childr
     <span className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
       <Icon size={13} aria-hidden="true" className="shrink-0" />
       {children}
+    </span>
+  )
+}
+
+export function RepoFact({ name }: { name: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 font-semibold text-foreground">
+      <BookMarked size={13} aria-hidden="true" className="shrink-0" />
+      {name}
     </span>
   )
 }
