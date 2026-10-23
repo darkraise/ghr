@@ -53,6 +53,7 @@ export function PackageSection({ status, offline }: { status: Status | undefined
   const [adding, setAdding] = useState(false)
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   const run = (a: PackageAction) => action.mutate(a)
+  const busy = offline || action.isPending
   const failed = packages.isError && <ErrorLine onRetry={() => void packages.refetch()}>{errorText(packages.error)}</ErrorLine>
 
   if (!packages.data) {
@@ -93,14 +94,14 @@ export function PackageSection({ status, offline }: { status: Status | undefined
       )}
       <RefusedHint what="Upgrade and uninstall" status={status} />
       <div className="ml-auto flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" disabled={offline} onClick={() => run({ call: () => api.refreshPackageIndex(), done: "Queued: refresh apt index" })}>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => run({ call: () => api.refreshPackageIndex(), done: "Queued: refresh apt index" })}>
           Refresh index
         </Button>
         {pending.length > 0 && (
           <Button
             size="sm"
             variant="outline"
-            disabled={offline}
+            disabled={busy}
             onClick={() => run({ call: () => api.upgradePackages({ all: true }), done: "Queued: upgrade all managed packages" })}
           >
             {`Upgrade all (${pending.length})`}
@@ -161,7 +162,7 @@ export function PackageSection({ status, offline }: { status: Status | undefined
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <DropdownMenuTrigger asChild>
-                            <Button size="icon" variant="ghost" aria-label={`More actions for ${p.name}`} disabled={offline}>
+                            <Button size="icon" variant="ghost" aria-label={`More actions for ${p.name}`} disabled={busy}>
                               <Ellipsis size={15} aria-hidden="true" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -194,10 +195,10 @@ export function PackageSection({ status, offline }: { status: Status | undefined
       )}
       <BaseList
         list={data.base ?? []}
-        offline={offline}
+        disabled={busy}
         onForget={(p) => run({ call: () => api.forgetPackage(p.name), done: `${p.name} is no longer managed; it stays installed` })}
       />
-      <DetectedList list={data.detected ?? []} offline={offline} onAdd={(p) => run({ call: () => api.addPackages([p.name]), done: `Queued: adopt ${p.name}` })} />
+      <DetectedList list={data.detected ?? []} disabled={busy} onAdd={(p) => run({ call: () => api.addPackages([p.name]), done: `Queued: adopt ${p.name}` })} />
       <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />
       <PackageAddDialog open={adding} onClose={() => setAdding(false)} />
     </Section>
@@ -218,7 +219,7 @@ function Fold({ title, children }: { title: string; children: ReactNode }) {
 
 // A managed name that is base on this host (a config copied from another
 // release) can only be forgotten.
-function BaseList({ list, offline, onForget }: { list: PackageInfo[]; offline: boolean; onForget: (p: PackageInfo) => void }) {
+function BaseList({ list, disabled, onForget }: { list: PackageInfo[]; disabled: boolean; onForget: (p: PackageInfo) => void }) {
   return (
     <Fold title={`Base packages (${list.length})`}>
       <p className="mb-2 text-sm text-muted-foreground">setup.sh installs these, so ghr does not change them.</p>
@@ -228,7 +229,7 @@ function BaseList({ list, offline, onForget }: { list: PackageInfo[]; offline: b
             <span className="font-mono">{p.name}</span>
             <span className="font-mono text-muted-foreground">{p.version}</span>
             {p.managed && (
-              <Button size="sm" variant="outline" className="ml-auto" aria-label={`Forget ${p.name}`} disabled={offline} onClick={() => onForget(p)}>
+              <Button size="sm" variant="outline" className="ml-auto" aria-label={`Forget ${p.name}`} disabled={disabled} onClick={() => onForget(p)}>
                 Forget
               </Button>
             )}
@@ -239,7 +240,7 @@ function BaseList({ list, offline, onForget }: { list: PackageInfo[]; offline: b
   )
 }
 
-function DetectedList({ list, offline, onAdd }: { list: PackageInfo[]; offline: boolean; onAdd: (p: PackageInfo) => void }) {
+function DetectedList({ list, disabled, onAdd }: { list: PackageInfo[]; disabled: boolean; onAdd: (p: PackageInfo) => void }) {
   const [filter, setFilter] = useState("")
   const shown = filterPackages(list, filter)
   return (
@@ -254,7 +255,7 @@ function DetectedList({ list, offline, onAdd }: { list: PackageInfo[]; offline: 
             <li key={p.name} className="flex items-center gap-2">
               <span className="font-mono">{p.name}</span>
               <span className="font-mono text-muted-foreground">{p.version}</span>
-              <Button size="sm" variant="outline" className="ml-auto" aria-label={`Add ${p.name}`} disabled={offline} onClick={() => onAdd(p)}>
+              <Button size="sm" variant="outline" className="ml-auto" aria-label={`Add ${p.name}`} disabled={disabled} onClick={() => onAdd(p)}>
                 Add
               </Button>
             </li>

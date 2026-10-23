@@ -105,6 +105,25 @@ describe("System packages section", () => {
     expect((await screen.findAllByText("Queued: refresh apt index")).length).toBeGreaterThan(0)
   })
 
+  it("holds the actions while a request is on its way", async () => {
+    let release: (() => void) | undefined
+    mockApi(
+      routes({
+        "POST /api/packages/refresh": () =>
+          new Promise<Response>((resolve) => {
+            release = () => resolve(noContent())
+          }),
+      }),
+    )
+    const { user } = renderApp("/toolchains")
+    const refresh = await (await section()).findByRole("button", { name: "Refresh index" })
+    await user.click(refresh)
+    await waitFor(() => expect(refresh).toBeDisabled())
+    expect((await managedRow("ripgrep")).getByRole("button", { name: "More actions for ripgrep" })).toBeDisabled()
+    act(() => release?.())
+    await waitFor(() => expect(refresh).toBeEnabled())
+  })
+
   it("upgrades one package from its menu, offered only when it is upgradable", async () => {
     const { calls } = mockApi(routes({ "POST /api/packages/upgrade": () => noContent() }))
     const { user } = renderApp("/toolchains")
