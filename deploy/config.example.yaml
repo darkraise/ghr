@@ -34,6 +34,7 @@ web:                          # browser UI; set its password with ghr web set-pa
 #   runner_update_check: { enabled: true, every: 24h }  # at least 1h; off, GitHub stops assigning jobs to a runner past its forced-update deadline
 #   prune: { enabled: true, every: 24h }                # at least 1h; off, old history and logs are kept and a full disk is not pruned
 #   storage_measure: { enabled: true, every: 30m }      # at least 5m
+#   package_index: { enabled: true, every: 24h }        # at least 1h; refreshes the apt index, then reinstalls missing managed packages
 repos: []
 # A repository entry, as `ghr repo add` and the web UI write it:
 #   - name: my-repo

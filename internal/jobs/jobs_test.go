@@ -66,6 +66,7 @@ func TestReleaseChecksAreDueAtStartTheRestAfterAnInterval(t *testing.T) {
 		config.JobRunnerUpdateCheck: {{0, true}},
 		config.JobPrune:             {{0, false}, {24*time.Hour - time.Second, false}, {24 * time.Hour, true}},
 		config.JobStorageMeasure:    {{29 * time.Minute, false}, {30 * time.Minute, true}},
+		config.JobPackageIndex:      {{0, false}, {24*time.Hour - time.Second, false}, {24 * time.Hour, true}},
 	} {
 		for _, c := range cases {
 			if got := g.r.Due(name, start.Add(c.at)); got != c.due {

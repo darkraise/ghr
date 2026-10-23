@@ -23,6 +23,7 @@ func TestJobsDefaultWhenAbsent(t *testing.T) {
 		RunnerUpdateCheck: Job{Enabled: true, Every: Duration(24 * time.Hour)},
 		Prune:             Job{Enabled: true, Every: Duration(24 * time.Hour)},
 		StorageMeasure:    Job{Enabled: true, Every: Duration(30 * time.Minute)},
+		PackageIndex:      Job{Enabled: true, Every: Duration(24 * time.Hour)},
 	}
 	if c.Jobs != want || DefaultJobs() != want {
 		t.Fatalf("jobs %+v, defaults %+v", c.Jobs, DefaultJobs())
@@ -48,12 +49,13 @@ func TestJobsMinimums(t *testing.T) {
 		{"jobs:\n  runner_update_check:\n    every: 0s\n", "jobs.runner_update_check.every must be >= 1h"},
 		{"jobs:\n  prune:\n    every: -1h\n", "jobs.prune.every must be >= 1h"},
 		{"jobs:\n  storage_measure:\n    every: 4m\n", "jobs.storage_measure.every must be >= 5m"},
+		{"jobs:\n  package_index:\n    every: 30m\n", "jobs.package_index.every must be >= 1h"},
 	} {
 		if _, _, err := Parse([]byte(sample + tc.yaml)); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%q: err %v, want %q", tc.yaml, err, tc.want)
 		}
 	}
-	if _, _, err := Parse([]byte(sample + "jobs:\n  prune:\n    every: 1h\n  storage_measure:\n    every: 5m\n")); err != nil {
+	if _, _, err := Parse([]byte(sample + "jobs:\n  prune:\n    every: 1h\n  storage_measure:\n    every: 5m\n  package_index:\n    every: 1h\n")); err != nil {
 		t.Fatalf("the floors are inclusive: %v", err)
 	}
 }
@@ -139,8 +141,8 @@ func TestExampleConfigDocumentsTheJobsBlock(t *testing.T) {
 			block = append(block, strings.TrimPrefix(line, "# "))
 		}
 	}
-	if len(block) != 5 {
-		t.Fatalf("want a commented jobs block of 5 lines, got %q", block)
+	if len(block) != 6 {
+		t.Fatalf("want a commented jobs block of 6 lines, got %q", block)
 	}
 	c, _, err := Parse([]byte(sample + strings.Join(block, "\n") + "\n"))
 	if err != nil {

@@ -20,6 +20,8 @@ import (
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/darkraise/ghr/internal/packages"
 )
 
 const (
@@ -69,6 +71,9 @@ type Config struct {
 	// WatchRepos are repositories whose workflow runs the Actions page shows;
 	// ghr runs no runners for them.
 	WatchRepos []string `yaml:"watch_repos,omitempty" json:"watch_repos,omitempty"`
+	// Packages are the apt packages ghr manages; the daemon reinstalls a
+	// listed package that is missing.
+	Packages []string `yaml:"packages,omitempty" json:"packages,omitempty"`
 	// Web is read at daemon start only; changing it needs a restart.
 	Web Web `yaml:"web,omitempty" json:"web,omitzero"`
 	// GitHubStorage sets the artifact storage allowance, warnings and cleanup.
@@ -244,6 +249,7 @@ func Parse(data []byte) (*Config, []string, error) {
 	c.Owner = strings.TrimSpace(c.Owner)
 	repaired := c.clampRunners()
 	repaired = append(repaired, c.dropBadLabels()...)
+	repaired = append(repaired, c.dropBadPackages()...)
 	warnings, err := c.Validate()
 	if err != nil {
 		return nil, nil, err
@@ -303,6 +309,45 @@ func (c *Config) dropBadLabels() []string {
 		c.Repos[i].Labels = drop(c.Repos[i].Name+": ", c.Repos[i].Labels)
 	}
 	return warnings
+}
+
+// dropBadPackages removes every package name that Validate would refuse, and
+// returns one warning for each.
+func (c *Config) dropBadPackages() []string {
+	var warnings []string
+	kept := make([]string, 0, len(c.Packages))
+	seen := map[string]bool{}
+	for _, p := range c.Packages {
+		switch {
+		case !packages.ValidName(p):
+			warnings = append(warnings, fmt.Sprintf("packages: %q is not a valid package name; ignored", p))
+		case seen[p]:
+			warnings = append(warnings, fmt.Sprintf("packages: %q is listed twice; ignored", p))
+		default:
+			seen[p] = true
+			kept = append(kept, p)
+		}
+	}
+	if len(kept) != len(c.Packages) {
+		c.Packages = kept
+	}
+	return warnings
+}
+
+// packagesProblem describes the first package name that is not valid or that
+// repeats an earlier one, and returns "" for a valid list.
+func packagesProblem(names []string) string {
+	seen := map[string]bool{}
+	for _, p := range names {
+		if !packages.ValidName(p) {
+			return fmt.Sprintf("packages: %q is not a valid package name", p)
+		}
+		if seen[p] {
+			return fmt.Sprintf("packages: %q is listed twice", p)
+		}
+		seen[p] = true
+	}
+	return ""
 }
 
 // labelFault says why one label is not valid, or returns "" for a valid one.
@@ -572,6 +617,9 @@ func (c *Config) Validate() ([]string, error) {
 		errs = append(errs, "history_retention must be >= 1d")
 	}
 	if p := labelProblem(c.Labels); p != "" {
+		errs = append(errs, p)
+	}
+	if p := packagesProblem(c.Packages); p != "" {
 		errs = append(errs, p)
 	}
 	if c.DiskHighWater < 1 || c.DiskHighWater > 100 {

@@ -11,10 +11,11 @@ const (
 	JobRunnerUpdateCheck = "runner_update_check"
 	JobPrune             = "prune"
 	JobStorageMeasure    = "storage_measure"
+	JobPackageIndex      = "package_index"
 )
 
 // JobNames lists the background tasks in the order the UI and the CLI show them.
-var JobNames = []string{JobGhrUpdateCheck, JobRunnerUpdateCheck, JobPrune, JobStorageMeasure}
+var JobNames = []string{JobGhrUpdateCheck, JobRunnerUpdateCheck, JobPrune, JobStorageMeasure, JobPackageIndex}
 
 // What turning a task off costs. Validate warns with these words and the web
 // UI's Jobs page shows the same ones, so change both together.
@@ -35,6 +36,7 @@ type Jobs struct {
 	RunnerUpdateCheck Job `yaml:"runner_update_check" json:"runner_update_check"`
 	Prune             Job `yaml:"prune" json:"prune"`
 	StorageMeasure    Job `yaml:"storage_measure" json:"storage_measure"`
+	PackageIndex      Job `yaml:"package_index" json:"package_index"`
 }
 
 // IsZero lets yaml's omitempty leave out a schedule that is the defaults:
@@ -51,6 +53,7 @@ func DefaultJobs() Jobs {
 		RunnerUpdateCheck: daily,
 		Prune:             daily,
 		StorageMeasure:    Job{Enabled: true, Every: Duration(30 * time.Minute)},
+		PackageIndex:      daily,
 	}
 }
 
@@ -65,6 +68,8 @@ func (j *Jobs) Ref(name string) *Job {
 		return &j.Prune
 	case JobStorageMeasure:
 		return &j.StorageMeasure
+	case JobPackageIndex:
+		return &j.PackageIndex
 	}
 	return nil
 }
@@ -86,6 +91,7 @@ var minJobEvery = map[string]struct {
 	JobRunnerUpdateCheck: {time.Hour, "1h"},
 	JobPrune:             {time.Hour, "1h"},
 	JobStorageMeasure:    {5 * time.Minute, "5m"},
+	JobPackageIndex:      {time.Hour, "1h"},
 }
 
 // validate returns the jobs block's errors and warnings.

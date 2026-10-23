@@ -82,6 +82,10 @@
     "storage_measure": {
       "enabled": true,
       "every": "30m0s"
+    },
+    "package_index": {
+      "enabled": true,
+      "every": "1d"
     }
   }
 }

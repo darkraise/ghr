@@ -122,6 +122,8 @@ func TestValidateErrors(t *testing.T) {
 		"watch_repos: other/docs must be a repository name":    func(c *Config) { c.WatchRepos = []string{"other/docs"} },
 		"duplicate watched repo Docs":                          func(c *Config) { c.WatchRepos = []string{"docs", "Docs"} },
 		"watch_repos: DarkMem is already a configured repo":    func(c *Config) { c.WatchRepos = []string{"DarkMem"} },
+		`packages: "jq;rm" is not a valid package name`:        func(c *Config) { c.Packages = []string{"ripgrep", "jq;rm"} },
+		`packages: "jq" is listed twice`:                       func(c *Config) { c.Packages = []string{"jq", "jq"} },
 
 		`labels: "a b" must not contain spaces or commas`:             func(c *Config) { c.Labels = []string{"a b"} },
 		`labels: "a,b" must not contain spaces or commas`:             func(c *Config) { c.Labels = []string{"a,b"} },
@@ -249,6 +251,56 @@ repos:
 	}
 	if got := strings.Join(back.Labels, ","); got != "homelab,Docker" {
 		t.Fatalf("saved labels = %s", got)
+	}
+}
+
+// A config.yaml with bad package names loses them on load, with one warning
+// for each, so the daemon still starts; what was loaded saves and loads again.
+func TestParseDropsInvalidPackages(t *testing.T) {
+	c, warnings, err := Parse([]byte(sample + "packages: [ripgrep, \"-o\", \"jq;rm\", ripgrep, Shellcheck, shellcheck]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `packages: "-o" is not a valid package name; ignored|` +
+		`packages: "jq;rm" is not a valid package name; ignored|` +
+		`packages: "ripgrep" is listed twice; ignored|` +
+		`packages: "Shellcheck" is not a valid package name; ignored`
+	if got := strings.Join(warnings, "|"); got != want {
+		t.Fatalf("warnings\n got %s\nwant %s", got, want)
+	}
+	if got := strings.Join(c.Packages, ","); got != "ripgrep,shellcheck" {
+		t.Fatalf("packages = %s", got)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(path, c); err != nil {
+		t.Fatalf("saving a repaired config: %v", err)
+	}
+	back, warnings, err := Load(path)
+	if err != nil || len(warnings) != 0 {
+		t.Fatalf("loading what was saved: warnings %v, err %v", warnings, err)
+	}
+	if got := strings.Join(back.Packages, ","); got != "ripgrep,shellcheck" {
+		t.Fatalf("saved packages = %s", got)
+	}
+}
+
+// Releases before the packages list refuse an unknown key, so a config
+// without packages must not grow an empty one.
+func TestSaveLeavesOutEmptyPackages(t *testing.T) {
+	c, _, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "packages") {
+		t.Fatalf("an empty packages list was written:\n%s", data)
 	}
 }
 

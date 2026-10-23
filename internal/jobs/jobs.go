@@ -30,6 +30,7 @@ var defs = map[string]def{
 	config.JobRunnerUpdateCheck: {"Runner update check", "Asks GitHub for the newest runner release and its forced-update deadline.", true},
 	config.JobPrune:             {"Prune", "Removes history and logs older than history_retention. While on, a disk above disk_high_water also prunes Docker.", false},
 	config.JobStorageMeasure:    {"Storage measurement", "Measures the disk use of Docker, toolchains and package caches for the Storage page.", false},
+	config.JobPackageIndex:      {"Package index", "Refreshes the apt package index, then reinstalls managed packages that are missing.", false},
 }
 
 type state struct {
