@@ -62,6 +62,8 @@ When a runner ends, ghr archives its diagnostic logs, the `Runner_*.log` and `Wo
 - `queue`: at most `global_max` jobs at once across repositories, and at most each repository's `max` (default 1). Further jobs wait as "Queued" in GitHub until a slot frees.
 - `all`: no `global_max`; ghr never runs more than 99 runners in total, and starts at most 10 per poll. Repositories are unlimited within that unless `max` is set. Each repository keeps `warm` idle runners ready (default 1), so a job starts without waiting for a runner to register.
 
+Several ghr hosts can serve one repository. Before starting a runner for a queued job, ghr counts the runners another ghr host registered for that repository that are not busy and carry every label this host would register. Each one is taken to cover one waiting job. An online runner counts until it is gone. An offline one counts for `start_timeout` from when this host first saw it, since it may still be starting. Hosts that poll within a few seconds of each other can still both start a runner for the same job. The extra runner stops after `idle_timeout`. `global_max`, `max` and `warm` apply to each host separately.
+
 ## Background tasks
 
 The `jobs` block schedules the work ghr does on its own. Each task has `enabled` and `every`; a config without the block, or without one of its tasks, keeps the defaults shown in the reference. The web UI's Jobs page shows each task's last and next run, runs one now, and edits the block.
