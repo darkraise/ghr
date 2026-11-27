@@ -313,7 +313,8 @@ func roundRobinByRepo(spawns []sched.Spawn) []sched.Spawn {
 // spawnPlanned spawns what sched.Plan decides, at most maxSpawnsPerTick of it,
 // and nothing while a runner update runs or maintenance holds the runners. It
 // plans from planConfig, so a blocked repo gets nothing. Repos that are unread,
-// in an error state, or waiting after a failed start, are left out of planning.
+// in an error state, or waiting after a failed start, are left out of planning,
+// and queued jobs another ghr host's runners cover are not planned for.
 // Spawning stops as soon as the live config differs from the one the plan used,
 // so a pause or cap change made during polling is never overridden.
 func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time.Time) {
@@ -339,7 +340,18 @@ func (m *Manager) spawnPlanned(ctx context.Context, cfg *config.Config, now time
 		}
 	}
 	m.mu.Unlock()
-	spawns := sched.Plan(&planCfg, m.schedInstances(cfg), demand, now)
+	insts := m.schedInstances(cfg)
+	spawns := sched.Plan(&planCfg, insts, demand, now)
+	if len(spawns) == 0 {
+		return
+	}
+	// Other ghr hosts serving a repository see the same queue. The runner
+	// list is read only for the repositories this plan would spawn for.
+	demand = m.withoutForeign(ctx, cfg, &planCfg, spawns, demand, now)
+	if !m.apiAllowed(now) {
+		return
+	}
+	spawns = sched.Plan(&planCfg, insts, demand, now)
 	if len(spawns) == 0 {
 		return
 	}

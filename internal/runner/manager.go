@@ -166,11 +166,11 @@ type registration struct {
 	repo, name string
 }
 
-// runnerList is one repository's registered runner IDs as read in this tick;
+// runnerList is one repository's registered runners as read in this tick;
 // ok is false when the read failed.
 type runnerList struct {
-	ids map[int64]bool
-	ok  bool
+	runners []github.Runner
+	ok      bool
 }
 
 type Manager struct {
@@ -228,9 +228,10 @@ type Manager struct {
 	maintCtx       context.Context         // cancelled by Close
 	maintCancel    context.CancelFunc
 	lastJob        map[string]model.HistoryEntry
-	histIDs        map[string]bool        // instance IDs history holds; guarded by mu
-	orphans        map[int64]bool         // untracked registrations seen offline at the last reconcile; guarded by mu
-	undeleted      map[int64]registration // by runner ID: registrations finish could not delete; guarded by mu
+	histIDs        map[string]bool                // instance IDs history holds; guarded by mu
+	orphans        map[int64]bool                 // untracked registrations seen offline at the last reconcile; guarded by mu
+	foreignSeen    map[string]map[int64]time.Time // by lower-cased repo: when another host's registrations were first listed; guarded by mu
+	undeleted      map[int64]registration         // by runner ID: registrations finish could not delete; guarded by mu
 	epoch          string
 	wg             sync.WaitGroup
 	upd            updateState // guarded by mu
@@ -253,6 +254,7 @@ func (m *Manager) Init() error {
 	m.fails = map[string]int{}
 	m.retryAt = map[string]time.Time{}
 	m.lists = map[string]runnerList{}
+	m.foreignSeen = map[string]map[int64]time.Time{}
 	m.spawnFails = map[string]int{}
 	m.spawnRetryAt = map[string]time.Time{}
 	m.spawnErr = map[string]string{}

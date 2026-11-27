@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -282,29 +283,34 @@ func (m *Manager) refreshRunners(ctx context.Context) {
 // read goes through apiErr and concludes nothing. The list is read once per
 // repository per tick.
 func (m *Manager) registrationGone(ctx context.Context, repo string, id int64, now time.Time) bool {
+	l := m.runnerList(ctx, repo, now)
+	return l.ok && !slices.ContainsFunc(l.runners, func(r github.Runner) bool { return r.ID == id })
+}
+
+// runnerList reads repo's registered runners once per tick. A list that
+// cannot be read goes through apiErr and is kept as unread for the tick.
+func (m *Manager) runnerList(ctx context.Context, repo string, now time.Time) runnerList {
 	key := strings.ToLower(repo)
 	m.mu.Lock()
 	l, read := m.lists[key]
 	m.mu.Unlock()
-	if !read {
-		runners, err := m.GH.ListRunners(ctx, repo)
-		if err != nil {
-			if tokenRejected(err) || github.IsKind(err, github.ErrRateLimit) {
-				m.apiErr(repo, err, now)
-			} else {
-				m.repoRefused(repo, err, now)
-			}
-		} else {
-			l = runnerList{ids: map[int64]bool{}, ok: true}
-			for _, r := range runners {
-				l.ids[r.ID] = true
-			}
-		}
-		m.mu.Lock()
-		m.lists[key] = l
-		m.mu.Unlock()
+	if read {
+		return l
 	}
-	return l.ok && !l.ids[id]
+	runners, err := m.GH.ListRunners(ctx, repo)
+	if err != nil {
+		if tokenRejected(err) || github.IsKind(err, github.ErrRateLimit) {
+			m.apiErr(repo, err, now)
+		} else {
+			m.repoRefused(repo, err, now)
+		}
+	} else {
+		l = runnerList{runners: runners, ok: true}
+	}
+	m.mu.Lock()
+	m.lists[key] = l
+	m.mu.Unlock()
+	return l
 }
 
 // markLost records that an idle instance's registration is confirmed missing.
